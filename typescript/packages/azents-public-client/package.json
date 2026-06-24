@@ -13,7 +13,7 @@
   "scripts": {
     "generate": "openapi-ts",
     "build": "echo 'No build step required'",
-    "typecheck": "pnpm run generate && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "format": "prettier --write 'src/**/*.ts' --ignore-path .gitignore",
     "format:check": "prettier --check 'src/**/*.ts' --ignore-path .gitignore",
     "clean": "rm -rf src/generated"
