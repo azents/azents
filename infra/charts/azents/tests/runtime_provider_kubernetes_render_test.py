@@ -81,6 +81,29 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert 'namespace: "azents-runtime"' in rendered
 
 
+def test_runtime_provider_kubernetes_network_policy_allows_runtime_control() -> None:
+    """Runtime workload NetworkPolicy allows Runner streams to runtime-control."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+    )
+
+    runtime_control_index = rendered.index(
+        "app.kubernetes.io/component: runtime-control"
+    )
+    public_rule_index = rendered.index("cidr: 0.0.0.0/0")
+    denied_index = rendered.index("192.168.0.0/16")
+
+    assert 'kubernetes.io/metadata.name: "default"' in rendered
+    assert 'app.kubernetes.io/instance: "azents"' in rendered
+    assert 'app.kubernetes.io/name: "azents"' in rendered
+    assert "port: 8030" in rendered
+    assert runtime_control_index < public_rule_index < denied_index
+
+
 def test_runtime_provider_kubernetes_network_policy_allows_explicit_cidrs() -> None:
     """Explicit allowed CIDRs remain allowed even under broader denied CIDRs."""
     rendered = _helm_template(

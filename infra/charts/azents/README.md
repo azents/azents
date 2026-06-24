@@ -75,12 +75,13 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 - Runtime Pod image pulls: by default, Runtime Pods inherit `global.imagePullSecrets`. Consumers may override with `runtimeProviderKubernetes.runtimePod.imagePullSecrets`. Referenced pull secrets must already exist in the workload namespace.
 - Runtime Pod resources: `runtimeProviderKubernetes.runnerResources` is passed to the Provider as Kubernetes `ResourceRequirements`. Defaults set requests to CPU `1` and memory `2Gi`; limits are intentionally omitted unless consumers set them.
 - Persistence: Kubernetes Provider v1 uses PVCs in the workload namespace as canonical persistence
-- Runtime NetworkPolicy: `runtimeProviderKubernetes.networkPolicy.deniedCidrs`
-  defines the CIDRs excluded from the default public egress rule,
-  `allowedCidrs` adds explicit CIDR egress rules, and `extraEgress` appends raw
-  Kubernetes NetworkPolicy egress rules for service-specific exceptions. NetworkPolicy
-  rules are additive, so explicit egress entries remain allowed even when a broader
-  CIDR appears in `deniedCidrs`.
+- Runtime NetworkPolicy: when enabled, Runtime Pods can reach cluster DNS and
+  the chart-managed `runtime-control` Service by default. `deniedCidrs` defines
+  the CIDRs excluded from the default public egress rule, `allowedCidrs` adds
+  explicit CIDR egress rules, and `extraEgress` appends raw Kubernetes
+  NetworkPolicy egress rules for service-specific exceptions. NetworkPolicy rules
+  are additive, so explicit egress entries remain allowed even when a broader CIDR
+  appears in `deniedCidrs`.
 
 ## External Service And Credential Modes
 

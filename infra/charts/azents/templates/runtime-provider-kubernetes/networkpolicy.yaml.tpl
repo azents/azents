@@ -28,6 +28,18 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "azents.serverNamespace" . | quote }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: runtime-control
+              app.kubernetes.io/instance: {{ .Release.Name | quote }}
+              app.kubernetes.io/name: {{ include "azents.name" . | quote }}
+      ports:
+        - protocol: TCP
+          port: 8030
     {{- range .Values.runtimeProviderKubernetes.networkPolicy.allowedCidrs }}
     - to:
         - ipBlock:
