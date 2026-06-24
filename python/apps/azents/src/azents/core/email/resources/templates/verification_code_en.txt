@@ -1,0 +1,17 @@
+Verification Code
+
+Please enter the verification code below to verify your identity.
+
+Verification code: {{ code }}
+
+This code expires in {{ expire_minutes }} minutes.
+If you didn't request this, you can ignore this email.
+
+{% if web_url %}
+Go to verification page: {{ web_url }}
+{% endif %}
+Thank you.
+Azents Team
+{% if domain %}
+@{{ domain }} #{{ code }}
+{% endif %}

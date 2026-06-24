@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package azents.runtime_control.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// External Runtime Providers open this outbound stream to Runtime Control.
+service RuntimeProviderControl {
+  rpc ConnectProvider(stream ProviderMessage) returns (stream ControlMessage);
+}
+
+message ProviderMessage {
+  string connection_id = 1;
+  string request_id = 2;
+  uint64 generation = 3;
+
+  oneof payload {
+    ProviderRegister register = 10;
+    ProviderHeartbeat heartbeat = 11;
+    RuntimeProviderReport report = 20;
+    ProviderCommandCompletion command_completion = 21;
+    ProviderError error = 40;
+  }
+}
+
+message ControlMessage {
+  string request_id = 1;
+
+  oneof payload {
+    ProviderRegisterAccepted register_accepted = 10;
+    ProviderHeartbeatAck heartbeat_ack = 11;
+    ProviderCommand provider_command = 20;
+    ProviderError error = 40;
+  }
+}
+
+message ProviderRegister {
+  string provider_id = 1;
+  string provider_type = 2;
+  string scope = 3;
+  string workspace_id = 4;
+  string protocol_version = 5;
+  repeated string capabilities = 6;
+  string config_schema_version = 7;
+  google.protobuf.Struct metadata = 8;
+  string auth_credential_id = 9;
+}
+
+message ProviderRegisterAccepted {
+  string provider_id = 1;
+  string connection_id = 2;
+  uint64 generation = 3;
+  uint32 heartbeat_interval_seconds = 4;
+}
+
+message ProviderHeartbeat {
+  uint64 monotonic_sequence = 1;
+}
+
+message ProviderHeartbeatAck {
+  uint64 monotonic_sequence = 1;
+}
+
+message ProviderCommand {
+  string runtime_id = 1;
+  string agent_id = 2;
+  string workspace_id = 3;
+  uint64 desired_generation = 4;
+  uint64 provider_generation = 5;
+  string command_type = 6;
+  string reset_final_desired_state = 7;
+  string runner_image = 8;
+  string control_endpoint = 9;
+  string runner_auth_token = 10;
+  google.protobuf.Struct payload = 11;
+  google.protobuf.Timestamp deadline_at = 12;
+}
+
+message RuntimeProviderReport {
+  string runtime_id = 1;
+  string provider_id = 2;
+  uint64 provider_generation = 3;
+  string observed_state = 4;
+  uint64 observed_desired_generation = 5;
+  string provider_runtime_id = 6;
+  string workspace_path = 7;
+  string reason = 8;
+  map<string, string> diagnostic = 9;
+  google.protobuf.Timestamp reported_at = 10;
+}
+
+message ProviderCommandCompletion {
+  string request_id = 1;
+  string runtime_id = 2;
+  uint64 generation = 3;
+  bool success = 4;
+  RuntimeProviderReport report = 5;
+  string error_code = 6;
+  string error_message = 7;
+  google.protobuf.Timestamp completed_at = 8;
+}
+
+message ProviderError {
+  string code = 1;
+  string message = 2;
+}

@@ -1,0 +1,227 @@
+"use client";
+
+/**
+ * Agent detail header + tab navigation.
+ *
+ * Displays avatar, name, status/visibility badge, model badge, and tabs (chat/settings).
+ * On tab change, moves through Next.js router via URL change.
+ */
+
+import {
+  ActionIcon,
+  Badge,
+  Box,
+  Group,
+  rem,
+  Stack,
+  Tabs,
+  Text,
+} from "@mantine/core";
+import {
+  IconChartBar,
+  IconChevronLeft,
+  IconFolderOpen,
+  IconMessageCircle,
+  IconSettings,
+} from "@tabler/icons-react";
+import { useTranslations } from "next-intl";
+import { usePathname, useRouter } from "next/navigation";
+import { type ReactNode, useCallback, useMemo } from "react";
+import { formatModelSelectionSummary } from "../model-selection";
+import { AgentAvatar } from "./AgentAvatar";
+import type { ConnectionStatus } from "@/features/chat/types";
+import type { AgentResponse } from "@azents/public-client";
+
+function getStatusColor(status: ConnectionStatus): string {
+  switch (status) {
+    case "connected":
+      return "green";
+    case "connecting":
+    case "reconnecting":
+      return "yellow";
+    case "disconnected":
+      return "red";
+  }
+}
+
+/** Extract active tab from current path */
+function resolveActiveTab(
+  pathname: string,
+  basePath: string,
+): "chat" | "context" | "settings" {
+  if (pathname.startsWith(`${basePath}/context`)) {
+    return "context";
+  }
+  if (pathname.startsWith(`${basePath}/settings`)) {
+    return "settings";
+  }
+  return "chat";
+}
+
+interface AgentHeaderRuntimeControls {
+  connectionStatus: ConnectionStatus;
+  onOpenRuntime: () => void;
+}
+
+interface AgentHeaderProps {
+  handle: string;
+  agent: AgentResponse;
+  runtimeControls?: AgentHeaderRuntimeControls;
+  chatControls?: ReactNode;
+}
+
+export function AgentHeader({
+  handle,
+  agent,
+  runtimeControls,
+  chatControls,
+}: AgentHeaderProps): React.ReactElement {
+  const t = useTranslations("workspace.agents.detail");
+  const router = useRouter();
+  const pathname = usePathname();
+  const basePath = `/w/${handle}/agents/${agent.id}`;
+  const activeTab = useMemo(
+    () => resolveActiveTab(pathname, basePath),
+    [pathname, basePath],
+  );
+  const modelSummary = formatModelSelectionSummary(agent.model_selection);
+
+  const handleTabChange = useCallback(
+    (value: string | null): void => {
+      if (value === "chat") {
+        router.push(`${basePath}/chat`);
+      } else if (value === "context") {
+        router.push(`${basePath}/context`);
+      } else if (value === "settings") {
+        router.push(`${basePath}/settings`);
+      }
+    },
+    [router, basePath],
+  );
+  const handleBackToAgentHome = useCallback((): void => {
+    router.push(basePath);
+  }, [router, basePath]);
+
+  return (
+    <Box
+      style={{
+        borderBottom: "1px solid var(--mantine-color-default-border)",
+        backgroundColor: "var(--mantine-color-body)",
+      }}
+    >
+      <Group
+        visibleFrom="lg"
+        align="center"
+        gap="md"
+        px="lg"
+        pt="md"
+        pb="xs"
+        wrap="nowrap"
+      >
+        <AgentAvatar
+          name={agent.name}
+          avatar={agent.avatar ?? null}
+          size={40}
+        />
+        <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+          <Group gap="xs" wrap="wrap">
+            <Text fw={600} size="md">
+              {agent.name}
+            </Text>
+            <Badge
+              size="sm"
+              variant="dot"
+              color={agent.enabled ? "green" : "gray"}
+            >
+              {agent.enabled ? t("status.enabled") : t("status.disabled")}
+            </Badge>
+            <Badge
+              size="sm"
+              variant="light"
+              color={agent.type === "public" ? "blue" : "gray"}
+            >
+              {agent.type === "public"
+                ? t("visibility.public")
+                : t("visibility.private")}
+            </Badge>
+            <Badge size="sm" variant="default">
+              {modelSummary}
+            </Badge>
+          </Group>
+          {agent.description && (
+            <Text size="xs" c="dimmed" truncate>
+              {agent.description}
+            </Text>
+          )}
+        </Stack>
+        {activeTab === "chat" && chatControls && (
+          <Box style={{ flexShrink: 0 }}>{chatControls}</Box>
+        )}
+      </Group>
+      <Group
+        hiddenFrom="lg"
+        align="center"
+        gap="xs"
+        px="md"
+        pt="xs"
+        pb={4}
+        wrap="nowrap"
+      >
+        {activeTab === "chat" && (
+          <ActionIcon
+            variant="subtle"
+            onClick={handleBackToAgentHome}
+            aria-label="Back to agent home"
+          >
+            <IconChevronLeft size={18} />
+          </ActionIcon>
+        )}
+        <AgentAvatar
+          name={agent.name}
+          avatar={agent.avatar ?? null}
+          size={24}
+        />
+        <Text fw={600} size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
+          {agent.name}
+        </Text>
+        {activeTab === "chat" && runtimeControls && (
+          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+            {chatControls}
+            <Badge
+              size="sm"
+              variant="dot"
+              color={getStatusColor(runtimeControls.connectionStatus)}
+              aria-label="WebSocket connection status"
+              style={{ minWidth: rem(38) }}
+            />
+            <ActionIcon
+              variant="subtle"
+              onClick={runtimeControls.onOpenRuntime}
+              aria-label="Open agent runtime"
+            >
+              <IconFolderOpen size="1rem" />
+            </ActionIcon>
+          </Group>
+        )}
+      </Group>
+      <Tabs
+        value={activeTab}
+        onChange={handleTabChange}
+        variant="default"
+        px={{ base: "sm", sm: "lg" }}
+      >
+        <Tabs.List>
+          <Tabs.Tab value="chat" leftSection={<IconMessageCircle size={14} />}>
+            {t("tabs.chat")}
+          </Tabs.Tab>
+          <Tabs.Tab value="context" leftSection={<IconChartBar size={14} />}>
+            {t("tabs.context")}
+          </Tabs.Tab>
+          <Tabs.Tab value="settings" leftSection={<IconSettings size={14} />}>
+            {t("tabs.settings")}
+          </Tabs.Tab>
+        </Tabs.List>
+      </Tabs>
+    </Box>
+  );
+}

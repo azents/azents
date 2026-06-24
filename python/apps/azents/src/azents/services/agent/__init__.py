@@ -1,0 +1,968 @@
+"""Agent service."""
+
+import dataclasses
+import datetime
+from typing import Annotated, assert_never
+
+from azcommon.infra.s3.service import S3Service
+from azcommon.result import Failure, Result, Success
+from fastapi import Depends
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from azents.core.agent import (
+    AgentModelSelection,
+    AgentModelSelectionInput,
+    ModelParameters,
+)
+from azents.core.builtin_tools import (
+    BuiltinToolCapabilities,
+    BuiltinToolModelCapabilities,
+    BuiltinToolValidationContext,
+    validate_builtin_tools,
+)
+from azents.core.config import Config
+from azents.core.deps import get_config
+from azents.core.enums import AgentType, WorkspaceUserRole
+from azents.core.llm_mapping import to_runtime_model
+from azents.core.s3.deps import get_s3_service
+from azents.engine.context.window import (
+    EffectiveContextWindow,
+    compute_effective_context_window_tokens,
+    get_max_input_tokens,
+)
+from azents.rdb.deps import get_session_manager
+from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate, NotFound
+from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent_admin.data import AgentAdminCreate
+from azents.repos.agent_subagent import AgentSubagentRepository
+from azents.repos.toolkit import AgentToolkitRepository
+from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
+from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.llm_catalog import ModelCatalogReadService
+from azents.services.uploads import UploadService, UploadValidationError
+from azents.services.uploads.deps import get_upload_service
+from azents.services.uploads.handlers.avatar import AvatarUploadHandler
+from azents.services.uploads.schema import (
+    ImageFile,
+    ImageThumbnails,
+    StoredImage,
+    StoredImageFile,
+    UploadedImage,
+)
+
+from .data import (
+    AdminNotFound,
+    AgentAdminListOutput,
+    AgentAdminOutput,
+    AgentCreateInput,
+    AgentListOutput,
+    AgentOutput,
+    AgentUpdateInput,
+    AvatarUploadRejected,
+    AvatarUploadTicketOutput,
+    BuiltinToolValidationFailed,
+    DuplicateAdmin,
+    InvalidModelParameters,
+    LastAdminCannotBeRemoved,
+    ModelRequired,
+    ModelSelectionNotFound,
+    NotAdmin,
+    NotBelongToWorkspace,
+    PrivateAgentAccessDenied,
+    WorkspaceUserNotFound,
+)
+
+
+@dataclasses.dataclass
+class _SelectionBuiltinToolCapabilities:
+    """Capability view required for builtin tool validation."""
+
+    supported: list[str]
+
+
+@dataclasses.dataclass
+class _SelectionBuiltinToolModelCapabilities:
+    """Model capability view required for builtin tool validation."""
+
+    built_in_tools: BuiltinToolCapabilities
+
+
+@dataclasses.dataclass
+class _SelectionBuiltinToolProviderModel:
+    """Provider model view required by builtin tool validation."""
+
+    model_identifier: str
+    capabilities: BuiltinToolModelCapabilities
+
+
+def _builtin_tool_provider_model_from_selection(
+    selection: AgentModelSelection,
+) -> _SelectionBuiltinToolProviderModel:
+    """Convert model selection snapshot to view for builtin tool validation."""
+    return _SelectionBuiltinToolProviderModel(
+        model_identifier=selection.model_identifier,
+        capabilities=_SelectionBuiltinToolModelCapabilities(
+            built_in_tools=_SelectionBuiltinToolCapabilities(
+                supported=list(
+                    selection.normalized_capabilities.built_in_tools.supported
+                )
+            )
+        ),
+    )
+
+
+def _get_avatar_handler() -> AvatarUploadHandler:
+    """AvatarUploadHandler DI (stateless singleton)."""
+    return AvatarUploadHandler()
+
+
+def _get_workspace_s3_bucket(
+    config: Annotated[Config, Depends(get_config)],
+) -> str:
+    """Workspace S3 bucket name DI."""
+    return config.workspace_s3.bucket
+
+
+def _get_avatar_cdn_base_url(
+    config: Annotated[Config, Depends(get_config)],
+) -> str | None:
+    """Avatar CDN base URL DI (optional)."""
+    return config.avatar_cdn_base_url
+
+
+def _get_runtime_default_provider_id(
+    config: Annotated[Config, Depends(get_config)],
+) -> str | None:
+    """Agent Runtime default Provider ID DI (optional)."""
+    return config.runtime.default_provider_id
+
+
+@dataclasses.dataclass
+class AgentService:
+    """Agent CRUD service."""
+
+    repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    admin_repository: Annotated[AgentAdminRepository, Depends(AgentAdminRepository)]
+    agent_subagent_repository: Annotated[
+        AgentSubagentRepository, Depends(AgentSubagentRepository)
+    ]
+    workspace_model_settings_repository: Annotated[
+        WorkspaceModelSettingsRepository, Depends(WorkspaceModelSettingsRepository)
+    ]
+    model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
+    workspace_user_repository: Annotated[
+        WorkspaceUserRepository, Depends(WorkspaceUserRepository)
+    ]
+    agent_toolkit_repository: Annotated[
+        AgentToolkitRepository, Depends(AgentToolkitRepository)
+    ]
+    upload_service: Annotated[UploadService, Depends(get_upload_service)]
+    avatar_handler: Annotated[AvatarUploadHandler, Depends(_get_avatar_handler)]
+    s3_service: Annotated[S3Service, Depends(get_s3_service)]
+    workspace_s3_bucket: Annotated[str, Depends(_get_workspace_s3_bucket)]
+    avatar_cdn_base_url: Annotated[str | None, Depends(_get_avatar_cdn_base_url)]
+    runtime_default_provider_id: Annotated[
+        str | None,
+        Depends(_get_runtime_default_provider_id),
+    ]
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ]
+
+    def _has_effective_reasoning(
+        self,
+        selection: AgentModelSelection,
+        params: ModelParameters,
+    ) -> bool:
+        """Return whether reasoning applies according to model capability contract."""
+        if params.reasoning_effort is None:
+            return False
+        reasoning = selection.normalized_capabilities.reasoning
+        if not reasoning.supported:
+            return False
+        return (
+            not reasoning.effort_levels
+            or params.reasoning_effort in reasoning.effort_levels
+        )
+
+    def _parse_model_parameters(
+        self,
+        params: ModelParameters | None,
+    ) -> Result[ModelParameters | None, InvalidModelParameters]:
+        """Validate Model parameter payload."""
+        if params is None:
+            return Success(None)
+        try:
+            return Success(
+                ModelParameters.model_validate(params.model_dump(mode="json"))
+            )
+        except ValidationError as e:
+            return Failure(
+                InvalidModelParameters(errors=[error["msg"] for error in e.errors()])
+            )
+
+    async def _resolve_model_selection_input(
+        self,
+        workspace_id: str,
+        selection_input: AgentModelSelectionInput,
+    ) -> Result[AgentModelSelection, ModelSelectionNotFound]:
+        """Convert model selection input to stored catalog snapshot."""
+        result = await self.model_catalog_read_service.resolve_agent_model_selection(
+            workspace_id=workspace_id,
+            selection_input=selection_input,
+        )
+        match result:
+            case Success(value):
+                return Success(value)
+            case Failure(_):
+                return Failure(
+                    ModelSelectionNotFound(
+                        llm_provider_integration_id=(
+                            selection_input.llm_provider_integration_id
+                        ),
+                        model_identifier=selection_input.model_identifier,
+                    )
+                )
+            case _:
+                assert_never(result)
+
+    async def _resolve_create_model_selections(
+        self,
+        create: AgentCreateInput,
+    ) -> Result[
+        tuple[AgentModelSelection, AgentModelSelection],
+        ModelRequired | ModelSelectionNotFound,
+    ]:
+        """Decide main/lightweight snapshots for Agent creation."""
+        async with self.session_manager() as session:
+            settings = await self.workspace_model_settings_repository.get_or_create(
+                session,
+                create.workspace_id,
+            )
+
+        if create.model_selection is not None:
+            main_result = await self._resolve_model_selection_input(
+                create.workspace_id,
+                create.model_selection,
+            )
+            match main_result:
+                case Success(value):
+                    main_selection = value
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(main_result)
+        elif settings.default_model_selection is not None:
+            main_selection = settings.default_model_selection
+        else:
+            return Failure(ModelRequired(workspace_id=create.workspace_id))
+
+        if create.lightweight_model_selection is not None:
+            lw_result = await self._resolve_model_selection_input(
+                create.workspace_id,
+                create.lightweight_model_selection,
+            )
+            match lw_result:
+                case Success(value):
+                    lightweight_selection = value
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(lw_result)
+        elif settings.default_lightweight_model_selection is not None:
+            lightweight_selection = settings.default_lightweight_model_selection
+        else:
+            lightweight_selection = main_selection
+
+        return Success((main_selection, lightweight_selection))
+
+    async def create(
+        self,
+        create: AgentCreateInput,
+        *,
+        creator_workspace_user_id: str,
+    ) -> Result[
+        AgentOutput,
+        ModelRequired
+        | ModelSelectionNotFound
+        | InvalidModelParameters
+        | BuiltinToolValidationFailed,
+    ]:
+        """Create Agent and add creator as first admin."""
+        selections_result = await self._resolve_create_model_selections(create)
+        match selections_result:
+            case Success((main_selection, lightweight_selection)):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(selections_result)
+
+        params_result = self._parse_model_parameters(create.model_parameters)
+        match params_result:
+            case Success(value):
+                effective_model_parameters = value
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(params_result)
+
+        if effective_model_parameters and effective_model_parameters.builtin_tools:
+            bt_errors = validate_builtin_tools(
+                effective_model_parameters.builtin_tools,
+                BuiltinToolValidationContext(
+                    agent_role=create.role,
+                    shell_enabled=create.shell_enabled,
+                    has_toolkits=False,
+                    provider_model=_builtin_tool_provider_model_from_selection(
+                        main_selection
+                    ),
+                    model_developer=main_selection.model_developer,
+                    reasoning_enabled=self._has_effective_reasoning(
+                        main_selection,
+                        effective_model_parameters,
+                    ),
+                ),
+            )
+            if bt_errors:
+                return Failure(BuiltinToolValidationFailed(errors=bt_errors))
+
+        repo_create = AgentCreate(
+            workspace_id=create.workspace_id,
+            name=create.name,
+            model_selection=main_selection,
+            lightweight_model_selection=lightweight_selection,
+            description=create.description,
+            model_parameters=create.model_parameters,
+            system_prompt=create.system_prompt,
+            enabled=create.enabled,
+            type=create.type,
+            role=create.role,
+            runtime_provider_id=(
+                create.runtime_provider_id or self.runtime_default_provider_id
+            ),
+            shell_enabled=create.shell_enabled,
+            memory_enabled=create.memory_enabled,
+            max_turns=create.max_turns,
+            toolkit_inherit_mode=create.toolkit_inherit_mode,
+        )
+        async with self.session_manager() as session:
+            if create.model_selection is not None:
+                set_default = (
+                    self.workspace_model_settings_repository.set_default_model_if_empty
+                )
+                await set_default(session, create.workspace_id, main_selection)
+            agent = await self.repository.create(session, repo_create)
+            await self.admin_repository.create(
+                session,
+                AgentAdminCreate(
+                    agent_id=agent.id,
+                    workspace_user_id=creator_workspace_user_id,
+                ),
+            )
+        return Success(await self._build_output(agent))
+
+    async def list_by_workspace(
+        self,
+        workspace_id: str,
+        *,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> AgentListOutput:
+        """Fetch Agent list in workspace."""
+        async with self.session_manager() as session:
+            if role == WorkspaceUserRole.OWNER:
+                result = await self.repository.list_by_workspace(session, workspace_id)
+            else:
+                result = await self.repository.list_visible_by_workspace(
+                    session, workspace_id, workspace_user_id
+                )
+        items = [await self._build_output(a) for a in result.items]
+        return AgentListOutput(items=items)
+
+    async def get_by_id(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        AgentOutput,
+        NotFound | NotBelongToWorkspace | PrivateAgentAccessDenied,
+    ]:
+        """Fetch Agent by ID."""
+        async with self.session_manager() as session:
+            agent = await self.repository.get_by_id(session, agent_id)
+        if agent is None:
+            return Failure(NotFound(agent_id=agent_id))
+        if agent.workspace_id != workspace_id:
+            return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        if agent.type == AgentType.PRIVATE and role != WorkspaceUserRole.OWNER:
+            async with self.session_manager() as session:
+                is_admin = await self.admin_repository.is_admin(
+                    session, agent_id, workspace_user_id
+                )
+            if not is_admin:
+                return Failure(PrivateAgentAccessDenied(agent_id=agent_id))
+        return Success(await self._build_output(agent))
+
+    async def update_by_id(
+        self,
+        agent_id: str,
+        update: AgentUpdateInput,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        AgentOutput,
+        NotFound
+        | NotBelongToWorkspace
+        | NotAdmin
+        | ModelRequired
+        | ModelSelectionNotFound
+        | InvalidModelParameters
+        | BuiltinToolValidationFailed,
+    ]:
+        """Update Agent by ID."""
+        async with self.session_manager() as session:
+            existing = await self.repository.get_by_id(session, agent_id)
+        if existing is None:
+            return Failure(NotFound(agent_id=agent_id))
+        if existing.workspace_id != workspace_id:
+            return Failure(NotBelongToWorkspace(agent_id=agent_id))
+
+        admin_check = await self._check_admin_or_owner(
+            agent_id, workspace_user_id, role
+        )
+        if admin_check is not None:
+            return Failure(admin_check)
+
+        repo_update = AgentUpdate()
+        if "name" in update:
+            repo_update["name"] = update["name"]
+        if "description" in update:
+            repo_update["description"] = update["description"]
+
+        main_selection = existing.model_selection
+        if "model_selection" in update:
+            selection_input = update["model_selection"]
+            if selection_input is None:
+                async with self.session_manager() as session:
+                    settings = await self.workspace_model_settings_repository.get(
+                        session,
+                        workspace_id,
+                    )
+                if settings is None or settings.default_model_selection is None:
+                    return Failure(ModelRequired(workspace_id=workspace_id))
+                main_selection = settings.default_model_selection
+            else:
+                main_result = await self._resolve_model_selection_input(
+                    workspace_id,
+                    selection_input,
+                )
+                match main_result:
+                    case Success(value):
+                        main_selection = value
+                    case Failure(error):
+                        return Failure(error)
+                    case _:
+                        assert_never(main_result)
+            repo_update["model_selection"] = main_selection
+
+        if "lightweight_model_selection" in update:
+            selection_input = update["lightweight_model_selection"]
+            if selection_input is None:
+                async with self.session_manager() as session:
+                    settings = await self.workspace_model_settings_repository.get(
+                        session,
+                        workspace_id,
+                    )
+                default_lightweight = (
+                    settings.default_lightweight_model_selection
+                    if settings is not None
+                    else None
+                )
+                if default_lightweight is not None:
+                    lightweight_selection = default_lightweight
+                else:
+                    lightweight_selection = main_selection
+            else:
+                lw_result = await self._resolve_model_selection_input(
+                    workspace_id,
+                    selection_input,
+                )
+                match lw_result:
+                    case Success(value):
+                        lightweight_selection = value
+                    case Failure(error):
+                        return Failure(error)
+                    case _:
+                        assert_never(lw_result)
+            repo_update["lightweight_model_selection"] = lightweight_selection
+
+        model_parameters = update.get("model_parameters", existing.model_parameters)
+        params_result = self._parse_model_parameters(model_parameters)
+        match params_result:
+            case Success(value):
+                effective_model_parameters = value
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(params_result)
+        if "model_parameters" in update:
+            repo_update["model_parameters"] = update["model_parameters"]
+
+        if effective_model_parameters and effective_model_parameters.builtin_tools:
+            new_shell_enabled = update.get("shell_enabled", existing.shell_enabled)
+            async with self.session_manager() as session:
+                agent_toolkits = await self.agent_toolkit_repository.list_by_agent(
+                    session, agent_id
+                )
+            bt_errors = validate_builtin_tools(
+                effective_model_parameters.builtin_tools,
+                BuiltinToolValidationContext(
+                    agent_role=update.get("role", existing.role),
+                    shell_enabled=new_shell_enabled,
+                    has_toolkits=len(agent_toolkits) > 0,
+                    provider_model=_builtin_tool_provider_model_from_selection(
+                        main_selection
+                    ),
+                    model_developer=main_selection.model_developer,
+                    reasoning_enabled=self._has_effective_reasoning(
+                        main_selection,
+                        effective_model_parameters,
+                    ),
+                ),
+            )
+            if bt_errors:
+                return Failure(BuiltinToolValidationFailed(errors=bt_errors))
+
+        for key in (
+            "system_prompt",
+            "enabled",
+            "type",
+            "role",
+            "runtime_provider_id",
+            "shell_enabled",
+            "memory_enabled",
+            "max_turns",
+            "toolkit_inherit_mode",
+        ):
+            if key in update:
+                repo_update[key] = update[key]  # type: ignore[literal-required]
+
+        async with self.session_manager() as session:
+            result = await self.repository.update_by_id(session, agent_id, repo_update)
+        match result:
+            case Success(value):
+                return Success(await self._build_output(value))
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(result)
+
+    async def delete_by_id(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[None, NotFound | NotBelongToWorkspace | NotAdmin]:
+        """Delete Agent by ID."""
+        async with self.session_manager() as session:
+            existing = await self.repository.get_by_id(session, agent_id)
+        if existing is None:
+            return Failure(NotFound(agent_id=agent_id))
+        if existing.workspace_id != workspace_id:
+            return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        admin_check = await self._check_admin_or_owner(
+            agent_id, workspace_user_id, role
+        )
+        if admin_check is not None:
+            return Failure(admin_check)
+        async with self.session_manager() as session:
+            await self.repository.delete_by_id(session, agent_id)
+        return Success(None)
+
+    async def list_admins(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+    ) -> Result[AgentAdminListOutput, NotFound | NotBelongToWorkspace]:
+        """Fetch Agent admin list."""
+        async with self.session_manager() as session:
+            agent = await self.repository.get_by_id(session, agent_id)
+        if agent is None:
+            return Failure(NotFound(agent_id=agent_id))
+        if agent.workspace_id != workspace_id:
+            return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        async with self.session_manager() as session:
+            admins = await self.admin_repository.list_by_agent(session, agent_id)
+        return Success(
+            AgentAdminListOutput(
+                items=[
+                    AgentAdminOutput(
+                        id=a.id,
+                        agent_id=a.agent_id,
+                        workspace_user_id=a.workspace_user_id,
+                        created_at=a.created_at,
+                    )
+                    for a in admins.items
+                ]
+            )
+        )
+
+    async def add_admin(
+        self,
+        agent_id: str,
+        target_workspace_user_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        AgentAdminOutput,
+        NotFound
+        | NotBelongToWorkspace
+        | NotAdmin
+        | DuplicateAdmin
+        | WorkspaceUserNotFound,
+    ]:
+        """Add admin to Agent."""
+        async with self.session_manager() as session:
+            agent = await self.repository.get_by_id(session, agent_id)
+        if agent is None:
+            return Failure(NotFound(agent_id=agent_id))
+        if agent.workspace_id != workspace_id:
+            return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        admin_check = await self._check_admin_or_owner(
+            agent_id, workspace_user_id, role
+        )
+        if admin_check is not None:
+            return Failure(admin_check)
+        async with self.session_manager() as session:
+            target_user = await self.workspace_user_repository.get(
+                session, target_workspace_user_id
+            )
+        if target_user is None or target_user.workspace_id != workspace_id:
+            return Failure(
+                WorkspaceUserNotFound(workspace_user_id=target_workspace_user_id)
+            )
+        async with self.session_manager() as session:
+            result = await self.admin_repository.create(
+                session,
+                AgentAdminCreate(
+                    agent_id=agent_id,
+                    workspace_user_id=target_workspace_user_id,
+                ),
+            )
+        match result:
+            case Success(value):
+                return Success(
+                    AgentAdminOutput(
+                        id=value.id,
+                        agent_id=value.agent_id,
+                        workspace_user_id=value.workspace_user_id,
+                        created_at=value.created_at,
+                    )
+                )
+            case Failure(error):
+                return Failure(
+                    DuplicateAdmin(
+                        agent_id=error.agent_id,
+                        workspace_user_id=error.workspace_user_id,
+                    )
+                )
+            case _:
+                assert_never(result)
+
+    async def remove_admin(
+        self,
+        agent_id: str,
+        target_workspace_user_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        None,
+        NotFound
+        | NotBelongToWorkspace
+        | NotAdmin
+        | LastAdminCannotBeRemoved
+        | AdminNotFound,
+    ]:
+        """Remove admin from Agent."""
+        async with self.session_manager() as session:
+            agent = await self.repository.get_by_id(session, agent_id)
+        if agent is None:
+            return Failure(NotFound(agent_id=agent_id))
+        if agent.workspace_id != workspace_id:
+            return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        admin_check = await self._check_admin_or_owner(
+            agent_id, workspace_user_id, role
+        )
+        if admin_check is not None:
+            return Failure(admin_check)
+        async with self.session_manager() as session:
+            count = await self.admin_repository.count_by_agent(session, agent_id)
+            if count <= 1:
+                return Failure(
+                    LastAdminCannotBeRemoved(
+                        agent_id=agent_id,
+                        workspace_user_id=target_workspace_user_id,
+                    )
+                )
+            deleted = await self.admin_repository.delete(
+                session, agent_id, target_workspace_user_id
+            )
+        if not deleted:
+            return Failure(
+                AdminNotFound(
+                    agent_id=agent_id,
+                    workspace_user_id=target_workspace_user_id,
+                )
+            )
+        return Success(None)
+
+    async def request_avatar_upload(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+        content_type: str,
+        content_length: int,
+    ) -> Result[
+        AvatarUploadTicketOutput,
+        NotFound | NotBelongToWorkspace | NotAdmin | AvatarUploadRejected,
+    ]:
+        """Issue presigned PUT ticket for avatar upload."""
+        async with self.session_manager() as session:
+            existing = await self.repository.get_by_id(session, agent_id)
+        if existing is None:
+            return Failure(NotFound(agent_id=agent_id))
+        if existing.workspace_id != workspace_id:
+            return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        admin_check = await self._check_admin_or_owner(
+            agent_id, workspace_user_id, role
+        )
+        if admin_check is not None:
+            return Failure(admin_check)
+        try:
+            ticket = await self.upload_service.issue_upload_ticket(
+                category=AvatarUploadHandler.category,
+                owner_id=agent_id,
+                content_type=content_type,
+                content_length=content_length,
+            )
+        except UploadValidationError as err:
+            return Failure(AvatarUploadRejected(message=str(err)))
+        return Success(
+            AvatarUploadTicketOutput(
+                upload_key=ticket.upload_key,
+                upload_url=ticket.upload_url,
+                expires_at=ticket.expires_at,
+            )
+        )
+
+    async def finalize_avatar(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+        upload_key: str,
+        filename: str,
+    ) -> Result[
+        AgentOutput,
+        NotFound | NotBelongToWorkspace | NotAdmin | AvatarUploadRejected,
+    ]:
+        """Validate uploaded avatar file and reflect it in DB."""
+        async with self.session_manager() as session:
+            existing = await self.repository.get_by_id(session, agent_id)
+        if existing is None:
+            return Failure(NotFound(agent_id=agent_id))
+        if existing.workspace_id != workspace_id:
+            return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        admin_check = await self._check_admin_or_owner(
+            agent_id, workspace_user_id, role
+        )
+        if admin_check is not None:
+            return Failure(admin_check)
+        try:
+            stored = await self.upload_service.finalize(
+                category=AvatarUploadHandler.category,
+                owner_id=agent_id,
+                upload_key=upload_key,
+                filename=filename,
+            )
+        except UploadValidationError as err:
+            return Failure(AvatarUploadRejected(message=str(err)))
+        async with self.session_manager() as session:
+            update_result = await self.repository.update_avatar(
+                session, agent_id, stored
+            )
+        match update_result:
+            case Success(updated_agent):
+                pass
+            case Failure(_):
+                return Failure(NotFound(agent_id=agent_id))
+        if existing.avatar is not None:
+            try:
+                await self.avatar_handler.delete_files(
+                    existing.avatar,
+                    self.s3_service,
+                    self.workspace_s3_bucket,
+                )
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
+        return Success(await self._build_output(updated_agent))
+
+    async def remove_avatar(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[AgentOutput, NotFound | NotBelongToWorkspace | NotAdmin]:
+        """Remove Avatar and delete S3 files."""
+        async with self.session_manager() as session:
+            existing = await self.repository.get_by_id(session, agent_id)
+        if existing is None:
+            return Failure(NotFound(agent_id=agent_id))
+        if existing.workspace_id != workspace_id:
+            return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        admin_check = await self._check_admin_or_owner(
+            agent_id, workspace_user_id, role
+        )
+        if admin_check is not None:
+            return Failure(admin_check)
+        async with self.session_manager() as session:
+            update_result = await self.repository.update_avatar(session, agent_id, None)
+        match update_result:
+            case Success(updated_agent):
+                pass
+            case Failure(_):
+                return Failure(NotFound(agent_id=agent_id))
+        if existing.avatar is not None:
+            try:
+                await self.avatar_handler.delete_files(
+                    existing.avatar,
+                    self.s3_service,
+                    self.workspace_s3_bucket,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return Success(await self._build_output(updated_agent))
+
+    async def _build_output(self, agent: Agent) -> AgentOutput:
+        """Convert `Agent` domain model to output."""
+        avatar = await self._resolve_avatar(agent.avatar)
+        context_window = self._compute_effective_context_window(agent)
+        return AgentOutput.convert_from(
+            agent,
+            avatar=avatar,
+            effective_context_window_tokens=(
+                context_window.effective_max_input_tokens
+                if context_window is not None
+                else None
+            ),
+            effective_auto_compaction_threshold_tokens=(
+                context_window.auto_compaction_threshold_tokens
+                if context_window is not None
+                else None
+            ),
+        )
+
+    def _compute_effective_context_window(
+        self,
+        agent: Agent,
+    ) -> EffectiveContextWindow | None:
+        """Calculate effective context window using same criteria as Runtime."""
+        main_max_input_tokens = get_max_input_tokens(
+            agent.model_selection.normalized_capabilities.context_window.max_input_tokens,
+            to_runtime_model(
+                agent.model_selection.provider,
+                agent.model_selection.model_identifier,
+            ),
+        )
+        compaction_max_input_tokens = get_max_input_tokens(
+            agent.lightweight_model_selection.normalized_capabilities.context_window.max_input_tokens,
+            to_runtime_model(
+                agent.lightweight_model_selection.provider,
+                agent.lightweight_model_selection.model_identifier,
+            ),
+        )
+        return compute_effective_context_window_tokens(
+            main_max_input_tokens=main_max_input_tokens,
+            compaction_max_input_tokens=compaction_max_input_tokens,
+        )
+
+    async def _resolve_avatar(self, stored: StoredImage | None) -> UploadedImage | None:
+        """Convert StoredImage to UploadedImage."""
+        if stored is None:
+            return None
+        return UploadedImage(
+            filename=stored.filename,
+            default=await self._resolve_file(stored.default),
+            thumbnails=ImageThumbnails(
+                small=(
+                    await self._resolve_file(stored.thumbnails.small)
+                    if stored.thumbnails.small is not None
+                    else None
+                ),
+                medium=(
+                    await self._resolve_file(stored.thumbnails.medium)
+                    if stored.thumbnails.medium is not None
+                    else None
+                ),
+                large=(
+                    await self._resolve_file(stored.thumbnails.large)
+                    if stored.thumbnails.large is not None
+                    else None
+                ),
+            ),
+            uploaded_at=stored.uploaded_at,
+        )
+
+    async def _resolve_file(self, stored: StoredImageFile) -> ImageFile:
+        """Convert StoredImageFile to ImageFile."""
+        if self.avatar_cdn_base_url is not None:
+            url = f"{self.avatar_cdn_base_url}/{stored.key}"
+        else:
+            url = await self.s3_service.get_download_url(
+                bucket=self.workspace_s3_bucket,
+                key=stored.key,
+                expires_in=datetime.timedelta(hours=1),
+            )
+        width = stored.width if stored.width is not None else 0
+        height = stored.height if stored.height is not None else 0
+        return ImageFile(url=url, width=width, height=height)
+
+    async def _check_admin_or_owner(
+        self,
+        agent_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> NotAdmin | None:
+        """Check whether admin or owner."""
+        if role == WorkspaceUserRole.OWNER:
+            return None
+        async with self.session_manager() as session:
+            is_admin = await self.admin_repository.is_admin(
+                session, agent_id, workspace_user_id
+            )
+        if not is_admin:
+            return NotAdmin(agent_id=agent_id)
+        return None

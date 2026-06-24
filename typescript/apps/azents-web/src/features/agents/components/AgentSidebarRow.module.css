@@ -1,0 +1,26 @@
+/* Sidebar agent row — groups chevron + NavLink into one hover area.
+ * Mantine NavLink and ActionIcon each have their own hover background,
+ * causing only half to change color when mouse hovers one side of row; this fixes it. */
+.row {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  border-radius: var(--mantine-radius-sm);
+  transition: background-color 120ms;
+}
+
+.row:hover {
+  background-color: var(--mantine-color-default-hover);
+}
+
+/* Remove internal NavLink hover background — parent (.row) handles it */
+.row :global(.mantine-NavLink-root):not(:global([data-active="true"])):hover {
+  background: transparent;
+}
+
+/* Remove subtle hover background of Chevron ActionIcon — parent handles it */
+.chevron,
+.chevron:hover,
+.chevron[data-hovered] {
+  background: transparent !important;
+}

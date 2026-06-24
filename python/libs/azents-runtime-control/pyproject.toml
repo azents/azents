@@ -1,0 +1,59 @@
+[project]
+name = "azents-runtime-control"
+version = "0.1.0"
+description = "Shared Agent Runtime Control contracts"
+requires-python = ">=3.14"
+dependencies = [
+    "grpcio>=1.80.0",
+    "protobuf>=6.33.5",
+]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.80.0",
+    "ruff>=0.14.5",
+    "pyright>=1.1.408",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+]
+
+[tool.uv]
+package = true
+resolution = "lowest-direct"
+
+[tool.uv.build-backend]
+module-name = "azents_runtime_control"
+
+[build-system]
+requires = ["uv_build>=0.9.10,<0.12"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"
+reportUnknownMemberType = "none"
+reportMissingTypeStubs = "none"
+exclude = [
+    ".venv",
+    "src/azents_runtime_control/proto/runtime_provider_control_pb2.py",
+    "src/azents_runtime_control/proto/runtime_provider_control_pb2_grpc.py",
+    "src/azents_runtime_control/proto/runtime_runner_control_pb2.py",
+    "src/azents_runtime_control/proto/runtime_runner_control_pb2_grpc.py",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"

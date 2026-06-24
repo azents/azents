@@ -1,0 +1,7 @@
+generatorName: python
+outputDir: .
+inputSpec: ../../apps/azents/specs/public/openapi.json
+additionalProperties:
+  packageName: azentspublicclient
+  disallowAdditionalPropertiesIfNotPresent: false
+  generateSourceCodeOnly: true

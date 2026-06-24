@@ -1,0 +1,80 @@
+"""Scheduled task registry."""
+
+import datetime
+
+from azents.scheduler.types import (
+    RetryPolicy,
+    ScheduledTaskDefinition,
+    TaskContext,
+    TaskResult,
+)
+from azents.services.llm_catalog import SystemCatalogProjectionService
+
+
+async def heartbeat_handler(context: TaskContext) -> TaskResult:
+    """Return heartbeat execution summary."""
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+        }
+    )
+
+
+async def system_catalog_projection_handler(context: TaskContext) -> TaskResult:
+    """Refresh system model catalog projections."""
+    service = await context.container.solve(SystemCatalogProjectionService)
+    summaries = await service.sync_system_catalogs()
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            "catalogs": [
+                {
+                    "provider": summary.provider.value,
+                    "catalog_id": summary.catalog_id,
+                    "snapshot_id": summary.snapshot_id,
+                    "visible_count": summary.visible_count,
+                    "hidden_count": summary.hidden_count,
+                }
+                for summary in summaries
+            ],
+        }
+    )
+
+
+HEARTBEAT_TASK = ScheduledTaskDefinition(
+    key="scheduler_heartbeat",
+    description="No-op scheduler heartbeat used to verify periodic execution wiring.",
+    interval=datetime.timedelta(minutes=1),
+    timeout=datetime.timedelta(seconds=30),
+    retry_policy=RetryPolicy(kind="next_interval"),
+    handler=heartbeat_handler,
+    enabled_by_default=True,
+)
+
+SYSTEM_CATALOG_PROJECTION_TASK = ScheduledTaskDefinition(
+    key="model_catalog_system_projection",
+    description="Refresh system model catalog projections from LiteLLM metadata.",
+    interval=datetime.timedelta(hours=6),
+    timeout=datetime.timedelta(minutes=5),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=5),
+        max_delay=datetime.timedelta(hours=1),
+    ),
+    handler=system_catalog_projection_handler,
+    enabled_by_default=True,
+)
+
+SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
+    HEARTBEAT_TASK,
+    SYSTEM_CATALOG_PROJECTION_TASK,
+)
+
+
+def get_task_definitions() -> tuple[ScheduledTaskDefinition, ...]:
+    """Return code-registered scheduled task definitions."""
+    return SCHEDULED_TASK_DEFINITIONS

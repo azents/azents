@@ -1,0 +1,20 @@
+{
+  "name": "codingbot-opencode-plugins",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.15.10",
+    "gray-matter": "^4.0.3",
+    "picomatch": "^4.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/picomatch": "^4.0.0",
+    "prettier": "^3.5.3",
+    "typescript": "^6.0.3"
+  }
+}

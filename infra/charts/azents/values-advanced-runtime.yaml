@@ -1,0 +1,20 @@
+server:
+  mcpEgressProxy:
+    enabled: true
+
+runtimeProviderKubernetes:
+  runtimePod:
+    nodeSelector:
+      azents.io/runtime-isolation: "true"
+    tolerations:
+      - key: azents.io/runtime-isolation
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+  nodeSelector:
+    azents.io/runtime-isolation: "true"
+  tolerations:
+    - key: azents.io/runtime-isolation
+      operator: Equal
+      value: "true"
+      effect: NoSchedule

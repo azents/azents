@@ -1,0 +1,16 @@
+apiVersion: v2
+name: azents
+description: A Helm chart for deploying Azents on Kubernetes.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.28.0-0"
+keywords:
+  - azents
+  - agent
+  - ai
+home: https://github.com/azents/azents
+sources:
+  - https://github.com/azents/azents
+maintainers:
+  - name: Choi Geonu

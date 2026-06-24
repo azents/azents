@@ -1,0 +1,21 @@
+[project]
+name = "azents-admin-client"
+version = "0.1.0"
+description = "Admin API client for Azents"
+requires-python = ">=3.14"
+dependencies = [
+    "urllib3>=2.6.3,<3",
+    "python-dateutil>=2.8.2,<3",
+    "pydantic>=2,<3",
+    "typing-extensions>=4.7.1,<5",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.build-backend]
+module-name = "azentsadminclient"
+
+[build-system]
+requires = ["uv_build>=0.9.10"]
+build-backend = "uv_build"

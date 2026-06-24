@@ -1,0 +1,63 @@
+name: azents
+services:
+  db:
+    image: public.ecr.aws/docker/library/postgres:18-alpine
+    restart: unless-stopped
+    ports:
+      - "${AZENTS_DB_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    environment:
+      POSTGRES_USER: azents
+      POSTGRES_PASSWORD: azents
+      POSTGRES_DB: azents
+  valkey:
+    image: public.ecr.aws/valkey/valkey:9-alpine
+    restart: unless-stopped
+    ports:
+      - "${AZENTS_VALKEY_PORT:-6379}:6379"
+    volumes:
+      - valkeydata:/data
+  rustfs:
+    image: rustfs/rustfs:1.0.0-alpha.90
+    restart: unless-stopped
+    ports:
+      # API
+      - "${AZENTS_RUSTFS_PORT:-9000}:9000"
+      # Console
+      - "${AZENTS_RUSTFS_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rustfs:/data
+    environment:
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: "dummy"
+      RUSTFS_SECRET_KEY: "dummy"
+      RUSTFS_VOLUMES: "/data"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9000 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  rustfs-init:
+    image: minio/mc:latest
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set rustfs http://rustfs:9000 dummy dummy;
+      mc mb --ignore-existing rustfs/azents-dev;
+      echo 'Bucket created successfully';
+      "
+volumes:
+  pgdata:
+  valkeydata:
+  rustfs:
+
+networks:
+  # Agent Home 컨테이너 전용 브리지 네트워크
+  # DockerAgentHomeClient가 이 네트워크에 컨테이너를 연결합니다
+  sandbox-restricted:
+    driver: bridge

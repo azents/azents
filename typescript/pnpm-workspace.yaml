@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+allowBuilds:
+  "@parcel/watcher": false
+  "@sentry/cli": true
+  "@swc/core": true
+  es5-ext: false
+  esbuild: false
+  sharp: true
+  unrs-resolver: true

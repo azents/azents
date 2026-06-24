@@ -1,0 +1,237 @@
+syntax = "proto3";
+
+package azents.runtime_control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Runtime-internal Runners open this outbound stream to Runtime Control.
+service RuntimeRunnerControl {
+  rpc ConnectRunner(stream RunnerMessage) returns (stream RunnerControlMessage);
+}
+
+message RunnerMessage {
+  string connection_id = 1;
+  string request_id = 2;
+  uint64 generation = 3;
+
+  oneof payload {
+    RunnerRegister register = 10;
+    RunnerHeartbeat heartbeat = 11;
+    RunnerStateReport state_report = 20;
+    RunnerOperationEvent operation_event = 21;
+    RunnerError error = 40;
+  }
+}
+
+message RunnerControlMessage {
+  string request_id = 1;
+
+  oneof payload {
+    RunnerRegisterAccepted register_accepted = 10;
+    RunnerHeartbeatAck heartbeat_ack = 11;
+    RunnerOperationRequest operation_request = 20;
+    RunnerError error = 40;
+  }
+}
+
+message RunnerRegister {
+  string runtime_id = 1;
+  string runner_id = 2;
+  string protocol_version = 3;
+  repeated string capabilities = 4;
+  string health = 5;
+  map<string, string> metadata = 6;
+  string auth_credential_id = 7;
+  string workspace_path = 8;
+}
+
+message RunnerRegisterAccepted {
+  string runtime_id = 1;
+  string runner_id = 2;
+  string connection_id = 3;
+  uint64 generation = 4;
+  uint32 heartbeat_interval_seconds = 5;
+}
+
+message RunnerHeartbeat {
+  uint64 monotonic_sequence = 1;
+}
+
+message RunnerHeartbeatAck {
+  uint64 monotonic_sequence = 1;
+}
+
+message RunnerStateReport {
+  string runtime_id = 1;
+  string runner_id = 2;
+  uint64 runner_generation = 3;
+  string runner_state = 4;
+  repeated string capabilities = 5;
+  repeated string active_operation_ids = 6;
+  string health = 7;
+  map<string, string> diagnostic = 8;
+  string workspace_path = 9;
+  google.protobuf.Timestamp reported_at = 10;
+}
+
+message RunnerOperationRequest {
+  string runtime_id = 1;
+  uint64 runner_generation = 2;
+  string operation_type = 3;
+  string reply_stream_id = 5;
+  string body_stream_id = 6;
+  bool background = 7;
+  google.protobuf.Timestamp deadline_at = 8;
+  repeated RunnerBodyChunk body_chunks = 9;
+
+  oneof payload {
+    BashOperationPayload bash = 20;
+    FileReadOperationPayload file_read = 21;
+    FileWriteOperationPayload file_write = 22;
+    FileListOperationPayload file_list = 23;
+    FileGrepOperationPayload file_grep = 24;
+    FileStatOperationPayload file_stat = 25;
+  }
+}
+
+message BashOperationPayload {
+  string command = 1;
+  uint32 timeout_seconds = 2;
+  map<string, string> env = 3;
+}
+
+message FileReadOperationPayload {
+  string path = 1;
+  uint64 offset = 2;
+  optional uint64 max_bytes = 3;
+}
+
+message FileWriteOperationPayload {
+  string path = 1;
+  uint64 total_bytes = 2;
+}
+
+message FileListOperationPayload {
+  string path = 1;
+  bool recursive = 2;
+  repeated string exclude_patterns = 3;
+}
+
+message FileGrepOperationPayload {
+  string path = 1;
+  string pattern = 2;
+  optional bool recursive = 3;
+  repeated string exclude_patterns = 4;
+  uint32 max_matching_files = 5;
+  uint32 max_lines_per_file = 6;
+}
+
+message FileStatOperationPayload {
+  string path = 1;
+}
+
+message RunnerBodyChunk {
+  uint64 chunk_id = 1;
+  bytes data = 2;
+  bool final = 3;
+}
+
+message RunnerOperationEvent {
+  string runtime_id = 1;
+  string operation_id = 2;
+  uint64 generation = 3;
+  string event_type = 4;
+  google.protobuf.Timestamp created_at = 6;
+  bool final = 7;
+
+  oneof payload {
+    RunnerOperationAcceptedPayload accepted = 20;
+    RunnerOperationTextPayload stdout = 21;
+    RunnerOperationTextPayload stderr = 22;
+    RunnerOperationFileChunkPayload file_chunk = 23;
+    RunnerOperationFinalSuccessPayload final_success = 24;
+    RunnerOperationFinalErrorPayload final_error = 25;
+  }
+}
+
+message RunnerOperationAcceptedPayload {
+  string operation_type = 1;
+}
+
+message RunnerOperationTextPayload {
+  string text = 1;
+}
+
+message RunnerOperationFileChunkPayload {
+  string data_base64 = 1;
+}
+
+message RunnerOperationFinalSuccessPayload {
+  oneof result {
+    BashFinalSuccess bash = 1;
+    FileReadFinalSuccess file_read = 2;
+    FileWriteFinalSuccess file_write = 3;
+    FileListFinalSuccess file_list = 4;
+    FileGrepFinalSuccess file_grep = 5;
+    FileStatFinalSuccess file_stat = 6;
+  }
+}
+
+message RunnerOperationFinalErrorPayload {
+  string error_code = 1;
+  string error_message = 2;
+}
+
+message BashFinalSuccess {
+  int32 exit_code = 1;
+}
+
+message FileReadFinalSuccess {
+  uint64 bytes_read = 1;
+}
+
+message FileWriteFinalSuccess {
+  uint64 bytes_written = 1;
+}
+
+message FileListFinalSuccess {
+  repeated RuntimeFileListEntry entries = 1;
+}
+
+message RuntimeFileListEntry {
+  string path = 1;
+  string type = 2;
+  optional uint64 size_bytes = 3;
+}
+
+message FileStatFinalSuccess {
+  string path = 1;
+  string kind = 2;
+  optional uint64 size_bytes = 3;
+  bool symlink = 4;
+  optional string real_path = 5;
+  optional string resolved_kind = 6;
+}
+
+message FileGrepFinalSuccess {
+  repeated RuntimeGrepFileMatch files = 1;
+  uint32 searched_file_count = 2;
+  uint32 matched_file_count = 3;
+  bool truncated = 4;
+}
+
+message RuntimeGrepFileMatch {
+  string path = 1;
+  repeated RuntimeGrepLineMatch lines = 2;
+  bool truncated = 3;
+}
+
+message RuntimeGrepLineMatch {
+  uint32 line_number = 1;
+  string text = 2;
+}
+
+message RunnerError {
+  string code = 1;
+  string message = 2;
+}

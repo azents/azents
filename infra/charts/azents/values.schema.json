@@ -1,0 +1,878 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "database": {
+            "properties": {
+              "mode": {
+                "const": "external"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          }
+        },
+        "required": [
+          "database"
+        ]
+      },
+      "then": {
+        "properties": {
+          "database": {
+            "properties": {
+              "external": {
+                "properties": {
+                  "host": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "host"
+                ]
+              }
+            },
+            "required": [
+              "external"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "database": {
+            "properties": {
+              "mode": {
+                "const": "external"
+              },
+              "external": {
+                "properties": {
+                  "useIamAuth": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "useIamAuth"
+                ]
+              }
+            },
+            "required": [
+              "mode",
+              "external"
+            ]
+          }
+        },
+        "required": [
+          "database"
+        ]
+      },
+      "then": {
+        "properties": {
+          "secrets": {
+            "properties": {
+              "existingSecrets": {
+                "properties": {
+                  "database": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "database"
+                ]
+              }
+            },
+            "required": [
+              "existingSecrets"
+            ]
+          }
+        },
+        "required": [
+          "secrets"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "redis": {
+            "properties": {
+              "mode": {
+                "const": "external"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          }
+        },
+        "required": [
+          "redis"
+        ]
+      },
+      "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "redis": {
+                "properties": {
+                  "external": {
+                    "properties": {
+                      "url": {
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ]
+                  }
+                },
+                "required": [
+                  "external"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "secrets": {
+                "properties": {
+                  "existingSecrets": {
+                    "properties": {
+                      "redis": {
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "redis"
+                    ]
+                  }
+                },
+                "required": [
+                  "existingSecrets"
+                ]
+              }
+            },
+            "required": [
+              "secrets"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "objectStorage": {
+            "properties": {
+              "mode": {
+                "const": "external"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          }
+        },
+        "required": [
+          "objectStorage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "objectStorage": {
+            "properties": {
+              "external": {
+                "properties": {
+                  "bucket": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "bucket"
+                ]
+              }
+            },
+            "required": [
+              "external"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "objectStorage": {
+            "properties": {
+              "mode": {
+                "const": "external"
+              },
+              "external": {
+                "properties": {
+                  "credentialMode": {
+                    "const": "existingSecret"
+                  }
+                },
+                "required": [
+                  "credentialMode"
+                ]
+              }
+            },
+            "required": [
+              "mode",
+              "external"
+            ]
+          }
+        },
+        "required": [
+          "objectStorage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "secrets": {
+            "properties": {
+              "existingSecrets": {
+                "properties": {
+                  "objectStorage": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "objectStorage"
+                ]
+              }
+            },
+            "required": [
+              "existingSecrets"
+            ]
+          }
+        },
+        "required": [
+          "secrets"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "server": {
+            "properties": {
+              "mcpEgressProxy": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            },
+            "required": [
+              "mcpEgressProxy"
+            ]
+          }
+        },
+        "required": [
+          "server"
+        ]
+      },
+      "then": {
+        "properties": {
+          "server": {
+            "properties": {
+              "mcpEgressProxy": {
+                "properties": {
+                  "image": {
+                    "properties": {
+                      "repository": {
+                        "minLength": 1
+                      },
+                      "tag": {
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "repository",
+                      "tag"
+                    ]
+                  }
+                },
+                "required": [
+                  "image"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "snapshotter": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          }
+        },
+        "required": [
+          "snapshotter"
+        ]
+      },
+      "then": {
+        "properties": {
+          "snapshotter": {
+            "properties": {
+              "image": {
+                "properties": {
+                  "repository": {
+                    "minLength": 1
+                  },
+                  "tag": {
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "repository",
+                  "tag"
+                ]
+              },
+              "snapshotRepository": {
+                "minLength": 1
+              }
+            },
+            "required": [
+              "image",
+              "snapshotRepository"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "existingSecrets": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "existingSecrets"
+      ]
+    },
+    "global": {
+      "type": "object",
+      "properties": {
+        "rbac": {
+          "type": "object",
+          "properties": {
+            "create": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "ingress": {
+      "$ref": "#/definitions/sharedIngress"
+    },
+    "server": {
+      "$ref": "#/definitions/componentWithImageAndServerParts"
+    },
+    "web": {
+      "$ref": "#/definitions/frontendComponent"
+    },
+    "adminWeb": {
+      "$ref": "#/definitions/frontendComponent"
+    },
+    "snapshotter": {
+      "$ref": "#/definitions/componentWithImage"
+    },
+    "runtimeProviderKubernetes": {
+      "$ref": "#/definitions/runtimeProviderKubernetes"
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "external"
+          ]
+        },
+        "external": {
+          "$ref": "#/definitions/databaseConnection"
+        }
+      }
+    },
+    "redis": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "external"
+          ]
+        },
+        "external": {
+          "type": "object",
+          "properties": {
+            "urlKey": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "objectStorage": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "external"
+          ]
+        },
+        "external": {
+          "$ref": "#/definitions/objectStorageConnection"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "enabledOnly": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "databaseConnection": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "database": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "passwordKey": {
+          "type": "string"
+        },
+        "useIamAuth": {
+          "type": "boolean"
+        },
+        "region": {
+          "type": "string"
+        },
+        "sslMode": {
+          "type": "string"
+        }
+      }
+    },
+    "objectStorageConnection": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string"
+        },
+        "bucket": {
+          "type": "string"
+        },
+        "credentialMode": {
+          "type": "string",
+          "enum": [
+            "existingSecret",
+            "ambientAws"
+          ]
+        },
+        "accessKeyIdKey": {
+          "type": "string"
+        },
+        "secretAccessKeyKey": {
+          "type": "string"
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string"
+        }
+      }
+    },
+    "componentWithImage": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        }
+      }
+    },
+    "componentGate": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "runtimeProviderKubernetes": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "$ref": "#/definitions/namespace"
+        },
+        "workloadNamespace": {
+          "$ref": "#/definitions/namespace"
+        },
+        "replicas": {
+          "type": "integer"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "runnerImage": {
+          "$ref": "#/definitions/image"
+        },
+        "serviceAccount": {
+          "$ref": "#/definitions/namedCreatable"
+        },
+        "leaderElection": {
+          "type": "object"
+        },
+        "workspace": {
+          "type": "object"
+        },
+        "runnerResources": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "requests": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number"
+                ]
+              }
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number"
+                ]
+              }
+            },
+            "claims": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "request": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "runtimePod": {
+          "type": "object",
+          "properties": {
+            "annotations": {
+              "type": "object"
+            },
+            "imagePullSecrets": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            },
+            "nodeSelector": {
+              "type": "object"
+            },
+            "tolerations": {
+              "type": "array"
+            }
+          }
+        },
+        "storage": {
+          "type": "object"
+        },
+        "networkPolicy": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "allowedCidrs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "extraEgress": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "deniedCidrs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "resources": {
+          "type": "object"
+        },
+        "pdb": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        }
+      }
+    },
+    "componentWithImageAndServerParts": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "$ref": "#/definitions/namespace"
+        },
+        "serviceAccount": {
+          "$ref": "#/definitions/namedCreatable"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "env": {
+          "type": "object"
+        },
+        "apiserver": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "ingress": {
+              "$ref": "#/definitions/componentIngress"
+            }
+          }
+        },
+        "adminserver": {
+          "$ref": "#/definitions/componentGate"
+        },
+        "worker": {
+          "$ref": "#/definitions/componentGate"
+        },
+        "scheduler": {
+          "$ref": "#/definitions/componentGate"
+        },
+        "mcpEgressProxy": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "$ref": "#/definitions/image"
+            },
+            "networkPolicy": {
+              "$ref": "#/definitions/enabledOnly"
+            },
+            "privateCidrs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "frontendComponent": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "$ref": "#/definitions/namespace"
+        },
+        "serviceAccount": {
+          "$ref": "#/definitions/namedCreatable"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "env": {
+          "type": "object"
+        },
+        "api": {
+          "type": "object",
+          "properties": {
+            "publicUrl": {
+              "type": "string"
+            },
+            "internalUrl": {
+              "type": "string"
+            },
+            "adminUrl": {
+              "type": "string"
+            }
+          }
+        },
+        "ingress": {
+          "$ref": "#/definitions/componentIngress"
+        }
+      }
+    },
+    "namespace": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "namedCreatable": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "sharedIngress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "tls": {
+          "type": "array"
+        }
+      }
+    },
+    "componentIngress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "pathType": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "tls": {
+          "type": "array"
+        }
+      }
+    }
+  }
+}

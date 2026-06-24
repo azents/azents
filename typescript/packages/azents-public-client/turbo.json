@@ -1,0 +1,31 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": [
+    "//"
+  ],
+  "tasks": {
+    "generate": {
+      "outputs": [
+        "src/generated/**"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "generate",
+        "^generate"
+      ]
+    },
+    "lint": {
+      "dependsOn": [
+        "generate",
+        "^generate"
+      ]
+    },
+    "lint:fix": {
+      "dependsOn": [
+        "generate",
+        "^generate"
+      ]
+    }
+  }
+}

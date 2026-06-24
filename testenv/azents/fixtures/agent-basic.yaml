@@ -1,0 +1,23 @@
+id: agent-basic
+summary: Minimal reusable agent fixture for azents QA
+depends_on_fixtures:
+  - devserver
+private_state_path: .state/fixtures/agent-basic.state.json
+manifest_path: .state/fixtures/agent-basic.json
+setup_dag:
+  - test-user-workspace
+  - llm-provider-dummy
+  - agent-dummy-key
+public_manifest:
+  provides:
+    - user.email
+    - ws.handle
+    - ws.name
+    - integration.id
+    - integration.provider
+    - integration.name
+    - agent.id
+    - agent.model_slug
+    - devserver.public_url
+    - devserver.admin_url
+    - devserver.session_name

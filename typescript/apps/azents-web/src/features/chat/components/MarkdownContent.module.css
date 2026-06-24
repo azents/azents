@@ -1,0 +1,203 @@
+/* chat bubble inside markdown style */
+
+.markdown {
+  max-width: 100%;
+  min-width: 0;
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1.55;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.markdown * {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* remove margin from first/last elements */
+.markdown > *:first-child {
+  margin-top: 0;
+}
+
+.markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+/* chat to to fit heading size reduce */
+.markdown h1 {
+  font-size: var(--mantine-font-size-md);
+  font-weight: 700;
+  margin: 0.6em 0 0.4em;
+  line-height: 1.3;
+}
+
+.markdown h2 {
+  font-size: calc(var(--mantine-font-size-sm) + 1px);
+  font-weight: 700;
+  margin: 0.5em 0 0.3em;
+  line-height: 1.3;
+}
+
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 700;
+  margin: 0.5em 0 0.3em;
+  line-height: 1.3;
+}
+
+/* paragraph */
+.markdown p {
+  margin: 0.4em 0;
+}
+
+/* list */
+.markdown ul,
+.markdown ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+
+.markdown li {
+  margin: 0.15em 0;
+}
+
+.markdown li > p {
+  margin: 0.2em 0;
+}
+
+.markdown :where(pre, code) {
+  font-family: var(--mantine-font-family-monospace);
+}
+
+/* code block */
+.markdown pre,
+.codeBlock {
+  --azents-chat-code-background: var(--mantine-color-gray-0);
+  --azents-chat-code-foreground: var(--mantine-color-dark-9);
+
+  position: relative;
+  margin: 0.5em 0;
+  padding: 0.6em var(--mantine-spacing-lg) 0.6em 0.8em;
+  border-radius: var(--mantine-radius-sm);
+  background-color: var(--azents-chat-code-background);
+  color: var(--azents-chat-code-foreground);
+  overflow-x: auto;
+  font-size: var(--mantine-font-size-xs);
+  line-height: 1.55;
+  max-width: 100%;
+}
+
+:where([data-mantine-color-scheme="dark"]) .markdown pre,
+:where([data-mantine-color-scheme="dark"]) .codeBlock {
+  --azents-chat-code-background: var(--mantine-color-dark-8);
+  --azents-chat-code-foreground: var(--mantine-color-gray-0);
+}
+
+.codeBlockCopyButton {
+  position: absolute;
+  top: calc(var(--mantine-spacing-xs) / 2);
+  right: calc(var(--mantine-spacing-xs) / 2);
+  z-index: 1;
+}
+
+.markdown pre code,
+.highlightedCode {
+  display: block;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  font-family: var(--mantine-font-family-monospace);
+  color: inherit;
+  text-shadow: none;
+  white-space: pre;
+}
+
+.highlightedCode :global(.token) {
+  background: none;
+  text-shadow: none;
+}
+
+/* inline code */
+.markdown :not(pre) > code {
+  --azents-chat-code-background: var(--mantine-color-gray-0);
+  --azents-chat-code-foreground: var(--mantine-color-dark-9);
+
+  padding: 0.15em 0.35em;
+  border-radius: var(--mantine-radius-xs);
+  background-color: var(--azents-chat-code-background);
+  color: var(--azents-chat-code-foreground);
+  font-size: var(--mantine-font-size-xs);
+  font-family: var(--mantine-font-family-monospace);
+}
+
+:where([data-mantine-color-scheme="dark"]) .markdown :not(pre) > code {
+  --azents-chat-code-background: var(--mantine-color-dark-8);
+  --azents-chat-code-foreground: var(--mantine-color-gray-0);
+}
+
+/* blockquote */
+.markdown blockquote {
+  margin: 0.4em 0;
+  padding: 0.2em 0 0.2em 0.8em;
+  border-left: calc(var(--mantine-spacing-xs) / 3) solid color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.markdown blockquote > *:first-child {
+  margin-top: 0;
+}
+
+.markdown blockquote > *:last-child {
+  margin-bottom: 0;
+}
+
+/* horizontal rule */
+.markdown hr {
+  margin: 0.6em 0;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+
+/* table */
+.markdown table {
+  display: block;
+  margin: 0.5em 0;
+  border-collapse: collapse;
+  font-size: var(--mantine-font-size-xs);
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown th,
+.markdown td {
+  padding: 0.3em 0.6em;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  text-align: left;
+}
+
+.markdown th {
+  font-weight: 600;
+  background-color: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+/* link */
+.markdown a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.125em;
+}
+
+/* image */
+.markdown img {
+  max-width: 100%;
+  border-radius: var(--mantine-radius-sm);
+}
+
+/* checkbox (GFM task list) */
+.markdown input[type="checkbox"] {
+  margin-right: 0.4em;
+}

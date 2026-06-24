@@ -1,0 +1,69 @@
+"""Credential type tests."""
+
+import datetime
+
+from pydantic import TypeAdapter
+
+from azents.core.credentials import (
+    PROVIDER_SECRET_TYPES,
+    PROVIDERS_WITH_CONFIG,
+    ChatGPTOAuthConfig,
+    ChatGPTOAuthSecrets,
+    ProviderConfig,
+    ProviderSecrets,
+)
+from azents.core.enums import LLMProvider
+
+
+def test_chatgpt_oauth_secrets_parse_from_provider_union() -> None:
+    """ProviderSecrets union parses ChatGPT OAuth secret."""
+    expires_at = datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC)
+    adapter = TypeAdapter(ProviderSecrets)
+
+    secrets = adapter.validate_python(
+        {
+            "type": "chatgpt_oauth",
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "id_token": "id-token",
+            "expires_at": expires_at,
+        }
+    )
+
+    assert isinstance(secrets, ChatGPTOAuthSecrets)
+    assert secrets.access_token == "access-token"
+    assert secrets.refresh_token == "refresh-token"
+    assert secrets.id_token == "id-token"
+    assert secrets.expires_at == expires_at
+
+
+def test_chatgpt_oauth_config_parse_from_provider_union() -> None:
+    """ProviderConfig union parses ChatGPT OAuth config."""
+    connected_at = datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC)
+    adapter = TypeAdapter(ProviderConfig)
+
+    config = adapter.validate_python(
+        {
+            "type": "chatgpt_oauth",
+            "account_id": "account-123",
+            "email": "user@example.com",
+            "plan_type": "plus",
+            "connection_method": "device",
+            "status": "connected",
+            "connected_at": connected_at,
+        }
+    )
+
+    assert isinstance(config, ChatGPTOAuthConfig)
+    assert config.account_id == "account-123"
+    assert config.email == "user@example.com"
+    assert config.plan_type == "plus"
+    assert config.connection_method == "device"
+    assert config.status == "connected"
+    assert config.connected_at == connected_at
+
+
+def test_chatgpt_oauth_provider_mappings() -> None:
+    """Provider mapping includes ChatGPT OAuth."""
+    assert PROVIDER_SECRET_TYPES[LLMProvider.CHATGPT_OAUTH] == "chatgpt_oauth"
+    assert LLMProvider.CHATGPT_OAUTH in PROVIDERS_WITH_CONFIG

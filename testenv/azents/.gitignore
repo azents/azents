@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+*.egg-info/
+.eggs/
+
+# devserver runtime state (Stage 1b)
+.state/
+
+# Local env (not committed)
+.env
+
+# uv-managed venv
+.venv/
+
+# scenario run logs — keep directory via .gitkeep only
+runs/*
+!runs/.gitkeep

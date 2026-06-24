@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# GitHub App Installation Token 또는 JWT를 반환한다.
+# config.yaml에서 App credentials를 읽고, JWT로 Installation Token을 교환한다.
+# 캐시 파일에 토큰을 저장하여 매 호출마다 재발급하지 않는다.
+#
+# 사용법:
+#   gh-app-token          # Installation Token 반환 (기본)
+#   gh-app-token --jwt    # JWT 반환 (App-level API 호출용)
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# --jwt 플래그 확인
+if [[ "${1:-}" == "--jwt" ]]; then
+    JWT_ONLY=true
+else
+    JWT_ONLY=false
+fi
+
+# config.yaml 경로 찾기
+# 1) CODINGBOT_CONFIG 환경변수
+# 2) git worktree list의 main worktree (worktree에서도 본 repo root를 찾음)
+# 3) 스크립트 위치 기준 fallback
+if [[ -z "${CODINGBOT_CONFIG:-}" ]]; then
+    CODINGBOT_CONFIG="$(git config --get codingbot.config 2>/dev/null || true)"
+fi
+if [[ -z "${CODINGBOT_CONFIG:-}" ]]; then
+    MAIN_WORKTREE="$(git worktree list --porcelain 2>/dev/null | head -1 | sed 's/^worktree //')"
+    if [[ -n "$MAIN_WORKTREE" && -f "$MAIN_WORKTREE/python/apps/codingbot/config.yaml" ]]; then
+        CODINGBOT_CONFIG="$MAIN_WORKTREE/python/apps/codingbot/config.yaml"
+    else
+        CODINGBOT_CONFIG="config.yaml"
+    fi
+fi
+export CODINGBOT_CONFIG
+
+infer_repo_from_url() {
+    local url="$1"
+    local slug=""
+
+    case "$url" in
+        https://github.com/*)
+            slug="${url#https://github.com/}"
+            ;;
+        https://*@github.com/*)
+            slug="${url#*github.com/}"
+            ;;
+        git@github.com:*)
+            slug="${url#git@github.com:}"
+            ;;
+        ssh://git@github.com/*)
+            slug="${url#ssh://git@github.com/}"
+            ;;
+    esac
+
+    slug="${slug%.git}"
+    slug="${slug%/}"
+    if [[ "$slug" == */* ]]; then
+        printf '%s\n' "$slug"
+    fi
+}
+
+# REPO 미지정 시 session 설정 또는 현재 origin remote 에서 repo slug 를 추론한다.
+if [[ -z "${REPO:-}" ]]; then
+    REPO="$(git config --get codingbot.repo 2>/dev/null || true)"
+fi
+if [[ -z "${REPO:-}" ]]; then
+    ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+    if [[ -n "$ORIGIN_URL" ]]; then
+        REPO="$(infer_repo_from_url "$ORIGIN_URL")"
+    fi
+fi
+export REPO
+
+# config.yaml 파싱 (python 사용)
+# 새 스키마: github_app.installation_ids = {slug: id} (dict)
+# 구 스키마: github_app.installation_id = id (int) 도 호환
+# REPO 환경변수, session 설정, origin remote 순으로 installation 선택
+read -r APP_ID PRIVATE_KEY_PATH INSTALLATION_ID <<< "$(python3 -c "
+import os
+import yaml
+with open('$CODINGBOT_CONFIG') as f:
+    c = yaml.safe_load(f)
+ga = c['github_app']
+inst_id = None
+if 'installation_id' in ga:
+    inst_id = ga['installation_id']
+elif 'installation_ids' in ga:
+    ids = ga['installation_ids']
+    repo = os.environ.get('REPO')
+    if repo and repo in ids:
+        inst_id = ids[repo]
+    elif repo:
+        by_lower = {str(k).lower(): v for k, v in ids.items()}
+        inst_id = by_lower.get(repo.lower())
+        if inst_id is None:
+            known = ', '.join(str(k) for k in ids)
+            raise SystemExit(f'No installation id configured for repo {repo!r}. Known repos: {known}')
+    elif ids:
+        inst_id = next(iter(ids.values()))
+if inst_id is None:
+    raise SystemExit('No installation id found in config')
+print(ga['app_id'], ga['private_key_path'], inst_id)
+")"
+
+# JWT 생성 함수
+generate_jwt() {
+    python3 -c "
+import time, jwt
+
+with open('$PRIVATE_KEY_PATH') as f:
+    private_key = f.read()
+
+now = int(time.time())
+payload = {'iat': now - 60, 'exp': now + (9 * 60), 'iss': '$APP_ID'}
+print(jwt.encode(payload, private_key, algorithm='RS256'))
+"
+}
+
+# --jwt 모드: JWT만 반환하고 종료
+if [[ "$JWT_ONLY" == "true" ]]; then
+    generate_jwt
+    exit 0
+fi
+
+# 캐시 파일
+CACHE_DIR="${HOME}/.cache"
+mkdir -p "$CACHE_DIR"
+CACHE_FILE="$CACHE_DIR/gh-app-installation-token-${INSTALLATION_ID}.json"
+
+# 캐시 확인
+if [[ -f "$CACHE_FILE" ]]; then
+    EXPIRES_AT=$(python3 -c "
+import json, sys
+with open('$CACHE_FILE') as f:
+    data = json.load(f)
+print(data.get('expires_at', ''))
+")
+    NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    if [[ "$EXPIRES_AT" > "$NOW" ]]; then
+        python3 -c "
+import json
+with open('$CACHE_FILE') as f:
+    print(json.load(f)['token'])
+"
+        exit 0
+    fi
+fi
+
+# JWT 생성 + Installation Token 교환
+python3 -c "
+import json, time, jwt, httpx, sys
+
+with open('$PRIVATE_KEY_PATH') as f:
+    private_key = f.read()
+
+now = int(time.time())
+payload = {'iat': now - 60, 'exp': now + (9 * 60), 'iss': '$APP_ID'}
+token_jwt = jwt.encode(payload, private_key, algorithm='RS256')
+
+resp = httpx.post(
+    'https://api.github.com/app/installations/$INSTALLATION_ID/access_tokens',
+    headers={'Authorization': f'Bearer {token_jwt}', 'Accept': 'application/vnd.github+json'},
+)
+resp.raise_for_status()
+data = resp.json()
+
+with open('$CACHE_FILE', 'w') as f:
+    json.dump({'token': data['token'], 'expires_at': data['expires_at']}, f)
+
+print(data['token'])
+"

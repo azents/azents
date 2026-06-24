@@ -1,0 +1,116 @@
+[project]
+name = "azents"
+version = "0.1.0"
+description = "Azents Server"
+requires-python = ">=3.14"
+dependencies = [
+    # FastAPI & Web
+    "fastapi[standard]==0.136.0",
+    "uvicorn==0.46.0",
+    # Database
+    "sqlalchemy[asyncio]==2.0.44",
+    "psycopg[binary]==3.3.2",
+    "alembic==1.18.0",
+    "alembic-postgresql-enum==1.10.0",
+    # Configuration
+    "pydantic==2.13.0",
+    "pydantic-settings==2.14.2",
+    # AWS
+    "boto3==1.40.61",
+    "aioboto3==15.5.0",
+    # Auth & Security
+    "bcrypt==5.0.0",
+    "pyjwt==2.13.0",
+    "cryptography==48.0.1",
+    # Utilities
+    "pytz==2026.2",
+    "tzdata==2026.2",
+    # Monitoring
+    "sentry-sdk[fastapi]==2.59.0",
+    # CLI
+    "typer==0.25.0",
+    # Template rendering
+    "jinja2==3.1.6",
+    # Type stubs
+    "types-pytz==2026.2.0.20260506",
+    "types-aioboto3[aioboto3,s3,ses]==15.5.0",
+    "boto3-stubs[rds]==1.43.0",
+    # aiodocker: type t t
+    "aiodocker==0.26.0",
+    # K8s: lightkube (main) + kubernetes_asyncio (exec WebSocket t)
+    "kubernetes-asyncio==35.0.1",
+    "lightkube==0.19.1",
+    # Local dependencies
+    "az-common",
+    "litellm==1.87.0",
+    "Pillow==12.2.0",
+    "redis==7.4.0",
+    "mcp==1.27.0",
+    "httpx==0.28.1",
+    "ptpython==3.0.32",
+    "aiohttp==3.14.1",
+    "python-frontmatter==1.1.0",
+    "google-auth==2.52.0",
+    "croniter==6.2.2",
+    "google-analytics-data==0.22.0",
+    "google-analytics-admin==0.29.0",
+    "grpcio==1.80.0",
+    "azents-runtime-control",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.5",
+    "pyright>=1.1.408",
+    "ty>=0.0.1a12",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "testcontainers[postgres,redis]>=4.13.3",
+    "types-croniter>=6.0.0",
+]
+
+[tool.uv]
+package = true
+resolution = "lowest-direct"
+
+[tool.uv.build-backend]
+module-name = "azents"
+
+[build-system]
+requires = ["uv_build>=0.9.10"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+az-common = { path = "../../libs/az-common", editable = true }
+azents-runtime-control = { path = "../../libs/azents-runtime-control", editable = true }
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003"]
+
+[tool.ruff.lint.per-file-ignores]
+"typings/**/*.pyi" = ["ANN401"]  # stub filet Any use t
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"
+reportUnknownMemberType = "none"
+reportUnknownLambdaType = "none"
+reportMissingTypeStubs = "none"
+reportUnnecessaryIsInstance = "none"
+
+[tool.ty.environment]
+# t type t use (pyrightt t type t)
+python-version = "3.14"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

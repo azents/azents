@@ -1,0 +1,61 @@
+{{- if .Values.adminWeb.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-web
+  namespace: {{ include "azents.adminWebNamespace" . | quote }}
+  labels:
+    {{- include "azents.componentLabels" (dict "root" . "component" "admin-web") | nindent 4 }}
+    app.kubernetes.io/part-of: "azents"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "azents.name" . | quote }}
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+      app.kubernetes.io/component: "admin-web"
+  template:
+    metadata:
+      labels:
+        {{- include "azents.componentLabels" (dict "root" . "component" "admin-web") | nindent 8 }}
+        app.kubernetes.io/part-of: "azents"
+        {{- with .Values.global.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.global.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "azents.adminWebServiceAccountName" . | quote }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: admin-web
+          image: {{ include "azents.adminWebImage" . | quote }}
+          imagePullPolicy: {{ .Values.adminWeb.image.pullPolicy | quote }}
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: {{ include "azents.adminWebConfigMapName" . | quote }}
+            {{- if .Values.secrets.existingSecrets.adminAuth }}
+            - secretRef:
+                name: {{ .Values.secrets.existingSecrets.adminAuth | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- with .Values.adminWeb.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

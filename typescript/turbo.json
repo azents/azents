@@ -1,0 +1,63 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "generate": {
+      "cache": false
+    },
+    "build": {
+      "dependsOn": [
+        "^build",
+        "^generate"
+      ],
+      "passThroughEnv": [
+        "CI",
+        "SENTRY_AUTH_TOKEN",
+        "SENTRY_ORG",
+        "SENTRY_PROJECT"
+      ]
+    },
+    "dev": {
+      "dependsOn": [
+        "^generate"
+      ],
+      "cache": false,
+      "persistent": true
+    },
+    "storybook": {
+      "dependsOn": [
+        "^generate"
+      ],
+      "cache": false,
+      "persistent": true
+    },
+    "build-storybook": {
+      "dependsOn": [
+        "^generate"
+      ],
+      "outputs": [
+        "storybook-static/**"
+      ]
+    },
+    "lint": {
+      "dependsOn": [
+        "^generate"
+      ]
+    },
+    "lint:fix": {
+      "dependsOn": [
+        "^generate"
+      ],
+      "cache": false
+    },
+    "format": {},
+    "format:check": {},
+    "typecheck": {
+      "dependsOn": [
+        "^generate"
+      ]
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

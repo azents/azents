@@ -1,0 +1,14 @@
+Azents - Workspace Invitation
+
+You've been invited to the {{ workspace_name }} workspace.
+
+{% if signup_url %}You need an account to accept this invitation. Use the signup link below:
+
+{{ signup_url }}
+
+{% else %}Click the link below to log in and review your invitation:
+
+{{ login_url }}
+
+{% endif %}If you already have an account, log in to see the invitation in your workspace list.
+If you didn't expect this invitation, you can safely ignore this email.

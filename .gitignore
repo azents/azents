@@ -1,0 +1,41 @@
+### Project ###
+.env
+.azents-dev.env
+**/.env
+**/.env.local
+**/.env.*.local
+!**/.env.example
+.claude/scheduled_tasks.lock
+.claude/codingbot/state/
+.claude/worktrees/
+/db-data
+/temporal-db-data
+.turbo/
+.pnpm-store/
+node_modules/
+storybook-static/
+
+### Intellij ###
+.idea/
+
+### macOS ###
+.DS_Store
+.AppleDouble
+.LSOverride
+
+### VisualStudioCode ###
+.vscode/
+*.code-workspace
+!azents.code-workspace
+
+# obsidian
+.vault/
+.obsidian/workspace/
+
+# Codingbot runtime files
+.claude/codingbot/channel-state.json
+.mcp.json
+/config.json
+/opencode.json
+__pycache__/
+*.pyc

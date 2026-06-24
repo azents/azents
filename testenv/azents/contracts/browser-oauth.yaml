@@ -1,0 +1,19 @@
+---
+kind: prerequisite
+schema_version: 1
+id: browser-oauth
+title: Browser OAuth storage state
+source: browser-state
+secret_fields:
+  - storage_state_ref
+credential_contract_ids: []
+checks:
+  - id: storage-state-artifact
+    mode: read
+    target: path:runs/_state/browser-oauth.json
+    description: Browser OAuth storage state artifact exists
+  - id: oauth-callback-config
+    mode: read
+    target: env-file:.env:AZENTS_PUBLIC_BASE_URL
+    description: Browser OAuth callback base URL is configured
+---

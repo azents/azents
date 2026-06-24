@@ -1,0 +1,82 @@
+/* Chat tab view state definition:
+ *
+ * | viewport | activeSessionId | Rendering method                                 |
+ * |----------|-----------------|-------------------------------------------|
+ * | ≥ lg     | any             | Group flex child (side panel + chat)      |
+ * | < lg     | null            | hiddenFrom="lg" → show only session panel      |
+ * | < lg     | set             | data-overlay="true" → fullscreen overlay |
+ *
+ * Overlay mode is above AppShell.Header and below Mantine modal/drawer.
+ * Slide in from right like screen push pattern — but on direct load/refresh,
+ * do not play animation (only when data-animate-push="true").
+ */
+.chatArea {
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.overlayShell {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.overlaySessions {
+  width: 18.75rem;
+  min-width: 18.75rem;
+  border-right: 0.0625rem solid var(--mantine-color-default-border);
+  overflow: hidden;
+}
+
+.overlayChat {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chatArea[data-overlay="true"] {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: var(--mantine-color-body);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 48em) {
+  .chatArea[data-overlay="true"] {
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--mobile-chat-viewport-height, 100dvh);
+    max-height: var(--mobile-chat-viewport-height, 100dvh);
+    transform: translateY(var(--mobile-chat-viewport-offset-top, 0));
+  }
+
+  .chatArea[data-overlay="true"][data-animate-push="true"] {
+    animation: chat-push-in 220ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chatArea[data-overlay="true"][data-animate-push="true"] {
+      animation: none;
+    }
+  }
+}
+
+@keyframes chat-push-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}

@@ -1,0 +1,4 @@
+.storybook-root {
+  --font-geist-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-geist-mono: "Menlo", "Consolas", monospace;
+}

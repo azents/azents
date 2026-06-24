@@ -1,0 +1,1231 @@
+"""Builtin tool factory.
+
+Creates bash/file tools injected into agents with Builtin Toolkit.
+Each tool runs through Agent Runtime Runner operation.
+"""
+
+import asyncio
+import logging
+import shlex
+import time
+from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Set as AbstractSet
+from datetime import UTC, datetime, timedelta
+from pathlib import PurePosixPath
+from textwrap import dedent
+from typing import NoReturn, Protocol
+
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from azents.core.enums import (
+    RuntimeDesiredState,
+    RuntimeLifecycleCommandType,
+    RuntimeProviderConnectionState,
+    RuntimeProviderObservedState,
+    RuntimeRunnerState,
+)
+from azents.core.tools import (
+    ResolveContext,
+    ShellToolkitConfig,
+    SubagentToolkitContext,
+    Toolkit,
+    ToolkitProvider,
+    ToolkitState,
+    ToolkitStatus,
+    TurnContext,
+)
+from azents.engine.events.engine_events import (
+    EngineEvent,
+    RuntimeReadyEvent,
+)
+from azents.engine.io.attachments import RuntimeAttachment
+from azents.engine.run.types import FunctionTool, FunctionToolError
+from azents.engine.tooling.make_tool import make_tool
+from azents.engine.tools.builtin_agents import (
+    AGENTS_LIVE_READ_INTERVAL_TURNS,
+    AgentsInstructionStateStore,
+    ProjectAgentsPromptMixin,
+    RootAgentsPromptMixin,
+    ToolkitAgentsInstructionStateStore,
+)
+from azents.engine.tools.delete_file import make_delete_file_tool
+from azents.engine.tools.edit import make_edit_tool
+from azents.engine.tools.glob import make_glob_tool
+from azents.engine.tools.grep import make_grep_tool
+from azents.engine.tools.import_file import make_import_file_tool
+from azents.engine.tools.memory import (
+    make_delete_memory_tool,
+    make_get_memory_tool,
+    make_list_memories_tool,
+    make_save_memory_tool,
+    make_search_memories_tool,
+)
+from azents.engine.tools.present_file import make_present_file_tool
+from azents.engine.tools.read_image import make_read_image_tool
+from azents.engine.tools.read_text import make_read_text_tool
+from azents.engine.tools.runtime_io import (
+    RuntimeFileListEntry,
+    RuntimeFileStatResult,
+    RuntimeGrepFileMatch,
+    RuntimeGrepLineMatch,
+    RuntimeRunnerOperationClient,
+    RuntimeRunnerOperationFailedError,
+    RuntimeRunnerOperationGenerationError,
+    RuntimeRunnerOperationUnavailable,
+)
+from azents.engine.tools.write import make_write_tool
+from azents.rdb.session import SessionManager
+from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.memory import MemoryRepository
+from azents.repos.memory.data import MemorySummary
+from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.runtime.types import RuntimeDomainConfig
+from azents.services.artifact import ArtifactService
+from azents.services.exchange_file import ExchangeFileService
+from azents.services.file_storage import GrepFileMatch, GrepLineMatch, GrepResult
+from azents.services.model_file import ModelFileService
+from azents.services.runtime_storage_error import (
+    RuntimeStorageError,
+)
+from azents.services.session_storage import guess_media_type
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Memory prompt
+# ---------------------------------------------------------------------------
+
+_MEMORY_RULES_PROMPT = dedent("""\
+    ### Memory Rules
+
+    You have a persistent memory system with dedicated tools. Use `save_memory` to store, `list_memories` / `get_memory` / `search_memories` to retrieve, and `delete_memory` to remove.
+
+    If the user explicitly asks you to remember something, save it immediately as whichever type fits best. If they ask you to forget something, use `delete_memory` to remove the relevant entry.
+
+    #### Types of memory
+
+    **user** — User's role, expertise, preferences.
+    - Scope: Always `user`.
+    - Example: user says "I'm a product manager" → save_memory(scope="user", type="user", name="profile", ...)
+
+    **feedback** — Behavioral corrections AND confirmations.
+    - Scope: Personal preference → `user`. Team rule → `agent`.
+    - Body: Lead with the rule, then **Why:** and **When to apply:** lines.
+    - Example: user says "always include sources" → save_memory(scope="agent", type="feedback", name="include-sources", ...)
+
+    **project** — Ongoing work, decisions, deadlines.
+    - Scope: Team context → `agent`. Personal work → `user`.
+    - Always convert relative dates to absolute dates.
+
+    **reference** — Pointers to external systems.
+    - Scope: Almost always `agent`.
+
+    #### What NOT to save
+
+    - Code patterns, architecture, file paths — read from code directly
+    - Git history — use git log/blame
+    - Ephemeral task details only useful in this conversation
+
+    #### Scope selection
+
+    - `agent` scope: shared with ALL users of this agent. Only save universally applicable knowledge.
+    - `user` scope: only this specific user. Save personal preferences and context.
+
+    #### Conflict resolution
+
+    When agent and user memories conflict on the same topic, follow the user memory — it represents this user's specific preference.
+
+    #### Stale memories
+
+    Memories are snapshots from when they were written. Before acting on a memory, verify it against current state. If stale, update or delete it silently.
+
+    #### Duplicate prevention
+
+    Do not save duplicate memories. Use `list_memories` or `search_memories` to check if a similar memory already exists. Use the same `name` to update an existing memory (upsert).""")  # noqa: E501
+
+_MAX_MEMORY_SUMMARIES = 100
+
+
+async def collect_memory_prompt(
+    repo: MemoryRepository,
+    session: AsyncSession,
+    agent_id: str,
+    user_id: str,
+) -> str:
+    """Look up memory summaries from DB and create prompt string.
+
+    When index is absent, return only rules. When agent_id or user_id is empty,
+    omit that section.
+    """
+    parts: list[str] = [
+        "## Memories",
+        "",
+        "You have a persistent memory system. Memories persist across conversations.",
+        "",
+    ]
+
+    agent_summaries: list[MemorySummary] = []
+    user_summaries: list[MemorySummary] = []
+
+    if agent_id:
+        agent_summaries = await repo.list_summaries(
+            session,
+            agent_id=agent_id,
+            user_id=None,
+        )
+    if user_id:
+        user_summaries = await repo.list_summaries(
+            session,
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+    if agent_summaries:
+        parts.extend(["### Agent Memories (shared with all users)", ""])
+        parts.extend(_format_summaries(agent_summaries))
+        if len(agent_summaries) >= _MAX_MEMORY_SUMMARIES:
+            parts.append(
+                f"(Showing {_MAX_MEMORY_SUMMARIES} memories. "
+                "Consider cleaning up old memories with delete_memory.)"
+            )
+        parts.append("")
+
+    if user_summaries:
+        parts.extend(["### Your Memories about this User", ""])
+        parts.extend(_format_summaries(user_summaries))
+        if len(user_summaries) >= _MAX_MEMORY_SUMMARIES:
+            parts.append(
+                f"(Showing {_MAX_MEMORY_SUMMARIES} memories. "
+                "Consider cleaning up old memories with delete_memory.)"
+            )
+        parts.append("")
+
+    parts.append(_MEMORY_RULES_PROMPT)
+    return "\n".join(parts)
+
+
+def _format_summaries(summaries: list[MemorySummary]) -> list[str]:
+    """Group by type and create text similar to the existing MEMORIES.md format."""
+    by_type: dict[str, list[MemorySummary]] = {}
+    for s in summaries:
+        by_type.setdefault(s.type, []).append(s)
+
+    lines: list[str] = []
+    for mem_type in sorted(by_type):
+        group = by_type.get(mem_type)
+        if not group:
+            continue
+        lines.append(f"#### {mem_type.title()}")
+        for m in group:
+            lines.append(f"- **{m.name}** — {m.description}")
+        lines.append("")
+    return lines
+
+
+# Error message passed to agent on Runtime connection failure
+_RUNTIME_UNAVAILABLE_MSG = (
+    "Runtime is temporarily unavailable. Please try again in a moment."
+)
+_RUNTIME_STARTING_MSG = "Runtime is still starting. Please try again in a moment."
+_RUNTIME_PROVIDER_DISCONNECTED_MSG = (
+    "Runtime Provider is disconnected. Please try again in a moment."
+)
+_RUNNABLE_PROVIDER_STATES = frozenset(
+    {
+        RuntimeProviderObservedState.RUNNING,
+    }
+)
+
+# Maximum execution time in seconds
+_MAX_EXECUTION_TIMEOUT = 120
+_RUNTIME_READY_WAIT_TIMEOUT_SECONDS = 120.0
+_RUNTIME_READY_POLL_INTERVAL_SECONDS = 1.0
+_RUNTIME_OPERATION_RESULT_GRACE_SECONDS = 10
+_RUNTIME_FILE_OPERATION_TIMEOUT_SECONDS = 120
+
+
+# ---------------------------------------------------------------------------
+# Input models
+# ---------------------------------------------------------------------------
+
+
+class ExecuteCodeInput(BaseModel):
+    """execute_code tool input."""
+
+    command: str = Field(description="Shell command to execute")
+    timeout: int = Field(
+        default=30,
+        description=f"Execution timeout in seconds (max {_MAX_EXECUTION_TIMEOUT})",
+    )
+
+
+class RequestProjectRegistrationInput(BaseModel):
+    """request_project_registration tool input."""
+
+    path: str = Field(description="Absolute path under /workspace/agent to register")
+    reason: str = Field(description="Why this folder should become a Project")
+
+
+# ---------------------------------------------------------------------------
+# Toolkit Provider
+# ---------------------------------------------------------------------------
+
+
+class BuiltinToolkit(RootAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
+    """Default builtin tool execution instance independent of Runtime Runner.
+
+    Currently responsible for persistent memory tools and memory prompt. Tools
+    depending on Runtime Runner, such as shell/file, are handled by
+    :class:`RuntimeToolkit`.
+    """
+
+    def __init__(
+        self,
+        config: ShellToolkitConfig,
+        agent_id: str,
+        session_manager: SessionManager[AsyncSession] | None = None,
+        memory_repo: MemoryRepository | None = None,
+        agent_runtime_repo: AgentRuntimeRepository | None = None,
+        agents_store: AgentsInstructionStateStore | None = None,
+    ) -> None:
+        self._config = config
+        self._agent_id = agent_id
+        self._session_id = ""
+        self._session_manager = session_manager
+        self._memory_repo = memory_repo
+        self._agent_runtime_repo = agent_runtime_repo
+        self._agents_store = agents_store
+
+    def set_agent_id(self, agent_id: str) -> None:
+        """Inject agent_id.
+
+        :param agent_id: Agent ID
+        """
+        self._agent_id = agent_id
+
+    def set_session_id(self, session_id: str) -> None:
+        """Inject session ID.
+
+        :param session_id: Current session ID
+        """
+        self._session_id = session_id
+
+    def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
+        """Apply parent-scoped builtin state to subagent execution.
+
+        :param context: Subagent execution context
+        """
+        self.set_agent_id(context.parent_agent_id)
+        self.set_session_id(context.parent_session_id)
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return builtin tools and prompt independent of Runtime Runner.
+
+        :param context: Context passed each turn
+        :return: Current state (tools + prompt)
+        """
+        config = self._config
+        agent_id = self._agent_id
+        user_id = context.user_id
+
+        memory_prompt = ""
+        tools: list[FunctionTool] = []
+        if config.memory_enabled and self._session_manager and self._memory_repo:
+            async with self._session_manager() as mem_session:
+                memory_prompt = await collect_memory_prompt(
+                    self._memory_repo,
+                    mem_session,
+                    agent_id,
+                    user_id or "",
+                )
+            tools.extend(
+                [
+                    make_save_memory_tool(
+                        self._memory_repo,
+                        agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                    make_list_memories_tool(
+                        self._memory_repo,
+                        agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                    make_get_memory_tool(
+                        self._memory_repo,
+                        agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                    make_search_memories_tool(
+                        self._memory_repo,
+                        agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                    make_delete_memory_tool(
+                        self._memory_repo,
+                        agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                ]
+            )
+
+        root_agents_prompt = await self._load_root_agents_prompt(
+            workspace_id=context.workspace_id,
+            domain_config=RuntimeDomainConfig(
+                allowed_domains=tuple(config.allowed_domains),
+                denied_domains=tuple(config.denied_domains),
+            ),
+            user_id=user_id,
+        )
+        prompt = "\n\n".join(
+            part for part in [memory_prompt, root_agents_prompt] if part
+        )
+
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=tools,
+            prompt=prompt,
+        )
+
+
+class RuntimeEnvProvider(Protocol):
+    """Runtime shell env provider protocol."""
+
+    async def expose_env(self) -> dict[str, str]:
+        """Return env vars to inject into runtime shell commands."""
+        ...
+
+
+class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
+    """Runtime Runner dependent shell/file tool execution instance."""
+
+    # Tool names to exclude from Subagent (DP4 C: Toolkit-defined).
+    #
+    SUBAGENT_EXCLUDED_TOOLS: frozenset[str] = frozenset()
+
+    def __init__(
+        self,
+        config: ShellToolkitConfig,
+        exchange_file_service: ExchangeFileService,
+        artifact_service: ArtifactService,
+        model_file_service: ModelFileService,
+        agent_id: str,
+        runner_operations: RuntimeRunnerOperationClient | None = None,
+        session_manager: SessionManager[AsyncSession] | None = None,
+        agent_runtime_repo: AgentRuntimeRepository | None = None,
+        project_repo: SessionWorkspaceProjectRepository | None = None,
+        agents_store: AgentsInstructionStateStore | None = None,
+    ) -> None:
+        self._config = config
+        self._runner_operations = runner_operations
+        self._exchange_file_service = exchange_file_service
+        self._artifact_service = artifact_service
+        self._model_file_service = model_file_service
+        self._agent_id = agent_id
+        self._runtime_agent_id = agent_id
+        self._session_id: str = ""
+        self._runtime_session_id: str = ""
+        self._excluded_tools: AbstractSet[str] = frozenset()
+        self._peer_toolkits: Sequence[RuntimeEnvProvider] = ()
+        self._session_manager = session_manager
+        self._agent_runtime_repo = agent_runtime_repo
+        self._project_repo = project_repo
+        self._agents_store = agents_store
+        self._active_agents_paths: set[str] = set()
+        self._agents_turns_since_live_read = AGENTS_LIVE_READ_INTERVAL_TURNS
+        self._last_projects: list[SessionWorkspaceProject] = []
+        self._agents_refresh_task = None
+        self._pending_agents_refresh_paths = set()
+        self._agents_file_storage = None
+
+    def set_peer_toolkits(self, peers: Sequence[RuntimeEnvProvider]) -> None:
+        """Register peer toolkits that collect env during Shell execution.
+
+        :param peers: Active toolkit instance list, excluding RuntimeToolkit itself
+        """
+        self._peer_toolkits = peers
+
+    def set_agent_id(self, agent_id: str) -> None:
+        """Inject agent_id.
+
+        ResolveContext has no agent_id, so separate injection is needed after resolve.
+        runtime_agent_id is also updated.
+
+        :param agent_id: Agent ID
+        """
+        self._agent_id = agent_id
+        self._runtime_agent_id = agent_id
+
+    def set_runtime_agent_id(self, agent_id: str) -> None:
+        """Specify separate agent_id for Runtime operation.
+
+        Used when Subagent shares parent runtime tool context.
+        shell/file tools find runtime by this ID.
+
+        :param agent_id: Agent ID for runtime operation (parent agent_id)
+        """
+        self._runtime_agent_id = agent_id
+
+    def set_session_id(self, session_id: str) -> None:
+        """Inject session ID.
+
+        :param session_id: Current session ID
+        """
+        self._session_id = session_id
+        self._runtime_session_id = session_id
+
+    def set_runtime_session_id(self, session_id: str) -> None:
+        """Specify separate session_id for Runtime operation.
+
+        When Subagent shares parent runtime tool context, pass parent session_id.
+        """
+        self._runtime_session_id = session_id
+
+    def set_excluded_tools(self, names: AbstractSet[str]) -> None:
+        """Set tool names to exclude from update_context().
+
+        :param names: Set of tool names to exclude (set or frozenset)
+        """
+        self._excluded_tools = names
+
+    def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
+        """Apply parent runtime tool context sharing rules to subagent execution.
+
+        :param context: Subagent execution context
+        """
+        self.set_runtime_agent_id(context.parent_agent_id)
+        self.set_runtime_session_id(context.parent_session_id)
+        self.set_excluded_tools(self.SUBAGENT_EXCLUDED_TOOLS)
+
+    def get_runtime_domain_config(self) -> RuntimeDomainConfig:
+        """Return Runtime domain settings.
+
+        Used by shell/file tools to reuse the same domain policy.
+
+        :return: Domain allow/block settings
+        """
+        return RuntimeDomainConfig(
+            allowed_domains=tuple(self._config.allowed_domains),
+            denied_domains=tuple(self._config.denied_domains),
+        )
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Create shell and file tools and return prompt.
+
+        :param context: Context passed each turn
+        :return: Current state (tools + prompt)
+        """
+        agent_id = self._agent_id
+        runtime_agent_id = self._runtime_agent_id
+        has_agent_id = bool(agent_id)
+        user_id = context.user_id
+
+        if self._runner_operations is None or self._agent_runtime_repo is None:
+            return ToolkitState(
+                status=ToolkitStatus.DISABLED,
+                tools=[],
+                prompt="Runtime Runner operation client is not configured.",
+            )
+
+        file_ss = RuntimeRunnerFileStorage(
+            runner_operations=self._runner_operations,
+            agent_runtime_repo=self._agent_runtime_repo,
+            session_manager=self._session_manager,
+        )
+
+        tools = [
+            make_execute_code_tool(
+                self._runner_operations,
+                agent_runtime_repo=self._agent_runtime_repo,
+                session_manager=self._session_manager,
+                agent_id=runtime_agent_id,
+                publish_event=context.publish_event,
+                peer_toolkits=self._peer_toolkits,
+            ),
+            make_read_image_tool(
+                session_storage=file_ss,
+                model_file_service=self._model_file_service,
+                session_id=self._session_id,
+                agent_id=agent_id,
+                user_id=user_id or "",
+                run_index=context.run_index,
+            ),
+            make_import_file_tool(
+                session_storage=file_ss,
+                exchange_file_service=self._exchange_file_service,
+                artifact_service=self._artifact_service,
+                session_id=self._session_id,
+                agent_id=agent_id,
+                user_id=user_id or "",
+            ),
+            make_present_file_tool(
+                session_storage=file_ss,
+                exchange_file_service=self._exchange_file_service,
+                session_id=self._session_id,
+                agent_id=agent_id,
+                user_id=user_id or "",
+            ),
+            make_read_text_tool(
+                session_storage=file_ss,
+                agent_id=agent_id,
+                user_id=user_id or "",
+            ),
+            make_delete_file_tool(
+                session_storage=file_ss,
+                agent_id=agent_id,
+                user_id=user_id or "",
+            ),
+            make_write_tool(
+                session_storage=file_ss,
+                agent_id=agent_id,
+                user_id=user_id or "",
+            ),
+            make_edit_tool(
+                session_storage=file_ss,
+                agent_id=agent_id,
+                user_id=user_id or "",
+            ),
+            make_glob_tool(
+                session_storage=file_ss,
+                agent_id=agent_id,
+                user_id=user_id or "",
+            ),
+            make_grep_tool(
+                session_storage=file_ss,
+                agent_id=agent_id,
+                user_id=user_id or "",
+            ),
+        ]
+        # Filter tools requested to be excluded by Subagent, etc.
+        if self._excluded_tools:
+            tools = [t for t in tools if t.spec.name not in self._excluded_tools]
+
+        projects = await self._load_projects(agent_id=runtime_agent_id)
+        self._last_projects = projects
+        agents_prompt = await self._load_project_agents_prompt(file_ss, projects)
+        prompt = self._render_config_prompt(
+            has_agent_id=has_agent_id,
+            user_id=user_id,
+            projects=projects,
+        )
+        if agents_prompt:
+            prompt = f"{prompt}\n\n{agents_prompt}"
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt=prompt)
+
+    async def _load_projects(
+        self,
+        *,
+        agent_id: str,
+    ) -> list[SessionWorkspaceProject]:
+        """Fetch Project list registered to AgentRuntime."""
+        if (
+            not agent_id
+            or self._session_manager is None
+            or self._agent_runtime_repo is None
+            or self._project_repo is None
+        ):
+            return []
+        async with self._session_manager() as session:
+            runtime = await self._agent_runtime_repo.get_by_agent_id(session, agent_id)
+            if runtime is None:
+                return []
+            return await self._project_repo.list_projects(
+                session,
+                agent_runtime_id=runtime.id,
+            )
+
+    def _render_config_prompt(
+        self,
+        *,
+        has_agent_id: bool,
+        user_id: str | None,
+        projects: list[SessionWorkspaceProject],
+    ) -> str:
+        """Return domain allow/block settings and accessible scope prompt.
+
+        :param has_agent_id: Whether agent_id is present
+        :param user_id: User ID. When None, do not display user folder path
+        :return: Settings prompt
+        """
+        parts: list[str] = []
+        scope_lines = [
+            "## Runtime Files",
+            "",
+            "Use absolute filesystem paths inside the runtime workspace.",
+            "Prefer the dedicated file tools for filesystem operations: use `read` "
+            "instead of `cat`, `grep` instead of shell `grep`/`rg`, and "
+            "`write`/`edit` instead of shell redirection or `sed` whenever "
+            "possible. Use `bash` for command execution, package installation, "
+            "and cases where no dedicated tool fits.",
+            "Recommended locations:",
+            "- `/workspace/agent/` — Durable working files for this agent runtime",
+            "- `/tmp/` — Temporary scratch space for the current runtime instance",
+        ]
+        if user_id:
+            scope_lines.append(
+                "Use `import_file` for user uploads and `present_file` to share "
+                "new or edited files back to the user."
+            )
+        if projects:
+            scope_lines.extend(
+                [
+                    "",
+                    "Registered Projects:",
+                    *[f"- `{project.path}`" for project in projects],
+                    "",
+                    "`/workspace/agent` itself is not a Project. Project-scoped "
+                    "instructions only apply inside registered Projects.",
+                ]
+            )
+        parts.append("\n".join(scope_lines))
+
+        config = self._config
+        if config.allowed_domains:
+            parts.append(f"Allowed domains: {', '.join(config.allowed_domains)}")
+        if config.denied_domains:
+            parts.append(f"Denied domains: {', '.join(config.denied_domains)}")
+        return "\n".join(parts)
+
+
+class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
+    """Builtin/runtime toolkit provider.
+
+    Create Runtime Runner independent default tools as BuiltinToolkit, and runner
+    dependent shell/file tools as RuntimeToolkit.
+    """
+
+    slug = "shell"
+    name = "Shell"
+    description = "Execute code in the agent runtime"
+    system_prompt = dedent("""\
+        You have access to an agent runtime shell environment.
+        You can execute commands, install packages, and run code.
+        The runtime workspace persists across calls for this agent.
+
+        ### File Storage
+
+        Your runtime working directory is `/workspace/agent/`. It persists across turns for this agent runtime and is the default place for files you create or edit.
+
+        Use absolute filesystem paths inside the runtime workspace. `/workspace/agent/` is the durable working directory for this agent runtime. `/tmp/` is temporary scratch space. `/tmp/agent/imports/` is where `import_file` places attached files by default; this location is transient, so copy important files to a durable working directory before presenting them.
+
+        Prefer the dedicated file tools for filesystem operations: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, and `write`/`edit` instead of shell redirection or `sed` whenever possible. Use `bash` for command execution, package installation, and cases where no dedicated tool fits.
+
+        | Path | Persistence | Usage |
+        |------|-------------|-------|
+        | `/workspace/agent/` | Durable for this agent runtime | Working files, outputs, edited imports |
+        | `/tmp/` | Ephemeral | Temporary files |
+        | `/tmp/agent/imports/` | Ephemeral | Default destination for imported exchange files |
+
+        To share files with the user, use `present_file` with absolute paths:
+
+        ```bash
+        cp ./output.csv /workspace/agent/output.csv
+        # Then use present_file with the full path
+        ```
+
+        When the user attaches an `exchange://...` file-location URI, use `import_file` to copy it into the runtime workspace before reading or editing it.
+
+        After creating files, use `present_file` to export them as `exchange://...` attachments for the user.""")  # noqa: E501
+    config_model = ShellToolkitConfig
+
+    def __init__(
+        self,
+        exchange_file_service: ExchangeFileService,
+        artifact_service: ArtifactService,
+        model_file_service: ModelFileService,
+        session_manager: SessionManager[AsyncSession] | None = None,
+        memory_repo: MemoryRepository | None = None,
+        agent_runtime_repo: AgentRuntimeRepository | None = None,
+        runner_operations: RuntimeRunnerOperationClient | None = None,
+        project_repo: SessionWorkspaceProjectRepository | None = None,
+    ) -> None:
+        self._exchange_file_service = exchange_file_service
+        self._artifact_service = artifact_service
+        self._model_file_service = model_file_service
+        self._session_manager = session_manager
+        self._memory_repo = memory_repo
+        self._agent_runtime_repo = agent_runtime_repo
+        self._runner_operations = runner_operations
+        self._project_repo = project_repo
+        if session_manager is not None:
+            self._agents_store = ToolkitAgentsInstructionStateStore(
+                session_manager=session_manager,
+            )
+        else:
+            self._agents_store = None
+
+    async def resolve(
+        self,
+        config: ShellToolkitConfig,
+        context: ResolveContext,
+    ) -> Toolkit[ShellToolkitConfig]:
+        """Return RuntimeToolkit.
+
+        ``config`` contains runtime domain policy, so separate injection is not needed.
+        Caller (``resolve_agent_tools``) must receive ``runtime_domain_config``
+        and build ``ShellToolkitConfig``.
+
+        :param config: Shell settings (memory_enabled, allowed/denied_domains, etc.)
+        :param context: Resolve context
+        :return: RuntimeToolkit instance
+        """
+        return RuntimeToolkit(
+            config=config,
+            runner_operations=self._runner_operations,
+            exchange_file_service=self._exchange_file_service,
+            artifact_service=self._artifact_service,
+            model_file_service=self._model_file_service,
+            agent_id=context.agent_id,
+            session_manager=self._session_manager,
+            agent_runtime_repo=self._agent_runtime_repo,
+            project_repo=self._project_repo,
+            agents_store=self._agents_store,
+        )
+
+    async def resolve_builtin(
+        self,
+        config: ShellToolkitConfig,
+        context: ResolveContext,
+    ) -> Toolkit[ShellToolkitConfig]:
+        """Return Runtime Runner independent default BuiltinToolkit.
+
+        :param config: Shell settings (memory_enabled, etc.)
+        :param context: Resolve context
+        :return: BuiltinToolkit instance
+        """
+        return BuiltinToolkit(
+            config=config,
+            agent_id=context.agent_id,
+            session_manager=self._session_manager,
+            memory_repo=self._memory_repo,
+            agent_runtime_repo=self._agent_runtime_repo,
+            agents_store=self._agents_store,
+        )
+
+
+async def _collect_secret_env(
+    peer_toolkits: Sequence[RuntimeEnvProvider],
+    agent_id: str,
+) -> dict[str, str]:
+    """Collect env by merging ``expose_env()`` from bundled peer toolkits.
+
+    When multiple toolkits expose the same key, later toolkit value overwrites it.
+    In this case, only warning is logged and execution continues. Platform-level
+    allowlist or priority should be decided later; Phase 1 uses simple override.
+
+    :param peer_toolkits: Active toolkit instance list of current session
+    :param agent_id: Agent ID for logging
+    :return: Merged env mapping. Empty dict when empty.
+    """
+    merged: dict[str, str] = {}
+    for toolkit in peer_toolkits:
+        env_part = await toolkit.expose_env()
+        for key, value in env_part.items():
+            if key in merged:
+                logger.warning(
+                    "Env var overridden by later toolkit",
+                    extra={"var_name": key, "agent_id": agent_id},
+                )
+            merged[key] = value
+    return merged
+
+
+async def _ready_runtime_for_agent(
+    *,
+    agent_runtime_repo: AgentRuntimeRepository,
+    session_manager: SessionManager[AsyncSession] | None,
+    agent_id: str,
+    wait_timeout_seconds: float | None = None,
+    poll_interval_seconds: float = _RUNTIME_READY_POLL_INTERVAL_SECONDS,
+) -> AgentRuntime:
+    """Load the active Runtime and verify that its Runner can accept operations."""
+    if session_manager is None:
+        raise RuntimeStorageError("Runtime database session is not configured")
+    wait_timeout_seconds = (
+        _RUNTIME_READY_WAIT_TIMEOUT_SECONDS
+        if wait_timeout_seconds is None
+        else wait_timeout_seconds
+    )
+    deadline = time.monotonic() + max(wait_timeout_seconds, 0.0)
+    last_runtime: AgentRuntime | None = None
+    while True:
+        async with session_manager() as session:
+            runtime = await agent_runtime_repo.get_by_agent_id(session, agent_id)
+        last_runtime = runtime
+        if (
+            runtime is not None
+            and runtime.provider_observed_state in _RUNNABLE_PROVIDER_STATES
+            and runtime.runner_state == RuntimeRunnerState.READY
+        ):
+            return runtime
+        if runtime is None:
+            raise RuntimeStorageError("Runtime is not running")
+        if runtime.provider_observed_state == RuntimeProviderObservedState.FAILED:
+            failure_message = getattr(runtime, "failure_message", None)
+            failure_code = getattr(runtime, "failure_code", None)
+            detail = failure_message or failure_code
+            message = "Runtime failed"
+            if detail:
+                message = f"{message}: {detail}"
+            raise RuntimeStorageError(message)
+        if (
+            runtime.provider_connection_state
+            == RuntimeProviderConnectionState.DISCONNECTED
+        ):
+            raise RuntimeStorageError(_RUNTIME_PROVIDER_DISCONNECTED_MSG)
+        if runtime.desired_state != RuntimeDesiredState.RUNNING:
+            async with session_manager() as session:
+                await agent_runtime_repo.set_desired_state(
+                    session,
+                    runtime.id,
+                    RuntimeLifecycleCommandType.START,
+                    RuntimeDesiredState.RUNNING,
+                )
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(poll_interval_seconds)
+
+    if last_runtime is None:
+        raise RuntimeStorageError("Runtime is not running")
+    if last_runtime.provider_observed_state not in _RUNNABLE_PROVIDER_STATES:
+        raise RuntimeStorageError(_RUNTIME_STARTING_MSG)
+    raise RuntimeStorageError("Runtime runner is not ready")
+
+
+def _raise_storage_error(error: RuntimeRunnerOperationFailedError) -> NoReturn:
+    """Convert Runner operation failure to file-storage-compatible error."""
+    message = str(error)
+    normalized = message.lower()
+    if (
+        "no such file" in normalized
+        or "not found" in normalized
+        or "not a directory" in normalized
+    ):
+        raise FileNotFoundError(message) from error
+    raise RuntimeStorageError(message) from error
+
+
+def _runtime_file_operation_deadline() -> datetime:
+    """Return Runtime file operation round-trip deadline."""
+    return datetime.now(UTC) + timedelta(
+        seconds=(
+            _RUNTIME_FILE_OPERATION_TIMEOUT_SECONDS
+            + _RUNTIME_OPERATION_RESULT_GRACE_SECONDS
+        )
+    )
+
+
+class RuntimeRunnerFileStorage:
+    """FileStorage implementation backed by Runtime Runner operations."""
+
+    def __init__(
+        self,
+        *,
+        runner_operations: RuntimeRunnerOperationClient,
+        agent_runtime_repo: AgentRuntimeRepository,
+        session_manager: SessionManager[AsyncSession] | None,
+    ) -> None:
+        self._runner_operations = runner_operations
+        self._agent_runtime_repo = agent_runtime_repo
+        self._session_manager = session_manager
+
+    async def get(self, path: str, *, agent_id: str) -> bytes:
+        """Read file bytes through the Runtime Runner."""
+        runtime = await self._ready_runtime(agent_id)
+        try:
+            result = await self._runner_operations.read_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                path=path,
+                offset=0,
+                max_bytes=None,
+                deadline_at=_runtime_file_operation_deadline(),
+            )
+            return result.data
+        except RuntimeRunnerOperationFailedError as exc:
+            _raise_storage_error(exc)
+
+    async def stat(self, path: str, *, agent_id: str) -> dict[str, object]:
+        """Fetch Runtime path metadata with file.stat."""
+        runtime = await self._ready_runtime(agent_id)
+        try:
+            result = await self._runner_operations.stat_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                path=path,
+                deadline_at=_runtime_file_operation_deadline(),
+            )
+        except RuntimeRunnerOperationFailedError as exc:
+            _raise_storage_error(exc)
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ) as exc:
+            raise RuntimeStorageError(str(exc)) from exc
+        return _stat_metadata(result)
+
+    async def put(
+        self,
+        path: str,
+        data: bytes,
+        media_type: str = "",
+        *,
+        agent_id: str,
+    ) -> RuntimeAttachment:
+        """Write file bytes through the Runtime Runner."""
+        runtime = await self._ready_runtime(agent_id)
+        try:
+            result = await self._runner_operations.write_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                path=path,
+                data=data,
+                deadline_at=_runtime_file_operation_deadline(),
+            )
+        except RuntimeRunnerOperationFailedError as exc:
+            _raise_storage_error(exc)
+        return RuntimeAttachment(
+            uri=path,
+            media_type=media_type,
+            size=result.bytes_written,
+            name=PurePosixPath(path).name,
+            text_preview=None,
+        )
+
+    async def delete(self, path: str, *, agent_id: str) -> None:
+        """Delete a Runtime path through a shell operation."""
+        runtime = await self._ready_runtime(agent_id)
+        try:
+            result = await self._runner_operations.run_bash(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                command=f"rm -rf -- {shlex.quote(path)}",
+                timeout_seconds=30,
+                env=None,
+                deadline_at=datetime.now(UTC)
+                + timedelta(seconds=30 + _RUNTIME_OPERATION_RESULT_GRACE_SECONDS),
+            )
+        except RuntimeRunnerOperationFailedError as exc:
+            _raise_storage_error(exc)
+        if result.exit_code != 0:
+            raise RuntimeStorageError(result.stderr or "Failed to delete file")
+
+    async def exists(self, path: str, *, agent_id: str) -> bool:
+        """Return whether a Runtime path exists."""
+        try:
+            await self.stat(path, agent_id=agent_id)
+        except FileNotFoundError:
+            return False
+        return True
+
+    async def list(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        recursive: bool = False,
+        exclude_patterns: list[str] | None = None,
+    ) -> list[RuntimeAttachment]:
+        """List file entries below a Runtime path."""
+        runtime = await self._ready_runtime(agent_id)
+        entries = await self._list_entries(
+            runtime,
+            path,
+            recursive=recursive,
+            exclude_patterns=exclude_patterns,
+        )
+        return [
+            RuntimeAttachment(
+                uri=entry.path,
+                media_type=guess_media_type(entry.path),
+                size=entry.size_bytes or 0,
+                name=PurePosixPath(entry.path).name,
+                text_preview=None,
+            )
+            for entry in entries
+            if entry.type == "file"
+        ]
+
+    async def list_dirs(self, path: str, *, agent_id: str) -> list[str]:
+        """List directory names below a Runtime directory."""
+        runtime = await self._ready_runtime(agent_id)
+        entries = await self._list_entries(runtime, path)
+        return [
+            PurePosixPath(entry.path).name
+            for entry in entries
+            if entry.type == "directory"
+        ]
+
+    async def grep(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        pattern: str,
+        recursive: bool = True,
+        exclude_patterns: list[str] | None = None,
+        max_matching_files: int = 50,
+        max_lines_per_file: int = 10,
+    ) -> GrepResult:
+        """Search Runtime files through a single Runner grep operation."""
+        runtime = await self._ready_runtime(agent_id)
+        try:
+            result = await self._runner_operations.grep_files(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                path=path,
+                pattern=pattern,
+                recursive=recursive,
+                exclude_patterns=exclude_patterns,
+                max_matching_files=max_matching_files,
+                max_lines_per_file=max_lines_per_file,
+                deadline_at=_runtime_file_operation_deadline(),
+            )
+        except RuntimeRunnerOperationFailedError as exc:
+            _raise_storage_error(exc)
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ) as exc:
+            raise RuntimeStorageError(str(exc)) from exc
+        return GrepResult(
+            files=tuple(_grep_file_match(file_match) for file_match in result.files),
+            searched_file_count=result.searched_file_count,
+            matched_file_count=result.matched_file_count,
+            truncated=result.truncated,
+        )
+
+    async def _ready_runtime(self, agent_id: str) -> AgentRuntime:
+        return await _ready_runtime_for_agent(
+            agent_runtime_repo=self._agent_runtime_repo,
+            session_manager=self._session_manager,
+            agent_id=agent_id,
+        )
+
+    async def _list_entries(
+        self,
+        runtime: AgentRuntime,
+        path: str,
+        *,
+        recursive: bool = False,
+        exclude_patterns: list[str] | None = None,
+    ) -> tuple[RuntimeFileListEntry, ...]:
+        try:
+            result = await self._runner_operations.list_files(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                path=path,
+                recursive=recursive,
+                exclude_patterns=exclude_patterns,
+                deadline_at=_runtime_file_operation_deadline(),
+            )
+            return result.entries
+        except RuntimeRunnerOperationFailedError as exc:
+            _raise_storage_error(exc)
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ) as exc:
+            raise RuntimeStorageError(str(exc)) from exc
+
+
+def _stat_metadata(result: RuntimeFileStatResult) -> dict[str, object]:
+    """Convert RuntimeFileStatResult to FileStorage.stat dict."""
+    return {
+        "is_file": result.kind == "file",
+        "is_directory": result.kind == "directory",
+        "is_symlink": result.symlink,
+        "size": result.size_bytes or 0,
+        "path": result.path,
+        "real_path": result.real_path,
+        "resolved_kind": result.resolved_kind,
+    }
+
+
+def _grep_file_match(file_match: RuntimeGrepFileMatch) -> GrepFileMatch:
+    return GrepFileMatch(
+        path=file_match.path,
+        lines=tuple(_grep_line_match(line_match) for line_match in file_match.lines),
+        truncated=file_match.truncated,
+    )
+
+
+def _grep_line_match(line_match: RuntimeGrepLineMatch) -> GrepLineMatch:
+    return GrepLineMatch(
+        line_number=line_match.line_number,
+        text=line_match.text,
+    )
+
+
+def make_execute_code_tool(
+    runner_operations: RuntimeRunnerOperationClient,
+    *,
+    agent_runtime_repo: AgentRuntimeRepository,
+    session_manager: SessionManager[AsyncSession] | None,
+    agent_id: str,
+    publish_event: Callable[[EngineEvent], Awaitable[None]],
+    peer_toolkits: Sequence[RuntimeEnvProvider] = (),
+) -> FunctionTool:
+    """Create a bash tool backed by Runtime Runner operations."""
+
+    async def handler(args: ExecuteCodeInput) -> str:
+        timeout = min(args.timeout, _MAX_EXECUTION_TIMEOUT)
+        secret_env = await _collect_secret_env(peer_toolkits, agent_id)
+        try:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=agent_runtime_repo,
+                session_manager=session_manager,
+                agent_id=agent_id,
+            )
+            await publish_event(RuntimeReadyEvent())
+            result = await runner_operations.run_bash(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                command=args.command,
+                timeout_seconds=timeout,
+                env=secret_env or None,
+                deadline_at=datetime.now(UTC)
+                + timedelta(seconds=timeout + _RUNTIME_OPERATION_RESULT_GRACE_SECONDS),
+            )
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+            RuntimeRunnerOperationFailedError,
+            RuntimeStorageError,
+        ) as exc:
+            message = str(exc)
+            logger.warning(
+                "Runtime Runner bash operation failed",
+                extra={"agent_id": agent_id, "error": message},
+            )
+            raise FunctionToolError(message) from None
+
+        return _format_result(result.stdout, result.stderr, result.exit_code)
+
+    return make_tool(
+        handler,
+        name="bash",
+        description=(
+            "Execute a shell command in the Agent Runtime workspace. "
+            "Files under /workspace/agent persist for this agent runtime."
+        ),
+    )
+
+
+def _format_result(stdout: str, stderr: str, exit_code: int) -> str:
+    """Format execution result."""
+    parts: list[str] = []
+    if stdout:
+        parts.append(f"stdout:\n{stdout}")
+    if stderr:
+        parts.append(f"stderr:\n{stderr}")
+    result = "\n\n".join(parts) if parts else "(no output)"
+    result += f"\n\nexit_code: {exit_code}"
+    return result

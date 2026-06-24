@@ -1,0 +1,136 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ensure-claude-md-link
+        name: Ensure CLAUDE.md imports AGENTS.md
+        entry: bash scripts/ensure-claude-md-link.sh
+        language: system
+        files: AGENTS\.md$
+      - id: gen-azents-docs-index
+        name: Validate and regenerate azents docs INDEX
+        language: python
+        entry: python scripts/gen_docs_index.py --docs-root docs/azents --project-name azents
+        files: ^docs/azents/.*\.md$
+        pass_filenames: false
+      - id: generate-conventions-index
+        name: Regenerate .claude/rules/*-conventions.md tables from convention bodies
+        language: python
+        entry: python scripts/generate-conventions-index.py
+        additional_dependencies: [python-frontmatter==1.1.0]
+        files: ^\.claude/(conventions|rules)/.*\.md$
+        pass_filenames: false
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-json
+      - id: pretty-format-json
+        args: [--autofix, --no-sort-keys, --no-ensure-ascii]
+        exclude: openapi\.json$
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: fix-byte-order-marker
+        exclude: ^.*\.csv$
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.0
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  # az-common
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.0
+    hooks:
+      - id: uv-lock
+        files: \/pyproject\.toml$
+        args: [--project, python/libs/az-common]
+  - repo: local
+    hooks:
+      - id: pyright-az-common
+        name: Run pyright in az-common
+        language: unsupported
+        entry: bash -c 'cd python/libs/az-common && uv run pyright'
+        files: |
+          (?x)^(
+            python/libs/az-common/.*|
+            (?!)
+          )$
+  # azents
+  - repo: local
+    hooks:
+      - id: dump-openapi-spec-azents
+        name: Dump OpenAPI spec (azents)
+        language: python
+        entry: bash -c 'cd python/apps/azents && uv run python src/cli/dump_openapi.py'
+        files: ^python/apps/azents/.*
+        fail_fast: true
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.0
+    hooks:
+      - id: uv-lock
+        files: \/pyproject\.toml$
+        args: [--project, python/apps/azents]
+  - repo: local
+    hooks:
+      - id: pyright-azents
+        name: Run pyright in azents
+        language: unsupported
+        entry: bash -c 'cd python/apps/azents && uv run pyright'
+        files: |
+          (?x)^(
+            python/apps/azents/.*|
+            python/libs/az-common/.*|
+            (?!)
+          )$
+  # azents testenv e2e
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.0
+    hooks:
+      - id: uv-lock
+        files: \/pyproject\.toml$
+        args: [--project, testenv/azents/e2e]
+  - repo: local
+    hooks:
+      - id: pyright-testenv-azents-e2e
+        name: Run pyright in testenv azents e2e
+        language: unsupported
+        entry: bash -c 'cd testenv/azents/e2e && uv run pyright .'
+        files: |
+          (?x)^(
+            testenv/azents/e2e/.*|
+            python/libs/az-common/.*|
+            (?!)
+          )$
+  # TypeScript
+  - repo: local
+    hooks:
+      - id: ts-format
+        name: Format TypeScript
+        language: system
+        entry: bash -c 'cd typescript && pnpm run format'
+        files: ^typescript/.*\.(ts|tsx|json)$
+        pass_filenames: false
+      - id: ts-lint
+        name: Lint TypeScript
+        language: system
+        entry: bash -c 'cd typescript && pnpm run lint:fix'
+        files: ^typescript/.*\.(ts|tsx)$
+        pass_filenames: false
+      - id: ts-typecheck
+        name: TypeScript type check
+        language: system
+        entry: bash -c 'cd typescript && pnpm run typecheck'
+        files: ^typescript/.*\.(ts|tsx)$
+        pass_filenames: false
+exclude: |
+  (?x)^(
+    # auto-generated
+    python/libs/azents-admin-client/.*|
+    python/libs/azents-public-client/.*|
+    typescript/packages/azents-admin-client/src/generated/.*|
+    typescript/packages/azents-public-client/src/generated/.*|
+    .*pnpm-lock\.yaml$
+  )$

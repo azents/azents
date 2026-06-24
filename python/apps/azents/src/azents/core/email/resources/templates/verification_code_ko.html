@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #4F46E5; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+        .content { background: #f9fafb; padding: 30px; border-radius: 0 0 8px 8px; }
+        .code { font-size: 32px; font-weight: bold; letter-spacing: 8px; text-align: center; background: #ffffff; padding: 20px; border-radius: 8px; border: 2px dashed #4F46E5; margin: 20px 0; color: #4F46E5; }
+        .footer { margin-top: 20px; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Azents</h1>
+        </div>
+        <div class="content">
+            <h2>인증 코드 안내</h2>
+            <p>아래 인증 코드를 입력하여 본인 확인을 완료해주세요.</p>
+            <div class="code">{{ code }}</div>
+            <p class="footer">
+                이 코드는 {{ expire_minutes }}분 후에 만료됩니다.<br>
+                본인이 요청하지 않은 경우 이 이메일을 무시하셔도 됩니다.
+            </p>
+            {% if workspace_url %}
+            <p style="margin-top: 20px; text-align: center;">
+                <a href="{{ workspace_url }}" style="display: inline-block; background: #4F46E5; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold;">워크스페이스 만들기</a>
+            </p>
+            {% endif %}
+        </div>
+        {% if domain %}
+        <div style="font-size:0;line-height:0;max-height:0;overflow:hidden;mso-hide:all;">@{{ domain }} #{{ code }}</div>
+        {% endif %}
+    </div>
+</body>
+</html>

@@ -1,0 +1,66 @@
+[project]
+name = "azents-testenv"
+version = "0.1.0"
+description = "Azents local test environment tools (preflight, devserver lifecycle)"
+requires-python = ">=3.14"
+dependencies = [
+    "cryptography==48.0.1",
+    "filelock==3.29.0",
+    "httpx==0.28.1",
+    "mcp==1.27.0",
+    "azents",
+    "azents-admin-client",
+    "azents-public-client",
+    "pydantic==2.13.0",
+    "python-dotenv==1.2.2",
+    "python-frontmatter==1.1.0",
+    "pyyaml==6.0.3",
+    "typer==0.25.0",
+    "websockets==16.0",
+]
+
+[project.scripts]
+testenv = "testenv.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["testenv"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "B", "I", "PLC", "PLE", "PLW", "PGH003"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+include = ["preflight.py", "devserver.py", "testenv"]
+venvPath = "."
+venv = ".venv"
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"
+reportUnknownMemberType = "none"
+reportUnknownLambdaType = "none"
+reportMissingTypeStubs = "none"
+
+[tool.pytest.ini_options]
+testpaths = ["testenv/tests"]
+
+[tool.uv]
+
+[tool.uv.sources]
+azents = { path = "../../python/apps/azents", editable = true }
+azents-public-client = { path = "../../python/libs/azents-public-client", editable = true }
+azents-admin-client = { path = "../../python/libs/azents-admin-client", editable = true }

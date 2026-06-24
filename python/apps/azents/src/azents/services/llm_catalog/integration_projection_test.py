@@ -1,0 +1,82 @@
+"""Integration model catalog projection tests."""
+
+import datetime
+
+from azents.core.enums import LLMCatalogEntryVisibility, LLMModelDeveloper, LLMProvider
+from azents.core.llm_catalog import ModelCapabilities
+from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.services.llm_catalog import project_integration_entries
+from azents.services.model_listing.data import (
+    ModelListingOutput,
+    ModelListingSummary,
+    NormalizedModelCandidate,
+)
+
+
+def test_project_integration_entries_requires_exact_target_projection() -> None:
+    """Integration projection exposes exact matches and hides missing target keys."""
+    fetched_at = datetime.datetime.now(datetime.UTC)
+    listing = ModelListingOutput(
+        models=[
+            NormalizedModelCandidate(
+                provider=LLMProvider.AWS_BEDROCK,
+                model_identifier="anthropic.claude-3-haiku-20240307-v1:0",
+                model_display_name="Claude 3 Haiku",
+                model_developer=LLMModelDeveloper.ANTHROPIC,
+                model_family="claude",
+                normalized_capabilities=ModelCapabilities(),
+                model_snapshot={},
+                source_metadata=None,
+                last_refreshed_at=fetched_at,
+            ),
+            NormalizedModelCandidate(
+                provider=LLMProvider.AWS_BEDROCK,
+                model_identifier="unmatched.model-v1",
+                model_display_name="Unmatched",
+                model_developer=LLMModelDeveloper.ANTHROPIC,
+                model_family="unmatched",
+                normalized_capabilities=ModelCapabilities(),
+                model_snapshot={},
+                source_metadata=None,
+                last_refreshed_at=fetched_at,
+            ),
+        ],
+        summary=ModelListingSummary(
+            source="aws_bedrock:list_foundation_models",
+            fetched_at=fetched_at,
+            returned_count=2,
+            skipped_count=0,
+        ),
+        skips=[],
+    )
+    source_snapshot = LiteLLMSourceSnapshot(
+        id="source-id",
+        source_key="litellm_model_cost",
+        source_url=None,
+        source_hash="hash",
+        model_count=1,
+        litellm_version="1.0.0",
+        loaded_source="fixture",
+        payload={
+            "bedrock/anthropic.claude-3-haiku-20240307-v1:0": {
+                "litellm_provider": "bedrock",
+                "mode": "chat",
+                "supports_function_calling": True,
+            }
+        },
+        created_at=fetched_at,
+    )
+
+    entries = project_integration_entries(
+        integration_id="integration-id",
+        provider=LLMProvider.AWS_BEDROCK,
+        listing=listing,
+        source_snapshot=source_snapshot,
+    )
+
+    assert entries[0].visibility_status == LLMCatalogEntryVisibility.SELECTABLE
+    assert entries[0].runtime_model_identifier == (
+        "bedrock/anthropic.claude-3-haiku-20240307-v1:0"
+    )
+    assert entries[1].visibility_status == LLMCatalogEntryVisibility.HIDDEN
+    assert entries[1].hidden_reason == "missing_target_projection"

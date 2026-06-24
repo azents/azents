@@ -1,0 +1,131 @@
+/* Surface layer dedicated to Workspace Home.
+ *
+ * Separates canvas, panel, card, muted text in both light/dark modes
+ * to prevent theme changes from improving only one mode.
+ */
+.root {
+  flex: 1;
+  background: var(--workspace-canvas);
+
+  --workspace-canvas: var(--mantine-color-mono-1);
+  --workspace-surface: var(--mantine-color-white);
+  --workspace-surface-raised: var(--mantine-color-white);
+  --workspace-surface-hover: var(--mantine-color-mono-0);
+  --workspace-border: var(--mantine-color-mono-3);
+  --workspace-border-strong: var(--mantine-color-mono-5);
+  --workspace-muted: var(--mantine-color-mono-7);
+  --workspace-subtle: var(--mantine-color-mono-8);
+}
+
+:global([data-mantine-color-scheme="dark"]) .root {
+  --workspace-canvas: var(--mantine-color-dark-8);
+  --workspace-surface: var(--mantine-color-dark-6);
+  --workspace-surface-raised: var(--mantine-color-dark-5);
+  --workspace-surface-hover: var(--mantine-color-dark-4);
+  --workspace-border: var(--mantine-color-dark-4);
+  --workspace-border-strong: var(--mantine-color-dark-3);
+  --workspace-muted: var(--mantine-color-dark-1);
+  --workspace-subtle: var(--mantine-color-dark-2);
+}
+
+.header {
+  background: var(--workspace-surface-raised);
+  border-bottom: rem(1px) solid var(--workspace-border);
+}
+
+.mutedText {
+  color: var(--workspace-muted);
+}
+
+.sectionCount,
+.tabCount {
+  border-radius: var(--mantine-radius-xl);
+  background: var(--workspace-surface-raised);
+  color: var(--workspace-subtle);
+}
+
+.emptyCard,
+.statCard,
+.subagentRow {
+  background: var(--workspace-surface-raised);
+  border: rem(1px) solid var(--workspace-border);
+}
+
+.emptyCard {
+  border-style: dashed;
+  border-radius: var(--mantine-radius-md);
+  color: var(--workspace-muted);
+}
+
+.statCard {
+  border-radius: var(--mantine-radius-md);
+}
+
+.statLabel,
+.statSubtitle,
+.statTotal,
+.rowDescription {
+  color: var(--workspace-muted);
+}
+
+.tabs {
+  margin-left: calc(var(--mantine-spacing-2xs) * -1);
+  margin-bottom: calc(rem(1px) * -1);
+}
+
+.tabButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mantine-spacing-2xs);
+  color: var(--workspace-muted);
+  border-bottom: rem(2px) solid transparent;
+  font-weight: 500;
+}
+
+.tabButton[data-active="true"] {
+  color: var(--mantine-color-text);
+  border-bottom-color: var(--mantine-color-text);
+  font-weight: 600;
+}
+
+.tabButton[data-active="true"] .tabCount {
+  background: var(--mantine-primary-color-light);
+  color: var(--mantine-primary-color-filled);
+}
+
+.searchInput {
+  background: var(--workspace-surface-raised);
+  border-color: var(--workspace-border-strong);
+  color: var(--mantine-color-text);
+}
+
+.noticeAlert {
+  background: var(--workspace-surface-raised);
+  border: rem(1px) solid var(--workspace-border);
+  color: var(--workspace-muted);
+}
+
+.noticeAlert :global(.mantine-Alert-message) {
+  color: var(--workspace-muted);
+}
+
+.teamCard {
+  background: var(--workspace-surface-raised);
+  border-color: var(--workspace-border);
+}
+
+.teamCard:hover,
+.subagentRow:hover {
+  background: var(--workspace-surface-hover);
+  border-color: var(--workspace-border-strong);
+}
+
+.teamCardFooter {
+  border-top: rem(1px) solid var(--workspace-border);
+  color: var(--workspace-muted);
+}
+
+.subagentRow {
+  display: block;
+  border-radius: var(--mantine-radius-md);
+}

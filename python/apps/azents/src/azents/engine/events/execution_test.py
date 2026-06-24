@@ -1,0 +1,1465 @@
+"""Event AgentRunExecution tests."""
+
+import asyncio
+import datetime
+from collections.abc import AsyncIterator, Callable, Sequence
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.engine.events.execution import (
+    AgentRunExecution,
+    AgentRunExecutionRequest,
+)
+from azents.engine.events.protocols import (
+    NativeEvent,
+    NativeModelRequest,
+    NormalizedAdapterOutput,
+)
+from azents.engine.events.types import (
+    ActiveToolCall,
+    AgentRunState,
+    AssistantMessagePayload,
+    ClientToolCallPayload,
+    ClientToolResultPayload,
+    CompactionSummaryPayload,
+    Event,
+    EventPayload,
+    InterruptedPayload,
+    NativeArtifact,
+    OutputTextPart,
+    ProviderToolCallPayload,
+    ReasoningPayload,
+    RunMarkerPayload,
+    SystemPromptAnalysisPayload,
+    SystemPromptFragmentPayload,
+    TokenUsagePayload,
+    TurnMarkerPayload,
+    UserMessagePayload,
+    build_native_compat_key,
+)
+from azents.engine.run.errors import ModelCallError
+from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
+from azents.repos.agent_execution.data import EventCreate
+
+
+class _Session(AsyncSession):
+    """AsyncSession for tests."""
+
+    def __init__(self, commit_value: Callable[[], int] | None = None) -> None:
+        """Record values at commit time."""
+        self.commits: list[int] = []
+        self._commit_value = commit_value
+
+    async def commit(self) -> None:
+        """Record commit call."""
+        value = self._commit_value() if self._commit_value is not None else 0
+        self.commits.append(value)
+
+
+class _RunRepo:
+    """Run repository for tests."""
+
+    def __init__(self) -> None:
+        self.phases: list[AgentRunPhase] = []
+        self.terminal: AgentRunStatus | None = None
+        self.active_tool_calls: list[ActiveToolCall] = []
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState:
+        """Return run state."""
+        del session
+        return AgentRunState(
+            id=run_id if len(run_id) == 32 else "1" * 32,
+            session_id="session-1",
+            run_index=1,
+            phase=self.phases[-1] if self.phases else AgentRunPhase.IDLE,
+            status=self.terminal or AgentRunStatus.RUNNING,
+            active_tool_calls=list(self.active_tool_calls),
+            started_at=datetime.datetime.now(datetime.UTC),
+            updated_at=datetime.datetime.now(datetime.UTC),
+        )
+
+    async def update_phase(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        phase: AgentRunPhase,
+        *,
+        active_tool_calls: list[ActiveToolCall] | None = None,
+    ) -> object:
+        """Record phase update."""
+        del session, run_id
+        self.phases.append(phase)
+        if active_tool_calls is not None:
+            self.active_tool_calls = list(active_tool_calls)
+        return object()
+
+    async def mark_terminal(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        status: AgentRunStatus,
+        *,
+        ended_at: object,
+        last_completed_event_id: str | None = None,
+    ) -> object:
+        """Record terminal status."""
+        del session, run_id, ended_at, last_completed_event_id
+        self.terminal = status
+        self.active_tool_calls = []
+        return object()
+
+
+class _TranscriptRepo:
+    """Transcript repository for tests."""
+
+    def __init__(self) -> None:
+        self.events: list[Event] = []
+        self.head_event_ids: list[str | None] = []
+
+    async def list_for_model_input(
+        self,
+        session: AsyncSession,
+        session_id: str,
+        *,
+        head_event_id: str | None = None,
+    ) -> list[Event]:
+        """Return transcript."""
+        del session, session_id
+        self.head_event_ids.append(head_event_id)
+        return list(self.events)
+
+    async def get_by_external_id(
+        self,
+        session: AsyncSession,
+        session_id: str,
+        external_id: str,
+    ) -> Event | None:
+        """Find event by external ID."""
+        del session
+        return next(
+            (
+                event
+                for event in self.events
+                if event.session_id == session_id and event.external_id == external_id
+            ),
+            None,
+        )
+
+    async def append(
+        self,
+        session: AsyncSession,
+        create: EventCreate,
+    ) -> Event:
+        """Materialize append request as event."""
+        payload_type = {
+            EventKind.ASSISTANT_MESSAGE: AssistantMessagePayload,
+            EventKind.CLIENT_TOOL_CALL: ClientToolCallPayload,
+            EventKind.CLIENT_TOOL_RESULT: ClientToolResultPayload,
+            EventKind.PROVIDER_TOOL_CALL: ProviderToolCallPayload,
+            EventKind.INTERRUPTED: InterruptedPayload,
+            EventKind.TURN_MARKER: TurnMarkerPayload,
+            EventKind.USER_MESSAGE: UserMessagePayload,
+        }.get(create.kind)
+        if payload_type is None:
+            payload_type = RunMarkerPayload
+        event = Event(
+            id="1" * 32,
+            session_id=create.session_id,
+            kind=create.kind,
+            payload=payload_type.model_validate(create.payload),
+            external_id=create.external_id,
+            created_at=datetime.datetime.now(datetime.UTC),
+        )
+        self.events.append(event)
+        return event
+
+
+class _Lowerer:
+    """Lowerer for tests."""
+
+    compat_key = "test"
+
+    def lower(
+        self,
+        transcript: Sequence[Event],
+        *,
+        model: str,
+        system_prompt: str | None = None,
+    ) -> NativeModelRequest:
+        """Return native request."""
+        return NativeModelRequest(model=model, input=[])
+
+
+class _RecordingLowerer:
+    """Record transcript at lowerer call time."""
+
+    compat_key = "test"
+
+    def __init__(self) -> None:
+        self.transcripts: list[list[Event]] = []
+
+    def lower(
+        self,
+        transcript: Sequence[Event],
+        *,
+        model: str,
+        system_prompt: str | None = None,
+    ) -> NativeModelRequest:
+        """Record transcript snapshot and return native request."""
+        del system_prompt
+        self.transcripts.append(list(transcript))
+        return NativeModelRequest(model=model, input=[])
+
+
+class _PreModelLowerHook:
+    """Pre-lower hook for tests."""
+
+    def __init__(self) -> None:
+        self.called = False
+
+    async def __call__(
+        self,
+        *,
+        transcript: Sequence[Event],
+    ) -> object:
+        """Record hook call."""
+        self.called = True
+        assert transcript
+        return object()
+
+
+class _SessionState:
+    """Session state for tests."""
+
+    def __init__(self, head_event_id: str | None) -> None:
+        self.model_input_head_event_id = head_event_id
+
+
+class _SessionRepo:
+    """Session head repository for tests."""
+
+    def __init__(self, head_event_id: str | None) -> None:
+        self._state = _SessionState(head_event_id)
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> _SessionState:
+        """Return session head."""
+        del session, session_id
+        return self._state
+
+
+class _PreFilter:
+    """Pre-lower filter for tests."""
+
+    def __init__(self, events: Sequence[Event]) -> None:
+        self._events = list(events)
+        self.was_compacted = True
+
+    async def apply(
+        self,
+        session: AsyncSession,
+        transcript: Sequence[Event],
+    ) -> list[Event]:
+        """Return transcript after compaction."""
+        del session, transcript
+        return list(self._events)
+
+
+class _PostFilter:
+    """Post-lower filter for tests."""
+
+    def apply(self, request: NativeModelRequest) -> NativeModelRequest:
+        """Return request as-is."""
+        return request
+
+
+class _ModelAdapter:
+    """Model adapter for tests."""
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+    ) -> AsyncIterator[NativeEvent]:
+        """Return one completed event."""
+        yield NativeEvent(type="done", item={})
+
+
+class _CancellingModelAdapter:
+    """Yield some native events, then raise user stop cancellation."""
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+    ) -> AsyncIterator[NativeEvent]:
+        """Return user stop cancellation after partial model stream."""
+        del request
+        yield NativeEvent(
+            type="response.output_text.delta",
+            item={"delta": "hel"},
+        )
+        yield NativeEvent(type="response.output_text.delta", item={"delta": "lo"})
+        raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
+
+
+class _FailingModelAdapter:
+    """Model adapter that raises user-visible model call error."""
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+    ) -> AsyncIterator[NativeEvent]:
+        """Return model call failure."""
+        del request
+        raise ModelCallError("Model call failed (401): Missing scopes")
+        yield
+
+
+class _Normalizer:
+    """Normalizer for tests."""
+
+    def __init__(
+        self,
+        events: list[Event],
+        usage: TokenUsagePayload | None = None,
+    ) -> None:
+        self._events = events
+        self._usage = usage or _usage()
+
+    def normalize(
+        self,
+        session_id: str,
+        native_events: Sequence[NativeEvent],
+    ) -> NormalizedAdapterOutput:
+        """Return predefined event."""
+        return NormalizedAdapterOutput(events=self._events, usage=self._usage)
+
+
+class _SequenceNormalizer:
+    """Return normalized output by call order."""
+
+    def __init__(self, event_batches: Sequence[Sequence[Event]]) -> None:
+        self._event_batches = [list(events) for events in event_batches]
+        self._index = 0
+
+    def normalize(
+        self,
+        session_id: str,
+        native_events: Sequence[NativeEvent],
+    ) -> NormalizedAdapterOutput:
+        """Return next batch."""
+        del session_id, native_events
+        if self._index >= len(self._event_batches):
+            return NormalizedAdapterOutput(events=[], usage=_usage())
+        events = self._event_batches[self._index]
+        self._index += 1
+        return NormalizedAdapterOutput(events=events, usage=_usage())
+
+
+class _ToolExecutor:
+    """Tool executor for tests."""
+
+    def __init__(self) -> None:
+        self.cancelled_calls: list[ClientToolCallPayload] = []
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Return tool result."""
+        return ClientToolResultPayload(
+            call_id=call.call_id,
+            name=call.name,
+            status="completed",
+            output=[OutputTextPart(text="tool output")],
+        )
+
+    def request_cancel(self, call: ClientToolCallPayload) -> None:
+        """Record cancellation request."""
+        self.cancelled_calls.append(call)
+
+
+class _FailingToolExecutor:
+    """Failing tool executor for tests."""
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Raise tool failure."""
+        del call
+        raise RuntimeError("boom")
+
+    def request_cancel(self, call: ClientToolCallPayload) -> None:
+        """Ignore cancellation requests in tests."""
+        del call
+
+
+class _CancellingToolExecutor:
+    """Cancelling tool executor for tests."""
+
+    def __init__(self, *, user_stop: bool = False) -> None:
+        self._user_stop = user_stop
+        self.cancelled_calls: list[ClientToolCallPayload] = []
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Raise tool cancellation."""
+        del call
+        if self._user_stop:
+            raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
+        raise asyncio.CancelledError
+
+    def request_cancel(self, call: ClientToolCallPayload) -> None:
+        """Record cancellation request."""
+        self.cancelled_calls.append(call)
+
+
+def _artifact() -> NativeArtifact:
+    """Create native artifact for tests."""
+    return NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="litellm",
+            native_format="responses",
+            provider="openai",
+            model="gpt-5.1",
+            schema_version="1",
+        ),
+        adapter="litellm",
+        native_format="responses",
+        provider="openai",
+        model="gpt-5.1",
+        schema_version="1",
+        item={"type": "message"},
+    )
+
+
+def _assistant_event() -> Event:
+    """Create assistant message event."""
+    return Event(
+        id="0" * 32,
+        session_id="session-1",
+        kind=EventKind.ASSISTANT_MESSAGE,
+        payload=AssistantMessagePayload(content="done", native_artifact=_artifact()),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+def _usage() -> TokenUsagePayload:
+    """Create token usage for tests."""
+    return TokenUsagePayload(
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        raw={
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "total_tokens": 15,
+        },
+    )
+
+
+def _tool_call_event() -> Event:
+    """Create client tool call event."""
+    return Event(
+        id="0" * 32,
+        session_id="session-1",
+        kind=EventKind.CLIENT_TOOL_CALL,
+        payload=ClientToolCallPayload(
+            call_id="call-1",
+            name="read_text",
+            arguments="{}",
+            native_artifact=_artifact(),
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+def _provider_tool_call_event() -> Event:
+    """Create provider-hosted tool call event."""
+    return Event(
+        id="0" * 32,
+        session_id="session-1",
+        kind=EventKind.PROVIDER_TOOL_CALL,
+        payload=ProviderToolCallPayload(
+            call_id="provider-call-1",
+            name="web_search",
+            arguments=None,
+            native_artifact=_artifact(),
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+def _event(
+    event_id: str,
+    kind: EventKind,
+    payload: EventPayload,
+) -> Event:
+    """Create event for tests."""
+    return Event(
+        id=event_id.rjust(32, "0"),
+        session_id="session-1",
+        kind=kind,
+        payload=payload,
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+async def test_text_run_completes() -> None:
+    """End as completed when there are no tool calls."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    emitted_phases: list[AgentRunPhase] = []
+
+    async def collect_phase(phase: AgentRunPhase) -> None:
+        emitted_phases.append(phase)
+
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        phase_sink=collect_phase,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert run_repo.terminal == AgentRunStatus.COMPLETED
+    assert AgentRunPhase.STREAMING_MODEL in run_repo.phases
+    assert emitted_phases == run_repo.phases
+
+
+async def test_text_run_commits_durable_events_before_output_sink() -> None:
+    """UI emit is delivered only after events commit."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    session = _Session(lambda: len(transcript_repo.events))
+    committed_event_counts_at_sink: list[int] = []
+
+    async def output_sink(
+        normalized: NormalizedAdapterOutput,
+        appended: Sequence[Event],
+    ) -> None:
+        """Record commit state at output sink call time."""
+        del normalized, appended
+        committed_event_counts_at_sink.append(session.commits[-1])
+
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        output_sink=output_sink,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        session,
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert committed_event_counts_at_sink == [3]
+
+
+async def test_text_run_output_sink_receives_run_marker() -> None:
+    """Completed turn/run markers are also delivered to projection sink."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    sink_kinds: list[list[EventKind]] = []
+
+    async def output_sink(
+        normalized: NormalizedAdapterOutput,
+        appended: Sequence[Event],
+    ) -> None:
+        """Record event kind delivered to output sink."""
+        del normalized
+        sink_kinds.append([event.kind for event in appended])
+
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        output_sink=output_sink,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert sink_kinds == [
+        [
+            EventKind.ASSISTANT_MESSAGE,
+            EventKind.TURN_MARKER,
+            EventKind.RUN_MARKER,
+        ]
+    ]
+
+
+async def test_model_usage_is_appended_as_turn_marker() -> None:
+    """Durably append normalizer usage as turn marker."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    usage = _usage()
+    system_prompt = SystemPromptAnalysisPayload(
+        agent_prompt=SystemPromptFragmentPayload(
+            id="agent",
+            source="agent",
+            label="Agent prompt",
+            content="Be helpful.",
+            preview="Be helpful.",
+            length=11,
+        ),
+    )
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()], usage=usage),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            system_prompt_analysis=system_prompt,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    turn_markers = [
+        event for event in transcript_repo.events if event.kind == EventKind.TURN_MARKER
+    ]
+    assert len(turn_markers) == 1
+    payload = turn_markers[0].payload
+    assert isinstance(payload, TurnMarkerPayload)
+    assert payload.run_id == "run-1"
+    assert payload.usage == usage
+    assert payload.system_prompt == system_prompt
+
+
+async def test_model_input_uses_session_head_event_id() -> None:
+    """After compaction, model input is fetched from session head."""
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=_RunRepo(),
+        transcript_repo=transcript_repo,
+        session_repo=_SessionRepo("2" * 32),
+    )
+
+    await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert transcript_repo.head_event_ids == ["2" * 32]
+
+
+async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
+    """Append final-turn tool result at turn limit, then end as interrupted."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event(), _assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=1,
+        ),
+    )
+
+    assert status == AgentRunStatus.INTERRUPTED
+    assert AgentRunPhase.EXECUTING_TOOLS in run_repo.phases
+    assert any(
+        event.kind == EventKind.CLIENT_TOOL_RESULT for event in transcript_repo.events
+    )
+
+
+async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
+    """max_turns None keeps running to next model turn after tool result."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert AgentRunPhase.EXECUTING_TOOLS in run_repo.phases
+    assert any(
+        event.kind == EventKind.CLIENT_TOOL_RESULT for event in transcript_repo.events
+    )
+
+
+async def test_provider_tool_call_continues_to_next_model_turn() -> None:
+    """Provider-hosted tool calls count as tool work before run completion."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_provider_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert run_repo.phases.count(AgentRunPhase.STREAMING_MODEL) == 2
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.PROVIDER_TOOL_CALL,
+        EventKind.TURN_MARKER,
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.TURN_MARKER,
+        EventKind.RUN_MARKER,
+    ]
+
+
+async def test_compacted_run_continues_with_summary_without_terminal_marker() -> None:
+    """After auto compaction, continue model call without past run marker."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    lowerer = _RecordingLowerer()
+    summary_event = Event(
+        id="2" * 32,
+        session_id="session-1",
+        kind=EventKind.COMPACTION_SUMMARY,
+        payload=CompactionSummaryPayload(
+            compaction_id="compact-1",
+            content="summary",
+            covered_until_event_id="1" * 32,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+    run_marker = Event(
+        id="3" * 32,
+        session_id="session-1",
+        kind=EventKind.RUN_MARKER,
+        payload=RunMarkerPayload(run_id="old-run", status="completed"),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    execution = AgentRunExecution(
+        lowerer=lowerer,
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        pre_lower_filter=_PreFilter([summary_event, run_marker]),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert run_repo.terminal == AgentRunStatus.COMPLETED
+    assert lowerer.transcripts == [[summary_event]]
+
+
+async def test_tool_turn_polls_input_before_next_model_call() -> None:
+    """New input after tool turn is included in next model call transcript."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    lowerer = _RecordingLowerer()
+    poll_count = 0
+
+    async def poll_input_events(
+        session: AsyncSession,
+        session_id: str,
+    ) -> list[Event]:
+        """Append queued user input at second turn boundary."""
+        nonlocal poll_count
+        poll_count += 1
+        if poll_count != 2:
+            return []
+        return [
+            await transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=session_id,
+                    kind=EventKind.USER_MESSAGE,
+                    payload=UserMessagePayload(
+                        content="Is something odd with the grep tool?",
+                    ).model_dump(mode="json", exclude_none=True),
+                ),
+            )
+        ]
+
+    execution = AgentRunExecution(
+        lowerer=lowerer,
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=2,
+        ),
+        poll_input_events=poll_input_events,
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert poll_count == 2
+    assert len(lowerer.transcripts) == 2
+    second_turn_payloads = [event.payload for event in lowerer.transcripts[1]]
+    assert any(
+        isinstance(payload, ClientToolResultPayload) for payload in second_turn_payloads
+    )
+    assert (
+        UserMessagePayload(content="Is something odd with the grep tool?")
+        in second_turn_payloads
+    )
+
+
+async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> None:
+    """Repair orphan tool call absent from state before model call."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    transcript_repo.events.append(_tool_call_event())
+    lowerer = _RecordingLowerer()
+    execution = AgentRunExecution(
+        lowerer=lowerer,
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    result_events = [
+        event
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert len(result_events) == 1
+    payload = result_events[0].payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.status == "cancelled"
+    assert payload.call_id == "call-1"
+    assert result_events[0] in lowerer.transcripts[0]
+
+
+async def test_active_orphan_tool_call_is_not_cancelled_before_lowering() -> None:
+    """Active tool calls remaining in state are not cancelled repair targets."""
+    run_repo = _RunRepo()
+    run_repo.active_tool_calls = [
+        ActiveToolCall(
+            call_id="call-1",
+            name="read_text",
+            arguments="{}",
+            started_at=datetime.datetime.now(datetime.UTC),
+            background=False,
+        )
+    ]
+    transcript_repo = _TranscriptRepo()
+    transcript_repo.events.append(_tool_call_event())
+    lowerer = _RecordingLowerer()
+    execution = AgentRunExecution(
+        lowerer=lowerer,
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert all(
+        event.kind != EventKind.CLIENT_TOOL_RESULT for event in lowerer.transcripts[0]
+    )
+
+
+async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
+    """User stop during streaming stores only assistant text and interrupted marker."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    assistant = _event(
+        "1",
+        EventKind.ASSISTANT_MESSAGE,
+        AssistantMessagePayload(content="hello", native_artifact=_artifact()),
+    )
+    reasoning = _event(
+        "2",
+        EventKind.REASONING,
+        ReasoningPayload(text="hidden", native_artifact=_artifact()),
+    )
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_CancellingModelAdapter(),
+        output_normalizer=_Normalizer([assistant, reasoning, _tool_call_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.INTERRUPTED
+    assert run_repo.terminal == AgentRunStatus.INTERRUPTED
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.RUN_MARKER,
+    ]
+    marker_payload = transcript_repo.events[-1].payload
+    assert isinstance(marker_payload, RunMarkerPayload)
+    assert marker_payload.status == "interrupted"
+
+
+async def test_model_stream_user_stop_without_text_appends_only_marker() -> None:
+    """Store only interrupted marker when assistant text is absent."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_CancellingModelAdapter(),
+        output_normalizer=_Normalizer([]),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.INTERRUPTED
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.RUN_MARKER,
+    ]
+
+
+async def test_non_user_tool_cancellation_reraises_without_repair() -> None:
+    """Non-user tool cancellation propagates cancellation without durable repair."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event()]),
+        tool_executor=_CancellingToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    result_events = [
+        event
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert result_events == []
+    assert run_repo.active_tool_calls
+
+
+async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
+    """User stop during tool execution stores cancelled result and marker."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _CancellingToolExecutor(user_stop=True)
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event()]),
+        tool_executor=tool_executor,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.INTERRUPTED
+    assert run_repo.terminal == AgentRunStatus.INTERRUPTED
+    assert len(tool_executor.cancelled_calls) == 1
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.CLIENT_TOOL_CALL,
+        EventKind.TURN_MARKER,
+        EventKind.CLIENT_TOOL_RESULT,
+        EventKind.RUN_MARKER,
+    ]
+    result_payload = transcript_repo.events[2].payload
+    assert isinstance(result_payload, ClientToolResultPayload)
+    assert result_payload.status == "cancelled"
+    marker_payload = transcript_repo.events[3].payload
+    assert isinstance(marker_payload, RunMarkerPayload)
+    assert marker_payload.status == "interrupted"
+
+
+async def test_tool_result_output_sink_receives_tool_result() -> None:
+    """Tool result is also delivered to projection sink."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    sink_kinds: list[list[EventKind]] = []
+
+    async def output_sink(
+        normalized: NormalizedAdapterOutput,
+        appended: Sequence[Event],
+    ) -> None:
+        """Record event kind delivered to output sink."""
+        del normalized
+        sink_kinds.append([event.kind for event in appended])
+
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event()]),
+        tool_executor=_ToolExecutor(),
+        output_sink=output_sink,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=1,
+        ),
+    )
+
+    assert status == AgentRunStatus.INTERRUPTED
+    assert [EventKind.CLIENT_TOOL_RESULT] in sink_kinds
+
+
+async def test_tool_failure_appends_failed_tool_result() -> None:
+    """Repair tool exception as failed tool result so next turn is not broken."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event()]),
+        tool_executor=_FailingToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=1,
+        ),
+    )
+
+    assert status == AgentRunStatus.INTERRUPTED
+    result_events = [
+        event
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert len(result_events) == 1
+    payload = result_events[0].payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.status == "failed"
+    output = payload.output[0]
+    assert isinstance(output, OutputTextPart)
+    assert "Tool execution failed" in output.text
+
+
+async def test_artifact_expirer_runs_during_input_preparation() -> None:
+    """Run Artifact expiry hook during new run input preparation."""
+    calls: list[tuple[str, int]] = []
+
+    async def expire(*, session_id: str, current_run_index: int) -> None:
+        calls.append((session_id, current_run_index))
+
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+        session_repo=_SessionRepo(None),
+        artifact_expirer=expire,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            run_index=7,
+            max_turns=1,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert calls == [("session-1", 7)]
+
+
+async def test_model_file_expirer_runs_during_input_preparation() -> None:
+    """Run ModelFile expiry hook during new run input preparation."""
+    calls: list[tuple[str, int]] = []
+
+    async def expire(*, session_id: str, current_run_index: int) -> None:
+        calls.append((session_id, current_run_index))
+
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+        session_repo=_SessionRepo(None),
+        model_file_expirer=expire,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            run_index=7,
+            max_turns=1,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert calls == [("session-1", 7)]
+
+
+async def test_exchange_file_expirer_runs_during_input_preparation() -> None:
+    """Run ExchangeFile expiry hook during new run input preparation."""
+    calls = 0
+
+    async def expire() -> None:
+        nonlocal calls
+        calls += 1
+
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+        session_repo=_SessionRepo(None),
+        exchange_file_expirer=expire,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            run_index=7,
+            max_turns=1,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert calls == 1
+
+
+async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
+    """Request-local materialization hook runs right before native lower."""
+    transcript_repo = _TranscriptRepo()
+    transcript_repo.events.append(
+        Event(
+            id="2" * 32,
+            session_id="session-1",
+            kind=EventKind.USER_MESSAGE,
+            payload=UserMessagePayload(content="hello"),
+            created_at=datetime.datetime.now(datetime.UTC),
+        )
+    )
+    lowerer = _RecordingLowerer()
+    hook = _PreModelLowerHook()
+    execution = AgentRunExecution(
+        lowerer=lowerer,
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=_RunRepo(),
+        transcript_repo=transcript_repo,
+        session_repo=_SessionRepo(None),
+        pre_model_lower_hook=hook,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=1,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert hook.called is True
+    assert lowerer.transcripts[0] == transcript_repo.events[:1]
+
+
+async def test_empty_model_output_marks_run_failed_and_reraises() -> None:
+    """Empty model turn propagates as failure instead of pretending completed."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([]),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(ModelCallError, match="without assistant output"):
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert run_repo.terminal == AgentRunStatus.FAILED
+    assert [event.kind for event in transcript_repo.events] == [EventKind.RUN_MARKER]
+    marker = transcript_repo.events[-1].payload
+    assert isinstance(marker, RunMarkerPayload)
+    assert marker.status == "failed"
+
+
+async def test_blank_assistant_message_marks_run_failed_and_reraises() -> None:
+    """Blank assistant message is not treated as completed response."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    blank_message = _event(
+        "1",
+        EventKind.ASSISTANT_MESSAGE,
+        AssistantMessagePayload(content=" ", native_artifact=_artifact()),
+    )
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([blank_message]),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(ModelCallError, match="without assistant output"):
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert run_repo.terminal == AgentRunStatus.FAILED
+    assert [event.kind for event in transcript_repo.events] == [EventKind.RUN_MARKER]
+
+
+async def test_model_call_error_marks_run_failed_and_reraises() -> None:
+    """LLM call error leaves failed run marker and propagates as user-visible error."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_FailingModelAdapter(),
+        output_normalizer=_Normalizer([]),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(ModelCallError, match="Missing scopes"):
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert run_repo.terminal == AgentRunStatus.FAILED
+    assert transcript_repo.events[-1].kind == EventKind.RUN_MARKER
+    marker = transcript_repo.events[-1].payload
+    assert isinstance(marker, RunMarkerPayload)
+    assert marker.status == "failed"

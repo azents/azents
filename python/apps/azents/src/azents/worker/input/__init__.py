@@ -1,0 +1,1 @@
+"""Worker input queue package."""

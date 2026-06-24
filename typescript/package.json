@@ -1,0 +1,36 @@
+{
+  "name": "azents-typescript",
+  "private": true,
+  "packageManager": "pnpm@11.1.0",
+  "engines": {
+    "node": "^24"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "generate": "turbo run generate",
+    "start": "turbo run start",
+    "storybook": "turbo run storybook",
+    "build-storybook": "turbo run build-storybook",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "format": "turbo run format",
+    "format:check": "turbo run format:check",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rm -rf node_modules/.cache .turbo"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/node": "24.12.4"
+    }
+  },
+  "devDependencies": {
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.4.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "prettier": "^3.7.4",
+    "turbo": "2.9.14",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.51.0"
+  }
+}

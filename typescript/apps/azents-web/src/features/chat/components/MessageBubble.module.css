@@ -1,0 +1,55 @@
+.messageSurface {
+  position: relative;
+}
+
+.messageTime {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.messageTooltip {
+  pointer-events: auto;
+}
+
+.messageTooltipLabel {
+  display: inline-block;
+}
+
+.messageSurface[data-time-visible="true"] .messageTime {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: hover) {
+  .messageSurface:hover .messageTime,
+  .messageSurface:focus-within .messageTime {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.actionRow {
+  min-height: rem(28px);
+}
+
+.actionRowAssistant {
+  justify-content: flex-start;
+}
+
+.actionRowUser {
+  justify-content: flex-end;
+}
+
+.errorMessageText {
+  color: light-dark(var(--mantine-color-red-7), var(--mantine-color-red-4));
+  font-family: var(
+    --mantine-font-family-monospace,
+    var(--font-geist-mono, monospace)
+  );
+}
+
+.errorMessageText :where(*) {
+  color: inherit;
+  font-family: inherit;
+}

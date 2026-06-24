@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project \"$(git rev-parse --show-toplevel)/.codex\" python \"$(git rev-parse --show-toplevel)/.codex/hooks/claude_rules_hook.py\" session-start",
+            "timeout": 30,
+            "statusMessage": "Loading Claude-style project rules"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project \"$(git rev-parse --show-toplevel)/.codex\" python \"$(git rev-parse --show-toplevel)/.codex/hooks/claude_rules_hook.py\" post-tool-use",
+            "timeout": 30,
+            "statusMessage": "Checking Claude-style project rules"
+          }
+        ]
+      }
+    ]
+  }
+}

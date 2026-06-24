@@ -1,0 +1,387 @@
+"""Runtime control protocol service tests."""
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from azents.core.enums import RuntimeLifecycleCommandType
+from azents.runtime.control_protocol.data import (
+    RuntimeDispatchResult,
+    RuntimeProtocolCapabilities,
+    RuntimeProtocolRouteUnavailable,
+    RuntimeProtocolStaleGeneration,
+    RuntimeProviderCommand,
+    RuntimeProviderRegistration,
+    RuntimeReplyAppendResult,
+    RuntimeRunnerOperation,
+    RuntimeRunnerRegistration,
+)
+from azents.runtime.control_protocol.service import (
+    RuntimeControlProtocolService,
+)
+from azents.runtime.coordination.data import (
+    RuntimeCoordinationTarget,
+    RuntimeReplyEvent,
+    RuntimeReplyEventType,
+)
+from azents.runtime.coordination.memory import (
+    InMemoryRuntimeCoordinationStore,
+)
+
+
+@pytest.mark.asyncio
+async def test_register_provider_and_runner_issue_independent_generations() -> None:
+    """Provider and Runner generations are independently scoped."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    now = _now()
+
+    provider = await service.register_provider(
+        _provider_registration(), registered_at=now
+    )
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+
+    assert provider.generation == 1
+    assert provider.provider_id == "provider-1"
+    assert runner.generation == 1
+    assert runner.runtime_id == "runtime-1"
+    assert (
+        await service.heartbeat_provider(
+            provider_id="provider-1",
+            generation=provider.generation,
+            heartbeat_at=now + timedelta(seconds=1),
+        )
+        is True
+    )
+    assert (
+        await service.heartbeat_runner(
+            runtime_id="runtime-1",
+            generation=runner.generation,
+            heartbeat_at=now + timedelta(seconds=1),
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_provider_command_uses_provider_generation_fence() -> None:
+    """Provider commands route through provider-scoped streams and generation groups."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
+    now = _now()
+    accepted = await service.register_provider(
+        _provider_registration(),
+        registered_at=now,
+    )
+
+    result = await service.dispatch_provider_command(
+        RuntimeProviderCommand(
+            provider_id="provider-1",
+            provider_generation=accepted.generation,
+            runtime_id="runtime-1",
+            desired_generation=3,
+            command_type=RuntimeLifecycleCommandType.START,
+            reset_final_desired_state=None,
+            payload={"reason": "user"},
+            deadline_at=now + timedelta(seconds=30),
+        ),
+        created_at=now,
+    )
+    claimed = await service.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="control-a",
+        block_ms=0,
+    )
+
+    assert isinstance(result, RuntimeDispatchResult)
+    assert result.request_stream_id == "provider:provider-1:generation:1:requests"
+    assert result.reply_stream_id == "provider:provider-1:generation:1:replies"
+    assert claimed is not None
+    assert claimed.runtime_id == "runtime-1"
+    assert claimed.target == RuntimeCoordinationTarget.PROVIDER
+    assert claimed.payload["desired_generation"] == 3
+
+
+@pytest.mark.asyncio
+async def test_provider_reconnect_skips_previous_generation_requests() -> None:
+    """Provider request streams are generation-scoped to avoid replay after eviction."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
+    now = _now()
+    first = await service.register_provider(_provider_registration(), registered_at=now)
+    result = await service.dispatch_provider_command(
+        RuntimeProviderCommand(
+            provider_id="provider-1",
+            provider_generation=first.generation,
+            runtime_id="runtime-1",
+            desired_generation=3,
+            command_type=RuntimeLifecycleCommandType.START,
+            reset_final_desired_state=None,
+            payload={"reason": "user"},
+            deadline_at=now + timedelta(seconds=30),
+        ),
+        created_at=now,
+    )
+    second = await service.register_provider(
+        _provider_registration(),
+        registered_at=now + timedelta(seconds=1),
+    )
+
+    claimed = await service.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=second.generation,
+        consumer_id="control-a",
+        block_ms=0,
+    )
+
+    assert isinstance(result, RuntimeDispatchResult)
+    assert first.generation == 1
+    assert second.generation == 2
+    assert claimed is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_runner_operation_supports_resume_after_reply_cursor() -> None:
+    """Runner operation dispatch writes metadata and reply streams support resume."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-2")
+    now = _now()
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=runner.generation,
+            operation_type="bash",
+            payload={"command": "echo ok"},
+            deadline_at=now + timedelta(seconds=30),
+            body_stream_id=None,
+            background=False,
+        ),
+        created_at=now,
+    )
+    assert isinstance(result, RuntimeDispatchResult)
+    claimed = await service.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=runner.generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert claimed is not None
+    assert claimed.operation_type == "bash"
+
+    first = await service.append_reply_event(
+        _reply("req-2", runner.generation, RuntimeReplyEventType.ACCEPTED),
+        reply_stream_id=result.reply_stream_id,
+        operation_id=result.operation_id,
+        expected_target=RuntimeCoordinationTarget.RUNNER,
+        expected_subject_id="runtime-1",
+    )
+    final = await service.append_reply_event(
+        _reply(
+            "req-2",
+            runner.generation,
+            RuntimeReplyEventType.FINAL_SUCCESS,
+            final=True,
+        ),
+        reply_stream_id=result.reply_stream_id,
+        operation_id=result.operation_id,
+        expected_target=RuntimeCoordinationTarget.RUNNER,
+        expected_subject_id="runtime-1",
+    )
+    resumed = await service.read_replies(
+        reply_stream_id=result.reply_stream_id,
+        after_cursor=first.cursor
+        if isinstance(first, RuntimeReplyAppendResult)
+        else None,
+        limit=10,
+    )
+
+    assert isinstance(final, RuntimeReplyAppendResult)
+    assert final.final is True
+    assert [record.event.event_type for record in resumed] == [
+        RuntimeReplyEventType.FINAL_SUCCESS
+    ]
+    metadata = await store.get_operation(result.operation_id)
+    assert metadata is not None
+    assert metadata.final_event_cursor == final.cursor
+
+
+@pytest.mark.asyncio
+async def test_runner_operations_share_generation_reply_stream() -> None:
+    """Runner operation replies share a generation-scoped stream."""
+    store = InMemoryRuntimeCoordinationStore()
+    request_ids = iter(("req-1", "req-2"))
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: next(request_ids),
+    )
+    now = _now()
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+
+    first = await service.dispatch_runner_operation(
+        _runner_operation(generation=runner.generation, now=now),
+        created_at=now,
+    )
+    second = await service.dispatch_runner_operation(
+        _runner_operation(generation=runner.generation, now=now),
+        created_at=now,
+    )
+
+    assert isinstance(first, RuntimeDispatchResult)
+    assert isinstance(second, RuntimeDispatchResult)
+    assert first.reply_stream_id == "runner:runtime-1:generation:1:replies"
+    assert second.reply_stream_id == first.reply_stream_id
+
+
+@pytest.mark.asyncio
+async def test_runner_reconnect_does_not_replay_previous_generation_requests() -> None:
+    """Runner request streams are generation-scoped to avoid replay after eviction."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-2")
+    now = _now()
+    first = await service.register_runner(_runner_registration(), registered_at=now)
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=first.generation,
+            operation_type="bash",
+            payload={"command": "echo ok"},
+            deadline_at=now + timedelta(seconds=30),
+            body_stream_id=None,
+            background=False,
+        ),
+        created_at=now,
+    )
+    second = await service.register_runner(
+        _runner_registration(),
+        registered_at=now + timedelta(seconds=1),
+    )
+
+    claimed = await service.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=second.generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+
+    assert isinstance(result, RuntimeDispatchResult)
+    assert first.generation == 1
+    assert second.generation == 2
+    assert claimed is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rejects_missing_and_stale_runner_generation() -> None:
+    """Control rejects missing or stale Runner generations."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    now = _now()
+
+    missing = await service.dispatch_runner_operation(
+        _runner_operation(generation=1, now=now),
+        created_at=now,
+    )
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+    stale = await service.dispatch_runner_operation(
+        _runner_operation(generation=runner.generation - 1, now=now),
+        created_at=now,
+    )
+
+    assert isinstance(missing, RuntimeProtocolRouteUnavailable)
+    assert missing.subject_id == "runtime-1"
+    assert isinstance(stale, RuntimeProtocolStaleGeneration)
+    assert stale.generation == 0
+
+
+@pytest.mark.asyncio
+async def test_stale_reply_event_is_not_appended() -> None:
+    """Reply events are fenced by current Runner generation."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    now = _now()
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+
+    result = await service.append_reply_event(
+        _reply("req-1", runner.generation - 1, RuntimeReplyEventType.ACCEPTED),
+        reply_stream_id="runner:runtime-1:generation:1:replies",
+        operation_id=None,
+        expected_target=RuntimeCoordinationTarget.RUNNER,
+        expected_subject_id="runtime-1",
+    )
+
+    assert isinstance(result, RuntimeProtocolStaleGeneration)
+    assert (
+        await service.read_replies(
+            reply_stream_id="runner:runtime-1:generation:1:replies",
+            after_cursor=None,
+            limit=10,
+        )
+        == []
+    )
+
+
+def _provider_registration() -> RuntimeProviderRegistration:
+    return RuntimeProviderRegistration(
+        provider_id="provider-1",
+        provider_type="docker",
+        scope="workspace",
+        workspace_id="workspace-1",
+        protocol_version="2026-05-25",
+        capabilities=RuntimeProtocolCapabilities(("lifecycle",)),
+        config_schema_version="v1",
+        metadata={"region": "local"},
+        auth_credential_id="credential-1",
+        connection_id="provider-connection-1",
+        owner_replica_id="control-a",
+    )
+
+
+def _runner_registration() -> RuntimeRunnerRegistration:
+    return RuntimeRunnerRegistration(
+        runtime_id="runtime-1",
+        runner_id="runner-1",
+        protocol_version="2026-05-25",
+        capabilities=RuntimeProtocolCapabilities(("bash", "files")),
+        health="ok",
+        workspace_path="/workspace/agent",
+        metadata={"image": "runner:v1"},
+        auth_credential_id="credential-1",
+        connection_id="runner-connection-1",
+        owner_replica_id="control-a",
+    )
+
+
+def _runner_operation(*, generation: int, now: datetime) -> RuntimeRunnerOperation:
+    return RuntimeRunnerOperation(
+        runtime_id="runtime-1",
+        runner_generation=generation,
+        operation_type="bash",
+        payload={"command": "pwd"},
+        deadline_at=now + timedelta(seconds=30),
+        body_stream_id=None,
+        background=False,
+    )
+
+
+def _reply(
+    request_id: str,
+    generation: int,
+    event_type: RuntimeReplyEventType,
+    *,
+    final: bool = False,
+) -> RuntimeReplyEvent:
+    return RuntimeReplyEvent(
+        request_id=request_id,
+        runtime_id="runtime-1",
+        generation=generation,
+        event_type=event_type,
+        payload={"ok": True},
+        created_at=_now(),
+        final=final,
+    )
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)

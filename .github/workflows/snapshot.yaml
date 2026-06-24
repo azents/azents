@@ -1,0 +1,169 @@
+name: Snapshot
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: snapshot-main
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: azents
+
+jobs:
+  build:
+    name: build-snapshot-${{ matrix.component }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: server
+            package: azents-server-snapshot
+            dockerfile: azents.Dockerfile
+            extra_context: ""
+          - component: web
+            package: azents-web-snapshot
+            dockerfile: azents-web.Dockerfile
+            extra_context: "--build-context next-cache=/tmp/next-cache"
+          - component: admin-web
+            package: azents-admin-web-snapshot
+            dockerfile: azents-admin-web.Dockerfile
+            extra_context: "--build-context next-cache=/tmp/next-cache"
+          - component: runtime-runner
+            package: azents-runtime-runner-snapshot
+            dockerfile: python/apps/azents-runtime-runner/Dockerfile
+            extra_context: ""
+          - component: runtime-provider-kubernetes
+            package: azents-runtime-provider-kubernetes-snapshot
+            dockerfile: python/apps/azents-runtime-provider-kubernetes/Dockerfile
+            extra_context: ""
+          - component: runtime-provider-docker
+            package: azents-runtime-provider-docker-snapshot
+            dockerfile: python/apps/azents-runtime-provider-docker/Dockerfile
+            extra_context: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Login to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Prepare image metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::12}"
+          date_tag="$(date -u +%Y%m%d)"
+          unique_tag="dev-main-${date_tag}-${short_sha}"
+          sha_tag="sha-${GITHUB_SHA}"
+          run_tag="run-${GITHUB_RUN_ID}"
+          image="${REGISTRY}/${OWNER}/${{ matrix.package }}"
+          {
+            printf 'image=%s\n' "$image"
+            printf 'version=%s\n' "$unique_tag"
+            printf 'unique_tag=%s\n' "$unique_tag"
+            printf 'sha_tag=%s\n' "$sha_tag"
+            printf 'run_tag=%s\n' "$run_tag"
+          } >> "$GITHUB_OUTPUT"
+      - name: Prepare empty Next.js cache context
+        run: mkdir -p /tmp/next-cache/next-cache
+      - name: Build and push snapshot image
+        run: |
+          set -euo pipefail
+          mkdir -p image-metadata
+          docker buildx build \
+            --push \
+            --provenance=true \
+            --sbom=true \
+            --metadata-file /tmp/build-metadata.json \
+            ${{ matrix.extra_context }} \
+            --label "org.opencontainers.image.source=https://github.com/azents/azents" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${{ steps.meta.outputs.version }}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "org.opencontainers.image.title=${{ matrix.component }}" \
+            --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.unique_tag }}" \
+            --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha_tag }}" \
+            --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.run_tag }}" \
+            --tag "${{ steps.meta.outputs.image }}:dev-main" \
+            -f "${{ matrix.dockerfile }}" \
+            .
+          digest="$(jq -r '."containerimage.digest"' /tmp/build-metadata.json)"
+          jq -n \
+            --arg component "${{ matrix.component }}" \
+            --arg package "${{ matrix.package }}" \
+            --arg image "${{ steps.meta.outputs.image }}" \
+            --arg unique_tag "${{ steps.meta.outputs.unique_tag }}" \
+            --arg sha_tag "${{ steps.meta.outputs.sha_tag }}" \
+            --arg run_tag "${{ steps.meta.outputs.run_tag }}" \
+            --arg digest "$digest" \
+            '{component: $component, package: $package, image: $image, uniqueTag: $unique_tag, shaTag: $sha_tag, runTag: $run_tag, movingTag: "dev-main", digest: $digest}' \
+            > "image-metadata/${{ matrix.component }}.json"
+      - name: Upload image metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-metadata-${{ matrix.component }}
+          path: image-metadata/${{ matrix.component }}.json
+          if-no-files-found: error
+
+  dispatch:
+    name: downstream-dispatch
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      HAS_DOWNSTREAM_TOKEN: ${{ secrets.DOWNSTREAM_DEPLOY_TOKEN != '' }}
+      DOWNSTREAM_REPOSITORY: ${{ vars.DOWNSTREAM_DEPLOY_REPOSITORY }}
+      DOWNSTREAM_EVENT_TYPE: ${{ vars.DOWNSTREAM_DEPLOY_EVENT_TYPE || 'azents_snapshot_published' }}
+    steps:
+      - name: Download image metadata
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          pattern: image-metadata-*
+          path: image-metadata
+          merge-multiple: true
+      - name: Build snapshot payload
+        run: |
+          set -euo pipefail
+          jq -s \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg ref "$GITHUB_REF" \
+            --arg sha "$GITHUB_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            '{repository: $repository, ref: $ref, sha: $sha, runId: $run_id, images: .}' \
+            image-metadata/*.json > snapshot-payload.json
+          jq -n \
+            --arg event_type "$DOWNSTREAM_EVENT_TYPE" \
+            --slurpfile client_payload snapshot-payload.json \
+            '{event_type: $event_type, client_payload: $client_payload[0]}' \
+            > dispatch-body.json
+          cat snapshot-payload.json
+      - name: Dispatch downstream deployment
+        if: env.HAS_DOWNSTREAM_TOKEN == 'true' && env.DOWNSTREAM_REPOSITORY != ''
+        env:
+          GH_TOKEN: ${{ secrets.DOWNSTREAM_DEPLOY_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/repos/${DOWNSTREAM_REPOSITORY}/dispatches" \
+            --input dispatch-body.json
+      - name: Skip downstream dispatch
+        if: env.HAS_DOWNSTREAM_TOKEN != 'true' || env.DOWNSTREAM_REPOSITORY == ''
+        run: echo "Downstream dispatch is not configured; snapshot artifacts were still published."

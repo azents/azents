@@ -1,0 +1,90 @@
+### Project ###
+
+**/.env
+**/.env.*
+!**/.env.example
+
+### git ###
+**/.git/**
+**/.gitignore
+
+### CI/CD ###
+**/.github/**
+.pre-commit-config.yaml
+
+### Visual Studio Code ###
+**/.vscode/**
+
+### Python ###
+
+# virtual environments (각 앱의 .venv 폴더)
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+# mypy cache
+**/.dmypy.json
+**/.mypy_cache
+.mypy_cache
+# pytest cache
+**/.pytest_cache
+.pytest_cache
+# ruff cache
+**/.ruff_cache
+.ruff_cache
+# coverage
+**/.coverage
+**/htmlcov
+# Python eggs
+**/*.egg-info
+**/*.egg
+
+### Node.js ###
+node_modules
+**/node_modules
+**/pnpm-lock.yaml
+!typescript/pnpm-lock.yaml
+**/.next
+**/dist
+**/build
+**/.turbo
+.turbo
+
+### Terraform & Infrastructure ###
+infra/**
+**/.terraform/**
+**/.terragrunt-cache/**
+**/*.tfstate
+**/*.tfstate.*
+
+### AI Agent docs (broken symlinks cause Docker build failures) ###
+**/CLAUDE.md
+**/AGENTS.md
+
+### Docker ###
+**/Dockerfile*
+**/.dockerignore
+
+### Build artifacts & Standalone apps ###
+# ECS task definitions
+ecs
+ecs/**
+# Obsidian
+.obsidian
+.obsidian/**
+
+### Logs ###
+**/*.log
+**/logs/**
+
+### IDE ###
+**/.idea/**
+**/.DS_Store
+
+### Temporary files ###
+**/tmp/**
+**/temp/**
+**/.cache/**

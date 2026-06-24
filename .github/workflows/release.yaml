@@ -1,0 +1,265 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v0.1.0 or v0.2.0-rc.1"
+        required: true
+        type: string
+      channel:
+        description: "Release channel"
+        required: true
+        type: choice
+        options:
+          - stable
+          - prerelease
+
+permissions:
+  contents: write
+  packages: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: azents
+
+jobs:
+  validate:
+    name: validate-release
+    runs-on: ubuntu-latest
+    environment: release
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      chart_version: ${{ steps.validate.outputs.chart_version }}
+      major: ${{ steps.validate.outputs.major }}
+      minor: ${{ steps.validate.outputs.minor }}
+      prerelease: ${{ steps.validate.outputs.prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+      - name: Validate version, channel, chart lockstep
+        id: validate
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid SemVer tag: $VERSION" >&2
+            exit 1
+          fi
+          prerelease=false
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease=true
+          fi
+          if [ "$CHANNEL" = 'stable' ] && [ "$prerelease" = 'true' ]; then
+            echo 'Stable releases must not use prerelease versions.' >&2
+            exit 1
+          fi
+          if [ "$CHANNEL" = 'prerelease' ] && [ "$prerelease" != 'true' ]; then
+            echo 'Prerelease channel requires a prerelease SemVer version.' >&2
+            exit 1
+          fi
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag already exists: $VERSION" >&2
+            exit 1
+          fi
+          chart_version="${VERSION#v}"
+          python - <<'PY' "$chart_version"
+          import sys
+          from pathlib import Path
+          import yaml
+
+          expected = sys.argv[1]
+          chart = yaml.safe_load(Path('infra/charts/azents/Chart.yaml').read_text())
+          actual_version = str(chart['version'])
+          actual_app_version = str(chart['appVersion'])
+          if actual_version != expected or actual_app_version != expected:
+              raise SystemExit(
+                  f'Chart version/appVersion must both be {expected}; '
+                  f'got version={actual_version} appVersion={actual_app_version}'
+              )
+          PY
+          version_core="${VERSION#v}"
+          version_core="${version_core%%-*}"
+          IFS=. read -r major minor patch <<< "$version_core"
+          {
+            printf 'version=%s\n' "$VERSION"
+            printf 'chart_version=%s\n' "$chart_version"
+            printf 'major=v%s\n' "$major"
+            printf 'minor=v%s.%s\n' "$major" "$minor"
+            printf 'prerelease=%s\n' "$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build-release-${{ matrix.component }}
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: server
+            package: azents-server
+            dockerfile: azents.Dockerfile
+            extra_context: ""
+          - component: web
+            package: azents-web
+            dockerfile: azents-web.Dockerfile
+            extra_context: "--build-context next-cache=/tmp/next-cache"
+          - component: admin-web
+            package: azents-admin-web
+            dockerfile: azents-admin-web.Dockerfile
+            extra_context: "--build-context next-cache=/tmp/next-cache"
+          - component: runtime-runner
+            package: azents-runtime-runner
+            dockerfile: python/apps/azents-runtime-runner/Dockerfile
+            extra_context: ""
+          - component: runtime-provider-kubernetes
+            package: azents-runtime-provider-kubernetes
+            dockerfile: python/apps/azents-runtime-provider-kubernetes/Dockerfile
+            extra_context: ""
+          - component: runtime-provider-docker
+            package: azents-runtime-provider-docker
+            dockerfile: python/apps/azents-runtime-provider-docker/Dockerfile
+            extra_context: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Login to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Prepare empty Next.js cache context
+        run: mkdir -p /tmp/next-cache/next-cache
+      - name: Build and push release image
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          CHART_VERSION: ${{ needs.validate.outputs.chart_version }}
+          MAJOR_TAG: ${{ needs.validate.outputs.major }}
+          MINOR_TAG: ${{ needs.validate.outputs.minor }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          mkdir -p image-metadata
+          tags=(--tag "${IMAGE}:${VERSION}")
+          if [ "$PRERELEASE" != 'true' ]; then
+            tags+=(--tag "${IMAGE}:${MINOR_TAG}" --tag "${IMAGE}:${MAJOR_TAG}" --tag "${IMAGE}:latest")
+          fi
+          docker buildx build \
+            --push \
+            --provenance=true \
+            --sbom=true \
+            --metadata-file /tmp/build-metadata.json \
+            ${{ matrix.extra_context }} \
+            --label "org.opencontainers.image.source=https://github.com/azents/azents" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${VERSION}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "org.opencontainers.image.title=${{ matrix.component }}" \
+            "${tags[@]}" \
+            -f "${{ matrix.dockerfile }}" \
+            .
+          digest="$(jq -r '."containerimage.digest"' /tmp/build-metadata.json)"
+          jq -n \
+            --arg component "${{ matrix.component }}" \
+            --arg package "${{ matrix.package }}" \
+            --arg image "$IMAGE" \
+            --arg version "$VERSION" \
+            --arg digest "$digest" \
+            '{component: $component, package: $package, image: $image, version: $version, digest: $digest}' \
+            > "image-metadata/${{ matrix.component }}.json"
+      - name: Upload image metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-image-metadata-${{ matrix.component }}
+          path: image-metadata/${{ matrix.component }}.json
+          if-no-files-found: error
+
+  publish-chart:
+    name: publish-helm-chart
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Setup Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Login Helm to GHCR
+        run: echo "${{ github.token }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - name: Package and push chart
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/azents-chart
+          helm package infra/charts/azents --destination /tmp/azents-chart
+          helm push "/tmp/azents-chart/azents-${{ needs.validate.outputs.chart_version }}.tgz" oci://ghcr.io/azents/charts
+
+  github-release:
+    name: github-release
+    needs:
+      - validate
+      - build
+      - publish-chart
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+      - name: Download image metadata
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          pattern: release-image-metadata-*
+          path: image-metadata
+          merge-multiple: true
+      - name: Build release notes
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          CHART_VERSION: ${{ needs.validate.outputs.chart_version }}
+        run: |
+          set -euo pipefail
+          {
+            printf '# Azents %s\n\n' "$VERSION"
+            printf '## Images\n\n'
+            jq -rsr '. | sort_by(.component)[] | "- `\(.image):\(.version)`\n  - digest: `\(.digest)`"' image-metadata/*.json
+            printf '\n## Helm chart\n\n'
+            printf '- `oci://ghcr.io/azents/charts/azents:%s`\n\n' "$CHART_VERSION"
+            printf '## Provenance and SBOM\n\n'
+            printf 'Image provenance and SBOM attestations are available through GHCR/GitHub attestations.\n'
+          } > release-notes.md
+          cat release-notes.md
+      - name: Create Git tag
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          git tag "$VERSION" "$GITHUB_SHA"
+          git push origin "refs/tags/$VERSION"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          args=("$VERSION" --verify-tag --title "Azents $VERSION" --notes-file release-notes.md)
+          if [ "$PRERELEASE" = 'true' ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}"

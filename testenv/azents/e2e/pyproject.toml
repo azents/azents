@@ -1,0 +1,59 @@
+[project]
+name = "azents-e2e"
+version = "0.1.0"
+description = "Azents E2E Tests"
+requires-python = ">=3.14"
+dependencies = [
+    "requests==2.34.0",
+    "websockets==16.0",
+    "boto3==1.40.61",
+    "types-boto3[s3]==1.43.0",
+    "pytest==9.0.3",
+    "testcontainers[postgres]==4.14.0",
+    "docker==7.1.0",
+    "python-on-whales==0.81.0",
+    "redis==7.1.0",
+    # local dependencies
+    "az-common",
+    "azents-admin-client",
+    "azents-public-client",
+    # type stubs
+    "types-requests==2.33.0.20260327",
+    "types-docker==7.1.0.20260109",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.5",
+    "pyright>=1.1.400",
+]
+
+[tool.uv]
+package = false
+resolution = "lowest-direct"
+
+[tool.uv.sources]
+az-common = { path = "../../../python/libs/az-common", editable = true }
+azents-admin-client = { path = "../../../python/libs/azents-admin-client", editable = true }
+azents-public-client = { path = "../../../python/libs/azents-public-client", editable = true }
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "T", "PGH003"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = "none"
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "live_external: requires external credentials or live third-party services",
+    "runtime_provider: requires an agent runtime provider connection",
+]

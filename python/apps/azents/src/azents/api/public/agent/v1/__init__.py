@@ -1,0 +1,761 @@
+"""Agent v1 Public API.
+
+Workspace-scoped Agent CRUD and Admin management endpoints.
+"""
+
+from textwrap import dedent
+from typing import Annotated, assert_never
+
+from azcommon.result import Failure, Success
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from azents.core.auth.deps import WorkspaceMember, get_workspace_member
+from azents.repos.agent.data import NotFound
+from azents.repos.agent_subagent.data import DuplicateAgentSubagent
+from azents.repos.agent_subagent.data import NotFound as AgentSubagentNotFound
+from azents.services.agent import AgentService
+from azents.services.agent.data import (
+    AdminNotFound,
+    AgentCreateInput,
+    AgentUpdateInput,
+    AvatarUploadRejected,
+    BuiltinToolValidationFailed,
+    DuplicateAdmin,
+    InvalidModelParameters,
+    LastAdminCannotBeRemoved,
+    ModelRequired,
+    ModelSelectionNotFound,
+    NotAdmin,
+    NotBelongToWorkspace,
+    PrivateAgentAccessDenied,
+    WorkspaceUserNotFound,
+)
+from azents.services.agent_subagent import AgentSubagentService
+from azents.services.agent_subagent.data import (
+    AgentNotFound,
+    AgentSubagentCreateInput,
+    CrossWorkspace,
+    InvalidAgentRole,
+    SubagentNotFound,
+)
+from azents.utils.fastapi.route import RouteMounter
+
+from .data import (
+    AgentAdminAddRequest,
+    AgentAdminListResponse,
+    AgentAdminResponse,
+    AgentCreateRequest,
+    AgentListResponse,
+    AgentResponse,
+    AgentSubagentCreateRequest,
+    AgentSubagentListResponse,
+    AgentSubagentResponse,
+    AgentSubagentUpdateRequest,
+    AgentUpdateRequest,
+    AvatarFinalizeRequest,
+    AvatarUploadRequest,
+    AvatarUploadTicketResponse,
+)
+
+router = APIRouter()
+
+
+# --- Agent CRUD ---
+
+
+@router.post(
+    "/workspaces/{handle}/agents",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_agent(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    request_body: AgentCreateRequest,
+) -> AgentResponse:
+    """Create an Agent.
+
+    Any workspace member can create one.
+    The creator is automatically registered as the first administrator.
+    """
+    create_input = AgentCreateInput(
+        workspace_id=member.workspace_id,
+        name=request_body.name,
+        model_selection=request_body.model_selection,
+        lightweight_model_selection=request_body.lightweight_model_selection,
+        description=request_body.description,
+        model_parameters=request_body.model_parameters,
+        system_prompt=request_body.system_prompt,
+        enabled=request_body.enabled,
+        type=request_body.type,
+        role=request_body.role,
+        runtime_provider_id=request_body.runtime_provider_id,
+        shell_enabled=request_body.shell_enabled,
+        memory_enabled=request_body.memory_enabled,
+        max_turns=request_body.max_turns,
+    )
+    result = await service.create(
+        create_input, creator_workspace_user_id=member.workspace_user_id
+    )
+    match result:
+        case Success(value):
+            return AgentResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case BuiltinToolValidationFailed(errors=bt_errors):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "message": "Built-in tool validation failed",
+                            "builtin_tool_errors": bt_errors,
+                        },
+                    )
+                case ModelRequired():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Select a model before saving this agent.",
+                    )
+                case ModelSelectionNotFound():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Selected model was not found.",
+                    )
+                case InvalidModelParameters(errors=errors):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "message": "Invalid model parameters.",
+                            "errors": errors,
+                        },
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/workspaces/{handle}/agents")
+async def list_agents(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+) -> AgentListResponse:
+    """List Agents in a workspace.
+
+    Any workspace member can list Agents.
+    Public Agents are visible to everyone; private Agents are visible only to
+    administrators and owners.
+    """
+    result = await service.list_by_workspace(
+        member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    return AgentListResponse(
+        items=[AgentResponse.convert_from(a) for a in result.items]
+    )
+
+
+@router.get("/workspaces/{handle}/agents/{agent_id}")
+async def get_agent(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    agent_id: str,
+) -> AgentResponse:
+    """Get Agent details.
+
+    Any workspace member can view them.
+    Private Agents are visible only to administrators and owners.
+    """
+    result = await service.get_by_id(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    match result:
+        case Success(value):
+            return AgentResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+def _build_agent_update_input(
+    request_body: AgentUpdateRequest,
+) -> AgentUpdateInput:
+    """Convert an API request to the service input model.
+
+    Distinguish missing fields from null values by TypedDict key presence.
+
+    :param request_body: Request body
+    :return: AgentUpdateInput containing only explicit fields
+    """
+    result = AgentUpdateInput()
+
+    # Simple one-to-one mapping fields
+    if "name" in request_body:
+        result["name"] = request_body["name"]
+    if "description" in request_body:
+        result["description"] = request_body["description"]
+    if "model_selection" in request_body:
+        result["model_selection"] = request_body["model_selection"]
+    if "lightweight_model_selection" in request_body:
+        result["lightweight_model_selection"] = request_body[
+            "lightweight_model_selection"
+        ]
+    if "model_parameters" in request_body:
+        result["model_parameters"] = request_body["model_parameters"]
+    if "system_prompt" in request_body:
+        result["system_prompt"] = request_body["system_prompt"]
+    if "enabled" in request_body:
+        result["enabled"] = request_body["enabled"]
+    if "type" in request_body:
+        result["type"] = request_body["type"]
+    if "role" in request_body:
+        result["role"] = request_body["role"]
+
+    if "runtime_provider_id" in request_body:
+        result["runtime_provider_id"] = request_body["runtime_provider_id"]
+    if "shell_enabled" in request_body:
+        result["shell_enabled"] = request_body["shell_enabled"]
+
+    # Memory
+    if "memory_enabled" in request_body:
+        result["memory_enabled"] = request_body["memory_enabled"]
+    if "max_turns" in request_body:
+        result["max_turns"] = request_body["max_turns"]
+
+    return result
+
+
+@router.patch("/workspaces/{handle}/agents/{agent_id}")
+async def update_agent(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    agent_id: str,
+    request_body: AgentUpdateRequest,
+) -> AgentResponse:
+    """Update an Agent.
+
+    Only administrators or workspace owners can update it.
+    """
+    # PATCH rule: distinguish missing fields from null values by TypedDict key presence.
+    # Missing keys are not updated; None values update fields to null.
+    update_input = _build_agent_update_input(request_body)
+    result = await service.update_by_id(
+        agent_id,
+        update_input,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    match result:
+        case Success(value):
+            return AgentResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage this agent.",
+                    )
+                case BuiltinToolValidationFailed(errors=bt_errors):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "message": "Built-in tool validation failed",
+                            "builtin_tool_errors": bt_errors,
+                        },
+                    )
+                case ModelRequired():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Select a model before saving this agent.",
+                    )
+                case ModelSelectionNotFound():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Selected model was not found.",
+                    )
+                case InvalidModelParameters(errors=errors):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "message": "Invalid model parameters.",
+                            "errors": errors,
+                        },
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.delete(
+    "/workspaces/{handle}/agents/{agent_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_agent(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    agent_id: str,
+) -> None:
+    """Delete an Agent.
+
+    Only administrators or workspace owners can delete it.
+    """
+    result = await service.delete_by_id(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    match result:
+        case Success():
+            return
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage this agent.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+# --- Avatar ---
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}/avatar/upload-url",
+)
+async def request_avatar_upload(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    agent_id: str,
+    request_body: AvatarUploadRequest,
+) -> AvatarUploadTicketResponse:
+    """Issue a presigned PUT ticket for avatar upload.
+
+    Only administrators or workspace owners can do this. The ticket TTL is the
+    server constant of 10 minutes. The client uploads the file directly with a
+    PUT request to the issued `upload_url`, then calls the `finalize` endpoint.
+    """
+    result = await service.request_avatar_upload(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+        content_type=request_body.content_type,
+        content_length=request_body.content_length,
+    )
+    match result:
+        case Success(value):
+            return AvatarUploadTicketResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage avatar.",
+                    )
+                case AvatarUploadRejected(message=message):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=message,
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}/avatar/finalize",
+)
+async def finalize_avatar(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    agent_id: str,
+    request_body: AvatarFinalizeRequest,
+) -> AgentResponse:
+    """Validate and resize the uploaded file, then apply it to the Agent.
+
+    The server downloads the actual bytes from S3 and reruns handler validation,
+    so it does not trust the client-reported size/type. On success, returns an
+    `AgentResponse` containing the new thumbnail URL.
+    """
+    result = await service.finalize_avatar(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+        upload_key=request_body.upload_key,
+        filename=request_body.filename,
+    )
+    match result:
+        case Success(value):
+            return AgentResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage avatar.",
+                    )
+                case AvatarUploadRejected(message=message):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=message,
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.delete(
+    "/workspaces/{handle}/agents/{agent_id}/avatar",
+)
+async def remove_avatar(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    agent_id: str,
+) -> AgentResponse:
+    """Remove an Agent avatar.
+
+    Only administrators or workspace owners can do this. Existing thumbnails in
+    S3 are deleted best-effort, and garbage-collected by Lifecycle on failure.
+    """
+    result = await service.remove_avatar(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    match result:
+        case Success(value):
+            return AgentResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage avatar.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+# --- Agent Admin ---
+
+
+@router.get("/workspaces/{handle}/agents/{agent_id}/admins")
+async def list_agent_admins(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    agent_id: str,
+) -> AgentAdminListResponse:
+    """List Agent administrators.
+
+    Any workspace member can view them.
+    """
+    result = await service.list_admins(agent_id, workspace_id=member.workspace_id)
+    match result:
+        case Success(value):
+            return AgentAdminListResponse(
+                items=[AgentAdminResponse.convert_from(a) for a in value.items]
+            )
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}/admins",
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_agent_admin(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    agent_id: str,
+    request_body: AgentAdminAddRequest,
+) -> AgentAdminResponse:
+    """Add an administrator to an Agent.
+
+    Only existing administrators or workspace owners can add one.
+    """
+    result = await service.add_admin(
+        agent_id,
+        request_body.workspace_user_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    match result:
+        case Success(value):
+            return AgentAdminResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage this agent.",
+                    )
+                case DuplicateAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Already registered as an administrator.",
+                    )
+                case WorkspaceUserNotFound():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Workspace member not found.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.delete(
+    "/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_agent_admin(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentService, Depends()],
+    *,
+    agent_id: str,
+    admin_workspace_user_id: str,
+) -> None:
+    """Remove an administrator from an Agent.
+
+    Only existing administrators or workspace owners can remove one.
+    The last administrator cannot be removed.
+    """
+    result = await service.remove_admin(
+        agent_id,
+        admin_workspace_user_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    match result:
+        case Success():
+            return
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage this agent.",
+                    )
+                case LastAdminCannotBeRemoved():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="The last administrator cannot be removed.",
+                    )
+                case AdminNotFound():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="That member is not an administrator.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+# --- Agent Subagent ---
+
+
+@router.get("/workspaces/{handle}/agents/{agent_id}/subagents")
+async def list_agent_subagents(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentSubagentService, Depends()],
+    *,
+    agent_id: str,
+) -> AgentSubagentListResponse:
+    """List an Agent's subagent links."""
+    result = await service.list_by_agent(agent_id)
+    return AgentSubagentListResponse(
+        items=[AgentSubagentResponse.convert_from(item) for item in result.items]
+    )
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}/subagents",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_agent_subagent(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentSubagentService, Depends()],
+    *,
+    agent_id: str,
+    request_body: AgentSubagentCreateRequest,
+) -> AgentSubagentResponse:
+    """Add a subagent link to an Agent."""
+    create_input = AgentSubagentCreateInput(
+        agent_id=agent_id,
+        subagent_id=request_body.subagent_id,
+        description=request_body.description,
+        enabled=request_body.enabled,
+    )
+    result = await service.create(create_input)
+    match result:
+        case Success(value):
+            return AgentSubagentResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case AgentNotFound():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent not found.",
+                    )
+                case SubagentNotFound():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Subagent not found.",
+                    )
+                case InvalidAgentRole():
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Invalid agent role for this operation.",
+                    )
+                case CrossWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Agent and subagent must belong to the same workspace.",
+                    )
+                case DuplicateAgentSubagent():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="This subagent connection already exists.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.patch("/workspaces/{handle}/agents/{agent_id}/subagents/{agent_subagent_id}")
+async def update_agent_subagent(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentSubagentService, Depends()],
+    *,
+    agent_id: str,
+    agent_subagent_id: str,
+    request_body: AgentSubagentUpdateRequest,
+) -> AgentSubagentResponse:
+    """Update a subagent link."""
+    result = await service.update(agent_subagent_id, request_body)
+    match result:
+        case Success(value):
+            return AgentSubagentResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case AgentSubagentNotFound():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Agent subagent connection not found.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.delete(
+    "/workspaces/{handle}/agents/{agent_id}/subagents/{agent_subagent_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_agent_subagent(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[AgentSubagentService, Depends()],
+    *,
+    agent_id: str,
+    agent_subagent_id: str,
+) -> None:
+    """Delete a subagent link."""
+    await service.delete(agent_subagent_id)
+
+
+def mount(mounter: RouteMounter) -> None:
+    """Mount Agent v1 routes."""
+    mounter(
+        router,
+        prefix="/agent/v1",
+        tag="Agent v1",
+        description=dedent(
+            """
+            Agent API (Public)
+
+            Workspace-scoped Agent CRUD and administrator management endpoints.
+            """
+        ),
+    )

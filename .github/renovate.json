@@ -1,0 +1,85 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "security"
+    ]
+  },
+  "osvVulnerabilityAlerts": true,
+  "minimumReleaseAge": "7 days",
+  "pre-commit": {
+    "enabled": true
+  },
+  "prHourlyLimit": 5,
+  "prConcurrentLimit": 10,
+  "prCreation": "status-success",
+  "packageRules": [
+    {
+      "description": "Ignore patch version updates",
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Disable boto3 updates until aioboto3 supports newer versions",
+      "matchPackageNames": [
+        "boto3"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Disable Python version updates",
+      "matchDepNames": [
+        "python",
+        "cpython"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Keep @types/node on the Node.js 24 major used by the TypeScript workspace",
+      "matchPackageNames": [
+        "@types/node"
+      ],
+      "allowedVersions": "/^24\\./"
+    },
+    {
+      "description": "Pin litellm until the prompt caching regression is resolved upstream.",
+      "matchPackageNames": [
+        "litellm"
+      ],
+      "enabled": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update globally installed turbo in frontend Dockerfiles together with the TypeScript workspace dependency.",
+      "managerFilePatterns": [
+        "/(^|/).+Dockerfile$/"
+      ],
+      "matchStrings": [
+        "npm install -g (?<depName>turbo)@(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "npm"
+    }
+  ],
+  "enabledManagers": [
+    "pep621",
+    "npm",
+    "github-actions",
+    "pre-commit",
+    "dockerfile",
+    "docker-compose"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true
+  }
+}

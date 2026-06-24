@@ -1,0 +1,25 @@
+{
+  "name": "@azents/public-client",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/api-client.ts",
+  "types": "./src/api-client.ts",
+  "exports": {
+    ".": {
+      "types": "./src/api-client.ts",
+      "default": "./src/api-client.ts"
+    }
+  },
+  "scripts": {
+    "generate": "openapi-ts",
+    "build": "echo 'No build step required'",
+    "typecheck": "pnpm run generate && tsc --noEmit",
+    "format": "prettier --write 'src/**/*.ts' --ignore-path .gitignore",
+    "format:check": "prettier --check 'src/**/*.ts' --ignore-path .gitignore",
+    "clean": "rm -rf src/generated"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "^0.97.0",
+    "typescript": "^6.0.0"
+  }
+}

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# gh CLI 래퍼 — config.yaml이 있으면 GitHub App 토큰을 자동 주입하고,
+# 없으면 일반 gh처럼 동작한다.
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+
+# 래퍼 자신을 제외한 실제 gh 경로 찾기
+# codingbot/bin 디렉토리는 worktree마다 별도 경로를 가지므로
+# 패턴 매칭으로 모든 래퍼 디렉토리를 건너뛴다
+REAL_GH=""
+IFS=: read -ra PATH_DIRS <<< "$PATH"
+for dir in "${PATH_DIRS[@]}"; do
+    if [[ "$dir" == */codingbot/bin ]] || [[ "$dir" == */codingbot/bin/ ]]; then
+        continue
+    fi
+    if [[ -x "$dir/gh" ]]; then
+        REAL_GH="$dir/gh"
+        break
+    fi
+done
+
+if [[ -z "$REAL_GH" ]]; then
+    echo "Error: gh CLI not found outside of runner wrapper" >&2
+    exit 1
+fi
+
+# config.yaml 경로 찾기 (git worktree list로 main worktree 찾기)
+if [[ -z "${CODINGBOT_CONFIG:-}" ]]; then
+    CODINGBOT_CONFIG="$(git config --get codingbot.config 2>/dev/null || true)"
+fi
+if [[ -z "${CODINGBOT_CONFIG:-}" ]]; then
+    MAIN_WORKTREE="$(git worktree list --porcelain 2>/dev/null | head -1 | sed 's/^worktree //')"
+    if [[ -n "$MAIN_WORKTREE" && -f "$MAIN_WORKTREE/python/apps/codingbot/config.yaml" ]]; then
+        CODINGBOT_CONFIG="$MAIN_WORKTREE/python/apps/codingbot/config.yaml"
+    fi
+fi
+
+# config.yaml이 없으면 일반 gh로 passthrough
+if [[ -z "${CODINGBOT_CONFIG:-}" || ! -f "${CODINGBOT_CONFIG}" ]]; then
+    exec "$REAL_GH" "$@"
+fi
+
+infer_repo_from_url() {
+    local url="$1"
+    local slug=""
+
+    case "$url" in
+        https://github.com/*)
+            slug="${url#https://github.com/}"
+            ;;
+        https://*@github.com/*)
+            slug="${url#*github.com/}"
+            ;;
+        git@github.com:*)
+            slug="${url#git@github.com:}"
+            ;;
+        ssh://git@github.com/*)
+            slug="${url#ssh://git@github.com/}"
+            ;;
+    esac
+
+    slug="${slug%.git}"
+    slug="${slug%/}"
+    if [[ "$slug" == */* ]]; then
+        printf '%s\n' "$slug"
+    fi
+}
+
+# REPO 미지정 시 worktree 에 저장된 session repo 를 기본값으로 사용한다.
+if [[ -z "${REPO:-}" ]]; then
+    REPO="$(git config --get codingbot.repo 2>/dev/null || true)"
+fi
+if [[ -z "${REPO:-}" ]]; then
+    ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+    if [[ -n "$ORIGIN_URL" ]]; then
+        REPO="$(infer_repo_from_url "$ORIGIN_URL")"
+    fi
+fi
+
+TOKEN=$(REPO="${REPO:-}" CODINGBOT_CONFIG="${CODINGBOT_CONFIG:-}" "$SCRIPT_DIR/gh-app-token")
+GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 REPO="${REPO:-}" GH_TOKEN="$TOKEN" exec "$REAL_GH" "$@"

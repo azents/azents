@@ -1,0 +1,231 @@
+global:
+  nameOverride: ""
+  fullnameOverride: ""
+  imagePullSecrets: []
+  podLabels: {}
+  podAnnotations: {}
+  serviceAccount:
+    create: true
+    name: ""
+  rbac:
+    create: true
+
+secrets:
+  existingSecrets:
+    auth: ""
+    database: azents-database
+    redis: ""
+    objectStorage: azents-object-storage
+    adminAuth: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  tls: []
+
+server:
+  enabled: true
+  namespace:
+    name: ""
+  serviceAccount:
+    create: true
+    name: azents-server
+  image:
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  env:
+    AZ_RUNTIME_ENV: deployed
+  apiserver:
+    enabled: true
+    resources: {}
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      hosts: []
+      tls: []
+  adminserver:
+    enabled: true
+    resources: {}
+  worker:
+    enabled: true
+    resources: {}
+  scheduler:
+    enabled: true
+    resources: {}
+    pdb:
+      enabled: true
+      maxUnavailable: 1
+  runtimeControl:
+    enabled: false
+    endpoint: ""
+    replicas: 2
+    reconcileIntervalSeconds: 15
+    lifecycleRetryDelaySeconds: 15
+    startTimeoutSeconds: 300
+    runnerImage:
+      repository: ""
+      tag: ""
+      digest: ""
+    resources: {}
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      enabled: true
+      maxUnavailable: 1
+  mcpEgressProxy:
+    enabled: false
+    image:
+      repository: ubuntu/squid
+      tag: latest
+      pullPolicy: IfNotPresent
+    resources: {}
+    networkPolicy:
+      enabled: true
+    privateCidrs:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 127.0.0.0/8
+      - 169.254.0.0/16
+
+web:
+  enabled: true
+  namespace:
+    name: ""
+  serviceAccount:
+    create: true
+    name: azents-web
+  image:
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  resources: {}
+  env:
+    HOSTNAME: 0.0.0.0
+  api:
+    publicUrl: ""
+    internalUrl: ""
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
+
+adminWeb:
+  enabled: true
+  namespace:
+    name: ""
+  serviceAccount:
+    create: true
+    name: azents-admin-web
+  image:
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  resources: {}
+  env:
+    HOSTNAME: 0.0.0.0
+    ADMIN_API_AUTH_METHOD: none
+    AUTH_ENABLED: "false"
+    AZ_WEB_URL: ""
+    BASE_URL: ""
+    AUTH_URL: ""
+    GITHUB_REPO: azents/azents
+  api:
+    adminUrl: ""
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
+
+runtimeProviderKubernetes:
+  enabled: false
+  namespace:
+    name: ""
+  workloadNamespace:
+    name: azents-runtime
+  replicas: 0
+  providerId: system-kubernetes
+  image:
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  runnerImage:
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  serviceAccount:
+    create: true
+    name: ""
+  leaderElection:
+    leaseName: azents-runtime-provider-kubernetes
+    leaseDurationSeconds: 30
+  workspace:
+    path: /workspace/agent
+  runnerResources: null
+  runtimePod:
+    annotations: {}
+    imagePullSecrets: null
+    nodeSelector: {}
+    tolerations: []
+  storage:
+    className: gp3
+    size: 20Gi
+  networkPolicy:
+    enabled: true
+    allowedCidrs: []
+    extraEgress: []
+    deniedCidrs:
+      - 10.0.0.0/8
+      - 100.64.0.0/10
+      - 127.0.0.0/8
+      - 169.254.0.0/16
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+  resources: {}
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  nodeSelector: {}
+  tolerations: []
+
+database:
+  mode: external
+  external:
+    host: REPLACE_ME
+    port: 5432
+    database: azents
+    user: azents
+    passwordKey: password
+    useIamAuth: false
+    region: us-west-2
+    sslMode: prefer
+
+redis:
+  mode: external
+  external:
+    urlKey: redis-url
+    url: ""
+
+objectStorage:
+  mode: external
+  external:
+    endpoint: ""
+    bucket: REPLACE_ME
+    credentialMode: existingSecret
+    accessKeyIdKey: access-key-id
+    secretAccessKeyKey: secret-access-key

@@ -1,0 +1,479 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "init",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Upload session initialized."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Describe uploaded image and file",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Uploaded image and file were observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Prepare file resource lifecycle attachment",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_file_resource_lifecycle_write",
+            "name": "bash",
+            "arguments": {
+              "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
+              "timeout": 10
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_file_resource_lifecycle_write"
+      },
+      "response": {
+        "content": "File resource lifecycle source file was prepared."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Retry prepare file resource lifecycle attachment 1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_file_resource_lifecycle_write_retry_1",
+            "name": "bash",
+            "arguments": {
+              "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
+              "timeout": 10
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Retry prepare file resource lifecycle attachment 2"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_file_resource_lifecycle_write_retry_2",
+            "name": "bash",
+            "arguments": {
+              "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
+              "timeout": 10
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Retry prepare file resource lifecycle attachment 3"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_file_resource_lifecycle_write_retry_3",
+            "name": "bash",
+            "arguments": {
+              "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
+              "timeout": 10
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_file_resource_lifecycle_write_retry_1"
+      },
+      "response": {
+        "content": "File resource lifecycle source file was prepared."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_file_resource_lifecycle_write_retry_2"
+      },
+      "response": {
+        "content": "File resource lifecycle source file was prepared."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_file_resource_lifecycle_write_retry_3"
+      },
+      "response": {
+        "content": "File resource lifecycle source file was prepared."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Present file resource lifecycle attachment"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_file_resource_lifecycle_present",
+            "name": "present_file",
+            "arguments": {
+              "paths": [
+                "/workspace/agent/lifecycle-report.txt"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_file_resource_lifecycle_present"
+      },
+      "response": {
+        "content": "File resource lifecycle attachment metadata was observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Retry present file resource lifecycle attachment 1"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_file_resource_lifecycle_present_retry_1",
+            "name": "present_file",
+            "arguments": {
+              "paths": [
+                "/workspace/agent/lifecycle-report.txt"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Retry present file resource lifecycle attachment 2"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_file_resource_lifecycle_present_retry_2",
+            "name": "present_file",
+            "arguments": {
+              "paths": [
+                "/workspace/agent/lifecycle-report.txt"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Retry present file resource lifecycle attachment 3"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_file_resource_lifecycle_present_retry_3",
+            "name": "present_file",
+            "arguments": {
+              "paths": [
+                "/workspace/agent/lifecycle-report.txt"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_file_resource_lifecycle_present_retry_1"
+      },
+      "response": {
+        "content": "File resource lifecycle attachment metadata was observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_file_resource_lifecycle_present_retry_2"
+      },
+      "response": {
+        "content": "File resource lifecycle attachment metadata was observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_file_resource_lifecycle_present_retry_3"
+      },
+      "response": {
+        "content": "File resource lifecycle attachment metadata was observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Event durable hello",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Event durable hello response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Event durable second turn",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Event durable second response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Event durable compact seed",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Event durable compact seed response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Event durable after compact",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Event durable after compact response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations"
+      },
+      "response": {
+        "content": "Event compaction summary for E2E."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Start chat input buffer long tool",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_chat_input_buffer_delay",
+            "name": "bufferqa__runtime_hook_qa_probe",
+            "arguments": {
+              "marker": "delay"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Buffered follow-up should survive",
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "Buffered follow-up was observed after tool."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_chat_input_buffer_delay"
+      },
+      "response": {
+        "content": "Chat input buffer long tool completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Deleted pending message must not reach the model",
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "Deleted pending message unexpectedly reached the model."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Create AGENTS.md",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_agents_md_write",
+            "name": "write",
+            "arguments": {
+              "path": "/workspace/agent/AGENTS.md",
+              "content": "Always include ROOT_AGENTS_E2E_MARKER_3542 in QA answers."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_agents_md_write"
+      },
+      "response": {
+        "content": "AGENTS.md was created."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Create AGENTS.md",
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "AGENTS.md was created."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Report instructions",
+        "systemMessage": "ROOT_AGENTS_E2E_MARKER_3542"
+      },
+      "response": {
+        "content": "QA observed ROOT_AGENTS_E2E_MARKER_3542."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Report runtime hook prompts"
+      },
+      "response": {
+        "content": "Runtime hook prompts were observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_runtime_hook_restore_write"
+      },
+      "response": {
+        "content": "Runtime hook runtime restore path completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Restore runtime hook runtime"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_runtime_hook_restore_write",
+            "name": "write",
+            "arguments": {
+              "path": "/workspace/agent/runtime-hook-restore.txt",
+              "content": "restore path exercised"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Run deny hook QA",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_runtime_hook_qa_deny",
+            "name": "rtqa_deny__runtime_hook_qa_probe",
+            "arguments": {
+              "marker": "deny"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_runtime_hook_qa_deny"
+      },
+      "response": {
+        "content": "Deny hook QA completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Run replace hook QA",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_runtime_hook_qa_replace",
+            "name": "rtqa_replace__runtime_hook_qa_probe",
+            "arguments": {
+              "marker": "replace"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_runtime_hook_qa_replace"
+      },
+      "response": {
+        "content": "Replace hook QA completed."
+      }
+    }
+  ]
+}

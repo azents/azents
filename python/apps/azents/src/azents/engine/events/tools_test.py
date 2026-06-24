@@ -1,0 +1,441 @@
+"""Event tool catalog tests."""
+
+import asyncio
+
+from pydantic import BaseModel
+
+from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
+from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
+from azents.engine.events.output_parts import (
+    TOOL_OUTPUT_TEXT_HARD_CAP_CHARS,
+    iter_output_parts,
+)
+from azents.engine.events.tools import (
+    ToolCatalogClientToolExecutor,
+    build_tool_catalog,
+    summarize_tool_arguments,
+)
+from azents.engine.events.types import (
+    AttachmentOutputPart,
+    ClientToolCallPayload,
+    NativeArtifact,
+    OutputTextPart,
+    build_native_compat_key,
+)
+from azents.engine.run.contracts import ToolkitBinding
+from azents.engine.run.types import (
+    FunctionTool,
+    FunctionToolCancelRequest,
+    FunctionToolResult,
+    FunctionToolSpec,
+)
+
+
+class _ToolkitConfig(BaseModel):
+    """Toolkit config for tests."""
+
+
+class _Toolkit(Toolkit[_ToolkitConfig]):
+    """Toolkit for tests."""
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return Tool state."""
+        del context
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            prompt="tool prompt",
+            tools=[
+                FunctionTool(
+                    spec=FunctionToolSpec(
+                        name="echo",
+                        description="Echo input.",
+                        input_schema={
+                            "type": "object",
+                            "properties": {"text": {"type": "string"}},
+                        },
+                    ),
+                    handler=_echo,
+                )
+            ],
+        )
+
+
+class _InlineToolkit(Toolkit[_ToolkitConfig]):
+    """Test toolkit returning a single FunctionTool."""
+
+    def __init__(self, tool: FunctionTool) -> None:
+        self._tool = tool
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return injected tool state."""
+        del context
+        return ToolkitState(status=ToolkitStatus.ENABLED, prompt="", tools=[self._tool])
+
+
+class _FunctionToolResultToolkit(Toolkit[_ToolkitConfig]):
+    """Toolkit for testing FunctionToolResult output part return."""
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return Tool state."""
+        del context
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            prompt="",
+            tools=[
+                FunctionTool(
+                    spec=FunctionToolSpec(
+                        name="legacy_result",
+                        description="Return structured legacy result.",
+                        input_schema={"type": "object"},
+                    ),
+                    handler=_legacy_result,
+                )
+            ],
+        )
+
+
+async def _echo(arguments: str) -> str:
+    """Echo handler."""
+    return arguments
+
+
+async def _legacy_result(arguments: str) -> FunctionToolResult:
+    """Return structured tool output part result."""
+    del arguments
+    return FunctionToolResult(
+        output=[
+            {"type": "text", "text": "created report"},
+            {
+                "type": "attachment",
+                "attachment_id": None,
+                "uri": "exchange://workspace/session/report.txt",
+                "name": "report.txt",
+                "media_type": "text/plain",
+                "size": 12,
+                "preview_summary": "preview",
+            },
+        ],
+    )
+
+
+async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
+    """Create prefixed function tool schema from Toolkit state."""
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_Toolkit(),
+                slug="demo",
+                use_prefix=True,
+            )
+        ],
+        context=TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    assert list(catalog.tools) == ["demo__echo"]
+    assert catalog.prompt_fragment_inputs[0].label == "demo"
+    assert catalog.prompt_fragment_inputs[0].content == "tool prompt"
+    assert catalog.native_tools[0]["name"] == "demo__echo"
+    assert catalog.native_tools[0]["strict"] is False
+
+    request = LiteLLMResponsesLowerer(
+        provider="openai",
+        model="gpt-5.1",
+        tools=catalog.native_tools,
+    ).lower([], model="gpt-5.1")
+    assert request.tools == catalog.native_tools
+
+
+async def test_client_tool_executor_returns_event_result() -> None:
+    """Convert Tool handler result to event client_tool_result."""
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(toolkit=_Toolkit(), slug="", use_prefix=False)
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    result = await ToolCatalogClientToolExecutor(catalog).execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="echo",
+            arguments='{"text":"hello"}',
+            native_artifact=_artifact(),
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.name == "echo"
+    assert result.output == '{"text":"hello"}'
+    parts = list(iter_output_parts(result.output))
+    assert isinstance(parts[0], OutputTextPart)
+    assert parts[0].text == '{"text":"hello"}'
+
+
+async def test_client_tool_executor_applies_global_text_output_cap() -> None:
+    """Tool executor applies global text hard cap to every tool result."""
+    long_output = "a" + "b" * TOOL_OUTPUT_TEXT_HARD_CAP_CHARS
+
+    async def handler(arguments: str) -> str:
+        del arguments
+        return long_output
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="long_output",
+                            description="Return long output.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=handler,
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    result = await ToolCatalogClientToolExecutor(catalog).execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="long_output",
+            arguments="{}",
+            native_artifact=_artifact(),
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.output == "... (truncated)\n" + "b" * TOOL_OUTPUT_TEXT_HARD_CAP_CHARS
+
+
+async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
+    """Structured output part also cannot bypass global text hard cap."""
+    long_output = "a" + "b" * TOOL_OUTPUT_TEXT_HARD_CAP_CHARS
+
+    async def handler(arguments: str) -> FunctionToolResult:
+        del arguments
+        return FunctionToolResult(
+            output=[
+                {"type": "text", "text": "prefix"},
+                {
+                    "type": "attachment",
+                    "uri": "exchange://workspace/session/report.txt",
+                    "name": "report.txt",
+                    "media_type": "text/plain",
+                    "size": 12,
+                },
+                {"type": "text", "text": long_output},
+            ]
+        )
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="structured_long_output",
+                            description="Return structured long output.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=handler,
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    result = await ToolCatalogClientToolExecutor(catalog).execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="structured_long_output",
+            arguments="{}",
+            native_artifact=_artifact(),
+        )
+    )
+
+    parts = list(iter_output_parts(result.output))
+    assert isinstance(parts[0], AttachmentOutputPart)
+    assert isinstance(parts[1], OutputTextPart)
+    assert parts[1].text == "... (truncated)\n" + "b" * TOOL_OUTPUT_TEXT_HARD_CAP_CHARS
+
+
+async def test_client_tool_executor_dispatches_cancel_handler() -> None:
+    """Tool cancellation hook is dispatched fire-and-forget."""
+    called = asyncio.Event()
+    requests: list[FunctionToolCancelRequest] = []
+
+    async def cancel_handler(request: FunctionToolCancelRequest) -> None:
+        requests.append(request)
+        called.set()
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="slow",
+                            description="Slow tool.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=_echo,
+                        cancel_handler=cancel_handler,
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    ToolCatalogClientToolExecutor(catalog).request_cancel(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="slow",
+            arguments='{"pid":123}',
+            native_artifact=_artifact(),
+        )
+    )
+
+    await asyncio.wait_for(called.wait(), timeout=1)
+    assert requests == [
+        FunctionToolCancelRequest(
+            call_id="call-1",
+            name="slow",
+            arguments='{"pid":123}',
+        )
+    ]
+
+
+async def test_client_tool_executor_migrates_function_tool_result_parts() -> None:
+    """FunctionToolResult output part input is validated as event output parts."""
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_FunctionToolResultToolkit(),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    result = await ToolCatalogClientToolExecutor(catalog).execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="legacy_result",
+            arguments="{}",
+            native_artifact=_artifact(),
+        )
+    )
+
+    assert result.status == "completed"
+    assert isinstance(result.output, list)
+    text_part = result.output[0]
+    attachment_part = result.output[1]
+    assert isinstance(text_part, OutputTextPart)
+    assert text_part.text == "created report"
+    assert isinstance(attachment_part, AttachmentOutputPart)
+    assert attachment_part.uri == "exchange://workspace/session/report.txt"
+    assert attachment_part.preview_summary == "preview"
+
+
+async def test_client_tool_executor_returns_failed_for_unknown_tool() -> None:
+    """Unregistered tool call is converted to failed result."""
+    result = await ToolCatalogClientToolExecutor(
+        await build_tool_catalog(
+            toolkit_bindings=[],
+            context=TurnContext(
+                user_id=None,
+                workspace_id="workspace-1",
+                model="gpt-5.1",
+                run_id="run-1",
+                publish_event=_noop_publish,
+            ),
+        )
+    ).execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="missing",
+            arguments="{}",
+            native_artifact=_artifact(),
+        )
+    )
+
+    assert result.status == "failed"
+    output = result.output[0]
+    assert isinstance(output, OutputTextPart)
+    assert "Tool not found" in output.text
+
+
+def test_summarize_tool_arguments_is_stable() -> None:
+    """Tool arguments summary stabilizes JSON key order."""
+    assert summarize_tool_arguments('{"b":2,"a":1}') == '{"a": 1, "b": 2}'
+
+
+async def _noop_publish(_event: object) -> None:
+    """No-op publish."""
+
+
+def _artifact() -> NativeArtifact:
+    """Create native artifact for tests."""
+    return NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="litellm",
+            native_format="responses",
+            provider="openai",
+            model="gpt-5.1",
+            schema_version="1",
+        ),
+        adapter="litellm",
+        native_format="responses",
+        provider="openai",
+        model="gpt-5.1",
+        schema_version="1",
+        item={"type": "function_call"},
+    )

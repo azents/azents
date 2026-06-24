@@ -1,0 +1,172 @@
+---
+title: "Agent Runtime Control"
+created: 2026-05-25
+tags: [backend, engine, infra, security]
+spec_type: flow
+owner: "@Hardtack"
+touches_domains: [agent, workspace, conversation, toolkit]
+code_paths:
+  - proto/azents/runtime_control/v1/**
+  - python/libs/azents-runtime-control/**
+  - python/apps/azents/src/azents/repos/agent_runtime/**
+  - python/apps/azents/src/azents/rdb/models/agent_runtime.py
+  - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/runtime/**
+  - python/apps/azents/src/azents/services/chat/workspace.py
+  - python/apps/azents/src/azents/runtime/control_server.py
+  - python/apps/azents/src/cli/runtime_control_server.py
+  - python/apps/azents-runtime-runner/**
+  - python/apps/azents-runtime-provider-docker/**
+  - python/apps/azents-runtime-provider-kubernetes/**
+  - infra/charts/azents/**
+  - infra/argocd/azents-runtime-provider-kubernetes/**
+  - infra/argocd/azents-server/**
+last_verified_at: 2026-06-23
+spec_version: 3
+---
+
+# Agent Runtime Control
+
+## Overview
+
+Agent Runtime is top-level domain of execution environment per Agent, not a sub-concept of sandbox/session. Runtime is one per Agent, and Control API looks up, creates, and controls Runtime by `agent_id` without using active session lookup. Legacy `azents-sandbox` provider-control path does not receive production traffic.
+
+Control replica is stateless. Runtime existence, desired state, provider observed state, provider connection state, runner state, and failure summary have PostgreSQL `agent_runtimes` row as durable source of truth. Process-local handle/cache cannot be used even as performance aid for deciding Runtime state.
+
+## Planes
+
+```mermaid
+flowchart LR
+    API[Agent-based API]
+    Worker[Worker / Engine]
+    RuntimeSvc[AgentRuntimeService]
+    DB[(PostgreSQL agent_runtimes)]
+    Store[Runtime Coordination Store]
+    Provider[External Runtime Provider]
+    Backend[Kubernetes or Docker backend]
+    Runner[Runtime Runner process]
+    Queue[Worker input queue]
+
+    API --> RuntimeSvc
+    Worker --> RuntimeSvc
+    RuntimeSvc --> DB
+    RuntimeSvc --> Store
+    Provider <-->|gRPC provider stream| RuntimeSvc
+    Runner <-->|gRPC runner stream| RuntimeSvc
+    Provider --> Backend
+    Backend --> Runner
+    Store --> Queue
+```
+
+## Durable State
+
+`agent_runtimes` stores the product authority for Runtime state:
+
+- desired lifecycle state and desired generation
+- selected `runtime_provider_id`
+- provider observed state, provider generation, provider runtime id, connection state
+- provider-reported Agent Workspace path
+- runner state, runner generation, active operation ids, connection state
+- current-generation failure code/message/details
+- run state for the Agent execution loop
+
+Server output exposes raw Runtime data only as diagnostics. UI behavior must be driven by the server-computed summary/actions:
+
+- summary examples: `STOPPED`, `STARTING`, `RUNNING`, `STOPPING`, `RESETTING`, `RECOVERING`, `PROVIDER_DISCONNECTED`, `RUNNER_UNAVAILABLE`, `FAILED`
+- actions examples: start, stop, restart, reset, recover
+
+Frontend code may handle API failure and network failure locally, but it must not recompute Runtime availability by combining raw provider/runner states.
+
+## Coordination Store
+
+The Runtime Coordination Store is the only cross-replica volatile coordination abstraction. It has Redis and in-memory implementations. Redis is the distributed production implementation; in-memory is for standalone/dev/test only.
+
+The store owns:
+
+- provider and runner connection registry
+- provider generation-scoped request/reply streams
+- runner generation-scoped operation request/reply streams and operation body streams
+- operation metadata, heartbeat/progress/final events
+- background operation completion claims
+- generation fencing data used to reject stale provider/runner messages
+
+The store is not a source of product truth. Losing store data may interrupt in-flight commands but must not make a Control replica infer that a Runtime does not exist or that workspace data can be discarded.
+
+## Provider Contract
+
+Provider is lifecycle-only. It implements:
+
+- start
+- stop
+- restart
+- reset
+- observe
+
+Provider reports backend observed state and metadata. The Agent Workspace absolute path is provider metadata and is stored on `agent_runtimes.workspace_path`. Runner registration can validate that it mounted the same path, but Runner is not the authority for choosing the Agent Workspace path.
+
+If Provider is disconnected or reports no workspace path for a Runtime that needs workspace access, Control records an explicit failure/unavailable state. It must not invent a fallback path. `PROVIDER_WORKSPACE_PATH_MISSING` is the explicit error for a missing provider path.
+
+Kubernetes and Docker Providers are external components. They must not import Azents server modules, DB sessions, repositories, or in-process managers. They communicate with Control only via the runtime-control protocol and their backend APIs.
+
+## Runner Contract
+
+Runner is operation-only. It handles operations inside an already provisioned Runtime:
+
+- `bash`
+- file stat/list/read/write/grep
+- file upload/download body streams
+- operation heartbeat/progress/final events
+
+`file.stat` is the authoritative operation for classifying a workspace path as file, directory, symlink, other, or missing before a caller chooses a file or directory operation.
+
+`file.list` accepts either a workspace file path or directory path. File paths return that single file entry. Directory paths are direct-child listings by default, and callers can opt into recursive listing with exclude patterns so high-level file tools can skip heavy trees such as `.git` or `node_modules`.
+
+`file.grep` accepts a workspace file path or directory path plus a regex pattern. The Runner performs file discovery, text decoding, regex matching, line limiting, file limiting, and exclude filtering inside the Runtime workspace, then returns a structured final payload of matched files and line matches. Callers should not implement grep by issuing `file.list` plus one `file.read` operation per file.
+
+Runner registration and state reports include a mounted workspace path. Control compares it with the provider-reported path and records an explicit failure if they differ. Operation routing uses runner generation fencing so stale runner streams cannot complete newer operations.
+
+Runner may process multiple operations concurrently up to its configured bounded concurrency. A long-running operation must not block unrelated operation requests from being scheduled while capacity remains available.
+
+Runner operations are deadline-bounded end to end. Every `RuntimeRunnerOperation` carries a non-null `deadline_at`, including foreground and background operations. Foreground callers pass the same deadline to the reply-stream fold/resume path; waiting for a final reply without a deadline is invalid. If the reply stream does not produce a final event before the deadline, Control appends a local final error event with `operation_timeout`, marks the operation final, and the caller receives a failed operation result instead of waiting indefinitely. Provider lifecycle commands and Coordination Store metadata may still model optional deadlines because they cover different request classes and storage TTL semantics.
+
+## Lifecycle Semantics
+
+Lifecycle APIs are desired-state declarations. Repeating the same request must converge to the same state and must not delete Agent Workspace data.
+
+- `start` sets desired state to running.
+- `stop` sets desired state to stopped and must preserve workspace data.
+- `restart` restarts compute but must preserve workspace data.
+- `recover`/reconcile may repair control/backend drift but must preserve workspace data.
+- `reset` is the only lifecycle operation allowed to delete Agent Workspace data.
+
+Reset carries its own desired generation and a final desired state. Provider is responsible for performing backend deletion/recreation according to that command and reporting the resulting observed state.
+
+## Background Operation Completion
+
+Long-running Runner operations can be marked background. Control stores background operation metadata in the Coordination Store, folds matching request events from the generation-scoped operation reply stream when a final event appears, claims publication idempotently, and enqueues a structured Worker input message.
+
+The Worker input queue message contains the parent AgentSession id, workspace id, agent id, runtime id, operation id, request id, tool name, status, completion text, and an idempotency key. Worker stores it as a `background_completion` input buffer for the parent AgentSession and sends a session wake-up. Completion publication must be idempotent across Control replica restarts.
+
+## Delivery
+
+Production deploys the new path through GitOps:
+
+- ECR repositories and GitHub Actions build/push runtime images.
+- Helm values/templates render runtime-control, runtime-runner, and Kubernetes provider settings.
+- ArgoCD Application/root/overlay includes the runtime provider deployment.
+- Final cutover defaults route production to the Agent Runtime path and disables/prunes the legacy sandbox provider-control traffic path.
+
+Manual image push, manual `kubectl apply`, or manual ArgoCD value edits are not completion criteria.
+
+## Validation
+
+Required deterministic coverage:
+
+- repository/service tests for desired/observed/runner state summary/actions
+- Coordination Store contract tests for in-memory and Redis implementations
+- provider/runner gRPC registration, generation fencing, request/reply/body stream tests
+- Runner operation tests for bash and file operations
+- Provider tests for Docker host bind mount persistence and Kubernetes PVC persistence
+- azents deterministic E2E for Agent Workspace bootstrap and lifecycle actions
+
+Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.

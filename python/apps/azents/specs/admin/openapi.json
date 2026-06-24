@@ -1,0 +1,2721 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Azents Admin API",
+    "description": "Admin CRUD API server for Azents",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/auth/v1/email-verifications": {
+      "get": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "List Email Verifications",
+        "description": "List EmailVerification records.",
+        "operationId": "auth_v1_list_email_verifications",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/email-verifications/by-email": {
+      "get": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "Get Email Verification By Email",
+        "description": "Get an EmailVerification by email and CSRF token.",
+        "operationId": "auth_v1_get_email_verification_by_email",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Email"
+            }
+          },
+          {
+            "name": "csrf_token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Csrf Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/email-verifications/{verification_id}": {
+      "get": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "Get Email Verification",
+        "description": "Get an EmailVerification by ID.",
+        "operationId": "auth_v1_get_email_verification",
+        "parameters": [
+          {
+            "name": "verification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Verification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/email-verifications/by-email/{email}": {
+      "get": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "List Email Verifications By Email",
+        "description": "List active EmailVerification records by email.",
+        "operationId": "auth_v1_list_email_verifications_by_email",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Email"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/signup-tokens": {
+      "post": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "Create Signup Token",
+        "description": "Create a signup token.",
+        "operationId": "auth_v1_create_signup_token",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSignupTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSignupTokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "List Signup Tokens",
+        "description": "List signup tokens.",
+        "operationId": "auth_v1_list_signup_tokens",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupTokenListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/signup-tokens/{token_id}": {
+      "delete": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "Revoke Signup Token",
+        "description": "Revoke a signup token.",
+        "operationId": "auth_v1_revoke_signup_token",
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/password-reset-tokens": {
+      "post": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "Create Password Reset Token",
+        "description": "Create a password reset token.",
+        "operationId": "auth_v1_create_password_reset_token",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePasswordResetTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatePasswordResetTokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "List Password Reset Tokens",
+        "description": "List password reset tokens.",
+        "operationId": "auth_v1_list_password_reset_tokens",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetTokenListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/password-reset-tokens/{token_id}": {
+      "delete": {
+        "tags": [
+          "Auth v1"
+        ],
+        "summary": "Revoke Password Reset Token",
+        "description": "Revoke a password reset token.",
+        "operationId": "auth_v1_revoke_password_reset_token",
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/debug/v1/fire-log": {
+      "post": {
+        "tags": [
+          "Debug v1"
+        ],
+        "summary": "Fire Log",
+        "description": "Emit a log at the specified level.\n\nUsed to verify Sentry delivery.\n- WARNING: Sentry breadcrumb attached to the next event\n- ERROR/CRITICAL: sent directly with ``sentry_sdk.capture_message()``",
+        "operationId": "debug_v1_fire_log",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ErrorLevel",
+              "description": "Log level (warning, error, critical)",
+              "default": "error"
+            },
+            "description": "Log level (warning, error, critical)"
+          },
+          {
+            "name": "message",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Log message",
+              "default": "Debug test log from admin API",
+              "title": "Message"
+            },
+            "description": "Log message"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebugErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/debug/v1/fire-exception": {
+      "post": {
+        "tags": [
+          "Debug v1"
+        ],
+        "summary": "Fire Exception",
+        "description": "Raise an unhandled exception.\n\nFastAPI returns 500 and sends an event with stacktrace to Sentry.",
+        "operationId": "debug_v1_fire_exception",
+        "parameters": [
+          {
+            "name": "message",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Exception message",
+              "default": "Debug test exception from admin API",
+              "title": "Message"
+            },
+            "description": "Exception message"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebugExceptionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/v1/readiness": {
+      "get": {
+        "tags": [
+          "Health v1"
+        ],
+        "summary": "Readiness",
+        "description": "Return the server readiness status.\n\nThis is the endpoint for the Kubernetes readiness probe.",
+        "operationId": "health_v1_readiness",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/v1/liveness": {
+      "get": {
+        "tags": [
+          "Health v1"
+        ],
+        "summary": "Liveness",
+        "description": "Return the server liveness status.\n\nThis is the endpoint for the Kubernetes liveness probe.",
+        "operationId": "health_v1_liveness",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/invitation/v1/workspaces/{handle}/invitations": {
+      "get": {
+        "tags": [
+          "Invitation v1"
+        ],
+        "summary": "List Workspace Invitations",
+        "description": "List workspace invitations.",
+        "operationId": "invitation_v1_list_workspace_invitations",
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/invitation/v1/invitations/{invitation_id}": {
+      "delete": {
+        "tags": [
+          "Invitation v1"
+        ],
+        "summary": "Delete Invitation",
+        "description": "Delete an invitation, cancelling it.",
+        "operationId": "invitation_v1_delete_invitation",
+        "parameters": [
+          {
+            "name": "invitation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Invitation Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/v1/users": {
+      "get": {
+        "tags": [
+          "User v1"
+        ],
+        "summary": "List Users",
+        "description": "List all Users.",
+        "operationId": "user_v1_list_users",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/v1/users/{user_id}": {
+      "get": {
+        "tags": [
+          "User v1"
+        ],
+        "summary": "Get User",
+        "description": "Get a User by ID.",
+        "operationId": "user_v1_get_user",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "User v1"
+        ],
+        "summary": "Delete User",
+        "description": "Delete a User.",
+        "operationId": "user_v1_delete_user",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user-email/v1/emails": {
+      "get": {
+        "tags": [
+          "UserEmail v1"
+        ],
+        "summary": "List Emails",
+        "description": "List all UserEmail records.",
+        "operationId": "useremail_v1_list_emails",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserEmailListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user-email/v1/users/{user_id}/emails": {
+      "get": {
+        "tags": [
+          "UserEmail v1"
+        ],
+        "summary": "List Emails By User",
+        "description": "List UserEmail records by User ID.",
+        "operationId": "useremail_v1_list_emails_by_user",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserEmailListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "UserEmail v1"
+        ],
+        "summary": "Create Email",
+        "description": "Create a UserEmail.",
+        "operationId": "useremail_v1_create_email",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserEmailCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserEmailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user-email/v1/emails/{email_id}": {
+      "delete": {
+        "tags": [
+          "UserEmail v1"
+        ],
+        "summary": "Delete Email",
+        "description": "Delete a UserEmail.",
+        "operationId": "useremail_v1_delete_email",
+        "parameters": [
+          {
+            "name": "email_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Email Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace/v1/bootstrap/status": {
+      "get": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Get Bootstrap Status",
+        "description": "Get whether first owner bootstrap is available.",
+        "operationId": "workspace_v1_get_bootstrap_status",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace/v1/bootstrap/first-owner": {
+      "post": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Bootstrap First Owner",
+        "description": "Create the first Owner and Workspace.",
+        "operationId": "workspace_v1_bootstrap_first_owner",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BootstrapFirstOwnerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapFirstOwnerResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace/v1/workspaces": {
+      "get": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "List Workspaces",
+        "description": "List all Workspaces.",
+        "operationId": "workspace_v1_list_workspaces",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Create Workspace",
+        "description": "Create a Workspace.",
+        "operationId": "workspace_v1_create_workspace",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace/v1/workspaces/{handle}": {
+      "get": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Get Workspace",
+        "description": "Get a Workspace by handle.",
+        "operationId": "workspace_v1_get_workspace",
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Update Workspace",
+        "description": "Update a Workspace.",
+        "operationId": "workspace_v1_update_workspace",
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Delete Workspace",
+        "description": "Delete a Workspace.",
+        "operationId": "workspace_v1_delete_workspace",
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace-user/v1/workspace-users": {
+      "post": {
+        "tags": [
+          "WorkspaceUser v1"
+        ],
+        "summary": "Create Workspace User",
+        "description": "Create a WorkspaceUser.",
+        "operationId": "workspaceuser_v1_create_workspace_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUserCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace-user/v1/workspaces/{handle}/workspace-users": {
+      "get": {
+        "tags": [
+          "WorkspaceUser v1"
+        ],
+        "summary": "List Workspace Users",
+        "description": "List WorkspaceUsers in a Workspace.",
+        "operationId": "workspaceuser_v1_list_workspace_users",
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUserListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace-user/v1/workspace-users/{workspace_user_id}": {
+      "get": {
+        "tags": [
+          "WorkspaceUser v1"
+        ],
+        "summary": "Get Workspace User",
+        "description": "Get a WorkspaceUser by ID.",
+        "operationId": "workspaceuser_v1_get_workspace_user",
+        "parameters": [
+          {
+            "name": "workspace_user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workspace User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "WorkspaceUser v1"
+        ],
+        "summary": "Update Workspace User",
+        "description": "Update a WorkspaceUser.",
+        "operationId": "workspaceuser_v1_update_workspace_user",
+        "parameters": [
+          {
+            "name": "workspace_user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workspace User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUserUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "WorkspaceUser v1"
+        ],
+        "summary": "Delete Workspace User",
+        "description": "Delete a WorkspaceUser.\n\nOwners cannot be deleted. Transfer ownership first, then delete.",
+        "operationId": "workspaceuser_v1_delete_workspace_user",
+        "parameters": [
+          {
+            "name": "workspace_user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workspace User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace-user/v1/workspaces/{handle}/transfer-ownership": {
+      "post": {
+        "tags": [
+          "WorkspaceUser v1"
+        ],
+        "summary": "Transfer Workspace Ownership",
+        "description": "Transfer Workspace ownership.\n\nSet the new Owner and demote the previous Owner to Manager.",
+        "operationId": "workspaceuser_v1_transfer_workspace_ownership",
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferOwnershipRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceUserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BootstrapFirstOwnerRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Owner email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "Owner initial password"
+          },
+          "owner_name": {
+            "type": "string",
+            "title": "Owner Name",
+            "description": "Owner display name"
+          },
+          "workspace_name": {
+            "type": "string",
+            "title": "Workspace Name",
+            "description": "Workspace name"
+          },
+          "workspace_handle": {
+            "type": "string",
+            "title": "Workspace Handle",
+            "description": "Workspace handle"
+          },
+          "locale": {
+            "type": "string",
+            "title": "Locale",
+            "description": "Locale (BCP 47)",
+            "default": "ko-KR"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password",
+          "owner_name",
+          "workspace_name",
+          "workspace_handle"
+        ],
+        "title": "BootstrapFirstOwnerRequest",
+        "description": "First owner bootstrap request."
+      },
+      "BootstrapFirstOwnerResponse": {
+        "properties": {
+          "workspace_handle": {
+            "type": "string",
+            "title": "Workspace Handle",
+            "description": "Created Workspace handle"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "Created Owner User ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_handle",
+          "user_id"
+        ],
+        "title": "BootstrapFirstOwnerResponse",
+        "description": "First owner bootstrap response."
+      },
+      "BootstrapStatusResponse": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "bootstrap availability flag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "BootstrapStatusResponse",
+        "description": "First owner bootstrap status response."
+      },
+      "CreatePasswordResetTokenRequest": {
+        "properties": {
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id",
+            "description": "Reset target User ID"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Reset target email"
+          }
+        },
+        "type": "object",
+        "title": "CreatePasswordResetTokenRequest",
+        "description": "Password reset token creation request."
+      },
+      "CreatePasswordResetTokenResponse": {
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/PasswordResetTokenResponse",
+            "description": "Password reset token metadata"
+          },
+          "plaintext_token": {
+            "type": "string",
+            "title": "Plaintext Token",
+            "description": "Plaintext password reset token"
+          },
+          "reset_url": {
+            "type": "string",
+            "title": "Reset Url",
+            "description": "Password reset URL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "plaintext_token",
+          "reset_url"
+        ],
+        "title": "CreatePasswordResetTokenResponse",
+        "description": "Password reset token creation response."
+      },
+      "CreateSignupTokenRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Email to pin to the token"
+          },
+          "delivery_method": {
+            "$ref": "#/components/schemas/SignupTokenDeliveryMethod",
+            "description": "Token delivery method"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "delivery_method"
+        ],
+        "title": "CreateSignupTokenRequest",
+        "description": "Signup token creation request."
+      },
+      "CreateSignupTokenResponse": {
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/SignupTokenResponse",
+            "description": "Signup token metadata"
+          },
+          "plaintext_token": {
+            "type": "string",
+            "title": "Plaintext Token",
+            "description": "Plaintext signup token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "plaintext_token"
+        ],
+        "title": "CreateSignupTokenResponse",
+        "description": "Signup token creation response."
+      },
+      "DebugErrorResponse": {
+        "properties": {
+          "fired": {
+            "type": "boolean",
+            "title": "Fired"
+          },
+          "level": {
+            "type": "string",
+            "title": "Level"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "sentry_event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sentry Event Id"
+          },
+          "sentry": {
+            "$ref": "#/components/schemas/SentryDiagnostics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fired",
+          "level",
+          "message",
+          "sentry_event_id",
+          "sentry"
+        ],
+        "title": "DebugErrorResponse",
+        "description": "Debug error response."
+      },
+      "DebugExceptionResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "DebugExceptionResponse",
+        "description": "Debug exception response. The actual response is 500."
+      },
+      "EmailVerificationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EmailVerificationResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Authentication record list"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total record count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "EmailVerificationListResponse",
+        "description": "EmailVerification list response schema."
+      },
+      "EmailVerificationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Verification ID (UUID7 hex)"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Email address"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Six-digit verification code"
+          },
+          "csrf_token": {
+            "type": "string",
+            "title": "Csrf Token",
+            "description": "CSRF token"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "Expiration time"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At",
+            "description": "Verification completion time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "code",
+          "csrf_token",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "EmailVerificationResponse",
+        "description": "EmailVerification response schema, including code."
+      },
+      "ErrorLevel": {
+        "type": "string",
+        "enum": [
+          "warning",
+          "error",
+          "critical"
+        ],
+        "title": "ErrorLevel",
+        "description": "Test error level."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthStatus": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "HealthStatus",
+        "description": "Server status response model."
+      },
+      "InvitationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InvitationResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Invitation list"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "InvitationListResponse",
+        "description": "Invitation list response schema."
+      },
+      "InvitationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "WorkspaceInvitation ID (UUID7 hex)"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id",
+            "description": "Workspace ID"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Invitation target email"
+          },
+          "role": {
+            "$ref": "#/components/schemas/WorkspaceUserRole",
+            "description": "Invitation role"
+          },
+          "invited_by": {
+            "type": "string",
+            "title": "Invited By",
+            "description": "Inviting WorkspaceUser ID"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvitationStatus",
+            "description": "Invitation status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "email",
+          "role",
+          "invited_by",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "InvitationResponse",
+        "description": "Invitation response schema."
+      },
+      "InvitationStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "accepted",
+          "declined"
+        ],
+        "title": "InvitationStatus",
+        "description": "Workspace invitation status."
+      },
+      "PasswordResetTokenListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PasswordResetTokenResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Password reset token list"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total record count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "PasswordResetTokenListResponse",
+        "description": "Password reset token list response."
+      },
+      "PasswordResetTokenResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Password reset token ID"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "Reset target User ID"
+          },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By User Id",
+            "description": "Token creator User ID"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "Expiration time"
+          },
+          "used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used At",
+            "description": "Used time"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At",
+            "description": "Revocation time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "created_by_user_id",
+          "expires_at",
+          "used_at",
+          "revoked_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PasswordResetTokenResponse",
+        "description": "Password reset token metadata response."
+      },
+      "SentryDiagnostics": {
+        "properties": {
+          "initialized": {
+            "type": "boolean",
+            "title": "Initialized"
+          },
+          "dsn_configured": {
+            "type": "boolean",
+            "title": "Dsn Configured"
+          }
+        },
+        "type": "object",
+        "required": [
+          "initialized",
+          "dsn_configured"
+        ],
+        "title": "SentryDiagnostics",
+        "description": "Sentry SDK diagnostics."
+      },
+      "SignupTokenDeliveryMethod": {
+        "type": "string",
+        "enum": [
+          "manual",
+          "email"
+        ],
+        "title": "SignupTokenDeliveryMethod",
+        "description": "Signup token delivery method."
+      },
+      "SignupTokenListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SignupTokenResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Signup token list"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total record count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "SignupTokenListResponse",
+        "description": "Signup token list response."
+      },
+      "SignupTokenResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Signup token ID"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Email fixed to token"
+          },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By User Id",
+            "description": "Token creator User ID"
+          },
+          "delivery_method": {
+            "$ref": "#/components/schemas/SignupTokenDeliveryMethod",
+            "description": "Token delivery method"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "Expiration time"
+          },
+          "max_uses": {
+            "type": "integer",
+            "title": "Max Uses",
+            "description": "Maximum use count"
+          },
+          "used_count": {
+            "type": "integer",
+            "title": "Used Count",
+            "description": "Use count"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At",
+            "description": "Revocation time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "created_by_user_id",
+          "delivery_method",
+          "expires_at",
+          "max_uses",
+          "used_count",
+          "revoked_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SignupTokenResponse",
+        "description": "Signup token metadata response."
+      },
+      "TransferOwnershipRequest": {
+        "properties": {
+          "new_owner_workspace_user_id": {
+            "type": "string",
+            "title": "New Owner Workspace User Id",
+            "description": "New Owner WorkspaceUser ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_owner_workspace_user_id"
+        ],
+        "title": "TransferOwnershipRequest",
+        "description": "Owner transfer request schema."
+      },
+      "UserEmailCreateRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Email address"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "UserEmailCreateRequest",
+        "description": "UserEmail creation request schema."
+      },
+      "UserEmailListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserEmailResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "UserEmail list"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total record count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "UserEmailListResponse",
+        "description": "UserEmail list response schema."
+      },
+      "UserEmailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "UserEmail ID (UUID7 hex)"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "Owning User ID"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Email address"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At",
+            "description": "Verification completion time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "email",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "UserEmailResponse",
+        "description": "UserEmail response schema."
+      },
+      "UserListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "User list"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total record count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "UserListResponse",
+        "description": "User list response schema."
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "User ID (UUID7 hex)"
+          },
+          "primary_email_id": {
+            "type": "string",
+            "title": "Primary Email Id",
+            "description": "Primary email ID"
+          },
+          "primary_email": {
+            "type": "string",
+            "title": "Primary Email",
+            "description": "Primary email address"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "primary_email_id",
+          "primary_email",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "UserResponse",
+        "description": "User response schema."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WorkspaceCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Workspace name"
+          },
+          "handle": {
+            "type": "string",
+            "title": "Handle",
+            "description": "Workspace unique handle"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "handle"
+        ],
+        "title": "WorkspaceCreateRequest",
+        "description": "Workspace creation request schema."
+      },
+      "WorkspaceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Workspace list"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "WorkspaceListResponse",
+        "description": "Workspace list response schema."
+      },
+      "WorkspaceResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Workspace name"
+          },
+          "handle": {
+            "type": "string",
+            "title": "Handle",
+            "description": "Workspace unique handle"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "handle",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkspaceResponse",
+        "description": "Workspace response schema."
+      },
+      "WorkspaceUpdateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "handle": {
+            "type": "string",
+            "title": "Handle"
+          }
+        },
+        "type": "object",
+        "title": "WorkspaceUpdateRequest",
+        "description": "Workspace update request schema."
+      },
+      "WorkspaceUserCreateRequest": {
+        "properties": {
+          "workspace_handle": {
+            "type": "string",
+            "title": "Workspace Handle",
+            "description": "Owning Workspace handle"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "User ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Workspace display name"
+          },
+          "locale": {
+            "type": "string",
+            "title": "Locale",
+            "description": "Workspace locale (BCP 47)",
+            "default": "ko-KR"
+          },
+          "role": {
+            "$ref": "#/components/schemas/WorkspaceUserRole",
+            "description": "Role (owner, manager, member)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_handle",
+          "user_id",
+          "name",
+          "role"
+        ],
+        "title": "WorkspaceUserCreateRequest",
+        "description": "WorkspaceUser creation request schema."
+      },
+      "WorkspaceUserListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceUserResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "WorkspaceUser list"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "WorkspaceUserListResponse",
+        "description": "WorkspaceUser list response schema."
+      },
+      "WorkspaceUserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "WorkspaceUser ID (UUID7 hex)"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id",
+            "description": "Owning Workspace ID"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "User ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Workspace display name"
+          },
+          "locale": {
+            "type": "string",
+            "title": "Locale",
+            "description": "Workspace locale (BCP 47)"
+          },
+          "role": {
+            "$ref": "#/components/schemas/WorkspaceUserRole",
+            "description": "Role (owner, manager, member)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "user_id",
+          "name",
+          "locale",
+          "role",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkspaceUserResponse",
+        "description": "WorkspaceUser response schema."
+      },
+      "WorkspaceUserRole": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "manager",
+          "member"
+        ],
+        "title": "WorkspaceUserRole",
+        "description": "WorkspaceUser role."
+      },
+      "WorkspaceUserUpdateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "locale": {
+            "type": "string",
+            "title": "Locale"
+          }
+        },
+        "type": "object",
+        "title": "WorkspaceUserUpdateRequest",
+        "description": "WorkspaceUser update request schema."
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Auth v1",
+      "description": "\nAuth API (Admin)\n\nAuthentication record lookup endpoints for E2E tests.\n"
+    },
+    {
+      "name": "Debug v1",
+      "description": "Operational debugging API (Sentry/logging verification)"
+    },
+    {
+      "name": "Health v1",
+      "description": "Server status API (Admin)"
+    },
+    {
+      "name": "Invitation v1",
+      "description": "\nWorkspace Invitation API (Admin)\n\nWorkspace invitation lookup/delete endpoints.\n"
+    },
+    {
+      "name": "User v1",
+      "description": "\nUser API (Admin)\n\nUser management CRUD endpoints.\n"
+    },
+    {
+      "name": "UserEmail v1",
+      "description": "\nUserEmail API (Admin)\n\nUser email management CRUD endpoints.\n"
+    },
+    {
+      "name": "Workspace v1",
+      "description": "\nWorkspace API (Admin)\n\nWorkspace CRUD endpoints.\n"
+    },
+    {
+      "name": "WorkspaceUser v1",
+      "description": "\nWorkspaceUser API (Admin)\n\nCRUD endpoints that manage user profiles scoped to a Workspace.\n"
+    }
+  ]
+}

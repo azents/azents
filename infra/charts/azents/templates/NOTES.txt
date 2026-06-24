@@ -1,0 +1,20 @@
+Azents chart rendered successfully.
+
+This phase renders the default server, web, adminWeb, Agent Runtime resources, and default-off optional components.
+
+Default-on components:
+- server.apiserver
+- server.adminserver
+- server.worker
+- web
+- adminWeb
+
+Default-off components:
+- server.mcpEgressProxy
+- snapshotter
+
+Prepare existing Secrets with these keys before installing:
+- {{ .Values.secrets.existingSecrets.auth }}: jwt-secret-key, credential-encryption-key, sentry-dsn, oauth-secret-key
+- {{ .Values.secrets.existingSecrets.adminAuth }}: admin web environment keys such as AUTH_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET when auth is enabled
+
+Optional components remain default-off. Enabling snapshotter requires privileged workload support, hostPath access to containerd.sock, node scheduling constraints, and registry push credentials. Enabling mcpEgressProxy injects AZ_MCP_PROXY_URL into server workloads.

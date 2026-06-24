@@ -1,0 +1,22 @@
+---
+kind: credential
+schema_version: 1
+id: bedrock-aws
+title: Bedrock AWS shared credentials
+source: aws-shared-credentials
+secret_fields:
+  - aws_access_key_id
+  - aws_secret_access_key
+required_fields:
+  - aws_access_key_id
+  - aws_secret_access_key
+checks:
+  - id: profile-present
+    mode: read
+    target: aws-shared-credentials:azents-bedrock
+    description: azents-bedrock or default AWS shared credentials profile exists
+  - id: region-present
+    mode: read
+    target: aws-shared-config:azents-bedrock
+    description: AWS shared config has a region or can use the default Bedrock region
+---
