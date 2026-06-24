@@ -85,7 +85,9 @@ class TestLLMProviderIntegrationRepository:
             provider=LLMProvider.AWS_BEDROCK,
             name="Bedrock Access Key",
             secrets=AwsSecrets(secret_access_key="secret-test"),
-            config=AwsConfig(access_key_id="AKIA-TEST", region="us-east-1"),
+            config=AwsConfig(
+                access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID", region="us-east-1"
+            ),
         )
 
         # When: create
@@ -95,7 +97,7 @@ class TestLLMProviderIntegrationRepository:
         assert integration.workspace_id == ws_id
         assert integration.provider == LLMProvider.AWS_BEDROCK
         assert integration.config == AwsConfig(
-            access_key_id="AKIA-TEST", region="us-east-1"
+            access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID", region="us-east-1"
         )
 
     async def test_get_by_id(self, rdb_session: AsyncSession) -> None:
@@ -109,7 +111,7 @@ class TestLLMProviderIntegrationRepository:
                 workspace_id=ws_id,
                 provider=LLMProvider.ANTHROPIC,
                 name="Anthropic Key",
-                secrets=ApiKeySecrets(api_key="sk-ant-test"),
+                secrets=ApiKeySecrets(api_key="example-anthropic-api-key"),
             ),
         )
 
@@ -140,7 +142,9 @@ class TestLLMProviderIntegrationRepository:
                 provider=LLMProvider.AWS_BEDROCK,
                 name="Bedrock Access Key",
                 secrets=AwsSecrets(secret_access_key="secret-test"),
-                config=AwsConfig(access_key_id="AKIA-TEST", region="us-east-1"),
+                config=AwsConfig(
+                    access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID", region="us-east-1"
+                ),
             ),
         )
 
@@ -152,7 +156,7 @@ class TestLLMProviderIntegrationRepository:
         assert integration.id == created.id
         assert integration.secrets == AwsSecrets(secret_access_key="secret-test")
         assert integration.config == AwsConfig(
-            access_key_id="AKIA-TEST", region="us-east-1"
+            access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID", region="us-east-1"
         )
 
     async def test_get_by_id_with_secrets_gcp(self, rdb_session: AsyncSession) -> None:
@@ -251,7 +255,7 @@ class TestLLMProviderIntegrationRepository:
                 workspace_id=ws_id,
                 provider=LLMProvider.ANTHROPIC,
                 name="Anthropic Key",
-                secrets=ApiKeySecrets(api_key="sk-ant-1"),
+                secrets=ApiKeySecrets(api_key="example-anthropic-api-key-1"),
             ),
         )
 
@@ -327,7 +331,9 @@ class TestLLMProviderIntegrationRepository:
                 provider=LLMProvider.AWS_BEDROCK,
                 name="Config Update Test",
                 secrets=AwsSecrets(secret_access_key="secret"),
-                config=AwsConfig(access_key_id="AKIA-OLD", region="us-east-1"),
+                config=AwsConfig(
+                    access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID_OLD", region="us-east-1"
+                ),
             ),
         )
 
@@ -336,14 +342,17 @@ class TestLLMProviderIntegrationRepository:
             rdb_session,
             created.id,
             LLMProviderIntegrationUpdate(
-                config=AwsConfig(access_key_id="AKIA-NEW", region="ap-northeast-2")
+                config=AwsConfig(
+                    access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID_NEW",
+                    region="ap-northeast-2",
+                )
             ),
         )
 
         # Then: check new config
         assert isinstance(result, Success)
         assert result.value.config == AwsConfig(
-            access_key_id="AKIA-NEW", region="ap-northeast-2"
+            access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID_NEW", region="ap-northeast-2"
         )
 
     async def test_update_not_found(self, rdb_session: AsyncSession) -> None:
@@ -368,7 +377,7 @@ class TestLLMProviderIntegrationRepository:
                 workspace_id=ws_id,
                 provider=LLMProvider.ANTHROPIC,
                 name="Delete target",
-                secrets=ApiKeySecrets(api_key="sk-ant-delete"),
+                secrets=ApiKeySecrets(api_key="example-anthropic-api-key-delete"),
             ),
         )
 

@@ -55,7 +55,7 @@ def _make_toolkit(
     credential_provider = AsyncMock(spec=AwsCredentialProvider)
     # Configure get_credentials to return mock Credentials
     mock_credentials = AsyncMock()
-    mock_credentials.access_key = "AKIAIOSFODNN7EXAMPLE"
+    mock_credentials.access_key = "EXAMPLE_AWS_ACCESS_KEY_ID"
     mock_credentials.secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     mock_credentials.token = None
     credential_provider.get_credentials = AsyncMock(return_value=mock_credentials)

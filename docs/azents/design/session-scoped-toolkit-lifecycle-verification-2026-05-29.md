@@ -23,7 +23,7 @@ Covered implementation PRs:
 ## Environment
 
 - Date: 2026-05-29
-- Repository: `/Users/hardtack/repos/azents/azents`
+- Repository: `<local-azents-repo>`
 - Local Python runtime: project `uv` environments
 - E2E stack: `testenv/azents/e2e` testcontainers fixtures
 - Live provider credentials: not required; deterministic model/toolkit fixtures used

@@ -378,7 +378,7 @@ class TestGkeCredential:
             "type": "service_account",
             "project_id": "my-project",
             "private_key_id": "key-id",
-            "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...",
+            "private_key": "example-private-key",
             "client_email": "sa@my-project.iam.gserviceaccount.com",
         }
         cred = GkeCredential(service_account_key=sa_key)

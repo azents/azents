@@ -359,12 +359,12 @@ tRPC endpoint called by `getByAgent`. Currently unimplemented → needs implemen
         "oauth_config": { "scopes": { "bot": ["chat:write", "channels:history", ...] } },
         "settings": {
             "event_subscriptions": {
-                "request_url": "https://api.nointern.dev/slack/v1/events",
+                "request_url": "https://api.example.invalid/slack/v1/events",
                 "bot_events": ["message.channels", "message.groups", "message.im", "message.mpim"]
             },
             "interactivity": {
                 "is_enabled": true,
-                "request_url": "https://api.nointern.dev/slack/v1/interactions"
+                "request_url": "https://api.example.invalid/slack/v1/interactions"
             },
             "socket_mode_enabled": false
         }
@@ -495,7 +495,7 @@ agent = seed.agent.create(ws)
 # create BYOA installation (API call)
 installation = api.post(f"/slack-installation/v1/workspaces/{ws.handle}/slack-installations/byoa", {
     "agent_id": agent.id,
-    "bot_token": "xoxb-test-token",
+    "bot_token": "example-slack-bot-token",
     "signing_secret": "test-signing-secret-32chars000000",
     "slack_app_id": "A_TEST_APP",
 })

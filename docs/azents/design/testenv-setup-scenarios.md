@@ -176,7 +176,7 @@ JSON object, setup merges its own `provides` keys. Example:
     "model_slug": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
   },
   "funnel": {
-    "url": "https://nointern-testenv.tail2b7559.ts.net"
+    "url": "https://example-testenv.example.invalid"
   },
   "slack": {
     "installation": {

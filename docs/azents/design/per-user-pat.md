@@ -77,7 +77,7 @@ sequenceDiagram
 
     W->>U: PAT registration form + required permissions guide
     U->>GH: create PAT (separate tab)
-    GH->>U: token issued (ghp_xxx...)
+    GH->>U: token issued (example token)
     U->>W: paste token + click [Register]
     W->>API: POST /pat {token}
     API->>GH: GET /user (validate)
@@ -207,7 +207,7 @@ After Slack OAuth completes, automatically switch to PAT registration step.
 │                                           │
 │  Step 2. Enter created token             │
 │  ┌───────────────────────────────────┐   │
-│  │ ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxx  │   │
+│  │ <github-token>  │   │
 │  └───────────────────────────────────┘   │
 │                                           │
 │  [Register]                              │
@@ -263,7 +263,7 @@ Managed in GitHub PAT section of workspace settings page. Placed next to account
 | State | Display | Action |
 |------|------|------|
 | not registered | "GitHub PAT is not registered" | [Register] → settings page |
-| registered | "@octocat · ghp_xxxx...xxxx" (first 4 chars + masked) | [Replace] [Delete] |
+| registered | "@octocat · token-prefix...suffix" (first 4 chars + masked) | [Replace] [Delete] |
 | expired | "@octocat · expired" (Fine-grained PAT) | [Re-register] |
 
 ### Agent Conversation UX
@@ -401,7 +401,7 @@ POST /workspaces/{handle}/github-pat
 | Item | Value |
 |------|------|
 | Auth | login required, workspace member |
-| Request Body | `{ "token": "ghp_xxx..." }` |
+| Request Body | `{ "token": "<github-token>" }` |
 | Handling | call GitHub `GET /user` → validate → encrypted store (upsert) |
 | Success response | `201 { "github_username": "octocat", "expires_at": null }` |
 | Failure response | `422 { "detail": "Invalid GitHub token" }` |
@@ -415,7 +415,7 @@ GET /workspaces/{handle}/github-pat
 | Item | Value |
 |------|------|
 | Auth | login required, workspace member |
-| Response (registered) | `{ "registered": true, "github_username": "octocat", "display_hint": "ghp_xxxx", "expires_at": null }` |
+| Response (registered) | `{ "registered": true, "github_username": "octocat", "display_hint": "token-hint", "expires_at": null }` |
 | Response (not registered) | `{ "registered": false }` |
 
 #### PAT deletion
@@ -582,7 +582,7 @@ Workspace-level credential is unnecessary when selecting `per_user_pat`. Other s
 | PAT storage | Fernet(AES-128 + HMAC-SHA256) encryption, use `CredentialCipher` |
 | PAT transmission | HTTPS only, Request body (not URL parameter) |
 | Prevent PAT exposure | not received via chat, not written to logs, not included in API response |
-| Display | expose only first 4 chars (`ghp_xxxx`) + masking |
+| Display | expose only first 4 chars (`token-hint`) + masking |
 | Deletion | CASCADE: automatically delete when user/workspace deleted |
 
 ## Implementation Plan

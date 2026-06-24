@@ -112,7 +112,7 @@ function PATRegistrationForm({
       <Stack gap="xs">
         <Text fw={500}>{t("step2Title")}</Text>
         <PasswordInput
-          placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          placeholder="Paste a GitHub token"
           value={token}
           onChange={(e) => setToken(e.currentTarget.value)}
           disabled={isRegistering}
