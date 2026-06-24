@@ -80,7 +80,7 @@ The initial CI does not include:
 - comment-triggered live E2E,
 - private downstream deployment smoke tests.
 
-Required CI includes deterministic tests only. Existing test markers such as `live_external` are excluded from required CI runs.
+Required CI includes deterministic tests only. Existing test markers such as `live_external` and `runtime_provider` are excluded from required CI runs because they require external credentials or runtime provider infrastructure beyond deterministic PR CI.
 
 ### ADR-0073-D5 — Make deterministic E2E a required check
 
@@ -90,7 +90,7 @@ The E2E command should exclude live/external tests, for example:
 
 ```bash
 cd testenv/azents/e2e
-uv run pytest -vv -m "not live_external" ./src
+uv run pytest -vv -m "not live_external and not runtime_provider" ./src
 ```
 
 If a marker represents a live or private-infrastructure dependency, it must be excluded or reclassified before becoming part of required CI. Deterministic E2E failures block merge.
@@ -191,7 +191,7 @@ Covers:
 
 Runs when Azents backend, shared Python libraries, E2E substrate, Docker Compose support, runtime support, or relevant CI config changes.
 
-Covers deterministic E2E only. It excludes `live_external` tests.
+Covers deterministic E2E only. It excludes `live_external` and `runtime_provider` tests.
 
 ### `ci-typescript`
 

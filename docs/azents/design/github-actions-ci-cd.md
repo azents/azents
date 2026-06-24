@@ -28,7 +28,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
   - Pull request CI has `permissions: contents: read`.
   - Pull request CI does not inherit secrets.
   - Pull request CI does not use `pull_request_target`.
-  - Pull request CI excludes `live_external` tests.
+  - Pull request CI excludes `live_external` and `runtime_provider` tests.
 
 ### REQ-2. Required checks remain stable under path filtering
 
@@ -45,7 +45,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 - Related decisions: `ADR-0073-D5`
 - Acceptance criteria:
   - `ci-python-e2e` is a required gate.
-  - The E2E run command excludes `live_external` tests.
+  - The E2E run command excludes `live_external` and `runtime_provider` tests.
   - When E2E-relevant paths change, E2E run failure fails the gate.
 
 ### REQ-4. Snapshot publishing is trusted and private
@@ -270,7 +270,7 @@ This supports downstream snapshot deployments that receive both tags and digests
 | Behavior | Primary verification |
 | --- | --- |
 | PR CI starts without secrets or self-hosted runners | Workflow structure review and YAML validation |
-| Deterministic E2E blocks merges | `ci-python-e2e` required gate and `pytest -m "not live_external"` |
+| Deterministic E2E blocks merges | `ci-python-e2e` required gate and `pytest -m "not live_external and not runtime_provider"` |
 | Path filtering preserves required checks | `changes` + gate job logic review |
 | Snapshot metadata includes digests | Snapshot workflow payload structure review |
 | Release channel tag rules are enforced | Release workflow validation and tag generation logic review |
@@ -279,7 +279,7 @@ This supports downstream snapshot deployments that receive both tags and digests
 ### CI Execution Policy
 
 - Pull request CI runs deterministic checks only.
-- `live_external` tests are excluded.
+- `live_external` and `runtime_provider` tests are excluded because they require external credentials or runtime provider infrastructure beyond deterministic PR CI.
 - Snapshot and release workflows are trusted workflows and are not part of PR CI.
 - Workflow dry-run validation is performed locally with YAML parsing and targeted command checks. Full publish workflows require repository secrets and are validated after merge or manual dry-run.
 

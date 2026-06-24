@@ -213,7 +213,7 @@ jobs:
       - name: Run deterministic E2E
         run: |
           cd testenv/azents/e2e
-          uv run pytest -vv -m "not live_external" ./src
+          uv run pytest -vv -m "not live_external and not runtime_provider" ./src
 
   ci-python-e2e:
     name: ci-python-e2e
