@@ -38,6 +38,8 @@ The migration intentionally removes private-infrastructure assumptions from the 
   - A `changes` job computes affected scopes.
   - Expensive run jobs are path-filtered by `if` conditions.
   - Required gate jobs always run with stable names.
+  - Required gate jobs fail when the `changes` job fails, is cancelled, or is skipped.
+  - `changes` checks out full git history for reliable PR diff calculation.
   - `ci-pre-commit` always runs.
 
 ### REQ-3. Deterministic E2E blocks merges
@@ -168,7 +170,7 @@ Required gate jobs:
 - `ci-helm`
 - `ci-docker-build`
 
-Path filtering uses a `changes` job and gate jobs. Workflow-level `paths` filters are not used. Pull requests use path-filtered run jobs; `push` to `main` and `workflow_dispatch` force all scopes to run so branch and manual verification exercise the full deterministic suite.
+Path filtering uses a `changes` job and gate jobs. Workflow-level `paths` filters are not used. Pull requests use path-filtered run jobs; `push` to `main` and `workflow_dispatch` force all scopes to run so branch and manual verification exercise the full deterministic suite. Gate jobs explicitly fail when `changes` fails, is cancelled, or is skipped so an invalid diff calculation cannot be reported as successful skipped scopes.
 
 ### `snapshot.yaml`
 
@@ -271,7 +273,7 @@ This supports downstream snapshot deployments that receive both tags and digests
 | --- | --- |
 | PR CI starts without secrets or self-hosted runners | Workflow structure review and YAML validation |
 | Deterministic E2E blocks merges | `ci-python-e2e` required gate and `pytest -m "not live_external and not runtime_provider"` |
-| Path filtering preserves required checks | `changes` + gate job logic review |
+| Path filtering preserves required checks | `changes` + gate job logic review, including changes-job failure propagation |
 | Snapshot metadata includes digests | Snapshot workflow payload structure review |
 | Release channel tag rules are enforced | Release workflow validation and tag generation logic review |
 | Helm digest pinning renders correctly | Helm render contract tests |
