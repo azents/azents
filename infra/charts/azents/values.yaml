@@ -176,7 +176,10 @@ runtimeProviderKubernetes:
     leaseDurationSeconds: 30
   workspace:
     path: /workspace/agent
-  runnerResources: null
+  runnerResources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
   runtimePod:
     annotations: {}
     imagePullSecrets: null

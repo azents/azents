@@ -65,7 +65,10 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_PROVIDER_POD_TOLERATIONS" in rendered
     assert "AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS" in rendered
     assert "AZ_RUNTIME_RUNNER_RESOURCES" in rendered
-    assert 'value: "null"' in rendered
+    assert (
+        'value: "{\\"requests\\":{\\"cpu\\":\\"1\\",\\"memory\\":\\"2Gi\\"}}"'
+        in rendered
+    )
     assert "AZ_RUNTIME_RUNNER_CPU_REQUEST" not in rendered
     assert "AZ_RUNTIME_RUNNER_MEMORY_REQUEST" not in rendered
     assert "AZ_RUNTIME_RUNNER_CPU_LIMIT" not in rendered
@@ -166,7 +169,7 @@ def test_runtime_provider_kubernetes_runner_resources_render_contract() -> None:
     assert (
         'value: "{\\"claims\\":[{\\"name\\":\\"claim-1\\",\\"request\\":\\"gpu\\"}],'
         '\\"limits\\":{\\"hugepages-2Mi\\":\\"1Gi\\",\\"memory\\":\\"4Gi\\"},'
-        '\\"requests\\":{\\"cpu\\":\\"1000m\\",\\"ephemeral-storage\\":\\"1Gi\\"}}"'
+        '\\"requests\\":{\\"cpu\\":\\"1000m\\",\\"ephemeral-storage\\":\\"1Gi\\",\\"memory\\":\\"2Gi\\"}}"'
         in rendered
     )
 

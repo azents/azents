@@ -63,7 +63,7 @@ Ingress is disabled by default. Use `server.apiserver.ingress`, `web.ingress`, a
 
 By default, application resources render into the Helm release namespace. Use `helm install --namespace ... --create-namespace` or the ArgoCD Application destination namespace to choose it. Component-specific namespace overrides exist only for deployments that intentionally split components across namespaces. `runtimeProviderKubernetes.workloadNamespace.name` remains separate for Runtime Pods and PVCs, and that namespace must be created by the consumer-owned deployment layer.
 
-Container resource requirements follow the standard Helm chart pattern: defaults are `{}`, and the chart renders a container `resources` stanza only when the consumer sets component-specific `*.resources` values.
+Container resource requirements follow the standard Helm chart pattern: defaults are `{}`, and the chart renders a container `resources` stanza only when the consumer sets component-specific `*.resources` values. Runtime runner Pods are the exception: `runtimeProviderKubernetes.runnerResources` defaults to CPU `1` and memory `2Gi` requests with no limits so interactive tool operations have reserved capacity while remaining burstable.
 
 ## Agent Runtime Provider Contract
 
@@ -73,6 +73,7 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 - Provider Deployment: `AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKSPACE_PATH`, `AZ_RUNTIME_PROVIDER_STORAGE_CLASS`, `AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS`
 - Provider RBAC: leader election Lease permissions are scoped to the provider namespace, while Runtime Pod/PVC permissions are scoped to the workload namespace
 - Runtime Pod image pulls: by default, Runtime Pods inherit `global.imagePullSecrets`. Consumers may override with `runtimeProviderKubernetes.runtimePod.imagePullSecrets`. Referenced pull secrets must already exist in the workload namespace.
+- Runtime Pod resources: `runtimeProviderKubernetes.runnerResources` is passed to the Provider as Kubernetes `ResourceRequirements`. Defaults set requests to CPU `1` and memory `2Gi`; limits are intentionally omitted unless consumers set them.
 - Persistence: Kubernetes Provider v1 uses PVCs in the workload namespace as canonical persistence
 - Runtime NetworkPolicy: `runtimeProviderKubernetes.networkPolicy.deniedCidrs`
   defines the CIDRs excluded from the default public egress rule,
