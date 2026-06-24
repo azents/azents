@@ -79,7 +79,7 @@ class TestExposeEnvDisabled:
     @pytest.mark.asyncio
     async def test_returns_empty_when_disabled(self) -> None:
         """When toggle is off, return empty dict even if provider exists."""
-        provider = AsyncMock(return_value="ghp_should_not_be_called")
+        provider = AsyncMock(return_value="example_should_not_be_called")
         toolkit = GitHubToolkit(
             config=_make_config(inject_runtime_environment=False),
             runtime_environment_token_provider=provider,
@@ -109,7 +109,7 @@ class TestExposeEnvEnabled:
     @pytest.mark.asyncio
     async def test_injects_both_env_names(self) -> None:
         """Set provider result as same value for both GH_TOKEN and GITHUB_TOKEN."""
-        provider = AsyncMock(return_value="ghp_token_xxx")
+        provider = AsyncMock(return_value="example_token_xxx")
         toolkit = GitHubToolkit(
             config=_make_config(inject_runtime_environment=True),
             runtime_environment_token_provider=provider,
@@ -117,7 +117,10 @@ class TestExposeEnvEnabled:
 
         setting = await toolkit.expose_env()
 
-        assert setting == {"GH_TOKEN": "ghp_token_xxx", "GITHUB_TOKEN": "ghp_token_xxx"}
+        assert setting == {
+            "GH_TOKEN": "example_token_xxx",
+            "GITHUB_TOKEN": "example_token_xxx",
+        }
         provider.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -140,7 +143,7 @@ class TestExposeEnvCache:
     @pytest.mark.asyncio
     async def test_second_call_within_ttl_uses_cache(self) -> None:
         """Second call within TTL uses cache without recalling provider."""
-        provider = AsyncMock(return_value="ghp_x")
+        provider = AsyncMock(return_value="example_x")
         toolkit = GitHubToolkit(
             config=_make_config(inject_runtime_environment=True),
             runtime_environment_token_provider=provider,
@@ -157,7 +160,7 @@ class TestExposeEnvCache:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Next call after TTL expiration recalls provider."""
-        tokens = iter(["ghp_first", "ghp_second"])
+        tokens = iter(["example_first", "example_second"])
 
         async def provider() -> str:
             return next(tokens)
@@ -176,17 +179,17 @@ class TestExposeEnvCache:
         )
 
         first = await toolkit.expose_env()
-        assert first["GH_TOKEN"] == "ghp_first"
+        assert first["GH_TOKEN"] == "example_first"
 
         current[0] = 1070.0  # past TTL (60s)
 
         second = await toolkit.expose_env()
-        assert second["GH_TOKEN"] == "ghp_second"
+        assert second["GH_TOKEN"] == "example_second"
 
     @pytest.mark.asyncio
     async def test_none_result_not_cached(self) -> None:
         """Do not cache provider None result, so next call retries."""
-        results = [None, "ghp_recovered"]
+        results = [None, "example_recovered"]
         call_count = 0
 
         async def provider() -> str | None:
@@ -205,8 +208,8 @@ class TestExposeEnvCache:
 
         second = await toolkit.expose_env()
         assert second == {
-            "GH_TOKEN": "ghp_recovered",
-            "GITHUB_TOKEN": "ghp_recovered",
+            "GH_TOKEN": "example_recovered",
+            "GITHUB_TOKEN": "example_recovered",
         }
         assert call_count == 2
 
@@ -219,10 +222,10 @@ class TestExposeEnvMultiInstallation:
         """Return each installation token and owner routing map in the env."""
 
         async def provide_azents() -> str:
-            return "ghs_azents"
+            return "example_installation_token_azents"
 
         async def provide_hardtack() -> str:
-            return "ghs_hardtack"
+            return "example_installation_token_hardtack"
 
         toolkit = GitHubToolkit(
             config=_make_app_config(inject_runtime_environment=True),
@@ -258,10 +261,16 @@ class TestExposeEnvMultiInstallation:
 
         setting = await toolkit.expose_env()
 
-        assert setting["GITHUB_TOKEN_INSTALLATION_101"] == "ghs_azents"
-        assert setting["GITHUB_TOKEN_INSTALLATION_202"] == "ghs_hardtack"
-        assert setting["GH_TOKEN"] == "ghs_azents"
-        assert setting["GITHUB_TOKEN"] == "ghs_azents"
+        assert (
+            setting["GITHUB_TOKEN_INSTALLATION_101"]
+            == "example_installation_token_azents"
+        )
+        assert (
+            setting["GITHUB_TOKEN_INSTALLATION_202"]
+            == "example_installation_token_hardtack"
+        )
+        assert setting["GH_TOKEN"] == "example_installation_token_azents"
+        assert setting["GITHUB_TOKEN"] == "example_installation_token_azents"
         assert '"azents"' in setting["GITHUB_INSTALLATION_MAP"]
         assert '"hardtack"' in setting["GITHUB_INSTALLATION_MAP"]
 
@@ -302,10 +311,10 @@ class TestExposeEnvMultiInstallation:
         """Selected installation controls GH_TOKEN/GITHUB_TOKEN for gh CLI."""
 
         async def provide_azents() -> str:
-            return "ghs_azents"
+            return "example_installation_token_azents"
 
         async def provide_hardtack() -> str:
-            return "ghs_hardtack"
+            return "example_installation_token_hardtack"
 
         toolkit = GitHubToolkit(
             config=_make_app_config(inject_runtime_environment=True),
@@ -345,8 +354,8 @@ class TestExposeEnvMultiInstallation:
 
         setting = await toolkit.expose_env()
 
-        assert setting["GH_TOKEN"] == "ghs_hardtack"
-        assert setting["GITHUB_TOKEN"] == "ghs_hardtack"
+        assert setting["GH_TOKEN"] == "example_installation_token_hardtack"
+        assert setting["GITHUB_TOKEN"] == "example_installation_token_hardtack"
 
     @pytest.mark.asyncio
     async def test_switch_installation_by_login_updates_state(self) -> None:
@@ -363,7 +372,9 @@ class TestExposeEnvMultiInstallation:
                         account_avatar_url=None,
                     ),
                     mcp_toolkit=None,
-                    token_provider=AsyncMock(return_value="ghs_azents"),
+                    token_provider=AsyncMock(
+                        return_value="example_installation_token_azents"
+                    ),
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
@@ -376,7 +387,9 @@ class TestExposeEnvMultiInstallation:
                         account_avatar_url=None,
                     ),
                     mcp_toolkit=None,
-                    token_provider=AsyncMock(return_value="ghs_hardtack"),
+                    token_provider=AsyncMock(
+                        return_value="example_installation_token_hardtack"
+                    ),
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
@@ -408,7 +421,9 @@ class TestExposeEnvMultiInstallation:
                         account_avatar_url=None,
                     ),
                     mcp_toolkit=None,
-                    token_provider=AsyncMock(return_value="ghs_azents"),
+                    token_provider=AsyncMock(
+                        return_value="example_installation_token_azents"
+                    ),
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
@@ -421,7 +436,9 @@ class TestExposeEnvMultiInstallation:
                         account_avatar_url=None,
                     ),
                     mcp_toolkit=None,
-                    token_provider=AsyncMock(return_value="ghs_hardtack"),
+                    token_provider=AsyncMock(
+                        return_value="example_installation_token_hardtack"
+                    ),
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
@@ -450,7 +467,9 @@ class TestExposeEnvMultiInstallation:
                         account_avatar_url=None,
                     ),
                     mcp_toolkit=None,
-                    token_provider=AsyncMock(return_value="ghs_azents"),
+                    token_provider=AsyncMock(
+                        return_value="example_installation_token_azents"
+                    ),
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
@@ -463,7 +482,9 @@ class TestExposeEnvMultiInstallation:
                         account_avatar_url=None,
                     ),
                     mcp_toolkit=None,
-                    token_provider=AsyncMock(return_value="ghs_hardtack"),
+                    token_provider=AsyncMock(
+                        return_value="example_installation_token_hardtack"
+                    ),
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,

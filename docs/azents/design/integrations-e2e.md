@@ -63,8 +63,8 @@ Decisions agreed in Discussion #2456. See each comment thread for pros/cons.
 |----|------|----------|
 | **D1** | scenario directory = `scenarios/integrations/` | Same level as existing `scenarios/{sandbox-isolation,shell-tool,mcp-toolkit,chat-streaming,browser}/`, accommodates Slack/Discord/future integrations |
 | **D2** | PR split = foundation → stacked by Phase | Merge foundation (`.env`/credentials/browser helper) quickly, distribute review burden by phase. Detailed stack structure in [Implementation Plan](#implementation-plan) |
-| **D3** | tunneling = **Tailscale Funnel** (runs directly on this machine) | Existing production infra uses Tailscale (`infra/argocd/tailscale-operator/`). Caddy limited to closed network, unusable. FRP needs separate VM → adopt Tailscale Funnel with 0 additional infra |
-| **D4** | test account = shared QA email + **AWS SSM Parameter Store** + pull script | Existing testenv `.env` pattern is plaintext; 1Password adds tool. AWS SSM is same infra as ExternalSecrets and protected by IAM policy + KMS. Variable names are kebab-case (`/testenv/nointern/slack-platform-app/client-id`, etc.) |
+| **D3** | tunneling = **Tailscale Funnel** (runs on the internal QA host) | Existing production infra uses Tailscale (`infra/argocd/tailscale-operator/`). Caddy limited to closed network, unusable. FRP needs separate VM → adopt Tailscale Funnel with 0 additional infra |
+| **D4** | test account = shared QA email + **AWS SSM Parameter Store** + pull script | Existing testenv `.env` pattern is plaintext; 1Password adds tool. AWS SSM is same infra as ExternalSecrets and protected by IAM policy + KMS. Variable names are kebab-case (`/testenv/{project}/slack-platform-app/client-id`, etc.) |
 | **D5** | 2FA = optional (TOTP automation supported, skip if absent) | Forcing it increases secret management burden; disabling risks Slack policy changes. Automatable with `pyotp`, but skip if account has no 2FA configured |
 | **D6** | data cleanup = Admin API helper (`seed/slack_discord_cleanup.py`) | Automation required, called in scenario beforeAll. Idempotent |
 
@@ -76,7 +76,7 @@ D7 (CI integration) is **excluded from this work scope** per user feedback.
 
 ```mermaid
 flowchart LR
-    subgraph Codingbot["Codingbot LXC (Proxmox VE)"]
+    subgraph QAHost["internal QA host"]
         QA["Claude Code\n(QA runner)"]
         PW["Playwright\n(bundled chromium)"]
         TS["tailscaled\n+ funnel"]
@@ -86,12 +86,12 @@ flowchart LR
 
         QA -- "browser_*" --> PW
         QA -- "scenario .md" --> Cred
-        Cred -- "aws ssm get-parameter" --> SSM[("AWS SSM\n/testenv/nointern/*")]
+        Cred -- "aws ssm get-parameter" --> SSM[("secure parameter store\n/testenv/{project}/*")]
         PW -- "HTTP localhost:3003" --> Web
         PW -- "HTTPS slack.com" --> Slack[("Slack\nworkspace + app")]
         Web -- "API call" --> Backend
 
-        TS -- "127.0.0.1:8010 ↔ public" --> Funnel[("nointern-testenv\n.tail2b7559.ts.net")]
+        TS -- "127.0.0.1:8010 ↔ public" --> Funnel[("example-testenv\n.example.invalid")]
     end
 
     Slack -. "Events / Interactions / Slash\n(webhook)" .-> Funnel
@@ -99,7 +99,7 @@ flowchart LR
 ```
 
 Core points:
-- **Tunneling runs directly on this LXC machine** (`tailscale funnel --bg 8010`). Already set up; `https://nointern-testenv.tail2b7559.ts.net` is persistently running.
+- **Tunneling runs on the internal QA host** (`tailscale funnel --bg <local-port>`). The public callback URL is environment-specific and should be supplied through local configuration.
 - **OAuth redirect URL is FE address** (`http://localhost:3003/oauth/slack/callback`). Slack allows localhost in dev app. Playwright runs on same machine, so localhost is sufficient.
 - **Webhook URL (Events/Interactions/Slash) is Funnel address** — Slack server directly calls our backend.
 - **Discord** OAuth callback is backend (`/discord/v1/oauth-callback`) — different from Slack.
@@ -122,10 +122,10 @@ Stage 4 only sees nointern-web UI. Stage 5 layers external services on top.
 
 ### AWS SSM Parameter Store
 
-All `SecureString`. Path prefix `/testenv/nointern/`. kebab-case (D4 decision).
+All `SecureString`. Path prefix `/testenv/{project}/`. kebab-case (D4 decision).
 
 ```
-/testenv/nointern/
+/testenv/{project}/
 ├── slack-platform-app/
 │   ├── client-id
 │   ├── client-secret
@@ -180,7 +180,7 @@ NI_RDB_PORT=5433
 # ...
 
 # Stage 5 addition
-TESTENV_NOINTERN_FUNNEL_URL=https://nointern-testenv.tail2b7559.ts.net
+TESTENV_AZENTS_FUNNEL_URL=https://example-testenv.example.invalid
 ```
 
 `.env` is gitignored. Machine-dependent value. SSM credentials are not in `.env`; `seed/credentials.py` pulls them at runtime.
@@ -223,10 +223,10 @@ class SlackPlatformApp:
     @classmethod
     def from_ssm(cls) -> "SlackPlatformApp":
         return cls(
-            client_id=_ssm_get("/testenv/nointern/slack-platform-app/client-id"),
-            client_secret=_ssm_get("/testenv/nointern/slack-platform-app/client-secret"),
-            signing_secret=_ssm_get("/testenv/nointern/slack-platform-app/signing-secret"),
-            app_token=_ssm_get("/testenv/nointern/slack-platform-app/app-token") or None,
+            client_id=_ssm_get("/testenv/{project}/slack-platform-app/client-id"),
+            client_secret=_ssm_get("/testenv/{project}/slack-platform-app/client-secret"),
+            signing_secret=_ssm_get("/testenv/{project}/slack-platform-app/signing-secret"),
+            app_token=_ssm_get("/testenv/{project}/slack-platform-app/app-token") or None,
         )
 
 
@@ -240,10 +240,10 @@ class SlackTestAccount:
     @classmethod
     def from_ssm(cls) -> "SlackTestAccount":
         return cls(
-            workspace_slug=_ssm_get("/testenv/nointern/slack-account/workspace-slug"),
-            email=_ssm_get("/testenv/nointern/slack-account/email"),
-            password=_ssm_get("/testenv/nointern/slack-account/password"),
-            totp_secret=(_ssm_get("/testenv/nointern/slack-account/totp-secret") or None) if _has_param("totp-secret") else None,
+            workspace_slug=_ssm_get("/testenv/{project}/slack-account/workspace-slug"),
+            email=_ssm_get("/testenv/{project}/slack-account/email"),
+            password=_ssm_get("/testenv/{project}/slack-account/password"),
+            totp_secret=(_ssm_get("/testenv/{project}/slack-account/totp-secret") or None) if _has_param("totp-secret") else None,
         )
 ```
 
@@ -413,7 +413,7 @@ Claude Code (QA runner)
 
 ## Preconditions
 - `devserver.py up --web`
-- AWS SSM credential registered (`/testenv/nointern/...`)
+- AWS SSM credential registered (`/testenv/{project}/...`)
 - Tailscale Funnel active (`tailscale funnel status` PASS)
 - (Phase 2+) Slack storage state cache exists or one-time login performed
 - (per scenario) admin API cleanup complete
@@ -447,8 +447,8 @@ from seed.slack_discord_cleanup import cleanup_slack
 | AWS SSM SecureString (Slack test account) | ✅ registered complete (3) | manual |
 | AWS SSM SecureString (Discord) | future (after Slack completion) | manual |
 | Tailscale tailnet + Funnel enable | ✅ running | Tailscale admin console |
-| Tailscale install in codingbot LXC | ✅ working | expose `/dev/net/tun` in LXC config (Hardtack manual) + join with auth key |
-| Funnel URL `nointern-testenv.tail2b7559.ts.net` | ✅ persistent (`--bg`) | `tailscale funnel --bg 8010` |
+| Tailscale install on QA host | ✅ working | host-specific setup; join with a restricted auth key |
+| Funnel URL | ✅ persistent (`--bg`) | environment-specific URL configured outside Git; `tailscale funnel --bg <local-port>` |
 
 ### Explicitly no changes
 
@@ -463,7 +463,7 @@ from seed.slack_discord_cleanup import cleanup_slack
 
 | Item | Result | Note |
 |------|------|------|
-| AWS SSM credential pull (`aws ssm get-parameter`) | ✅ | pull succeeded with `user/nointern-testenv` IAM permission |
+| AWS SSM credential pull (`aws ssm get-parameter`) | ✅ | pull succeeded with `a least-privilege testenv IAM principal` IAM permission |
 | Reach external domain with Playwright bundled chromium | ✅ | no block even headless and no stealth |
 | Slack `{slug}.slack.com/sign_in_with_password` login | ✅ | email + password auto input → reached ssb/redirect |
 | Storage state persistence | ✅ | 8 cookies, 1874 bytes |
@@ -553,7 +553,7 @@ main
 | **Puppeteer** | Playwright more actively maintained, multi-browser support, Stage 4 already Playwright based |
 | **Selenium** | heavier, Playwright better suited for modern SPA of Slack/Discord |
 | **Mock OAuth Provider** | deterministic but expensive to bypass hardcoded `slack_sdk` / `discord.com`. loses value of verifying actual OAuth flow |
-| **system chrome** (`/opt/google/chrome/chrome`) | launch failed in this LXC due to socket binding permission issue. Playwright bundled chromium works |
+| **system chrome** (`/opt/google/chrome/chrome`) | launch failed on the internal QA host due to socket binding permission issue. Playwright bundled chromium works |
 
 → **Playwright bundled chromium** (already `/home/code/.cache/ms-playwright/chromium-1212/`).
 

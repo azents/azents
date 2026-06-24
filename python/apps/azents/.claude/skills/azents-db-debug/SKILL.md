@@ -10,7 +10,7 @@ Run database queries with `shell.py -c` from the azents project directory.
 ## Execution
 
 ```bash
-cd /Users/hardtack/repos/azents/azents/python/apps/azents && uv run python -m cli.shell -c "<python_code>"
+cd <local-azents-repo>/python/apps/azents && uv run python -m cli.shell -c "<python_code>"
 ```
 
 ## Available Variables

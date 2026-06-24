@@ -248,7 +248,7 @@ The CLI prints:
 
 ```text
 Open this URL:
-https://nointern.com/device
+https://example.invalid/device
 
 Enter code:
 ABCD-EFGH

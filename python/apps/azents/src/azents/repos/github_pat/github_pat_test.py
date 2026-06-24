@@ -13,7 +13,7 @@ from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 
-_TOKEN = "ghp_abcdef1234567890abcdef1234567890"
+_TOKEN = "example-github-pat-token"
 _USERNAME = "octocat"
 _TEST_KEY = Fernet.generate_key().decode()
 
@@ -56,14 +56,14 @@ class TestGitHubPATRepositoryUpsert:
             user_id=user_id,
             token=_TOKEN,
             github_username=_USERNAME,
-            display_hint="ghp_abcd",
+            display_hint="token-hint",
         )
 
         assert pat.workspace_id == ws_id
         assert pat.user_id == user_id
         assert pat.token == _TOKEN
         assert pat.github_username == _USERNAME
-        assert pat.display_hint == "ghp_abcd"
+        assert pat.display_hint == "token-hint"
         assert pat.expires_at is None
 
     async def test_upsert_updates_existing(self, rdb_session: AsyncSession) -> None:
@@ -78,22 +78,22 @@ class TestGitHubPATRepositoryUpsert:
             user_id=user_id,
             token=_TOKEN,
             github_username=_USERNAME,
-            display_hint="ghp_abcd",
+            display_hint="token-hint",
         )
 
-        new_token = "ghp_newtoken9999999999999999999999"
+        new_token = "example-github-pat-token-updated"
         pat = await repo.upsert(
             rdb_session,
             workspace_id=ws_id,
             user_id=user_id,
             token=new_token,
             github_username="newuser",
-            display_hint="ghp_newt",
+            display_hint="token-hint-updated",
         )
 
         assert pat.token == new_token
         assert pat.github_username == "newuser"
-        assert pat.display_hint == "ghp_newt"
+        assert pat.display_hint == "token-hint-updated"
 
     async def test_upsert_with_expires_at(self, rdb_session: AsyncSession) -> None:
         """Store expiration date of Fine-grained PAT."""
@@ -161,7 +161,7 @@ class TestGitHubPATRepositoryStatus:
             user_id=user_id,
             token=_TOKEN,
             github_username=_USERNAME,
-            display_hint="ghp_abcd",
+            display_hint="token-hint",
         )
 
         status = await repo.get_status_by_workspace_and_user(
@@ -170,7 +170,7 @@ class TestGitHubPATRepositoryStatus:
 
         assert status.registered is True
         assert status.github_username == _USERNAME
-        assert status.display_hint == "ghp_abcd"
+        assert status.display_hint == "token-hint"
 
     async def test_status_not_registered(self, rdb_session: AsyncSession) -> None:
         """Fetch unregistered status."""

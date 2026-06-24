@@ -147,7 +147,7 @@ def _write_aws_files(home: Path) -> None:
     aws_root.mkdir()
     (aws_root / "credentials").write_text(
         """[azents-bedrock]
-aws_access_key_id = AKIA_TEST_VALUE
+aws_access_key_id = EXAMPLE_AWS_ACCESS_KEY_ID
 aws_secret_access_key = secret-value
 """,
         encoding="utf-8",

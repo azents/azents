@@ -36,7 +36,7 @@ class TestVerifyToken:
         with patch(target) as patched:
             patched.return_value.__aenter__.return_value = mock_client
             service = _make_service()
-            result = await service._verify_token("ghp_valid")  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            result = await service._verify_token("example-valid-token")  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
 
         assert result == "octocat"
 
@@ -53,7 +53,7 @@ class TestVerifyToken:
         with patch(target) as patched:
             patched.return_value.__aenter__.return_value = mock_client
             service = _make_service()
-            result = await service._verify_token("ghp_bad")  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            result = await service._verify_token("example-bad-token")  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
 
         assert result is None
 
@@ -67,7 +67,7 @@ class TestVerifyToken:
         with patch(target) as patched:
             patched.return_value.__aenter__.return_value = mock_client
             service = _make_service()
-            result = await service._verify_token("ghp_any")  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            result = await service._verify_token("example-any-token")  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
 
         assert result is None
 
@@ -86,5 +86,5 @@ class TestVerifyToken:
             patched.return_value.__aenter__.return_value = mock_client
             service = _make_service()
             service.config.mcp_proxy_url = "http://proxy:8080"
-            await service._verify_token("ghp_test")  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            await service._verify_token("example-test-token")  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
             patched.assert_called_once_with(proxy="http://proxy:8080")

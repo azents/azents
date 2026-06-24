@@ -416,7 +416,9 @@ export function GithubConfigFields({
           label={t("patTokenLabel")}
           description={t("patTokenDescription")}
           placeholder={
-            hasCredentials ? t("credentialsEditPlaceholder") : "ghp_..."
+            hasCredentials
+              ? t("credentialsEditPlaceholder")
+              : "Paste a GitHub token"
           }
           value={(credentials?.token as string) || ""}
           onChange={(e) => setCred("token", e.currentTarget.value)}
@@ -438,7 +440,7 @@ export function GithubConfigFields({
             placeholder={
               hasCredentials
                 ? t("credentialsEditPlaceholder")
-                : "-----BEGIN RSA PRIVATE KEY-----\n..."
+                : "Paste a GitHub App private key"
             }
             autosize
             minRows={3}

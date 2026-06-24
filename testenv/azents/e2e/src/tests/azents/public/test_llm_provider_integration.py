@@ -109,7 +109,9 @@ class TestCreateIntegration:
                     AwsSecrets(secret_access_key="wJalrXUtnFEMI/K7MDENG/test")
                 ),
                 config=LLMProviderIntegrationCreateRequestConfig(
-                    AwsConfig(access_key_id="AKIAIOSFODNN7EXAMPLE", region="us-east-1")
+                    AwsConfig(
+                        access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID", region="us-east-1"
+                    )
                 ),
             ),
             _headers={"Authorization": f"Bearer {access_token}"},
@@ -122,7 +124,7 @@ class TestCreateIntegration:
         config = created.config.actual_instance
         assert config is not None
         assert isinstance(config, AwsConfig)
-        assert config.access_key_id == "AKIAIOSFODNN7EXAMPLE"
+        assert config.access_key_id == "EXAMPLE_AWS_ACCESS_KEY_ID"
         assert config.region == "us-east-1"
         assert created.enabled is True
 
@@ -180,7 +182,7 @@ class TestCreateIntegration:
                     secrets=Secrets(AwsSecrets(secret_access_key="wrong-type")),
                     config=LLMProviderIntegrationCreateRequestConfig(
                         AwsConfig(
-                            access_key_id="AKIAIOSFODNN7EXAMPLE",
+                            access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID",
                             region="us-east-1",
                         )
                     ),
@@ -218,7 +220,7 @@ class TestListIntegrations:
             llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
                 provider=LLMProvider.ANTHROPIC,
                 name="Anthropic 1",
-                secrets=Secrets(ApiKeySecrets(api_key="sk-ant-key-1")),
+                secrets=Secrets(ApiKeySecrets(api_key="example-anthropic-api-key-1")),
             ),
             _headers=headers,
         )
@@ -254,7 +256,10 @@ class TestGetIntegration:
                 name="Get Test Bedrock",
                 secrets=Secrets(AwsSecrets(secret_access_key="wJalrXUtnFEMI/test")),
                 config=LLMProviderIntegrationCreateRequestConfig(
-                    AwsConfig(access_key_id="AKIATEST", region="ap-northeast-2")
+                    AwsConfig(
+                        access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID",
+                        region="ap-northeast-2",
+                    )
                 ),
             ),
             _headers=headers,
@@ -273,7 +278,7 @@ class TestGetIntegration:
         assert fetched.config is not None
         config = fetched.config.actual_instance
         assert isinstance(config, AwsConfig)
-        assert config.access_key_id == "AKIATEST"
+        assert config.access_key_id == "EXAMPLE_AWS_ACCESS_KEY_ID"
         assert config.region == "ap-northeast-2"
         assert fetched.created_at is not None
         assert fetched.updated_at is not None
@@ -350,7 +355,9 @@ class TestUpdateIntegration:
                 name="AWS Config Update",
                 secrets=Secrets(AwsSecrets(secret_access_key="wJalrXUtnFEMI/test")),
                 config=LLMProviderIntegrationCreateRequestConfig(
-                    AwsConfig(access_key_id="AKIATEST", region="us-east-1")
+                    AwsConfig(
+                        access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID", region="us-east-1"
+                    )
                 ),
             ),
             _headers=headers,
@@ -361,7 +368,10 @@ class TestUpdateIntegration:
             handle=handle,
             llm_provider_integration_update_request=LLMProviderIntegrationUpdateRequest(
                 config=LLMProviderIntegrationCreateRequestConfig(
-                    AwsConfig(access_key_id="AKIATEST", region="ap-northeast-2")
+                    AwsConfig(
+                        access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID",
+                        region="ap-northeast-2",
+                    )
                 ),
             ),
             _headers=headers,
@@ -371,7 +381,7 @@ class TestUpdateIntegration:
         config = updated.config.actual_instance
         assert isinstance(config, AwsConfig)
         assert config.region == "ap-northeast-2"
-        assert config.access_key_id == "AKIATEST"
+        assert config.access_key_id == "EXAMPLE_AWS_ACCESS_KEY_ID"
 
     def test_toggle_enabled(
         self,

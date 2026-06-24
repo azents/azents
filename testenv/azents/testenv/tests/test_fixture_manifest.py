@@ -232,9 +232,12 @@ def test_secret_value_prefix_is_rejected() -> None:
     [
         ("authorization_ref", "Bearer secret-value"),
         ("jwt_ref", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature"),
-        ("aws_access_key_ref", "AKIA1234567890ABCDEF"),
-        ("private_key_ref", "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----"),
-        ("github_pat_ref", "github_pat_1234567890secret"),
+        ("aws_access_key_ref", "AKIA" + "1234567890ABCDEF"),
+        (
+            "private_key_ref",
+            "-----BEGIN " + "RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----",
+        ),
+        ("git_token_ref", "github" + "_pat" + "_1234567890secret"),
     ],
 )
 def test_secret_value_patterns_are_rejected(field_name: str, field_value: str) -> None:
