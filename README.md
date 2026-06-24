@@ -97,3 +97,9 @@ $ pnpm run generate --filter=@azents/public-client --filter=@azents/admin-client
 - Container images are built from the Azents Dockerfiles in this repository.
 - The Helm chart lives at `infra/charts/azents/`.
 - Public project domain: `azents.io`.
+
+## License
+
+Azents source code is licensed under the [MIT License](./LICENSE).
+
+The Azents name, logo, icons, and other brand assets are not licensed under the MIT License. You may not use them in a way that suggests you are the official Azents project, an official Azents cloud or hosting provider, or endorsed by Azents without written permission. See [TRADEMARKS.md](./TRADEMARKS.md) for details.
