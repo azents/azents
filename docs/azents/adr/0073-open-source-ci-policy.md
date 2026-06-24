@@ -39,9 +39,10 @@ Pull request CI runs on the `pull_request` event with minimal permissions:
 ```yaml
 permissions:
   contents: read
+  pull-requests: read
 ```
 
-Pull request CI must not receive repository secrets or inherited secrets. It must not request `id-token: write`, `packages: write`, `contents: write`, or downstream deployment credentials.
+`pull-requests: read` is allowed only so the `changes` job can read pull request changed-file metadata. Pull request CI must not receive repository secrets or inherited secrets. It must not request `id-token: write`, `packages: write`, `contents: write`, or downstream deployment credentials.
 
 Pull request CI must not:
 
@@ -128,11 +129,12 @@ It does not use workflow-level `paths` or `paths-ignore` for required CI, becaus
 
 A lightweight `changes` job computes affected scopes. Expensive run jobs execute only when their scope changed. Each required gate job runs with `if: always()` and evaluates the corresponding run job result:
 
+- if the `changes` job fails, is cancelled, or is skipped, every gate fails,
 - if the scope did not change, the gate succeeds,
 - if the scope changed and the run job succeeded, the gate succeeds,
 - if the scope changed and the run job failed, was cancelled, or did not run as expected, the gate fails.
 
-Changes under `.github/workflows/**` force all CI scopes to run.
+Changes under `.github/workflows/**` force all CI scopes to run. The `changes` checkout uses full history so pull request diff calculation does not depend on a shallow clone.
 
 ### ADR-0073-D8 — Keep pre-commit as an always-run required check
 

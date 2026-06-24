@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.sha }}
@@ -30,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
       - name: Compute changed scopes
         id: filter
         uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
@@ -166,8 +169,13 @@ jobs:
     steps:
       - name: Gate Python result
         run: |
+          changes_result='${{ needs.changes.result }}'
           changed='${{ needs.changes.outputs.python }}'
           result='${{ needs.ci_python_run.result }}'
+          if [ "$changes_result" != 'success' ]; then
+            echo "changes job failed or was skipped: $changes_result"
+            exit 1
+          fi
           if [ "$changed" != 'true' ]; then
             echo 'Python scope unchanged; passing.'
             exit 0
@@ -225,8 +233,13 @@ jobs:
     steps:
       - name: Gate Python E2E result
         run: |
+          changes_result='${{ needs.changes.result }}'
           changed='${{ needs.changes.outputs.python_e2e }}'
           result='${{ needs.ci_python_e2e_run.result }}'
+          if [ "$changes_result" != 'success' ]; then
+            echo "changes job failed or was skipped: $changes_result"
+            exit 1
+          fi
           if [ "$changed" != 'true' ]; then
             echo 'Python E2E scope unchanged; passing.'
             exit 0
@@ -255,6 +268,8 @@ jobs:
           package_json_file: typescript/package.json
       - name: Install dependencies
         run: cd typescript && pnpm install --frozen-lockfile
+      - name: Generate API clients
+        run: cd typescript && pnpm run generate
       - name: Format check
         run: cd typescript && pnpm run format:check
       - name: Lint
@@ -272,8 +287,13 @@ jobs:
     steps:
       - name: Gate TypeScript result
         run: |
+          changes_result='${{ needs.changes.result }}'
           changed='${{ needs.changes.outputs.typescript }}'
           result='${{ needs.ci_typescript_run.result }}'
+          if [ "$changes_result" != 'success' ]; then
+            echo "changes job failed or was skipped: $changes_result"
+            exit 1
+          fi
           if [ "$changed" != 'true' ]; then
             echo 'TypeScript scope unchanged; passing.'
             exit 0
@@ -323,8 +343,13 @@ jobs:
     steps:
       - name: Gate Helm result
         run: |
+          changes_result='${{ needs.changes.result }}'
           changed='${{ needs.changes.outputs.helm }}'
           result='${{ needs.ci_helm_run.result }}'
+          if [ "$changes_result" != 'success' ]; then
+            echo "changes job failed or was skipped: $changes_result"
+            exit 1
+          fi
           if [ "$changed" != 'true' ]; then
             echo 'Helm scope unchanged; passing.'
             exit 0
@@ -394,8 +419,13 @@ jobs:
     steps:
       - name: Gate Docker build result
         run: |
+          changes_result='${{ needs.changes.result }}'
           changed='${{ needs.changes.outputs.docker }}'
           result='${{ needs.ci_docker_build_run.result }}'
+          if [ "$changes_result" != 'success' ]; then
+            echo "changes job failed or was skipped: $changes_result"
+            exit 1
+          fi
           if [ "$changed" != 'true' ]; then
             echo 'Docker scope unchanged; passing.'
             exit 0

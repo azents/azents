@@ -25,7 +25,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 - Related decisions: `ADR-0073-D1`, `ADR-0073-D2`, `ADR-0073-D3`, `ADR-0073-D4`
 - Acceptance criteria:
   - Pull request CI uses `ubuntu-latest` only.
-  - Pull request CI has `permissions: contents: read`.
+  - Pull request CI has `permissions: contents: read` and `pull-requests: read` only.
   - Pull request CI does not inherit secrets.
   - Pull request CI does not use `pull_request_target`.
   - Pull request CI excludes `live_external` and `runtime_provider` tests.
@@ -38,6 +38,8 @@ The migration intentionally removes private-infrastructure assumptions from the 
   - A `changes` job computes affected scopes.
   - Expensive run jobs are path-filtered by `if` conditions.
   - Required gate jobs always run with stable names.
+  - Required gate jobs fail when the `changes` job fails, is cancelled, or is skipped.
+  - `changes` checks out full git history for reliable PR diff calculation.
   - `ci-pre-commit` always runs.
 
 ### REQ-3. Deterministic E2E blocks merges
@@ -157,7 +159,10 @@ Permissions:
 ```yaml
 permissions:
   contents: read
+  pull-requests: read
 ```
+
+`pull-requests: read` is used only by the `changes` job to read pull request changed-file metadata.
 
 Required gate jobs:
 
@@ -168,7 +173,7 @@ Required gate jobs:
 - `ci-helm`
 - `ci-docker-build`
 
-Path filtering uses a `changes` job and gate jobs. Workflow-level `paths` filters are not used. Pull requests use path-filtered run jobs; `push` to `main` and `workflow_dispatch` force all scopes to run so branch and manual verification exercise the full deterministic suite.
+Path filtering uses a `changes` job and gate jobs. Workflow-level `paths` filters are not used. Pull requests use path-filtered run jobs; `push` to `main` and `workflow_dispatch` force all scopes to run so branch and manual verification exercise the full deterministic suite. Gate jobs explicitly fail when `changes` fails, is cancelled, or is skipped so an invalid diff calculation cannot be reported as successful skipped scopes. TypeScript CI generates API clients before lint/typecheck so fresh checkouts do not depend on ignored generated files.
 
 ### `snapshot.yaml`
 
@@ -271,7 +276,7 @@ This supports downstream snapshot deployments that receive both tags and digests
 | --- | --- |
 | PR CI starts without secrets or self-hosted runners | Workflow structure review and YAML validation |
 | Deterministic E2E blocks merges | `ci-python-e2e` required gate and `pytest -m "not live_external and not runtime_provider"` |
-| Path filtering preserves required checks | `changes` + gate job logic review |
+| Path filtering preserves required checks | `changes` + gate job logic review, including changes-job failure propagation |
 | Snapshot metadata includes digests | Snapshot workflow payload structure review |
 | Release channel tag rules are enforced | Release workflow validation and tag generation logic review |
 | Helm digest pinning renders correctly | Helm render contract tests |
@@ -304,7 +309,7 @@ This prevents untrusted pull request code from accessing secrets, write tokens, 
 
 #### How to check
 
-Inspect `.github/workflows/ci.yaml` and run YAML validation. Confirm `pull_request` trigger, `permissions: contents: read`, `runs-on: ubuntu-latest`, and no `secrets: inherit`.
+Inspect `.github/workflows/ci.yaml` and run YAML validation. Confirm `pull_request` trigger, read-only permissions (`contents: read`, `pull-requests: read`), `runs-on: ubuntu-latest`, and no `secrets: inherit`.
 
 #### Expected result
 
