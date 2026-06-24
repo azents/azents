@@ -25,7 +25,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 - Related decisions: `ADR-0073-D1`, `ADR-0073-D2`, `ADR-0073-D3`, `ADR-0073-D4`
 - Acceptance criteria:
   - Pull request CI uses `ubuntu-latest` only.
-  - Pull request CI has `permissions: contents: read`.
+  - Pull request CI has `permissions: contents: read` and `pull-requests: read` only.
   - Pull request CI does not inherit secrets.
   - Pull request CI does not use `pull_request_target`.
   - Pull request CI excludes `live_external` and `runtime_provider` tests.
@@ -159,7 +159,10 @@ Permissions:
 ```yaml
 permissions:
   contents: read
+  pull-requests: read
 ```
+
+`pull-requests: read` is used only by the `changes` job to read pull request changed-file metadata.
 
 Required gate jobs:
 
@@ -306,7 +309,7 @@ This prevents untrusted pull request code from accessing secrets, write tokens, 
 
 #### How to check
 
-Inspect `.github/workflows/ci.yaml` and run YAML validation. Confirm `pull_request` trigger, `permissions: contents: read`, `runs-on: ubuntu-latest`, and no `secrets: inherit`.
+Inspect `.github/workflows/ci.yaml` and run YAML validation. Confirm `pull_request` trigger, read-only permissions (`contents: read`, `pull-requests: read`), `runs-on: ubuntu-latest`, and no `secrets: inherit`.
 
 #### Expected result
 

@@ -39,9 +39,10 @@ Pull request CI runs on the `pull_request` event with minimal permissions:
 ```yaml
 permissions:
   contents: read
+  pull-requests: read
 ```
 
-Pull request CI must not receive repository secrets or inherited secrets. It must not request `id-token: write`, `packages: write`, `contents: write`, or downstream deployment credentials.
+`pull-requests: read` is allowed only so the `changes` job can read pull request changed-file metadata. Pull request CI must not receive repository secrets or inherited secrets. It must not request `id-token: write`, `packages: write`, `contents: write`, or downstream deployment credentials.
 
 Pull request CI must not:
 
