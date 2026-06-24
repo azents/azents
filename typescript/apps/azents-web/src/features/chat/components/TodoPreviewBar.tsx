@@ -288,7 +288,7 @@ function GoalSection({
               gap="xs"
               align="flex-start"
               wrap="nowrap"
-              style={{ minWidth: 0 }}
+              style={{ flex: 1, minWidth: 0 }}
             >
               <IconTargetArrow
                 aria-hidden="true"
@@ -310,7 +310,7 @@ function GoalSection({
                   aria-label={t("editGoal")}
                 />
               ) : (
-                <Text size="sm" lh={rem(20)} style={{ minWidth: 0 }}>
+                <Text size="sm" lh={rem(20)} style={{ flex: 1, minWidth: 0 }}>
                   {goal.objective}
                 </Text>
               )}

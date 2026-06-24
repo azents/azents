@@ -70,6 +70,17 @@ export const GoalAndTodo: Story = {
   },
 };
 
+export const LongGoal: Story = {
+  args: {
+    goal: {
+      objective:
+        "Remove per-user OAuth handling and consolidate generic MCP, Notion, and Sentry toolkits under ToolkitConfig-level OAuth behavior",
+      status: "active",
+    },
+    todo: { items: [] },
+  },
+};
+
 export const PausedGoal: Story = {
   args: {
     goal: {
