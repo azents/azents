@@ -8,7 +8,7 @@ import pytest_asyncio
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from azcommon.testing.images import get_docker_hub_image
-from docker.errors import DockerException
+from docker.errors import DockerException, ImageNotFound
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -42,6 +42,15 @@ def _docker_availability() -> bool:
         return False
 
 
+def _ensure_docker_image(image: str) -> str:
+    docker_client = DockerClient().client
+    try:
+        docker_client.images.get(image)
+    except ImageNotFound:
+        docker_client.images.pull(image)
+    return image
+
+
 @pytest.fixture(scope="session")
 def check_docker_availability() -> None:
     if not _docker_availability():
@@ -58,8 +67,9 @@ def postgres_container(
     check_docker_availability: None,
 ) -> Generator[PostgresContainer, None, None]:
     """PostgreSQL test container."""
+    postgres_image = _ensure_docker_image(get_docker_hub_image("postgres:17"))
     with PostgresContainer(
-        get_docker_hub_image("postgres:17"),
+        postgres_image,
         driver="psycopg",
     ) as postgres:
         yield postgres
@@ -159,8 +169,9 @@ def redis_container(
     check_docker_availability: None,
 ) -> Generator[RedisContainer, None, None]:
     """Redis test container."""
+    valkey_image = _ensure_docker_image("public.ecr.aws/valkey/valkey:9-alpine")
     with RedisContainer(
-        "public.ecr.aws/valkey/valkey:9-alpine",
+        valkey_image,
     ) as redis:
         yield redis
 
