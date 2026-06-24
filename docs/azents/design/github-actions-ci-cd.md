@@ -173,7 +173,7 @@ Required gate jobs:
 - `ci-helm`
 - `ci-docker-build`
 
-Path filtering uses a `changes` job and gate jobs. Workflow-level `paths` filters are not used. Pull requests use path-filtered run jobs; `push` to `main` and `workflow_dispatch` force all scopes to run so branch and manual verification exercise the full deterministic suite. Gate jobs explicitly fail when `changes` fails, is cancelled, or is skipped so an invalid diff calculation cannot be reported as successful skipped scopes.
+Path filtering uses a `changes` job and gate jobs. Workflow-level `paths` filters are not used. Pull requests use path-filtered run jobs; `push` to `main` and `workflow_dispatch` force all scopes to run so branch and manual verification exercise the full deterministic suite. Gate jobs explicitly fail when `changes` fails, is cancelled, or is skipped so an invalid diff calculation cannot be reported as successful skipped scopes. TypeScript CI generates API clients before lint/typecheck so fresh checkouts do not depend on ignored generated files.
 
 ### `snapshot.yaml`
 
