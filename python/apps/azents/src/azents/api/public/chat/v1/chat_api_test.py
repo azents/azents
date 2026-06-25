@@ -775,6 +775,42 @@ class TestRestMessageWriteContract:
         )
         assert len(broker.messages) == 1
 
+    async def test_message_write_rejects_changed_input_target(self) -> None:
+        """REST boundary rejects an input service result for another session."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        chat_service = _RestWriteChatService(
+            session_id="2223456789abcdef0123456789abcdef"
+        )
+        input_service = _BufferedInputService(
+            target_session_id="3333456789abcdef0123456789abcdef"
+        )
+
+        try:
+            await _write_message_via_rest(
+                chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                _exchange_file_service(),
+                _model_file_service(),
+                broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                InMemoryLiveEventStore(),
+                ChatMessageWriteRequest(
+                    agent_id="agent-1",
+                    client_request_id="client-mismatch",
+                    message="hello",
+                ),
+                session_id="2223456789abcdef0123456789abcdef",
+                user_id="user-1",
+                tz=ZoneInfo("UTC"),
+            )
+        except RuntimeError as exc:
+            assert str(exc) == "AgentSession input target changed during REST write"
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+        assert broker.messages == []
+
 
 class TestRestEditCommandWriteContract:
     """REST edit/command write contract tests."""

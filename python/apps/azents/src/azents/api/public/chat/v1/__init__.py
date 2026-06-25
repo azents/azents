@@ -531,6 +531,8 @@ async def _write_message_via_rest(
         client_request_id=request.client_request_id,
     )
     result = _handle_agent_session_input_result(input_result)
+    if result.agent_session_id != resolved_session_id:
+        raise RuntimeError("AgentSession input target changed during REST write")
     live_event_upserted = chat_live_event_upserted_dump(
         input_buffer_to_live_event(result.input_buffer)
     )
