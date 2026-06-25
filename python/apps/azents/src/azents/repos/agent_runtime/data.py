@@ -74,9 +74,6 @@ class AgentRuntime(BaseModel):
     last_state_change_at: datetime.datetime | None = Field(
         default=None, description="Last runtime domain state change time"
     )
-    current_session_id: str | None = Field(
-        default=None, description="Current active AgentSession ID"
-    )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import (
     AgentSessionEndReason,
+    AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -28,6 +29,13 @@ def _agent_session_run_state_values(
     enum_cls: type[AgentSessionRunState],
 ) -> list[str]:
     """Return AgentSessionRunState enum values stored in the DB."""
+    return [v.value for v in enum_cls]
+
+
+def _agent_session_primary_kind_values(
+    enum_cls: type[AgentSessionPrimaryKind],
+) -> list[str]:
+    """Return AgentSessionPrimaryKind enum values stored in the DB."""
     return [v.value for v in enum_cls]
 
 
@@ -56,6 +64,12 @@ agent_session_run_state_enum = ENUM(
     name="agent_session_run_state",
     create_type=False,
     values_callable=_agent_session_run_state_values,
+)
+agent_session_primary_kind_enum = ENUM(
+    AgentSessionPrimaryKind,
+    name="agent_session_primary_kind",
+    create_type=False,
+    values_callable=_agent_session_primary_kind_values,
 )
 agent_session_start_reason_enum = ENUM(
     AgentSessionStartReason,
@@ -106,6 +120,12 @@ class RDBAgentSession(RDBModel):
         unique=True,
         postgresql_where=sa.text("status = 'active'"),
     )
+    UQ_AGENT_ACTIVE_TEAM_PRIMARY = sa.Index(
+        "uq_agent_sessions_agent_active_team_primary",
+        "agent_id",
+        unique=True,
+        postgresql_where=sa.text("status = 'active' AND primary_kind = 'team_primary'"),
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -132,6 +152,11 @@ class RDBAgentSession(RDBModel):
         agent_session_status_enum,
         nullable=False,
         default=AgentSessionStatus.ACTIVE,
+    )
+    primary_kind: Mapped[AgentSessionPrimaryKind | None] = mapped_column(
+        agent_session_primary_kind_enum,
+        nullable=True,
+        default=AgentSessionPrimaryKind.TEAM_PRIMARY,
     )
     start_reason: Mapped[AgentSessionStartReason] = mapped_column(
         agent_session_start_reason_enum,
@@ -250,4 +275,5 @@ class RDBAgentSession(RDBModel):
         IX_STOP_REQUESTED_AT,
         IX_RUN_STATE_RUNNING,
         UQ_RUNTIME_ACTIVE,
+        UQ_AGENT_ACTIVE_TEAM_PRIMARY,
     )

@@ -90,7 +90,7 @@ class _FakeRuntimeRepository(AgentRuntimeRepository):
     ) -> AgentRuntime:
         del session, agent_id, default_runtime_provider_id
         if self._runtime is None:
-            self._runtime = _make_agent_runtime(current_session_id=None)
+            self._runtime = _make_agent_runtime()
         return self._runtime
 
 
@@ -189,7 +189,7 @@ async def _session_manager() -> AsyncGenerator[AsyncSession]:
 
 @pytest.mark.asyncio
 async def test_get_workspace_reads_active_runtime_with_runner() -> None:
-    runtime = _make_agent_runtime(current_session_id="session-1")
+    runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
@@ -218,7 +218,7 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
 
 @pytest.mark.asyncio
 async def test_get_workspace_uses_agent_runtime_without_session_match() -> None:
-    runtime = _make_agent_runtime(current_session_id="session-2")
+    runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
@@ -244,7 +244,6 @@ async def test_get_workspace_uses_agent_runtime_without_session_match() -> None:
 @pytest.mark.asyncio
 async def test_get_workspace_reports_missing_provider_workspace_path() -> None:
     runtime = _make_agent_runtime(
-        current_session_id="session-1",
         workspace_path=None,
     )
     runner_operations = _FakeRunnerOperations()
@@ -270,7 +269,6 @@ async def test_get_workspace_reports_missing_provider_workspace_path() -> None:
 async def test_get_workspace_reports_stopped_runtime_not_started() -> None:
     """Workspace state follows Provider observed state."""
     runtime = _make_agent_runtime(
-        current_session_id="session-1",
         provider_observed_state=RuntimeProviderObservedState.UNKNOWN,
         desired_state=RuntimeDesiredState.STOPPED,
     )
@@ -293,7 +291,6 @@ async def test_get_workspace_reports_stopped_runtime_not_started() -> None:
 async def test_get_workspace_shows_starting_when_start_requested() -> None:
     """start desired state is starting even if Provider still reports stopped."""
     runtime = _make_agent_runtime(
-        current_session_id=None,
         provider_observed_state=RuntimeProviderObservedState.STOPPED,
         desired_state=RuntimeDesiredState.RUNNING,
     )
@@ -318,7 +315,6 @@ async def test_get_workspace_shows_starting_when_start_requested() -> None:
 async def test_get_workspace_error_exposes_restart_action() -> None:
     """Expose Pod restart action in Provider failure state."""
     runtime = _make_agent_runtime(
-        current_session_id="session-1",
         provider_observed_state=RuntimeProviderObservedState.FAILED,
         desired_state=RuntimeDesiredState.RUNNING,
     )
@@ -342,7 +338,7 @@ async def test_get_workspace_error_exposes_restart_action() -> None:
 
 @pytest.mark.asyncio
 async def test_read_path_uses_stat_to_return_file_preview() -> None:
-    runtime = _make_agent_runtime(current_session_id="session-1")
+    runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
@@ -367,7 +363,7 @@ async def test_read_path_uses_stat_to_return_file_preview() -> None:
 
 @pytest.mark.asyncio
 async def test_read_path_uses_stat_to_return_directory_listing() -> None:
-    runtime = _make_agent_runtime(current_session_id="session-1")
+    runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
@@ -401,7 +397,6 @@ async def test_read_path_uses_stat_to_return_directory_listing() -> None:
 
 def _make_agent_runtime(
     *,
-    current_session_id: str | None,
     workspace_path: str | None = AGENT_WORKSPACE_ROOT.as_posix(),
     provider_observed_state: RuntimeProviderObservedState | None = None,
     desired_state: RuntimeDesiredState | None = None,
@@ -420,7 +415,6 @@ def _make_agent_runtime(
         agent_id="agent-1",
         desired_state=desired_state,
         provider_observed_state=provider_observed_state,
-        current_session_id=current_session_id,
         runner_state=RuntimeRunnerState.READY,
         runner_generation=1,
         workspace_path=workspace_path,

@@ -94,9 +94,6 @@ class RDBAgentRuntime(RDBModel):
         "provider_observe_requested_at",
     )
     IX_RUNNER_STATE = sa.Index("ix_agent_runtimes_runner_state", "runner_state")
-    IX_CURRENT_SESSION_ID = sa.Index(
-        "ix_agent_runtimes_current_session_id", "current_session_id"
-    )
     id: Mapped[str] = mapped_column(
         sa.String(32),
         primary_key=True,
@@ -227,12 +224,6 @@ class RDBAgentRuntime(RDBModel):
         default=None,
     )
 
-    current_session_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_sessions.id", ondelete="SET NULL"),
-        nullable=True,
-        default=None,
-    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -255,5 +246,4 @@ class RDBAgentRuntime(RDBModel):
         IX_PROVIDER_CONNECTION_STATE,
         IX_PROVIDER_OBSERVE_REQUESTED_AT,
         IX_RUNNER_STATE,
-        IX_CURRENT_SESSION_ID,
     )
