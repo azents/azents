@@ -54,7 +54,15 @@ from azents.engine.run.input import InputMessage
 from azents.engine.run.resolve import (
     materialize_user_input_exchange_file_attachments,
 )
-from azents.services.agent_session_input import AgentSessionInputService
+from azents.services.agent_session_input import (
+    AgentSessionInputError,
+    AgentSessionInputInactiveSession,
+    AgentSessionInputService,
+    AgentSessionInputSessionNotFound,
+    AgentSessionInputWrongAgent,
+    AgentSessionInputWrongRuntime,
+    BufferedAgentSessionInputResult,
+)
 from azents.services.chat import ChatSessionService
 from azents.services.chat.context import SessionContextService
 from azents.services.chat.data import (
@@ -515,13 +523,14 @@ async def _write_message_via_rest(
         attachments=[attachment.uri for attachment in materialized.attachments],
         file_parts=materialized.file_parts,
     )
-    result = await agent_session_input_service.create_buffered_agent_input(
+    input_result = await agent_session_input_service.create_buffered_agent_input(
         agent_id=request.agent_id,
         agent_session_id=resolved_session_id,
         message=message,
         user_id=user_id,
         client_request_id=request.client_request_id,
     )
+    result = _handle_agent_session_input_result(input_result)
     live_event_upserted = chat_live_event_upserted_dump(
         input_buffer_to_live_event(result.input_buffer)
     )
@@ -552,6 +561,33 @@ async def _write_message_via_rest(
         snapshot=snapshot,
         history_reload_required=False,
     )
+
+
+def _handle_agent_session_input_result(
+    result: Result[BufferedAgentSessionInputResult, AgentSessionInputError],
+) -> BufferedAgentSessionInputResult:
+    """Convert AgentSession input service result to REST response semantics."""
+    match result:
+        case Success(value):
+            return value
+        case Failure(error):
+            match error:
+                case AgentSessionInputSessionNotFound():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case AgentSessionInputWrongAgent() | AgentSessionInputWrongRuntime():
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Session access denied.",
+                    )
+                case AgentSessionInputInactiveSession():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Session is not active.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
 
 
 async def _handle_ensure_session_for_rest(

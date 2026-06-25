@@ -65,12 +65,12 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-25
-spec_version: 60
+spec_version: 61
 ---
 
 # Conversation & Events
 
-The `conversation` domain owns active `AgentSession`, event transcript events, durable
+The `conversation` domain owns `AgentSession`, event transcript events, durable
 `agent_runs`, input buffers, exchange files, and scheduled task dispatch.
 
 Production agent execution now uses the event runtime. OpenAI Agents SDK `RunState` and legacy
@@ -80,10 +80,9 @@ raw `runtime/llm.py` are not production conversation state.
 
 ```mermaid
 erDiagram
-    AgentRuntime ||--o{ AgentSession : rotates
-    AgentRuntime }o--|| Agent : "runs with"
+    Agent ||--|| AgentRuntime : "has runtime"
+    Agent ||--o{ AgentSession : "has sessions"
     AgentRuntime }o--|| Workspace : "scoped to"
-    AgentRuntime }o--o| AgentSession : "current session"
     AgentSession ||--o{ Event : "event transcript"
     AgentSession ||--o{ AgentRun : "durable execution runs"
     AgentSession ||--o{ ExchangeFile : "shows uploads and artifacts"
@@ -92,9 +91,8 @@ erDiagram
     ScheduledTask }o--|| Agent : "targets"
 ```
 
-`AgentSession` is the conversation boundary. Reset/new archives the current active session and starts
-a new active session. Web inputs route to the active session rather than creating
-interface-specific session types.
+`AgentSession` is the conversation boundary. Direct session write routes target the requested session.
+Runtime current/active session lookup must not redirect direct session writes to another session.
 
 `AgentRuntime` remains the long-lived shared runtime identity and sandbox lifecycle owner. Session
 execution control state is stored on `AgentSession`; detailed run phase/tool state is stored in
@@ -109,7 +107,7 @@ command, stop intent, or run heartbeat.
 | --- | --- | --- |
 | `id` | `str(32)` | UUID7 hex |
 | `workspace_id` / `agent_id` | FK | Workspace and agent boundary |
-| `agent_runtime_id` | FK `agent_runtimes` | Long-lived runtime owner |
+| `agent_runtime_id` | FK `agent_runtimes` | Transitional denormalized runtime reference; not the session ownership edge |
 | `status` | enum | `active` or `archived` |
 | `start_reason` | enum | `initial`, `manual_new`, `manual_reset`, `system_recovery`, `compact_rotate` |
 | `end_reason` | enum \| null | Archive reason |
@@ -118,8 +116,10 @@ command, stop intent, or run heartbeat.
 | `pending_command_*` | mixed | Single pending idle command for this session |
 | `stop_requested_*` | mixed | Durable stop intent for this session |
 
-Only one active session may exist per runtime in the current product state, but execution ownership is
-session-scoped so the runtime can be shared by multiple sessions in a future multi-session model.
+Only one active session may exist in the current product state, but direct session writes are already
+session-scoped. When a route contains `session_id`, input buffers, live projections, broker wake-up,
+and the REST response use that same session id. Runtime current/active session lookup is invalid for
+that direct write path.
 
 ## 3. AgentRun
 
@@ -284,8 +284,10 @@ Web chat message/edit/command writes use REST commit endpoints instead of WebSoc
 `POST /chat/v1/sessions/{session_id}/commands` are idle-only control boundaries. All REST write
 requests require `client_request_id`; accepted writes are recorded in `chat_write_requests` so
 retries with the same key return the same accepted target instead of creating duplicate side effects.
-Message writes commit a `user_message` input buffer before returning success, mark the session
-running through `InputBufferService`, then send a worker wake-up signal. Edit writes rewrite durable
+Message writes commit a `user_message` input buffer to the explicit path session before returning
+success, mark the same session running through `InputBufferService`, then send a worker wake-up signal
+for that session. The message path must not resolve `AgentRuntime.current_session_id` or any runtime
+active session to replace the requested `session_id`. Edit writes rewrite durable
 history state, clear pending input buffers, commit an `edited_user_message` input buffer, mark the
 session running through `InputBufferService`, and send a wake-up. Command writes do not enter the
 input buffer; they store a single pending command on `agent_sessions`, mark the session running, and

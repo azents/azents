@@ -4,12 +4,14 @@ import dataclasses
 import datetime
 from typing import Annotated
 
+from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionEndReason,
     AgentSessionStartReason,
+    AgentSessionStatus,
     InputBufferKind,
 )
 from azents.engine.run.input import InputMessage
@@ -29,6 +31,34 @@ class BufferedAgentSessionInputResult:
     agent_runtime_id: str
     agent_session_id: str
     input_buffer: InputBuffer
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentSessionInputSessionNotFound:
+    """Requested AgentSession was not found."""
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentSessionInputWrongAgent:
+    """Requested AgentSession does not belong to the requested agent."""
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentSessionInputWrongRuntime:
+    """Requested AgentSession does not match the agent runtime."""
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentSessionInputInactiveSession:
+    """Requested AgentSession is not writable."""
+
+
+AgentSessionInputError = (
+    AgentSessionInputSessionNotFound
+    | AgentSessionInputWrongAgent
+    | AgentSessionInputWrongRuntime
+    | AgentSessionInputInactiveSession
+)
 
 
 @dataclasses.dataclass
@@ -57,29 +87,28 @@ class AgentSessionInputService:
         message: InputMessage,
         user_id: str,
         client_request_id: str | None = None,
-    ) -> BufferedAgentSessionInputResult:
+    ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
         """Store user input as durable InputBuffer row."""
         async with self.session_manager() as session:
-            runtime = await self.agent_runtime_repository.ensure_for_agent(
-                session, agent_id
-            )
-            active_session = (
-                await self.agent_session_repository.ensure_active_with_runtime_lock(
-                    session, runtime.id
-                )
-            )
-            await self.event_session_repository.ensure_from_legacy_session(
-                session,
-                active_session,
-            )
             agent_session = await self.agent_session_repository.get_by_id(
                 session, agent_session_id
             )
             if agent_session is None:
-                raise ValueError("AgentSession not found")
+                return Failure(AgentSessionInputSessionNotFound())
+            if agent_session.agent_id != agent_id:
+                return Failure(AgentSessionInputWrongAgent())
+            if agent_session.status != AgentSessionStatus.ACTIVE:
+                return Failure(AgentSessionInputInactiveSession())
+            runtime = await self.agent_runtime_repository.ensure_for_agent(
+                session, agent_id
+            )
             if agent_session.agent_runtime_id != runtime.id:
-                raise ValueError("AgentSession does not belong to the agent runtime")
-            target_session_id = active_session.id
+                return Failure(AgentSessionInputWrongRuntime())
+            await self.event_session_repository.ensure_from_legacy_session(
+                session,
+                agent_session,
+            )
+            target_session_id = agent_session.id
             result = await self.input_buffer_service.enqueue(
                 session,
                 InputBufferEnqueue(
@@ -95,10 +124,12 @@ class AgentSessionInputService:
             )
             input_buffer = result.input_buffer
 
-        return BufferedAgentSessionInputResult(
-            agent_runtime_id=runtime.id,
-            agent_session_id=target_session_id,
-            input_buffer=input_buffer,
+        return Success(
+            BufferedAgentSessionInputResult(
+                agent_runtime_id=runtime.id,
+                agent_session_id=target_session_id,
+                input_buffer=input_buffer,
+            )
         )
 
     async def rotate_agent_session(

@@ -159,7 +159,7 @@ class _BufferedInputService:
     async def create_buffered_agent_input(
         self,
         **kwargs: object,
-    ) -> BufferedAgentSessionInputResult:
+    ) -> Success[BufferedAgentSessionInputResult]:
         """Return InputBuffer creation result."""
         self.calls.append("create_buffered_agent_input")
         self.kwargs.append(kwargs)
@@ -181,10 +181,12 @@ class _BufferedInputService:
             file_parts=[],
             created_at=datetime.datetime(2026, 5, 19, tzinfo=datetime.UTC),
         )
-        return BufferedAgentSessionInputResult(
-            agent_runtime_id="1123456789abcdef0123456789abcdef",
-            agent_session_id=session_id,
-            input_buffer=input_buffer,
+        return Success(
+            BufferedAgentSessionInputResult(
+                agent_runtime_id="1123456789abcdef0123456789abcdef",
+                agent_session_id=session_id,
+                input_buffer=input_buffer,
+            )
         )
 
 
