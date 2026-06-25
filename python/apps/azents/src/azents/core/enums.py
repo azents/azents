@@ -99,8 +99,8 @@ class LLMCatalogEntryVisibility(enum.StrEnum):
     HIDDEN = "hidden"
 
 
-class AgentRuntimeRunState(enum.StrEnum):
-    """Engine execution status of AgentRuntime."""
+class AgentSessionRunState(enum.StrEnum):
+    """Engine execution status of AgentSession."""
 
     IDLE = "idle"
     RUNNING = "running"

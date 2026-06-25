@@ -9,7 +9,6 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentRuntimeRunState,
     RuntimeDesiredState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
@@ -422,16 +421,6 @@ def _make_agent_runtime(
         desired_state=desired_state,
         provider_observed_state=provider_observed_state,
         current_session_id=current_session_id,
-        run_state=AgentRuntimeRunState.IDLE,
-        run_heartbeat_at=_NOW,
-        pending_command_id=None,
-        pending_command_name=None,
-        pending_command_payload=None,
-        pending_command_user_id=None,
-        pending_command_created_at=None,
-        stop_requested_at=None,
-        stop_requested_by=None,
-        stop_request_id=None,
         runner_state=RuntimeRunnerState.READY,
         runner_generation=1,
         workspace_path=workspace_path,

@@ -11,7 +11,7 @@ from azents.engine.events.engine_adapter import AgentEngineAdapter
 from azents.engine.run.contracts import AgentEngineProtocol
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.services.input_buffer import InputBufferService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.command_executor import CommandExecutor
@@ -33,8 +33,8 @@ class SessionRunnerFactory:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
     idle_continuation_service: Annotated[
@@ -52,7 +52,7 @@ class SessionRunnerFactory:
             event_publisher=self.event_publisher,
             session_lifecycle=self.session_lifecycle,
             session_manager=self.session_manager,
-            agent_runtime_repository=self.agent_runtime_repository,
+            agent_session_repository=self.agent_session_repository,
             input_buffer_service=self.input_buffer_service,
             idle_continuation_service=self.idle_continuation_service,
             user_stop_finalizer=self.user_stop_finalizer,

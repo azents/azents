@@ -31,8 +31,8 @@ from azents.engine.run.resolve import resolve_invoke_input
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import PendingRuntimeCommand
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import PendingSessionCommand
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
@@ -55,7 +55,7 @@ _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
 
 @dataclasses.dataclass(frozen=True)
 class CommandExecutor:
-    """Resolve PendingRuntimeCommand and run command handler."""
+    """Resolve PendingSessionCommand and run command handler."""
 
     command_registry: Annotated[
         Mapping[str, CommandHandler], Depends(get_command_registry)
@@ -69,8 +69,8 @@ class CommandExecutor:
         LLMProviderIntegrationRepository,
         Depends(get_llm_provider_integration_repository),
     ]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     session_lifecycle: Annotated[
         SessionLifecycleService, Depends(SessionLifecycleService)
@@ -86,7 +86,7 @@ class CommandExecutor:
         *,
         agent_id: str,
         session_id: str,
-        command: PendingRuntimeCommand,
+        command: PendingSessionCommand,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> RunExecutionResult:
         """Handle command.
@@ -250,7 +250,7 @@ class CommandExecutor:
     async def clear_pending_command(self, session_id: str, *, command_id: str) -> None:
         """Remove processed pending command."""
         await self.run_short_db(
-            lambda db: self.agent_runtime_repository.clear_pending_command(
+            lambda db: self.agent_session_repository.clear_pending_command(
                 db,
                 session_id=session_id,
                 command_id=command_id,

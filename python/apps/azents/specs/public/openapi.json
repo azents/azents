@@ -7533,15 +7533,6 @@
         "title": "AgentRuntimeResponse",
         "description": "Agent Runtime response."
       },
-      "AgentRuntimeRunState": {
-        "type": "string",
-        "enum": [
-          "idle",
-          "running"
-        ],
-        "title": "AgentRuntimeRunState",
-        "description": "Engine execution status of AgentRuntime."
-      },
       "AgentRuntimeSummaryResponse": {
         "properties": {
           "summary": {
@@ -7622,6 +7613,15 @@
         ],
         "title": "AgentSessionResponse",
         "description": "Conversation session response."
+      },
+      "AgentSessionRunState": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "running"
+        ],
+        "title": "AgentSessionRunState",
+        "description": "Engine execution status of AgentSession."
       },
       "AgentSubagentCreateRequest": {
         "properties": {
@@ -9343,7 +9343,7 @@
             "description": "Currently running run status"
           },
           "session_run_state": {
-            "$ref": "#/components/schemas/AgentRuntimeRunState",
+            "$ref": "#/components/schemas/AgentSessionRunState",
             "description": "Authoritative run_state for the current session"
           },
           "todo": {
@@ -10414,7 +10414,7 @@
             "description": "Currently running run status"
           },
           "session_run_state": {
-            "$ref": "#/components/schemas/AgentRuntimeRunState",
+            "$ref": "#/components/schemas/AgentSessionRunState",
             "description": "Authoritative run_state for the current session"
           },
           "todo": {

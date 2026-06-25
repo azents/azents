@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSession
 from azents.worker.deps import get_worker_broker
 from azents.worker.session.lifecycle import SessionLifecycleService
 
@@ -36,8 +36,8 @@ class StuckSessionRecovery:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     session_lifecycle: Annotated[
         SessionLifecycleService, Depends(SessionLifecycleService)
@@ -80,7 +80,7 @@ class StuckSessionRecovery:
         broker queue path, and receive_messages reacquires lock then dispatches.
         """
         async with self.session_manager() as db_session:
-            stuck = await self.agent_runtime_repository.find_stuck_running(
+            stuck = await self.agent_session_repository.find_stuck_running(
                 db_session,
                 stale_threshold=self.stale_threshold,
                 limit=self.limit,
@@ -88,28 +88,23 @@ class StuckSessionRecovery:
         for rec in stuck:
             logger.info(
                 "Recovering stuck running session",
-                extra={"session_id": rec.current_session_id, "agent_id": rec.agent_id},
+                extra={"session_id": rec.id, "agent_id": rec.agent_id},
             )
             try:
-                if rec.current_session_id is not None:
-                    await self.session_lifecycle.mark_session_running(
-                        rec.current_session_id
-                    )
+                await self.session_lifecycle.mark_session_running(rec.id)
                 await self.broker.send_message(_build_resume_message(rec))
             except Exception:
                 logger.exception(
                     "Failed to enqueue RESUME for stuck session",
-                    extra={"session_id": rec.current_session_id},
+                    extra={"session_id": rec.id},
                 )
 
 
-def _build_resume_message(rec: AgentRuntime) -> SessionWakeUp:
+def _build_resume_message(rec: AgentSession) -> SessionWakeUp:
     """Create SessionWakeUp for stuck recovery / shutdown recovery."""
-    if rec.current_session_id is None:
-        raise ValueError("AgentRuntime has no current AgentSession")
     return SessionWakeUp(
         agent_id=rec.agent_id,
-        session_id=rec.current_session_id,
+        session_id=rec.id,
         user_id=None,
         additional_system_prompt=None,
         interface=None,

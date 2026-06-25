@@ -19,7 +19,6 @@ from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
@@ -83,9 +82,6 @@ class InputBufferService:
     input_buffer_repository: Annotated[
         InputBufferRepository, Depends(InputBufferRepository)
     ]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
-    ]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     agent_session_repository: Annotated[
@@ -135,7 +131,7 @@ class InputBufferService:
         else:
             created = False
             input_buffer = existing
-        await self.agent_runtime_repository.mark_running_for_input_wakeup(
+        await self.agent_session_repository.mark_running_for_input_wakeup(
             session,
             input.session_id,
         )
@@ -208,7 +204,7 @@ class InputBufferService:
             to_session_id=to_session_id,
         )
         if moved:
-            await self.agent_runtime_repository.mark_running_for_input_wakeup(
+            await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 to_session_id,
             )

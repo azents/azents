@@ -13,7 +13,7 @@ from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.types import ActiveToolCall, AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -63,8 +63,8 @@ class _Broker:
         del session_id
 
 
-class _AgentRuntimeRepository:
-    """AgentRuntimeRepository test double."""
+class _AgentSessionRepository:
+    """AgentSessionRepository test double."""
 
     def __init__(self) -> None:
         self.idle_session_ids: list[str] = []
@@ -123,15 +123,15 @@ def _running_run() -> AgentRunState:
 def _service(
     *,
     agent_run_repository: _AgentRunRepository,
-    agent_runtime_repository: _AgentRuntimeRepository,
+    agent_session_repository: _AgentSessionRepository,
 ) -> SessionLifecycleService:
     """Create SessionLifecycleService with test doubles."""
     return SessionLifecycleService(
         broker=cast(SessionBroker, _Broker()),
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
-        agent_runtime_repository=cast(
-            AgentRuntimeRepository,
-            agent_runtime_repository,
+        agent_session_repository=cast(
+            AgentSessionRepository,
+            agent_session_repository,
         ),
         agent_run_repository=cast(AgentRunRepository, agent_run_repository),
     )
@@ -141,16 +141,16 @@ def _service(
 async def test_mark_session_idle_rejects_active_agent_run() -> None:
     """Active AgentRun blocks Runtime idle transition."""
     agent_run_repository = _AgentRunRepository(_running_run())
-    agent_runtime_repository = _AgentRuntimeRepository()
+    agent_session_repository = _AgentSessionRepository()
     service = _service(
         agent_run_repository=agent_run_repository,
-        agent_runtime_repository=agent_runtime_repository,
+        agent_session_repository=agent_session_repository,
     )
 
     marked_idle = await service.mark_session_idle("session-001")
 
     assert not marked_idle
-    assert agent_runtime_repository.idle_session_ids == []
+    assert agent_session_repository.idle_session_ids == []
     assert agent_run_repository.terminal_session_ids == []
 
 
@@ -158,14 +158,14 @@ async def test_mark_session_idle_rejects_active_agent_run() -> None:
 async def test_mark_session_idle_allows_terminal_run_boundary() -> None:
     """Runtime becomes idle only when there is no running AgentRun."""
     agent_run_repository = _AgentRunRepository(None)
-    agent_runtime_repository = _AgentRuntimeRepository()
+    agent_session_repository = _AgentSessionRepository()
     service = _service(
         agent_run_repository=agent_run_repository,
-        agent_runtime_repository=agent_runtime_repository,
+        agent_session_repository=agent_session_repository,
     )
 
     marked_idle = await service.mark_session_idle("session-001")
 
     assert marked_idle
-    assert agent_runtime_repository.idle_session_ids == ["session-001"]
+    assert agent_session_repository.idle_session_ids == ["session-001"]
     assert agent_run_repository.terminal_session_ids == []

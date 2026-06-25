@@ -8,9 +8,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.enums import AgentRuntimeRunState
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
+from azents.core.enums import (
+    AgentSessionRunState,
+    AgentSessionStartReason,
+    AgentSessionStatus,
+)
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSession
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.recovery import StuckSessionRecovery
 
@@ -34,11 +38,11 @@ class _SessionManager:
         return _SessionScope()
 
 
-class _AgentRuntimeRepository(AgentRuntimeRepository):
-    """AgentRuntimeRepository test double."""
+class _AgentSessionRepository(AgentSessionRepository):
+    """AgentSessionRepository test double."""
 
-    def __init__(self, runtimes: list[AgentRuntime]) -> None:
-        self.runtimes = runtimes
+    def __init__(self, sessions: list[AgentSession]) -> None:
+        self.sessions = sessions
         self.find_calls: list[tuple[datetime.timedelta, int]] = []
 
     async def find_stuck_running(
@@ -47,11 +51,11 @@ class _AgentRuntimeRepository(AgentRuntimeRepository):
         *,
         stale_threshold: datetime.timedelta,
         limit: int,
-    ) -> list[AgentRuntime]:
+    ) -> list[AgentSession]:
         """Record stuck session fetch request and return specified result."""
         del session
         self.find_calls.append((stale_threshold, limit))
-        return self.runtimes
+        return self.sessions
 
 
 class _Broker:
@@ -68,28 +72,36 @@ class _Broker:
 class _SessionLifecycle:
     """SessionLifecycleService test double."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, fail_for: str | None = None) -> None:
+        self.fail_for = fail_for
         self.running_session_ids: list[str] = []
 
     async def mark_session_running(self, session_id: str) -> None:
         """Record session id for RUNNING transition request."""
+        if session_id == self.fail_for:
+            raise RuntimeError("mark failed")
         self.running_session_ids.append(session_id)
 
 
-def _runtime(
+def _agent_session(
     *,
-    session_id: str | None = "session-001",
+    session_id: str = "session-001",
     agent_id: str = "agent-001",
     workspace_id: str = "workspace-001",
-) -> AgentRuntime:
-    """Create AgentRuntime for tests."""
+) -> AgentSession:
+    """Create AgentSession for tests."""
     now = datetime.datetime.now(datetime.UTC)
-    return AgentRuntime(
-        id="runtime-001",
+    return AgentSession(
+        id=session_id,
         workspace_id=workspace_id,
+        agent_runtime_id="runtime-001",
         agent_id=agent_id,
-        current_session_id=session_id,
-        run_state=AgentRuntimeRunState.RUNNING,
+        status=AgentSessionStatus.ACTIVE,
+        start_reason=AgentSessionStartReason.INITIAL,
+        end_reason=None,
+        started_at=now,
+        lifecycle_started_at=None,
+        run_state=AgentSessionRunState.RUNNING,
         run_heartbeat_at=now - datetime.timedelta(minutes=10),
         pending_command_id=None,
         pending_command_name=None,
@@ -99,6 +111,7 @@ def _runtime(
         stop_requested_at=None,
         stop_requested_by=None,
         stop_request_id=None,
+        ended_at=None,
         created_at=now,
         updated_at=now,
     )
@@ -106,7 +119,7 @@ def _runtime(
 
 def _recovery(
     *,
-    repository: _AgentRuntimeRepository,
+    repository: _AgentSessionRepository,
     broker: _Broker,
     lifecycle: _SessionLifecycle,
     stale_threshold: datetime.timedelta = datetime.timedelta(seconds=5),
@@ -116,7 +129,7 @@ def _recovery(
     return StuckSessionRecovery(
         broker=cast(SessionBroker, broker),
         session_manager=cast(Any, _SessionManager()),
-        agent_runtime_repository=repository,
+        agent_session_repository=repository,
         session_lifecycle=cast(SessionLifecycleService, lifecycle),
         stale_threshold=stale_threshold,
         limit=limit,
@@ -127,8 +140,8 @@ def _recovery(
 @pytest.mark.asyncio
 async def test_recover_once_enqueues_resume_for_stuck_sessions() -> None:
     """stuck RUNNING session is marked running again, then re-enqueued as RESUME."""
-    repository = _AgentRuntimeRepository(
-        [_runtime(session_id="session-001", agent_id="agent-001")]
+    repository = _AgentSessionRepository(
+        [_agent_session(session_id="session-001", agent_id="agent-001")]
     )
     broker = _Broker()
     lifecycle = _SessionLifecycle()
@@ -152,14 +165,14 @@ async def test_recover_once_enqueues_resume_for_stuck_sessions() -> None:
 @pytest.mark.asyncio
 async def test_recover_once_continues_after_record_failure() -> None:
     """One stuck record recovery failure does not block next record recovery."""
-    repository = _AgentRuntimeRepository(
+    repository = _AgentSessionRepository(
         [
-            _runtime(session_id=None, agent_id="agent-bad"),
-            _runtime(session_id="session-002", agent_id="agent-002"),
+            _agent_session(session_id="session-bad", agent_id="agent-bad"),
+            _agent_session(session_id="session-002", agent_id="agent-002"),
         ]
     )
     broker = _Broker()
-    lifecycle = _SessionLifecycle()
+    lifecycle = _SessionLifecycle(fail_for="session-bad")
 
     await _recovery(
         repository=repository,

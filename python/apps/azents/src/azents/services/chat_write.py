@@ -7,7 +7,7 @@ from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentRuntimeRunState, EventKind, InputBufferKind
+from azents.core.enums import AgentSessionRunState, EventKind, InputBufferKind
 from azents.engine.events.types import FileOutputPart
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -15,6 +15,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import (
     ChatWriteRequest,
@@ -95,7 +96,7 @@ class ChatWriteService:
     ) -> AcceptedEditInput:
         """Accept idle session edit idempotently and create edited buffer."""
         async with self.session_manager() as session:
-            runtime = await self._lock_runtime_for_idle_control(
+            runtime, _agent_session = await self._lock_runtime_for_idle_control(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
@@ -177,7 +178,7 @@ class ChatWriteService:
     ) -> AcceptedPendingCommand:
         """Store idle session command as single pending command."""
         async with self.session_manager() as session:
-            runtime = await self._lock_runtime_for_idle_control(
+            runtime, _agent_session = await self._lock_runtime_for_idle_control(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
@@ -211,7 +212,7 @@ class ChatWriteService:
                     ),
                     command_id=None,
                 )
-            updated = await self.agent_runtime_repository.enqueue_pending_command(
+            updated = await self.agent_session_repository.enqueue_pending_command(
                 session,
                 session_id=session_id,
                 command_id=command_id,
@@ -241,7 +242,7 @@ class ChatWriteService:
         """Record Session stop intent in durable state."""
         stop_request_id = uuid7().hex
         async with self.session_manager() as session:
-            updated = await self.agent_runtime_repository.request_stop(
+            updated = await self.agent_session_repository.request_stop(
                 session,
                 session_id=session_id,
                 stop_request_id=stop_request_id,
@@ -259,31 +260,25 @@ class ChatWriteService:
         *,
         agent_id: str,
         session_id: str,
-    ) -> AgentRuntime:
-        """Acquire runtime row lock for idle-only control action."""
+    ) -> tuple[AgentRuntime, AgentSession]:
+        """Acquire session row lock for idle-only control action."""
         runtime = await self.agent_runtime_repository.ensure_for_agent(
             session,
             agent_id,
         )
-        agent_session = await self.agent_session_repository.get_by_id(
+        locked = await self.agent_session_repository.lock_by_id(
             session,
             session_id,
         )
-        if agent_session is None:
+        if locked is None:
             raise ValueError("AgentSession not found")
-        if agent_session.agent_runtime_id != runtime.id:
+        if locked.agent_runtime_id != runtime.id:
             raise ValueError("AgentSession does not belong to the agent runtime")
-        locked = await self.agent_runtime_repository.lock_by_current_session_id(
-            session,
-            session_id,
-        )
-        if locked is None or locked.id != runtime.id:
-            raise ValueError("Session is not active")
-        if locked.run_state != AgentRuntimeRunState.IDLE:
+        if locked.run_state != AgentSessionRunState.IDLE:
             raise ValueError("Session is running")
         if locked.pending_command_id is not None:
             raise ValueError("Session has pending command")
-        return locked
+        return runtime, locked
 
     async def _create_idempotent_record(
         self,

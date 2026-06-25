@@ -37,7 +37,7 @@ azentspublicclient/docs/AgentRuntimeFailureResponse.md
 azentspublicclient/docs/AgentRuntimeLifecycleResponse.md
 azentspublicclient/docs/AgentRuntimeRawStateResponse.md
 azentspublicclient/docs/AgentRuntimeResponse.md
-azentspublicclient/docs/AgentRuntimeRunState.md
+azentspublicclient/docs/AgentSessionRunState.md
 azentspublicclient/docs/AgentRuntimeSummaryResponse.md
 azentspublicclient/docs/AgentRuntimeV1Api.md
 azentspublicclient/docs/AgentSessionListResponse.md
@@ -263,7 +263,7 @@ azentspublicclient/models/agent_runtime_failure_response.py
 azentspublicclient/models/agent_runtime_lifecycle_response.py
 azentspublicclient/models/agent_runtime_raw_state_response.py
 azentspublicclient/models/agent_runtime_response.py
-azentspublicclient/models/agent_runtime_run_state.py
+azentspublicclient/models/agent_session_run_state.py
 azentspublicclient/models/agent_runtime_summary_response.py
 azentspublicclient/models/agent_session_list_response.py
 azentspublicclient/models/agent_session_response.py
@@ -472,7 +472,7 @@ azentspublicclient/test/test_agent_runtime_failure_response.py
 azentspublicclient/test/test_agent_runtime_lifecycle_response.py
 azentspublicclient/test/test_agent_runtime_raw_state_response.py
 azentspublicclient/test/test_agent_runtime_response.py
-azentspublicclient/test/test_agent_runtime_run_state.py
+azentspublicclient/test/test_agent_session_run_state.py
 azentspublicclient/test/test_agent_runtime_summary_response.py
 azentspublicclient/test/test_agent_runtime_v1_api.py
 azentspublicclient/test/test_agent_session_list_response.py

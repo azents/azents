@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-06-23
-spec_version: 6
+last_verified_at: 2026-06-25
+spec_version: 7
 ---
 
 # Run Resume
@@ -32,13 +32,13 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | --- | --- | --- |
 | Broker wake-up | New session wake-up signal | Live sticky owner receives the wake-up directly; otherwise a worker can take over after owner heartbeat expiry |
 | Broker redelivery | Unacked session wake-up signal | Another worker receives and resumes from durable DB state |
-| Stale runtime activity | Worker recovery scan | Worker enqueues a wake-up signal for the affected session |
+| Stale session activity | Worker recovery scan of `agent_sessions.run_state` | Worker enqueues a wake-up signal for the affected session |
 | Active event run | `agent_runs.phase` and `active_tool_calls` | Runtime reconciles phase/tool state and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime executes or interrupts the missing result path without duplicating completed results |
 
 ## Ownership Lease
 
-Session ownership is a sticky worker lease. It is separate from `AgentRuntime.run_state` and exists
+Session ownership is a sticky worker lease. It is separate from `AgentSession.run_state` and exists
 to keep follow-up inputs on the same warm `_SessionRunner` and session-scoped toolkit lifecycle.
 
 | Concept | Authority | Duration | Purpose |
@@ -57,8 +57,9 @@ The sticky lease and heartbeat timeout intentionally have different meanings:
 
 ## Worker State And Routing
 
-`AgentRuntime.run_state` remains a coarse worker lifecycle signal (`idle` / `running`). Detailed
-execution state lives in `agent_runs.phase`.
+`AgentSession.run_state` remains a coarse session execution recovery signal (`idle` / `running`).
+Detailed execution state lives in `agent_runs.phase`. `AgentRuntime` owns shared sandbox lifecycle and
+runner/provider state, not session run ownership.
 
 Worker shutdown must not partially process a new message. If shutdown wins before processing, the
 message is left for broker redelivery or ownership takeover.
@@ -66,7 +67,7 @@ message is left for broker redelivery or ownership takeover.
 If shutdown is observed while a foreground run is active, the run boundary is a worker handover
 boundary, not an idle boundary. The current worker may wait briefly for `engine.run()` to finish
 cleanly, but even a clean return during shutdown must skip idle hooks, skip Goal continuation
-creation, and skip `run_state=IDLE`. The worker releases the ownership lease and heartbeat; a new
+creation, and skip `AgentSession.run_state=IDLE`. The worker releases the ownership lease and heartbeat; a new
 worker resumes from the durable transcript, `agent_runs`, pending input buffers, and session
 wake-up state.
 
@@ -171,7 +172,7 @@ tool results are never re-executed.
 
 User-requested stop is a terminal interruption, not a sticky stop condition for future turns. The
 stop finalizer consumes the durable stop request, records user stop events, and clears
-`AgentRuntime.stop_requested_at` before the next wake-up can process buffered input. The durable
+`AgentSession.stop_requested_at` before the next wake-up can process buffered input. The durable
 event order for a stopped run is:
 
 1. Any live assistant/reasoning projection that can be persisted.

@@ -38,7 +38,7 @@ from azents.core.auth.deps import CurrentUser
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
-    AgentRuntimeRunState,
+    AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
     EventKind,
@@ -522,7 +522,7 @@ class _EventService:
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                     status=AgentRunStatus.RUNNING,
                 ),
-                session_run_state=AgentRuntimeRunState.RUNNING,
+                session_run_state=AgentSessionRunState.RUNNING,
             )
         )
 
@@ -730,7 +730,7 @@ class TestRestMessageWriteContract:
         assert response.accepted.id == "0123456789abcdef0123456789abcdef"
         assert response.snapshot.input_buffer_events[0].kind == EventKind.USER_MESSAGE
         assert response.snapshot.partial_history_events == []
-        assert response.snapshot.session_run_state == AgentRuntimeRunState.IDLE
+        assert response.snapshot.session_run_state == AgentSessionRunState.IDLE
         assert response.history_reload_required is False
         assert broadcast.events[0][1]["type"] == "live_event_upserted"
         assert len(broker.messages) == 1

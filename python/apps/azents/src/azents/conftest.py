@@ -169,7 +169,7 @@ def redis_container(
     check_docker_availability: None,
 ) -> Generator[RedisContainer, None, None]:
     """Redis test container."""
-    valkey_image = _ensure_docker_image("public.ecr.aws/valkey/valkey:9-alpine")
+    valkey_image = _ensure_docker_image(get_docker_hub_image("valkey/valkey:9-alpine"))
     with RedisContainer(
         valkey_image,
     ) as redis:

@@ -22,8 +22,8 @@ from azents.engine.run.contracts import AgentEngineProtocol, RunRequest
 from azents.engine.run.emit import Emit, ephemeral
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution.data import AgentRunCreate
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import PendingRuntimeCommand
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import PendingSessionCommand
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
@@ -104,7 +104,7 @@ class _SessionLifecycle:
         self.terminal_runs.append((run_id, status))
 
 
-class _AgentRuntimeRepository(AgentRuntimeRepository):
+class _AgentSessionRepository(AgentSessionRepository):
     """AgentRuntimeRepository test double."""
 
     def __init__(self) -> None:
@@ -167,7 +167,7 @@ def _executor(
     *,
     handler: CommandHandler,
     session_lifecycle: _SessionLifecycle,
-    agent_runtime_repository: _AgentRuntimeRepository,
+    agent_session_repository: _AgentSessionRepository,
     live_event_projector: _LiveEventProjector,
 ) -> CommandExecutor:
     """Create CommandExecutor under test."""
@@ -177,7 +177,7 @@ def _executor(
         engine=cast(AgentEngineProtocol, object()),
         agent_repository=cast(AgentRepository, object()),
         integration_repository=cast(LLMProviderIntegrationRepository, object()),
-        agent_runtime_repository=agent_runtime_repository,
+        agent_session_repository=agent_session_repository,
         session_lifecycle=cast(SessionLifecycleService, session_lifecycle),
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
@@ -192,7 +192,7 @@ async def test_execute_runs_command_and_marks_terminal(
     """CommandExecutor completes command run lifecycle."""
     dispatched: list[tuple[str, PublishedEvent]] = []
     session_lifecycle = _SessionLifecycle()
-    runtime_repository = _AgentRuntimeRepository()
+    session_repository = _AgentSessionRepository()
     live_event_projector = _LiveEventProjector()
     handler = _CommandHandler(
         [
@@ -222,14 +222,14 @@ async def test_execute_runs_command_and_marks_terminal(
     executor = _executor(
         handler=cast(CommandHandler, handler),
         session_lifecycle=session_lifecycle,
-        agent_runtime_repository=runtime_repository,
+        agent_session_repository=session_repository,
         live_event_projector=live_event_projector,
     )
 
     await executor.execute(
         agent_id="agent-001",
         session_id="session-001",
-        command=PendingRuntimeCommand(
+        command=PendingSessionCommand(
             id="command-001",
             name="compact",
             payload={},
@@ -258,7 +258,7 @@ async def test_execute_runs_command_and_marks_terminal(
     assert live_event_projector.flushed_session_ids == ["session-001"]
     assert session_lifecycle.cleared_session_ids == ["session-001"]
     assert session_lifecycle.terminal_runs == [(run_id, AgentRunStatus.COMPLETED)]
-    assert runtime_repository.cleared_commands == [("session-001", "command-001")]
+    assert session_repository.cleared_commands == [("session-001", "command-001")]
 
 
 @pytest.mark.asyncio
@@ -266,12 +266,12 @@ async def test_execute_ignores_unknown_command() -> None:
     """Unregistered command is ignored without side effects."""
     dispatched: list[PublishedEvent] = []
     session_lifecycle = _SessionLifecycle()
-    runtime_repository = _AgentRuntimeRepository()
+    session_repository = _AgentSessionRepository()
     live_event_projector = _LiveEventProjector()
     executor = _executor(
         handler=cast(CommandHandler, _CommandHandler([])),
         session_lifecycle=session_lifecycle,
-        agent_runtime_repository=runtime_repository,
+        agent_session_repository=session_repository,
         live_event_projector=live_event_projector,
     )
 
@@ -285,7 +285,7 @@ async def test_execute_ignores_unknown_command() -> None:
     await executor.execute(
         agent_id="agent-001",
         session_id="session-001",
-        command=PendingRuntimeCommand(
+        command=PendingSessionCommand(
             id="command-001",
             name="noop",
             payload={},
@@ -300,5 +300,5 @@ async def test_execute_ignores_unknown_command() -> None:
     assert session_lifecycle.cleared_session_ids == []
     assert session_lifecycle.created == []
     assert session_lifecycle.terminal_runs == []
-    assert runtime_repository.cleared_commands == [("session-001", "command-001")]
+    assert session_repository.cleared_commands == [("session-001", "command-001")]
     assert live_event_projector.flushed_session_ids == []

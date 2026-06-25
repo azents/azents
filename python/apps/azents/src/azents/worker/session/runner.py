@@ -4,7 +4,7 @@ import asyncio
 import dataclasses
 import logging
 from collections.abc import Sequence
-from typing import assert_never
+from typing import Protocol, assert_never
 
 from azcommon.logging import bind_extra
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,7 @@ from azents.engine.run.contracts import AgentEngineProtocol, ToolkitBinding
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.types import CheckStop, PollMessages
 from azents.rdb.session import SessionManager
-from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session.data import PendingSessionCommand
 from azents.services.input_buffer import InputBufferService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.command_executor import CommandExecutor
@@ -46,6 +46,18 @@ from azents.worker.session.waiter import (
 logger = logging.getLogger(__name__)
 
 
+class AgentSessionCommandReader(Protocol):
+    """Read pending commands for a session runner."""
+
+    async def get_pending_command_by_session_id(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> PendingSessionCommand | None:
+        """Fetch a pending command for a session."""
+        ...
+
+
 @dataclasses.dataclass(frozen=True)
 class _PendingIdleBoundary:
     """stale wake-up 뒤에 닫아야 하는 terminal run boundary."""
@@ -69,7 +81,7 @@ class SessionRunner:
         event_publisher: WorkerEventPublisher,
         session_lifecycle: SessionLifecycleService,
         session_manager: SessionManager[AsyncSession],
-        agent_runtime_repository: AgentRuntimeRepository,
+        agent_session_repository: AgentSessionCommandReader,
         input_buffer_service: InputBufferService,
         idle_continuation_service: IdleContinuationService,
         user_stop_finalizer: UserStopFinalizer,
@@ -81,7 +93,7 @@ class SessionRunner:
         self.event_publisher = event_publisher
         self.session_lifecycle = session_lifecycle
         self.session_manager = session_manager
-        self.agent_runtime_repository = agent_runtime_repository
+        self.agent_session_repository = agent_session_repository
         self.input_buffer_service = input_buffer_service
         self.idle_continuation_service = idle_continuation_service
         self.command_executor = command_executor
@@ -253,7 +265,7 @@ class SessionRunner:
         """Return whether a pending runtime command should run next."""
         async with self.session_manager() as db_session:
             command = (
-                await self.agent_runtime_repository.get_pending_command_by_session_id(
+                await self.agent_session_repository.get_pending_command_by_session_id(
                     db_session,
                     session_id,
                 )
@@ -507,7 +519,7 @@ class SessionRunner:
         """Consume wake-up through command path when pending command exists."""
         async with self.session_manager() as db_session:
             command = (
-                await self.agent_runtime_repository.get_pending_command_by_session_id(
+                await self.agent_session_repository.get_pending_command_by_session_id(
                     db_session,
                     message.session_id,
                 )
