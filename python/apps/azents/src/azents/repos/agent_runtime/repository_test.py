@@ -818,7 +818,6 @@ class TestAgentRuntimeRepository:
             .values(
                 provider_observed_at=old_observe_at,
                 provider_observe_requested_at=old_observe_at,
-                run_heartbeat_at=sa.func.now(),
             )
         )
 

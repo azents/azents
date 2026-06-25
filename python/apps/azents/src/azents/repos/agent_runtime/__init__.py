@@ -1,7 +1,6 @@
 """AgentRuntime repository."""
 
 import datetime
-from typing import Any
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -9,7 +8,6 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentRuntimeRunState,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
@@ -24,7 +22,6 @@ from .data import (
     AgentRuntimeCreate,
     AgentRuntimeFailurePatch,
     AgentRuntimeLifecycleCommand,
-    PendingRuntimeCommand,
 )
 
 
@@ -590,231 +587,6 @@ class AgentRuntimeRepository:
         )
         await session.flush()
 
-    async def mark_running(self, session: AsyncSession, runtime_id: str) -> None:
-        """Transition AgentRuntime run state to RUNNING."""
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.current_session_id == runtime_id)
-            .values(
-                run_state=AgentRuntimeRunState.RUNNING,
-                run_heartbeat_at=sa.func.now(),
-            )
-        )
-        await session.flush()
-
-    async def mark_running_for_input_wakeup(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> None:
-        """Transition Runtime to RUNNING recovery target on buffered input."""
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.current_session_id == session_id,
-                RDBAgentRuntime.run_state != AgentRuntimeRunState.RUNNING,
-            )
-            .values(
-                run_state=AgentRuntimeRunState.RUNNING,
-                run_heartbeat_at=sa.func.now(),
-            )
-        )
-        await session.flush()
-
-    async def enqueue_pending_command(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        command_id: str,
-        command_name: str,
-        payload: dict[str, Any],
-        user_id: str | None,
-    ) -> AgentRuntime | None:
-        """Store single pending command in idle Runtime and transition to RUNNING."""
-        result = await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.current_session_id == session_id,
-                RDBAgentRuntime.run_state == AgentRuntimeRunState.IDLE,
-                RDBAgentRuntime.pending_command_id.is_(None),
-            )
-            .values(
-                pending_command_id=command_id,
-                pending_command_name=command_name,
-                pending_command_payload=payload,
-                pending_command_user_id=user_id,
-                pending_command_created_at=sa.func.now(),
-                run_state=AgentRuntimeRunState.RUNNING,
-                run_heartbeat_at=sa.func.now(),
-            )
-            .returning(RDBAgentRuntime)
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        await session.flush()
-        return self._build(rdb)
-
-    async def get_pending_command_by_session_id(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> PendingRuntimeCommand | None:
-        """Fetch pending command for current session."""
-        result = await session.execute(
-            sa.select(RDBAgentRuntime).where(
-                RDBAgentRuntime.current_session_id == session_id,
-                RDBAgentRuntime.pending_command_id.is_not(None),
-            )
-        )
-        rdb = result.scalar_one_or_none()
-        if (
-            rdb is None
-            or rdb.pending_command_id is None
-            or rdb.pending_command_name is None
-            or rdb.pending_command_payload is None
-            or rdb.pending_command_created_at is None
-        ):
-            return None
-        return PendingRuntimeCommand(
-            id=rdb.pending_command_id,
-            name=rdb.pending_command_name,
-            payload=dict(rdb.pending_command_payload),
-            user_id=rdb.pending_command_user_id,
-            created_at=rdb.pending_command_created_at,
-        )
-
-    async def clear_pending_command(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        command_id: str,
-    ) -> None:
-        """Remove processed pending command."""
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.current_session_id == session_id,
-                RDBAgentRuntime.pending_command_id == command_id,
-            )
-            .values(
-                pending_command_id=None,
-                pending_command_name=None,
-                pending_command_payload=None,
-                pending_command_user_id=None,
-                pending_command_created_at=None,
-            )
-        )
-        await session.flush()
-
-    async def request_stop(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        stop_request_id: str,
-        user_id: str | None,
-    ) -> AgentRuntime | None:
-        """Record stop intent on RUNNING Runtime."""
-        result = await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.current_session_id == session_id,
-                RDBAgentRuntime.run_state == AgentRuntimeRunState.RUNNING,
-            )
-            .values(
-                stop_requested_at=sa.func.now(),
-                stop_requested_by=user_id,
-                stop_request_id=stop_request_id,
-            )
-            .returning(RDBAgentRuntime)
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        await session.flush()
-        return self._build(rdb)
-
-    async def has_stop_request(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> bool:
-        """Check whether current session has stop intent."""
-        result = await session.execute(
-            sa.select(RDBAgentRuntime.id).where(
-                RDBAgentRuntime.current_session_id == session_id,
-                RDBAgentRuntime.stop_requested_at.is_not(None),
-            )
-        )
-        return result.scalar_one_or_none() is not None
-
-    async def clear_stop_request(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> None:
-        """Remove processed stop intent."""
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.current_session_id == session_id)
-            .values(
-                stop_requested_at=None,
-                stop_requested_by=None,
-                stop_request_id=None,
-            )
-        )
-        await session.flush()
-
-    async def mark_idle(self, session: AsyncSession, runtime_id: str) -> None:
-        """Transition AgentRuntime run state to IDLE."""
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.current_session_id == runtime_id)
-            .values(
-                run_state=AgentRuntimeRunState.IDLE,
-                stop_requested_at=None,
-                stop_requested_by=None,
-                stop_request_id=None,
-            )
-        )
-        await session.flush()
-
-    async def heartbeat_running(self, session: AsyncSession, runtime_id: str) -> None:
-        """Update heartbeat time of RUNNING AgentRuntime."""
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.current_session_id == runtime_id,
-                RDBAgentRuntime.run_state == AgentRuntimeRunState.RUNNING,
-            )
-            .values(run_heartbeat_at=sa.func.now())
-        )
-        await session.flush()
-
-    async def find_stuck_running(
-        self,
-        session: AsyncSession,
-        *,
-        stale_threshold: datetime.timedelta,
-        limit: int,
-    ) -> list[AgentRuntime]:
-        """Fetch old RUNNING AgentRuntime list."""
-        cutoff = sa.func.now() - stale_threshold
-        result = await session.execute(
-            sa.select(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.run_state == AgentRuntimeRunState.RUNNING,
-                RDBAgentRuntime.run_heartbeat_at < cutoff,
-                RDBAgentRuntime.current_session_id.is_not(None),
-            )
-            .order_by(RDBAgentRuntime.run_heartbeat_at)
-            .limit(limit)
-        )
-        return [self._build(rdb) for rdb in result.scalars()]
-
     async def find_lifecycle_dispatch_candidates(
         self,
         session: AsyncSession,
@@ -925,16 +697,6 @@ class AgentRuntimeRepository:
             failure_message=rdb.failure_message,
             last_state_change_at=rdb.last_state_change_at,
             current_session_id=rdb.current_session_id,
-            run_state=rdb.run_state,
-            run_heartbeat_at=rdb.run_heartbeat_at,
-            pending_command_id=rdb.pending_command_id,
-            pending_command_name=rdb.pending_command_name,
-            pending_command_payload=rdb.pending_command_payload,
-            pending_command_user_id=rdb.pending_command_user_id,
-            pending_command_created_at=rdb.pending_command_created_at,
-            stop_requested_at=rdb.stop_requested_at,
-            stop_requested_by=rdb.stop_requested_by,
-            stop_request_id=rdb.stop_request_id,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )

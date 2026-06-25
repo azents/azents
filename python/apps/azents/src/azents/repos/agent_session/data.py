@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from azents.core.enums import (
     AgentSessionEndReason,
+    AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
 )
@@ -27,9 +28,54 @@ class AgentSession(BaseModel):
     lifecycle_started_at: datetime.datetime | None = Field(
         default=None, description="Lifecycle start hook claim time"
     )
+    run_state: AgentSessionRunState = Field(
+        default=AgentSessionRunState.IDLE,
+        description="Session execution state",
+    )
+    run_heartbeat_at: datetime.datetime = Field(
+        default_factory=lambda: datetime.datetime.now(datetime.UTC),
+        description="Run heartbeat time",
+    )
+    pending_command_id: str | None = Field(
+        default=None, description="Pending command ID"
+    )
+    pending_command_name: str | None = Field(
+        default=None, description="Pending command name"
+    )
+    pending_command_payload: dict[str, object] | None = Field(
+        default=None,
+        description="Pending command payload",
+    )
+    pending_command_user_id: str | None = Field(
+        default=None, description="Pending command user ID"
+    )
+    pending_command_created_at: datetime.datetime | None = Field(
+        default=None,
+        description="Pending command created timestamp",
+    )
+    stop_requested_at: datetime.datetime | None = Field(
+        default=None,
+        description="Stop intent timestamp",
+    )
+    stop_requested_by: str | None = Field(
+        default=None, description="Stop requesting user ID"
+    )
+    stop_request_id: str | None = Field(
+        default=None, description="Stop request correlation ID"
+    )
     ended_at: datetime.datetime | None = Field(default=None, description="End time")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
+
+
+class PendingSessionCommand(BaseModel):
+    """AgentSession pending command."""
+
+    id: str = Field(description="Pending command ID")
+    name: str = Field(description="Command name")
+    payload: dict[str, object] = Field(description="Command payload")
+    user_id: str | None = Field(description="Command requesting user ID")
+    created_at: datetime.datetime = Field(description="Command created timestamp")
 
 
 class AgentSessionCreate(BaseModel):

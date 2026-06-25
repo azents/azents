@@ -18,9 +18,9 @@ from enum import Enum
 from typing_extensions import Self
 
 
-class AgentRuntimeRunState(str, Enum):
+class AgentSessionRunState(str, Enum):
     """
-    Engine execution status of AgentRuntime.
+    Engine execution status of AgentSession.
     """
 
     """
@@ -31,5 +31,5 @@ class AgentRuntimeRunState(str, Enum):
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:
-        """Create an instance of AgentRuntimeRunState from a JSON string"""
+        """Create an instance of AgentSessionRunState from a JSON string"""
         return cls(json.loads(json_str))

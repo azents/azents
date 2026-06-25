@@ -17,7 +17,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
-from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.worker.deps import get_worker_broker
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ class SessionLifecycleService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
 
@@ -72,7 +72,7 @@ class SessionLifecycleService:
     async def mark_session_running(self, session_id: str) -> None:
         """Transition ``run_state`` to RUNNING and initialize heartbeat."""
         await self.run_short_db(
-            lambda db: self.agent_runtime_repository.mark_running(db, session_id),
+            lambda db: self.agent_session_repository.mark_running(db, session_id),
             error_log="Failed to mark session running",
             session_id=session_id,
         )
@@ -94,7 +94,7 @@ class SessionLifecycleService:
                     },
                 )
                 return False
-            await self.agent_runtime_repository.mark_idle(db_session, session_id)
+            await self.agent_session_repository.mark_idle(db_session, session_id)
             return True
 
         marked_idle = await self.run_short_db(
@@ -126,7 +126,7 @@ class SessionLifecycleService:
     async def heartbeat_session(self, session_id: str) -> None:
         """Refresh DB heartbeat and Redis owner heartbeat of RUNNING session."""
         await self.run_short_db(
-            lambda db: self.agent_runtime_repository.heartbeat_running(db, session_id),
+            lambda db: self.agent_session_repository.heartbeat_running(db, session_id),
             error_log="Failed to heartbeat session",
             session_id=session_id,
         )
@@ -135,7 +135,7 @@ class SessionLifecycleService:
     async def has_stop_request(self, session_id: str) -> bool:
         """Return whether Durable stop intent exists."""
         async with self.session_manager() as db_session:
-            return await self.agent_runtime_repository.has_stop_request(
+            return await self.agent_session_repository.has_stop_request(
                 db_session,
                 session_id,
             )

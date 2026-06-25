@@ -226,7 +226,7 @@ Class | Method | HTTP request | Description
  - [AgentRuntimeLifecycleResponse](azentspublicclient/docs/AgentRuntimeLifecycleResponse.md)
  - [AgentRuntimeRawStateResponse](azentspublicclient/docs/AgentRuntimeRawStateResponse.md)
  - [AgentRuntimeResponse](azentspublicclient/docs/AgentRuntimeResponse.md)
- - [AgentRuntimeRunState](azentspublicclient/docs/AgentRuntimeRunState.md)
+ - [AgentSessionRunState](azentspublicclient/docs/AgentSessionRunState.md)
  - [AgentRuntimeSummaryResponse](azentspublicclient/docs/AgentRuntimeSummaryResponse.md)
  - [AgentSessionListResponse](azentspublicclient/docs/AgentSessionListResponse.md)
  - [AgentSessionResponse](azentspublicclient/docs/AgentSessionResponse.md)

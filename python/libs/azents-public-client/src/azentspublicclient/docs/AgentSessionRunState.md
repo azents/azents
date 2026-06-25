@@ -1,6 +1,6 @@
-# AgentRuntimeRunState
+# AgentSessionRunState
 
-Engine execution status of AgentRuntime.
+Engine execution status of AgentSession.
 
 ## Enum
 

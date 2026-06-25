@@ -5,7 +5,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentRuntimeRunState,
+    AgentSessionRunState,
     EventKind,
     InputBufferKind,
     LLMProvider,
@@ -90,7 +90,6 @@ def _service(
     input_buffer_service = InputBufferService(
         session_manager=rdb_session_manager,
         input_buffer_repository=InputBufferRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
@@ -207,9 +206,9 @@ class TestChatWriteService:
                 )
             ).scalars()
             assert [buffer.content for buffer in buffers] == ["edited"]
-            runtime_after = await AgentRuntimeRepository().get_by_current_session_id(
+            session_after = await AgentSessionRepository().get_by_id(
                 session,
                 event_session.id,
             )
-            assert runtime_after is not None
-            assert runtime_after.run_state == AgentRuntimeRunState.RUNNING
+            assert session_after is not None
+            assert session_after.run_state == AgentSessionRunState.RUNNING

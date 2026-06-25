@@ -2,7 +2,7 @@
 
 import dataclasses
 
-from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentRuntimeRunState
+from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
 from azents.engine.events.types import Event
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
 from azents.engine.tools.todo import TodoStateSnapshot
@@ -37,7 +37,7 @@ class ChatLiveStateSnapshot:
     partial_history_events: list[Event]
     input_buffer_events: list[Event]
     run: ChatLiveRunState | None = None
-    session_run_state: AgentRuntimeRunState = AgentRuntimeRunState.IDLE
+    session_run_state: AgentSessionRunState = AgentSessionRunState.IDLE
     todo: TodoStateSnapshot | None = None
     goal: GoalStateSnapshot | None = None
 

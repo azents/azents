@@ -108,13 +108,13 @@ async def runtime_control_server_lifespan(
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
     runtime_repository = AgentRuntimeRepository()
+    session_repository = AgentSessionRepository()
     input_buffer_service = InputBufferService(
         session_manager=session_manager,
         input_buffer_repository=InputBufferRepository(),
-        agent_runtime_repository=runtime_repository,
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
-        agent_session_repository=cast(AgentSessionRepository, object()),
+        agent_session_repository=session_repository,
         event_transcript_repository=cast(EventTranscriptRepository, object()),
     )
     worker_input_queue = DatabaseWorkerInputQueue(

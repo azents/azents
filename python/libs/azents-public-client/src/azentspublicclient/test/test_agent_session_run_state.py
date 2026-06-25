@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.agent_runtime_run_state import AgentRuntimeRunState
+from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
 
-class TestAgentRuntimeRunState(unittest.TestCase):
-    """AgentRuntimeRunState unit test stubs"""
+class TestAgentSessionRunState(unittest.TestCase):
+    """AgentSessionRunState unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,9 +25,9 @@ class TestAgentRuntimeRunState(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def testAgentRuntimeRunState(self):
-        """Test AgentRuntimeRunState"""
-        # inst = AgentRuntimeRunState()
+    def testAgentSessionRunState(self):
+        """Test AgentSessionRunState"""
+        # inst = AgentSessionRunState()
 
 if __name__ == '__main__':
     unittest.main()

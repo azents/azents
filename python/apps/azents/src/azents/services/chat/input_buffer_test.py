@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
-    AgentRuntimeRunState,
+    AgentSessionRunState,
     InputBufferKind,
     LLMProvider,
     WorkspaceUserRole,
@@ -114,7 +114,6 @@ def _service(
     input_buffer_service = InputBufferService(
         session_manager=rdb_session_manager,
         input_buffer_repository=InputBufferRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
@@ -199,7 +198,7 @@ class TestChatSessionInputBuffer:
         assert isinstance(result, Success)
         assert [event.id for event in result.value.input_buffer_events] == [buffer_id]
         assert result.value.partial_history_events == []
-        assert result.value.session_run_state == AgentRuntimeRunState.IDLE
+        assert result.value.session_run_state == AgentSessionRunState.IDLE
 
     async def test_list_live_events_includes_running_run_state(
         self,
@@ -212,12 +211,7 @@ class TestChatSessionInputBuffer:
                 handle="chat-live-running-run",
                 slug="chat-live-running-run",
             )
-            runtime = await AgentRuntimeRepository().get_by_current_session_id(
-                session,
-                session_id,
-            )
-            assert runtime is not None
-            await AgentRuntimeRepository().mark_running(session, session_id)
+            await AgentSessionRepository().mark_running(session, session_id)
             run = await AgentRunRepository().create(
                 session,
                 AgentRunCreate(
@@ -236,7 +230,7 @@ class TestChatSessionInputBuffer:
         assert result.value.run.run_id == run.id
         assert result.value.run.phase == AgentRunPhase.WAITING_FOR_MODEL
         assert result.value.run.status == AgentRunStatus.RUNNING
-        assert result.value.session_run_state == AgentRuntimeRunState.RUNNING
+        assert result.value.session_run_state == AgentSessionRunState.RUNNING
 
     async def test_flushed_input_buffer_remains_in_message_history(
         self,
@@ -253,7 +247,6 @@ class TestChatSessionInputBuffer:
         input_buffer_service = InputBufferService(
             session_manager=rdb_session_manager,
             input_buffer_repository=InputBufferRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
             exchange_file_service=_ExchangeFileService(),
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),

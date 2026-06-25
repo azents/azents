@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-06-23
-spec_version: 41
+last_verified_at: 2026-06-25
+spec_version: 42
 ---
 
 # Agent Execution Loop
@@ -60,7 +60,7 @@ Main steps:
 8. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
 9. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
 10. When no tool call or pending follow-up remains, the runner observes the terminal `RunComplete`
-    boundary and then transitions the session runtime to idle.
+    boundary and then transitions `AgentSession.run_state` to idle.
 
 Streaming deltas are UI projection only. Durable events are appended based on completed output items
 or completed responses.
@@ -285,7 +285,7 @@ Web chat user writes enter through REST commit endpoints. Message writes create 
 idle-only: the REST transaction rewrites durable history state, clears pending input buffers,
 creates an `edited_user_message` input buffer, marks the session running, and sends a wake-up.
 Command writes are idle-only control actions: the REST transaction stores one pending command on
-`agent_runtimes`, marks the session running, and sends a wake-up. Running sessions, existing pending
+`agent_sessions`, marks the session running, and sends a wake-up. Running sessions, existing pending
 commands, or pending input buffers reject command/edit writes with `409 Conflict`. Stop uses the REST
 control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable DB stop intent and
 sends a best-effort broker stop signal for immediate cancellation. WebSocket message/edit/command/stop
@@ -339,7 +339,7 @@ Primary checks:
 
 ## Idle continuation
 
-Idle transition is allowed only at a terminal run boundary. A session runtime may become `idle` only
+Idle transition is allowed only at a terminal run boundary. `AgentSession.run_state` may become `idle` only
 after the runner has observed a terminal `RunComplete` boundary and has confirmed that there is no
 follow-up work: no pending command, no pending input buffer, and no queued actionable wake-up. User
 interrupt and unrecoverable turn errors also end through `RunComplete`; after that same follow-up
@@ -354,12 +354,12 @@ The required run-completion order is:
 1. Append or observe the terminal run event (`RunComplete`).
 2. Check whether follow-up work already exists.
 3. If follow-up work exists, keep or restore `running` and continue with the next run.
-4. If no follow-up work exists, transition the session runtime to `idle`.
+4. If no follow-up work exists, transition `AgentSession.run_state` to `idle`.
 5. Clear session activity state that belongs to the completed run.
 6. Run `on_session_idle` hooks.
 7. Collect returned continuation prompts.
-8. Enqueue collected prompts through `InputBufferService`, which inserts the buffers and marks the
-   session runtime `running` in the same database transaction.
+8. Enqueue collected prompts through `InputBufferService`, which inserts the buffers and marks
+   `AgentSession.run_state` as `running` in the same database transaction.
 9. Publish pending-buffer live state and send a broker wake-up signal.
 
 `on_session_idle` hook providers do not write durable transcript events directly and do not send

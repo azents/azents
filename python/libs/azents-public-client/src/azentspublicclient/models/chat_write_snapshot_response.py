@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.agent_runtime_run_state import AgentRuntimeRunState
+from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
 from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunStateResponse
 from azentspublicclient.models.goal_state_response import GoalStateResponse
@@ -34,7 +34,7 @@ class ChatWriteSnapshotResponse(BaseModel):
     partial_history_events: List[ChatEventResponse] = Field(description="Partial history projection list to compose into Chat timeline")
     input_buffer_events: List[ChatEventResponse] = Field(description="Pending input buffer projection list")
     run: Optional[ChatLiveRunStateResponse] = None
-    session_run_state: AgentRuntimeRunState = Field(description="Authoritative run_state for the current session")
+    session_run_state: AgentSessionRunState = Field(description="Authoritative run_state for the current session")
     todo: Optional[TodoStateResponse] = None
     goal: Optional[GoalStateResponse] = None
     additional_properties: Dict[str, Any] = {}

@@ -8,7 +8,7 @@ from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentRuntimeRunState,
+    AgentSessionRunState,
     ExchangeFileOrigin,
     ExchangeFileStatus,
     InputBufferKind,
@@ -249,7 +249,6 @@ def _input_buffer_service(
     return InputBufferService(
         session_manager=rdb_session_manager,
         input_buffer_repository=InputBufferRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
@@ -272,12 +271,12 @@ class TestInputBufferService:
         service = _input_buffer_service(rdb_session_manager)
 
         async with rdb_session_manager() as session:
-            before = await AgentRuntimeRepository().get_by_current_session_id(
+            before = await AgentSessionRepository().get_by_id(
                 session,
                 session_id,
             )
             assert before is not None
-            assert before.run_state == AgentRuntimeRunState.IDLE
+            assert before.run_state == AgentSessionRunState.IDLE
 
             result = await service.enqueue(
                 session,
@@ -292,7 +291,7 @@ class TestInputBufferService:
                     file_parts=[],
                 ),
             )
-            after = await AgentRuntimeRepository().get_by_current_session_id(
+            after = await AgentSessionRepository().get_by_id(
                 session,
                 session_id,
             )
@@ -301,7 +300,7 @@ class TestInputBufferService:
         assert result.input_buffer.session_id == session_id
         assert result.input_buffer.content == "wake me"
         assert after is not None
-        assert after.run_state == AgentRuntimeRunState.RUNNING
+        assert after.run_state == AgentSessionRunState.RUNNING
 
     async def test_flush_promotes_buffer_and_deletes_row(
         self,

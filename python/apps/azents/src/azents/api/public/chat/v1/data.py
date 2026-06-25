@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
-    AgentRuntimeRunState,
+    AgentSessionRunState,
     EventKind,
 )
 from azents.engine.events.types import Event
@@ -207,7 +207,7 @@ class ChatWriteSnapshotResponse(BaseModel):
         default=None,
         description="Currently running run status",
     )
-    session_run_state: AgentRuntimeRunState = Field(
+    session_run_state: AgentSessionRunState = Field(
         description="Authoritative run_state for the current session",
     )
     todo: TodoStateResponse | None = Field(
@@ -929,7 +929,7 @@ class LiveEventListResponse(BaseModel):
         default=None,
         description="Currently running run status",
     )
-    session_run_state: AgentRuntimeRunState = Field(
+    session_run_state: AgentSessionRunState = Field(
         description="Authoritative run_state for the current session",
     )
     todo: TodoStateResponse | None = Field(

@@ -10,7 +10,6 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import (
-    AgentRuntimeRunState,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
@@ -24,14 +23,6 @@ from azents.rdb.types.datetime import TimeZoneDateTime
 def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
     """Return StrEnum values stored in the DB."""
     return [v.value for v in enum_cls]
-
-
-agent_runtime_run_state_enum = ENUM(
-    AgentRuntimeRunState,
-    name="agent_runtime_run_state",
-    create_type=False,
-    values_callable=_enum_values,
-)
 
 
 runtime_desired_state_enum = ENUM(
@@ -105,21 +96,6 @@ class RDBAgentRuntime(RDBModel):
     IX_RUNNER_STATE = sa.Index("ix_agent_runtimes_runner_state", "runner_state")
     IX_CURRENT_SESSION_ID = sa.Index(
         "ix_agent_runtimes_current_session_id", "current_session_id"
-    )
-    IX_PENDING_COMMAND = sa.Index(
-        "ix_agent_runtimes_pending_command",
-        "pending_command_created_at",
-        postgresql_where=sa.text("pending_command_id IS NOT NULL"),
-    )
-    IX_STOP_REQUESTED_AT = sa.Index(
-        "ix_agent_runtimes_stop_requested_at",
-        "stop_requested_at",
-        postgresql_where=sa.text("stop_requested_at IS NOT NULL"),
-    )
-    IX_RUN_STATE_RUNNING = sa.Index(
-        "ix_agent_runtimes_run_state_running",
-        "run_heartbeat_at",
-        postgresql_where=sa.text("run_state = 'running'"),
     )
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -257,68 +233,6 @@ class RDBAgentRuntime(RDBModel):
         nullable=True,
         default=None,
     )
-    run_state: Mapped[AgentRuntimeRunState] = mapped_column(
-        agent_runtime_run_state_enum,
-        init=False,
-        server_default=AgentRuntimeRunState.IDLE.value,
-        nullable=False,
-    )
-    run_heartbeat_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        server_default=sa.func.now(),
-        nullable=False,
-    )
-    pending_command_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    pending_command_name: Mapped[str | None] = mapped_column(
-        sa.String(120),
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    pending_command_payload: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB,
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    pending_command_user_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="SET NULL"),
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    pending_command_created_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    stop_requested_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    stop_requested_by: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="SET NULL"),
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    stop_request_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        init=False,
-        nullable=True,
-        default=None,
-    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -342,7 +256,4 @@ class RDBAgentRuntime(RDBModel):
         IX_PROVIDER_OBSERVE_REQUESTED_AT,
         IX_RUNNER_STATE,
         IX_CURRENT_SESSION_ID,
-        IX_PENDING_COMMAND,
-        IX_STOP_REQUESTED_AT,
-        IX_RUN_STATE_RUNNING,
     )

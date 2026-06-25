@@ -29,7 +29,7 @@ from azents.engine.events.types import (
 from azents.rdb.deps import get_session_manager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.worker.deps import get_live_event_store, get_worker_broker
 from azents.worker.events.publisher import WorkerEventPublisher
@@ -46,8 +46,8 @@ class UserStopFinalizer:
 
     session_manager: Annotated[SessionManagerFactory, Depends(get_session_manager)]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     event_transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
@@ -243,7 +243,7 @@ class UserStopFinalizer:
         """Remove consumed durable stop intent."""
 
         async def clear(db_session: AsyncSession) -> None:
-            await self.agent_runtime_repository.clear_stop_request(
+            await self.agent_session_repository.clear_stop_request(
                 db_session,
                 session_id=session_id,
             )

@@ -134,8 +134,8 @@ class _EventTranscriptRepository:
         return object()
 
 
-class _AgentRuntimeRepository:
-    """AgentRuntimeRepository test double."""
+class _AgentSessionRepository:
+    """AgentSessionRepository test double."""
 
     def __init__(self) -> None:
         self.cleared_stop_request_session_ids: list[str] = []
@@ -268,7 +268,7 @@ def _finalizer(
 ) -> tuple[
     UserStopFinalizer,
     _AgentRunRepository,
-    _AgentRuntimeRepository,
+    _AgentSessionRepository,
     _EventTranscriptRepository,
     _LiveEventProjector,
     _Broker,
@@ -276,7 +276,7 @@ def _finalizer(
 ]:
     """Create subject under test and main dependency doubles."""
     run_repository = _AgentRunRepository(running_run)
-    runtime_repository = _AgentRuntimeRepository()
+    session_repository = _AgentSessionRepository()
     transcript_repository = _EventTranscriptRepository()
     projector = _LiveEventProjector()
     broker = _Broker()
@@ -284,7 +284,7 @@ def _finalizer(
     finalizer = UserStopFinalizer(
         session_manager=_SessionManager(),
         agent_run_repository=cast(Any, run_repository),
-        agent_runtime_repository=cast(Any, runtime_repository),
+        agent_session_repository=cast(Any, session_repository),
         event_transcript_repository=cast(Any, transcript_repository),
         live_event_store=cast(Any, _LiveEventStore(live_events)),
         live_event_projector=cast(Any, projector),
@@ -294,7 +294,7 @@ def _finalizer(
     return (
         finalizer,
         run_repository,
-        runtime_repository,
+        session_repository,
         transcript_repository,
         projector,
         broker,
@@ -309,7 +309,7 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     (
         finalizer,
         run_repository,
-        runtime_repository,
+        session_repository,
         transcripts,
         projector,
         broker,
@@ -350,7 +350,7 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
         ("11111111111111111111111111111111", AgentRunStatus.STOPPED)
     ]
     assert run_repository.terminal_sessions == []
-    assert runtime_repository.cleared_stop_request_session_ids == [session_id]
+    assert session_repository.cleared_stop_request_session_ids == [session_id]
     assert broker.cleared_session_ids == [session_id]
     assert len(event_publisher.dispatched) == 1
     assert event_publisher.dispatched[0][0] == session_id
@@ -364,7 +364,7 @@ async def test_record_interrupted_run_only_records_marker_and_stopped_event() ->
     (
         finalizer,
         run_repository,
-        runtime_repository,
+        session_repository,
         transcripts,
         projector,
         broker,
@@ -388,7 +388,7 @@ async def test_record_interrupted_run_only_records_marker_and_stopped_event() ->
         event_publisher.dispatched[0][1],
         RunStopped,
     )
-    assert runtime_repository.cleared_stop_request_session_ids == [session_id]
+    assert session_repository.cleared_stop_request_session_ids == [session_id]
     assert projector.flushed_session_ids == []
     assert projector.removed_events == []
     assert broker.cleared_session_ids == []

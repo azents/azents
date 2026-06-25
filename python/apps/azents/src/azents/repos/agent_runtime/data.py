@@ -6,7 +6,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from azents.core.enums import (
-    AgentRuntimeRunState,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
@@ -78,34 +77,8 @@ class AgentRuntime(BaseModel):
     current_session_id: str | None = Field(
         default=None, description="Current active AgentSession ID"
     )
-    run_state: AgentRuntimeRunState = Field(description="Engine run state")
-    run_heartbeat_at: datetime.datetime = Field(description="Run heartbeat time")
-    pending_command_id: str | None = Field(description="Pending command ID")
-    pending_command_name: str | None = Field(description="Pending command name")
-    pending_command_payload: dict[str, Any] | None = Field(
-        description="Pending command payload"
-    )
-    pending_command_user_id: str | None = Field(description="Pending command user ID")
-    pending_command_created_at: datetime.datetime | None = Field(
-        description="Pending command created timestamp"
-    )
-    stop_requested_at: datetime.datetime | None = Field(
-        description="Stop intent timestamp"
-    )
-    stop_requested_by: str | None = Field(description="Stop requesting user ID")
-    stop_request_id: str | None = Field(description="Stop request correlation ID")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
-
-
-class PendingRuntimeCommand(BaseModel):
-    """AgentRuntime pending command."""
-
-    id: str = Field(description="Pending command ID")
-    name: str = Field(description="Command name")
-    payload: dict[str, Any] = Field(description="Command payload")
-    user_id: str | None = Field(description="Command requesting user ID")
-    created_at: datetime.datetime = Field(description="Command created timestamp")
 
 
 class AgentRuntimeCreate(BaseModel):

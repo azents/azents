@@ -61,7 +61,7 @@ __all__ = [
     "AgentRuntimeLifecycleResponse",
     "AgentRuntimeRawStateResponse",
     "AgentRuntimeResponse",
-    "AgentRuntimeRunState",
+    "AgentSessionRunState",
     "AgentRuntimeSummaryResponse",
     "AgentSessionListResponse",
     "AgentSessionResponse",
@@ -301,7 +301,7 @@ from azentspublicclient.models.agent_runtime_failure_response import AgentRuntim
 from azentspublicclient.models.agent_runtime_lifecycle_response import AgentRuntimeLifecycleResponse as AgentRuntimeLifecycleResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse as AgentRuntimeRawStateResponse
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse as AgentRuntimeResponse
-from azentspublicclient.models.agent_runtime_run_state import AgentRuntimeRunState as AgentRuntimeRunState
+from azentspublicclient.models.agent_session_run_state import AgentSessionRunState as AgentSessionRunState
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse as AgentRuntimeSummaryResponse
 from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse as AgentSessionListResponse
 from azentspublicclient.models.agent_session_response import AgentSessionResponse as AgentSessionResponse

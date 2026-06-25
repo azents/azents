@@ -8,7 +8,7 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentRuntimeRunState, EventKind
+from azents.core.enums import EventKind
 from azents.engine.events.types import Event
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
@@ -278,10 +278,6 @@ class ChatSessionService:
                 session,
                 session_id=session_id,
             )
-            runtime = await self.agent_runtime_repository.get_by_current_session_id(
-                session,
-                session_id,
-            )
             goal_store = GoalStateStore(session_manager=self.session_manager)
             goal = GoalStateSnapshot.from_state(
                 await goal_store.load(agent_session.agent_id, session_id)
@@ -301,9 +297,7 @@ class ChatSessionService:
                         phase=run.phase,
                         status=run.status,
                     ),
-                    session_run_state=runtime.run_state
-                    if runtime is not None
-                    else AgentRuntimeRunState.IDLE,
+                    session_run_state=agent_session.run_state,
                     todo=todo,
                     goal=goal,
                 )
@@ -372,7 +366,7 @@ class ChatSessionService:
                     },
                 ),
             )
-            await self.agent_runtime_repository.mark_running_for_input_wakeup(
+            await self.agent_session_repository.mark_running_for_input_wakeup(
                 session, session_id
             )
             return event

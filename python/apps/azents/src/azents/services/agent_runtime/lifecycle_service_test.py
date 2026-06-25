@@ -3,7 +3,6 @@
 from datetime import UTC, datetime
 
 from azents.core.enums import (
-    AgentRuntimeRunState,
     RuntimeDesiredState,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
@@ -52,16 +51,6 @@ def _runtime(
         failure_message=failure_message,
         last_state_change_at=None,
         current_session_id=None,
-        run_state=AgentRuntimeRunState.IDLE,
-        run_heartbeat_at=now,
-        pending_command_id=None,
-        pending_command_name=None,
-        pending_command_payload=None,
-        pending_command_user_id=None,
-        pending_command_created_at=None,
-        stop_requested_at=None,
-        stop_requested_by=None,
-        stop_request_id=None,
         created_at=now,
         updated_at=now,
     )

@@ -64,8 +64,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-06-20
-spec_version: 59
+last_verified_at: 2026-06-25
+spec_version: 60
 ---
 
 # Conversation & Events
@@ -96,9 +96,10 @@ erDiagram
 a new active session. Web inputs route to the active session rather than creating
 interface-specific session types.
 
-`AgentRuntime` remains the long-lived agent runtime identity and sandbox lifecycle owner. Execution
-loop state is now stored in `agent_runs`; `AgentRuntime.run_state` remains a coarse worker/runtime
-activity signal for existing lifecycle flows.
+`AgentRuntime` remains the long-lived shared runtime identity and sandbox lifecycle owner. Session
+execution control state is stored on `AgentSession`; detailed run phase/tool state is stored in
+`agent_runs`. Runtime lifecycle state must not be used as the authority for a session run, pending
+command, stop intent, or run heartbeat.
 
 ## 2. AgentSession
 
@@ -113,8 +114,12 @@ activity signal for existing lifecycle flows.
 | `start_reason` | enum | `initial`, `manual_new`, `manual_reset`, `system_recovery`, `compact_rotate` |
 | `end_reason` | enum \| null | Archive reason |
 | `model_input_head_event_id` | `str(32)` \| null | Event model-input head after append-only compaction |
+| `run_state` / `run_heartbeat_at` | enum / timestamptz | Session execution recovery state |
+| `pending_command_*` | mixed | Single pending idle command for this session |
+| `stop_requested_*` | mixed | Durable stop intent for this session |
 
-Only one active session may exist per runtime.
+Only one active session may exist per runtime in the current product state, but execution ownership is
+session-scoped so the runtime can be shared by multiple sessions in a future multi-session model.
 
 ## 3. AgentRun
 
@@ -253,8 +258,8 @@ continuation, session runner flushing, and tests should go through this service 
 `InputBufferRepository` directly, except where repository tests or migrations explicitly exercise the
 storage layer. Service methods are responsible for these transaction boundaries:
 
-- enqueueing or moving buffers to a session marks the session runtime `running` in the same database
-  transaction as the buffer mutation;
+- enqueueing or moving buffers to a session marks `agent_sessions.run_state` as `running` in the same
+  database transaction as the buffer mutation;
 - flushing buffers claims the session-bound pending set, appends the corresponding durable events,
   and deletes the claimed buffers after successful promotion;
 - buffer idempotency is scoped to `(session_id, kind, idempotency_key)` when an idempotency key is
@@ -280,11 +285,11 @@ Web chat message/edit/command writes use REST commit endpoints instead of WebSoc
 requests require `client_request_id`; accepted writes are recorded in `chat_write_requests` so
 retries with the same key return the same accepted target instead of creating duplicate side effects.
 Message writes commit a `user_message` input buffer before returning success, mark the session
-runtime running through `InputBufferService`, then send a worker wake-up signal. Edit writes rewrite
-durable history state, clear pending input buffers, commit an `edited_user_message` input buffer,
-mark the session running through `InputBufferService`, and send a wake-up. Command writes do not
-enter the input buffer; they store a single pending command on `agent_runtimes`, mark the session
-running, and send a wake-up. Signal delivery is not the persistence source of truth. REST write
+running through `InputBufferService`, then send a worker wake-up signal. Edit writes rewrite durable
+history state, clear pending input buffers, commit an `edited_user_message` input buffer, mark the
+session running through `InputBufferService`, and send a wake-up. Command writes do not enter the
+input buffer; they store a single pending command on `agent_sessions`, mark the session running, and
+send a wake-up. Signal delivery is not the persistence source of truth. REST write
 responses include `session_id`, `client_request_id`, an accepted target, an authoritative live
 snapshot, and `history_reload_required` for writes such as edit/command that require durable history
 reload.
@@ -293,7 +298,7 @@ WebSocket chat connections are existing-session live subscription channels. They
 subscription/history/live event actions and accept only the `subscription_health_check` control
 message for subscription reconcile. Chat input, edit, command, and stop payloads are not accepted on
 WebSocket. Stop is a REST control boundary: `POST /chat/v1/sessions/{session_id}/stop`.
-Stop records a durable `agent_runtimes.stop_requested_at` intent and sends a best-effort broker stop
+Stop records a durable `agent_sessions.stop_requested_at` intent and sends a best-effort broker stop
 signal so an active runner can cancel immediately. Runner polling of the DB intent covers broker
 signal loss.
 `/chat/v1/sessions/new` is not a WebSocket write or subscription route; the first message creates the
@@ -336,8 +341,8 @@ preserved raw tail. Manual compaction and fallback compaction do not preserve a 
 - Web chat stop has a single REST control boundary; WebSocket is not a fallback stop/control path.
 - `client_request_id` retry for chat writes must converge to the same accepted target without duplicate side effects.
 - Input buffers are session-bound and must not store or require `agent_runtime_id`.
-- Any service path that enqueues input buffers must mark the session runtime `running` in the same
-  transaction.
+- Any service path that enqueues input buffers must mark `agent_sessions.run_state` as `running` in
+  the same transaction.
 
 ## 10. Verification
 
@@ -352,6 +357,9 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-06-25** — v60. Moved coarse run state, run heartbeat, pending command, and stop intent
+  ownership from `AgentRuntime` to `AgentSession`; `AgentRuntime` remains shared sandbox lifecycle
+  state.
 - **2026-06-20** — v59. Documented session-bound input buffers, removed runtime-bound buffer
   ownership from the spec, and defined the `InputBufferService` transaction boundary for running-state
   transitions and goal continuation promotion.

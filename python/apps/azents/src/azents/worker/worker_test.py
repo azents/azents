@@ -49,8 +49,7 @@ from azents.engine.run.types import (
     PollMessages,
 )
 from azents.rdb.session import SessionManager
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import PendingRuntimeCommand
+from azents.repos.agent_session.data import PendingSessionCommand
 from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
@@ -259,8 +258,8 @@ class _LiveEventStore:
         )
 
 
-class _AgentRuntimeRepository:
-    """AgentRuntimeRepository test double."""
+class _AgentSessionRepository:
+    """AgentSessionRepository test double."""
 
     def __init__(self, host: "_Host") -> None:
         self.host = host
@@ -270,13 +269,13 @@ class _AgentRuntimeRepository:
         self,
         session: AsyncSession,
         session_id: str,
-    ) -> PendingRuntimeCommand | None:
+    ) -> PendingSessionCommand | None:
         """Return pending command specified by test."""
         del session
         self.queried_session_ids.append(session_id)
         if not self.host.pending_command_result:
             return None
-        return PendingRuntimeCommand(
+        return PendingSessionCommand(
             id="command-001",
             name="compact",
             payload={},
@@ -316,14 +315,14 @@ class _CommandExecutor:
 
     def __init__(self, host: "_Host") -> None:
         self.host = host
-        self.commands: list[PendingRuntimeCommand] = []
+        self.commands: list[PendingSessionCommand] = []
 
     async def execute(
         self,
         *,
         agent_id: str,
         session_id: str,
-        command: PendingRuntimeCommand,
+        command: PendingSessionCommand,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> RunExecutionResult:
         """Record delivered command and raise test-specified exception."""
@@ -565,10 +564,7 @@ def _make_session_runner(host: _Host) -> SessionRunner:
         ),
         session_lifecycle=cast(SessionLifecycleService, host),
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
-        agent_runtime_repository=cast(
-            AgentRuntimeRepository,
-            _AgentRuntimeRepository(host),
-        ),
+        agent_session_repository=_AgentSessionRepository(host),
         input_buffer_service=cast(
             InputBufferService,
             _PendingInputBufferService(host),

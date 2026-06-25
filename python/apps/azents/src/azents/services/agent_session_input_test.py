@@ -7,8 +7,8 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentRuntimeRunState,
     AgentSessionEndReason,
+    AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
     InputBufferKind,
@@ -216,7 +216,6 @@ def _input_buffer_service(
     return InputBufferService(
         session_manager=rdb_session_manager,
         input_buffer_repository=InputBufferRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
@@ -478,11 +477,11 @@ class TestAgentSessionInputService:
             )
         assert old_buffers == []
 
-    async def test_create_buffered_agent_input_marks_runtime_running(
+    async def test_create_buffered_agent_input_marks_session_running(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """REST input storage marks Runtime running to cover broker loss."""
+        """REST input storage marks Session running to cover broker loss."""
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(session, "buffered-chat-running")
             user_id = await _create_user(session, "buffered-running@example.com")
@@ -518,10 +517,13 @@ class TestAgentSessionInputService:
         )
 
         async with rdb_session_manager() as session:
-            updated = await AgentRuntimeRepository().get_by_id(session, runtime.id)
+            updated = await AgentSessionRepository().get_by_id(
+                session,
+                agent_session.id,
+            )
 
         assert updated is not None
-        assert updated.run_state == AgentRuntimeRunState.RUNNING
+        assert updated.run_state == AgentSessionRunState.RUNNING
         assert updated.run_heartbeat_at is not None
 
     async def test_create_buffered_agent_input_dedupes_client_request_id(
