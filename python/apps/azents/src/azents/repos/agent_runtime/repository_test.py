@@ -93,7 +93,6 @@ class TestAgentRuntimeRepository:
         assert first.id == second.id
         assert first.agent_id == agent_id
         assert first.workspace_id == workspace_id
-        assert first.current_session_id is None
         assert first.desired_state == RuntimeDesiredState.STOPPED
         assert first.desired_generation == 0
         assert first.last_lifecycle_dispatch_generation == 0

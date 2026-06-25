@@ -121,7 +121,6 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_download_agent_workspace_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_agent_workspace_file) | **GET** /chat/v1/agents/{agent_id}/workspace/download | Download Agent Workspace File
 *ChatV1Api* | [**chat_v1_download_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 *ChatV1Api* | [**chat_v1_edit_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
-*ChatV1Api* | [**chat_v1_get_active_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_active_agent_session) | **GET** /chat/v1/agents/{agent_id}/active-session | Get Active Agent Session
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/context | Get Agent Session Context
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
 *ChatV1Api* | [**chat_v1_issue_ws_ticket**](azentspublicclient/docs/ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket

@@ -65,10 +65,27 @@ class AgentSessionRepository:
         session: AsyncSession,
         runtime_id: str,
     ) -> AgentSession | None:
-        """Fetch active AgentSession of AgentRuntime."""
+        """Fetch active AgentSession for transitional runtime-scoped uniqueness."""
         result = await session.execute(
             sa.select(RDBAgentSession).where(
                 RDBAgentSession.agent_runtime_id == runtime_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
+    async def get_active_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> AgentSession | None:
+        """Fetch active AgentSession of Agent without runtime selection state."""
+        result = await session.execute(
+            sa.select(RDBAgentSession).where(
+                RDBAgentSession.agent_id == agent_id,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
         )
@@ -158,25 +175,15 @@ class AgentSessionRepository:
     ) -> AgentSession:
         """Fetch or create active AgentSession based on Runtime row."""
 
-        if runtime.current_session_id is not None:
-            current = await self.get_by_id(session, runtime.current_session_id)
-            if current is not None and current.status == AgentSessionStatus.ACTIVE:
-                return current
-
         active = await self.get_active_by_runtime_id(session, runtime.id)
         if active is not None:
-            runtime.current_session_id = active.id
-            await session.flush()
             return active
 
-        created = await self._create_active_if_absent(
+        return await self._create_active_if_absent(
             session,
             runtime,
             start_reason=AgentSessionStartReason.INITIAL,
         )
-        runtime.current_session_id = created.id
-        await session.flush()
-        return created
 
     async def _create_active_if_absent(
         self,
@@ -555,8 +562,6 @@ class AgentSessionRepository:
                 start_reason=start_reason,
             ),
         )
-        runtime.current_session_id = created.id
-        await session.flush()
         return AgentSessionRotation(previous=current, current=created)
 
     def _build(self, rdb: RDBAgentSession) -> AgentSession:

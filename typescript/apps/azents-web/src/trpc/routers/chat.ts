@@ -15,7 +15,6 @@ import {
   chatV1DeleteAgentProject,
   chatV1DeleteInputBuffer,
   chatV1EditMessage,
-  chatV1GetActiveAgentSession,
   chatV1GetAgentSessionContext,
   chatV1GetAgentWorkspace,
   chatV1IssueWsTicket,
@@ -37,28 +36,6 @@ import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
 export const chatRouter = router({
-  /**
-   * Agent of active session fetch. if absent backend createdoes..
-   */
-  getActiveAgentSession: publicProcedure
-    .input(z.object({ agentId: z.string().min(1) }))
-    .query(async ({ ctx, input }) => {
-      try {
-        const { data } = await chatV1GetActiveAgentSession({
-          client: ctx.apiClient,
-          path: { agent_id: input.agentId },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-        });
-      }
-    }),
-
   listAgentProjects: publicProcedure
     .input(z.object({ agentId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {

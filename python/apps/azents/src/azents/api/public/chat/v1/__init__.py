@@ -1073,45 +1073,6 @@ async def get_agent_session_context(
             assert_never(result)
 
 
-@router.get("/agents/{agent_id}/active-session")
-async def get_active_agent_session(
-    agent_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    chat_service: Annotated[ChatSessionService, Depends()],
-) -> AgentSessionResponse:
-    """Get an Agent's active AgentSession, creating one if absent."""
-    result = await chat_service.get_active_session(
-        agent_id=agent_id,
-        user_id=current_user.user_id,
-    )
-    match result:
-        case Success(session):
-            return AgentSessionResponse(
-                id=session.id,
-                agent_id=session.agent_id,
-                created_at=session.created_at,
-                updated_at=session.updated_at,
-            )
-        case Failure(error):
-            match error:
-                case AgentNotFound():
-                    raise HTTPException(status_code=404, detail="Agent not found.")
-                case NotWorkspaceMember():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Workspace membership required.",
-                    )
-                case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
-
-
 @router.get("/commands")
 async def list_slash_commands() -> SlashCommandListResponse:
     """Return the list of available slash commands."""

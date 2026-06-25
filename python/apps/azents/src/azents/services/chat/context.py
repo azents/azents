@@ -29,7 +29,6 @@ from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -183,9 +182,6 @@ class SessionContextService:
     """Agent active session context inspector service."""
 
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
-    ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
@@ -222,18 +218,9 @@ class SessionContextService:
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
 
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
+            active_session = await self.agent_session_repository.get_active_by_agent_id(
                 session,
                 agent_id,
-            )
-            if runtime is None:
-                return Success(_empty_context(agent_id))
-
-            active_session = (
-                await self.agent_session_repository.get_active_by_runtime_id(
-                    session,
-                    runtime.id,
-                )
             )
             if active_session is None:
                 return Success(_empty_context(agent_id))

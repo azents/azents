@@ -44,14 +44,14 @@ class SessionRunnerWaiter:
         *,
         inbox: SessionRunnerInbox,
         runner_shutdown: asyncio.Event,
-        current_session_id: str | None,
+        running_session_id: str | None,
         idle_started_at: float,
     ) -> RunnerWaitResult:
         """Wait for next runner action."""
         get_task = asyncio.ensure_future(inbox.get())
         shutdown_task = asyncio.ensure_future(runner_shutdown.wait())
         wait_timeout = self._wait_timeout(
-            current_session_id=current_session_id,
+            running_session_id=running_session_id,
             idle_started_at=idle_started_at,
         )
         done, pending = await asyncio.wait(
@@ -67,7 +67,7 @@ class SessionRunnerWaiter:
 
         if not done:
             if self._should_heartbeat(
-                current_session_id=current_session_id,
+                running_session_id=running_session_id,
                 idle_started_at=idle_started_at,
             ):
                 return HeartbeatResult()
@@ -81,11 +81,11 @@ class SessionRunnerWaiter:
     def _wait_timeout(
         self,
         *,
-        current_session_id: str | None,
+        running_session_id: str | None,
         idle_started_at: float,
     ) -> float:
         """Return wait timeout matching current idle state."""
-        if current_session_id is None:
+        if running_session_id is None:
             return _IDLE_TIMEOUT
         now = asyncio.get_running_loop().time()
         idle_remaining = _IDLE_TIMEOUT - (now - idle_started_at)
@@ -94,10 +94,10 @@ class SessionRunnerWaiter:
     def _should_heartbeat(
         self,
         *,
-        current_session_id: str | None,
+        running_session_id: str | None,
         idle_started_at: float,
     ) -> bool:
         """Return whether only owner heartbeat should refresh before idle timeout."""
-        if current_session_id is None:
+        if running_session_id is None:
             return False
         return asyncio.get_running_loop().time() - idle_started_at < _IDLE_TIMEOUT

@@ -15,7 +15,6 @@ Method | HTTP request | Description
 [**chat_v1_download_agent_workspace_file**](ChatV1Api.md#chat_v1_download_agent_workspace_file) | **GET** /chat/v1/agents/{agent_id}/workspace/download | Download Agent Workspace File
 [**chat_v1_download_exchange_file**](ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 [**chat_v1_edit_message**](ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
-[**chat_v1_get_active_agent_session**](ChatV1Api.md#chat_v1_get_active_agent_session) | **GET** /chat/v1/agents/{agent_id}/active-session | Get Active Agent Session
 [**chat_v1_get_agent_session_context**](ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/context | Get Agent Session Context
 [**chat_v1_get_agent_workspace**](ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
 [**chat_v1_issue_ws_ticket**](ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
@@ -913,8 +912,6 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **chat_v1_get_active_agent_session**
-> AgentSessionResponse chat_v1_get_active_agent_session(agent_id)
 
 Get Active Agent Session
 
@@ -926,7 +923,6 @@ Get an Agent's active AgentSession, creating one if absent.
 
 ```python
 import azentspublicclient
-from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.rest import ApiException
 from pprint import pprint
 
@@ -954,11 +950,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
     try:
         # Get Active Agent Session
-        api_response = api_instance.chat_v1_get_active_agent_session(agent_id)
-        print("The response of ChatV1Api->chat_v1_get_active_agent_session:\n")
         pprint(api_response)
     except Exception as e:
-        print("Exception when calling ChatV1Api->chat_v1_get_active_agent_session: %s\n" % e)
 ```
 
 

@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-06-18 | 35 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-06-25 | 61 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-06-25 | 62 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-06-23 | 6 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-05-10 | 1 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
@@ -41,7 +41,7 @@ _8 documents_
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-23 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-20 | 1 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-06-25 | 7 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-06-16 | 4 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-06-16 | 5 |
 | [Subagent Delegation Flow](spec/flow/subagent-delegation.md) | @Hardtack | 2026-06-16 | 12 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |
 
@@ -154,4 +154,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 298
+- Total documents: 299

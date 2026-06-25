@@ -6,7 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
 last_verified_at: 2026-06-16
-spec_version: 4
+spec_version: 5
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -26,7 +26,7 @@ code_paths:
 
 ## Current Behavior
 
-Agent detail screen provides `Chat`, `Context`, and `Settings` top-level tabs. `Context` tab is an inspector that shows model context usage and event source based on active session of that Agent.
+Agent detail screen provides `Chat`, `Context`, and `Settings` top-level tabs. `Context` tab is an inspector that shows model context usage and event source based on the Agent's currently open session row.
 
 ## Backend API
 
@@ -40,18 +40,17 @@ Behavior:
 
 1. Verify Agent exists.
 2. Verify current user is Agent workspace member.
-3. Look up Agent runtime.
-4. Look up active session of runtime.
-5. If active session does not exist, return empty context payload.
-6. If active session exists, query recent events within `limit`.
-7. Use usage of most recent `turn_marker` event as latest usage.
-8. Build event stats, approximate prompt-token breakdown, and raw events from events.
+3. Look up the Agent's active session row without using AgentRuntime session-selection state.
+4. If an active session does not exist, return empty context payload.
+5. If an active session exists, query recent events within `limit`.
+6. Use usage of most recent `turn_marker` event as latest usage.
+7. Build event stats, approximate prompt-token breakdown, and raw events from events.
 
 `limit` minimum is 1, maximum is 500. Default is 300.
 
 ## Empty Session
 
-Context query is read-only. It does not create new session when Runtime or active session does not exist. In this case, response `session.id` is `null`, `usage` is `null`, and stats/breakdown/raw events are empty.
+Context query is read-only. It does not create a new session when an active session does not exist. In this case, response `session.id` is `null`, `usage` is `null`, and stats/breakdown/raw events are empty.
 
 ## Usage Summary
 

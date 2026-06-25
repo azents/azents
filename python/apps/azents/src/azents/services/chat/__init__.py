@@ -159,22 +159,6 @@ class ChatSessionService:
                 return Failure(SessionAccessDenied())
             return Success(agent_session)
 
-    async def get_active_session(
-        self,
-        *,
-        agent_id: str,
-        user_id: str,
-    ) -> Result[AgentSession, EnsureSessionError]:
-        """Ensure active AgentSession of Agent and check access permission.
-
-        :param agent_id: Agent ID
-        :param user_id: Requester user ID
-        :return: active AgentSession on success, error on failure
-        """
-        return await self.ensure_session(
-            EnsureSessionInput(session_id=None, agent_id=agent_id, user_id=user_id)
-        )
-
     async def list_sessions(
         self, user_id: str, workspace_id: str
     ) -> list[AgentSession]:

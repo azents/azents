@@ -2452,54 +2452,6 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/active-session": {
-      "get": {
-        "tags": [
-          "Chat v1"
-        ],
-        "summary": "Get Active Agent Session",
-        "description": "Get an Agent's active AgentSession, creating one if absent.",
-        "operationId": "chat_v1_get_active_agent_session",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentSessionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/chat/v1/commands": {
       "get": {
         "tags": [

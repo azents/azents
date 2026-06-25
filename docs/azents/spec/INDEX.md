@@ -13,7 +13,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-06-18 | 35 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-06-25 | 61 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-06-25 | 62 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-06-23 | 6 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-05-10 | 1 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
@@ -36,6 +36,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-23 | 3 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-20 | 1 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-06-25 | 7 |
-| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-06-16 | 4 |
+| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-06-16 | 5 |
 | [Subagent Delegation Flow](flow/subagent-delegation.md) | @Hardtack | 2026-06-16 | 12 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |

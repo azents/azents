@@ -50,7 +50,6 @@ def _runtime(
         failure_code=failure_code,
         failure_message=failure_message,
         last_state_change_at=None,
-        current_session_id=None,
         created_at=now,
         updated_at=now,
     )

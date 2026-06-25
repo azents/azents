@@ -54,7 +54,6 @@ api_routes:
   - /chat/v1/sessions/{session_id}/messages
   - /chat/v1/sessions/{session_id}/edit-message
   - /chat/v1/sessions/{session_id}/commands
-  - /chat/v1/agents/{agent_id}/active-session
   - /chat/v1/agents/{agent_id}/projects
   - /chat/v1/agents/{agent_id}/projects/register
   - /chat/v1/sessions/{session_id}/history
@@ -65,7 +64,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-25
-spec_version: 61
+spec_version: 62
 ---
 
 # Conversation & Events

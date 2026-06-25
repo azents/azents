@@ -3,11 +3,11 @@
 /**
  * Agent detail Chat tab UI.
  *
- * Renders one active session of Agent across full area, centered on Direct chat.
- * WebSocket/buffer is isolated by per-session remount (ChatSessionView key).
+ * Renders the Agent chat surface. The view may start without a session id; the
+ * first message creates a concrete AgentSession.
  */
 
-import { Box, Center, Loader, Text } from "@mantine/core";
+import { Box } from "@mantine/core";
 import { useEffect } from "react";
 import { ChatSessionView } from "@/features/chat/components/ChatSessionView";
 import styles from "./AgentChatTab.module.css";
@@ -18,11 +18,10 @@ export function AgentChatTab(
 ): React.ReactElement {
   const {
     agent,
-    activeSessionState,
     mountKey,
     mountInitialSessionId,
     onConnectionStatusChange,
-    onInnerSessionCreated,
+    onSessionCreated,
   } = props;
 
   // Lock outer document scroll on chat page.
@@ -48,28 +47,6 @@ export function AgentChatTab(
     };
   }, []);
 
-  switch (activeSessionState.type) {
-    case "LOADING": {
-      return (
-        <Center className={styles.chatArea} style={{ flex: 1, minHeight: 0 }}>
-          <Loader size="lg" />
-        </Center>
-      );
-    }
-
-    case "ERROR": {
-      return (
-        <Center className={styles.chatArea} style={{ flex: 1, minHeight: 0 }}>
-          <Text c="red">{activeSessionState.message}</Text>
-        </Center>
-      );
-    }
-
-    case "LOADED": {
-      break;
-    }
-  }
-
   return (
     <Box className={styles.chatArea} style={{ flex: 1, minHeight: 0 }}>
       <ChatSessionView
@@ -77,7 +54,7 @@ export function AgentChatTab(
         handle={props.handle}
         initialSessionId={mountInitialSessionId}
         agent={agent}
-        onSessionCreated={onInnerSessionCreated}
+        onSessionCreated={onSessionCreated}
         onConnectionStatusChange={onConnectionStatusChange}
       />
     </Box>
