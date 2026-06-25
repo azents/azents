@@ -102,7 +102,7 @@ class SessionRunner:
         self.terminated_event = asyncio.Event()
         self.started = False
         self.stop_controller = RunStopController()
-        self.current_session_id: str | None = None
+        self.running_session_id: str | None = None
         self.toolkit_scope = SessionToolkitScope()
         self.waiter = SessionRunnerWaiter()
         self.run_supervisor = RunTaskSupervisor(
@@ -296,7 +296,7 @@ class SessionRunner:
 
     async def _release_current_session(self) -> None:
         """Release current session ownership or hand it over to another worker."""
-        session_id = self.current_session_id
+        session_id = self.running_session_id
         if session_id is None:
             return
 
@@ -342,10 +342,10 @@ class SessionRunner:
                 raise
             except Exception as exc:
                 toolkit_cleanup_error = exc
-            if self.current_session_id is not None:
+            if self.running_session_id is not None:
                 logger.info(
                     "Session runner stopped, releasing lock",
-                    extra={"session_id": self.current_session_id},
+                    extra={"session_id": self.running_session_id},
                 )
                 await self._release_current_session()
             if toolkit_cleanup_error is not None:
@@ -355,26 +355,26 @@ class SessionRunner:
         wait_result = await self.waiter.wait_next(
             inbox=self.inbox,
             runner_shutdown=self.runner_shutdown,
-            current_session_id=self.current_session_id,
+            running_session_id=self.running_session_id,
             idle_started_at=idle_started_at,
         )
         match wait_result:
             case HeartbeatResult():
-                assert self.current_session_id is not None
+                assert self.running_session_id is not None
                 await self.session_lifecycle.renew_session_owner_heartbeat(
-                    self.current_session_id
+                    self.running_session_id
                 )
                 return True
             case IdleTimeoutResult():
                 logger.info(
                     "Session runner idle timeout",
-                    extra={"session_id": self.current_session_id},
+                    extra={"session_id": self.running_session_id},
                 )
                 return False
             case ShutdownResult():
                 return False
             case MessageResult(message):
-                self.current_session_id = message.session_id
+                self.running_session_id = message.session_id
                 self.stop_controller.clear_for_next_run()
                 self.handover_wake_up = None
                 loop = asyncio.get_running_loop()

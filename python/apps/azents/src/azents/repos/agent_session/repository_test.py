@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     AgentSessionEndReason,
+    AgentSessionPrimaryKind,
     AgentSessionStartReason,
     AgentSessionStatus,
     LLMProvider,
@@ -84,11 +85,7 @@ class TestAgentSessionRepository:
 
         assert first.id == second.id
         assert first.status == AgentSessionStatus.ACTIVE
-        updated_runtime = await AgentRuntimeRepository().get_by_id(
-            rdb_session, runtime.id
-        )
-        assert updated_runtime is not None
-        assert updated_runtime.current_session_id == first.id
+        assert first.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
 
     async def test_ensure_active_recreates_after_archive(
         self, rdb_session: AsyncSession
@@ -178,12 +175,8 @@ class TestAgentSessionRepository:
         assert archived.ended_at == now
         assert second.id != first.id
         assert second.status == AgentSessionStatus.ACTIVE
+        assert second.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
         assert second.start_reason == AgentSessionStartReason.MANUAL_RESET
-        updated_runtime = await AgentRuntimeRepository().get_by_id(
-            rdb_session, runtime.id
-        )
-        assert updated_runtime is not None
-        assert updated_runtime.current_session_id == second.id
 
     async def test_claim_lifecycle_start_sets_marker_once(
         self, rdb_session: AsyncSession

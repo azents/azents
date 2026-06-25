@@ -65,7 +65,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-25
-spec_version: 62
+spec_version: 63
 ---
 
 # Conversation & Events
@@ -92,7 +92,9 @@ erDiagram
 ```
 
 `AgentSession` is the conversation boundary. Direct session write routes target the requested session.
-Runtime current/active session lookup must not redirect direct session writes to another session.
+The default team conversation is the agent's active team primary session, represented by
+`agent_sessions.primary_kind = 'team_primary'`. Runtime current/active session lookup must not
+redirect direct session writes or default team session lookup to another session.
 
 `AgentRuntime` remains the long-lived shared runtime identity and sandbox lifecycle owner. Session
 execution control state is stored on `AgentSession`; detailed run phase/tool state is stored in
@@ -109,6 +111,7 @@ command, stop intent, or run heartbeat.
 | `workspace_id` / `agent_id` | FK | Workspace and agent boundary |
 | `agent_runtime_id` | FK `agent_runtimes` | Transitional denormalized runtime reference; not the session ownership edge |
 | `status` | enum | `active` or `archived` |
+| `primary_kind` | enum \| null | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind. |
 | `start_reason` | enum | `initial`, `manual_new`, `manual_reset`, `system_recovery`, `compact_rotate` |
 | `end_reason` | enum \| null | Archive reason |
 | `model_input_head_event_id` | `str(32)` \| null | Event model-input head after append-only compaction |
@@ -116,12 +119,12 @@ command, stop intent, or run heartbeat.
 | `pending_command_*` | mixed | Single pending idle command for this session |
 | `stop_requested_*` | mixed | Durable stop intent for this session |
 
-Only one active session may exist in the current product state, but direct session writes are already
-session-scoped. When a route contains `session_id`, input buffers, live projections, broker wake-up,
-and the REST response use that same session id. Runtime current/active session lookup is invalid for
-that direct write path. If any internal write helper produces a different session id from the REST
-boundary's resolved target, the write is invalid and must not enqueue a broker wake-up for that
-alternate session.
+Only one active team primary session may exist per agent in the current product state. Direct session
+writes are already session-scoped. When a route contains `session_id`, input buffers, live projections,
+broker wake-up, and the REST response use that same session id. Runtime current/active session lookup
+is invalid for that direct write path and for default team session selection. If any internal write
+helper produces a different session id from the REST boundary's resolved target, the write is invalid
+and must not enqueue a broker wake-up for that alternate session.
 
 ## 3. AgentRun
 
@@ -280,7 +283,8 @@ Wake-up delivery is a signal only. The persisted buffer plus the `running` state
 recovery source of truth if the signal is lost.
 
 Web chat message/edit/command writes use REST commit endpoints instead of WebSocket write payloads.
-`POST /chat/v1/sessions/new/messages` creates the session for the first message.
+`POST /chat/v1/sessions/new/messages` resolves or creates the agent's active team primary session
+and commits the first/default message there.
 `POST /chat/v1/sessions/{session_id}/messages` appends a user message input to an existing session.
 `POST /chat/v1/sessions/{session_id}/edit-message` and
 `POST /chat/v1/sessions/{session_id}/commands` are idle-only control boundaries. All REST write
@@ -291,8 +295,8 @@ matches the runtime/user idempotency scope but points at another session is reje
 returning the original session's accepted target. Message writes commit a `user_message` input buffer
 to the explicit path session before returning success, mark the same session running through
 `InputBufferService`, then send a worker wake-up signal for that session. The message path must not
-resolve `AgentRuntime.current_session_id` or any runtime active session to replace the requested
-`session_id`. Edit writes rewrite durable history state, clear pending input buffers, commit an
+resolve runtime current/active session state to replace the requested `session_id`. Edit writes
+rewrite durable history state, clear pending input buffers, commit an
 `edited_user_message` input buffer, mark the session running through `InputBufferService`, and send a
 wake-up for the explicit path session. Command writes do not enter the input buffer; they store a
 single pending command on `agent_sessions`, mark the explicit path session running, and send a wake-up
@@ -308,10 +312,9 @@ WebSocket. Stop is a REST control boundary: `POST /chat/v1/sessions/{session_id}
 Stop records a durable `agent_sessions.stop_requested_at` intent and sends a best-effort broker stop
 signal so an active runner can cancel immediately. Runner polling of the DB intent covers broker
 signal loss.
-`/chat/v1/sessions/new` is not a WebSocket write or subscription route; the first message creates the
-session through
-`POST /chat/v1/sessions/new/messages`, and the client connects to
-`/chat/v1/sessions/{session_id}` after receiving the REST response. Legacy message/edit/command/stop
+`/chat/v1/sessions/new` is not a WebSocket write or subscription route; the first/default message
+resolves or creates the team primary session through `POST /chat/v1/sessions/new/messages`, and the
+client connects to `/chat/v1/sessions/{session_id}` after receiving the REST response. Legacy message/edit/command/stop
 WebSocket compatibility paths are not part of the public contract and must not create input buffers,
 edits, commands, stop requests, or compatibility error responses.
 

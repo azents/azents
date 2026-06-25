@@ -74,38 +74,6 @@ class AgentRuntimeRepository:
             return None
         return self._build(rdb)
 
-    async def get_by_current_session_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> AgentRuntime | None:
-        """Fetch AgentRuntime by current active AgentSession ID."""
-        result = await session.execute(
-            sa.select(RDBAgentRuntime).where(
-                RDBAgentRuntime.current_session_id == agent_session_id
-            )
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        return self._build(rdb)
-
-    async def lock_by_current_session_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> AgentRuntime | None:
-        """Acquire AgentRuntime row lock by current active AgentSession ID."""
-        result = await session.execute(
-            sa.select(RDBAgentRuntime)
-            .where(RDBAgentRuntime.current_session_id == agent_session_id)
-            .with_for_update()
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        return self._build(rdb)
-
     async def ensure_for_agent(
         self,
         session: AsyncSession,
@@ -573,20 +541,6 @@ class AgentRuntimeRepository:
         await session.flush()
         return self._build(rdb)
 
-    async def set_current_session(
-        self,
-        session: AsyncSession,
-        runtime_id: str,
-        agent_session_id: str,
-    ) -> None:
-        """Set current_session_id of AgentRuntime."""
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime_id)
-            .values(current_session_id=agent_session_id)
-        )
-        await session.flush()
-
     async def find_lifecycle_dispatch_candidates(
         self,
         session: AsyncSession,
@@ -696,7 +650,6 @@ class AgentRuntimeRepository:
             failure_code=rdb.failure_code,
             failure_message=rdb.failure_message,
             last_state_change_at=rdb.last_state_change_at,
-            current_session_id=rdb.current_session_id,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )

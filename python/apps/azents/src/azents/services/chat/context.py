@@ -29,7 +29,6 @@ from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -183,9 +182,6 @@ class SessionContextService:
     """Agent active session context inspector service."""
 
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
-    ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
@@ -222,28 +218,21 @@ class SessionContextService:
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
 
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
-            )
-            if runtime is None:
-                return Success(_empty_context(agent_id))
-
-            active_session = (
-                await self.agent_session_repository.get_active_by_runtime_id(
+            primary_session = (
+                await self.agent_session_repository.get_team_primary_by_agent_id(
                     session,
-                    runtime.id,
+                    agent_id,
                 )
             )
-            if active_session is None:
+            if primary_session is None:
                 return Success(_empty_context(agent_id))
 
             events = await self.transcript_repository.list_recent_by_session_id(
                 session,
-                active_session.id,
+                primary_session.id,
                 limit=bounded_limit,
             )
-            return Success(_build_context(active_session, events))
+            return Success(_build_context(primary_session, events))
 
 
 def _empty_context(agent_id: str) -> SessionContext:

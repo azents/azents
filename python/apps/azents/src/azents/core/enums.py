@@ -182,6 +182,12 @@ class AgentSessionStatus(enum.StrEnum):
     ARCHIVED = "archived"
 
 
+class AgentSessionPrimaryKind(enum.StrEnum):
+    """AgentSession primary role."""
+
+    TEAM_PRIMARY = "team_primary"
+
+
 class AgentSessionStartReason(enum.StrEnum):
     """AgentSession start reason."""
 
