@@ -45,7 +45,7 @@ class TestModelParameters(unittest.TestCase):
                 reasoning_effort = 'low',
                 builtin_tools = [
                     azentspublicclient.models.builtin_tool_config.BuiltinToolConfig(
-                        name = '',
+                        name = '', 
                         config = { }, )
                     ]
             )

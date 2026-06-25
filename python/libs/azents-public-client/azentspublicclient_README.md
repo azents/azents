@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Agent Runtime
@@ -113,7 +113,6 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_approve_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_approve_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/project-registration-requests/{request_id}/approve | Approve Agent Project Registration Request
 *ChatV1Api* | [**chat_v1_create_command**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_command) | **POST** /chat/v1/sessions/{session_id}/commands | Create Command
 *ChatV1Api* | [**chat_v1_create_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_message) | **POST** /chat/v1/sessions/{session_id}/messages | Create Message
-*ChatV1Api* | [**chat_v1_create_session_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_session_message) | **POST** /chat/v1/sessions/new/messages | Create Session Message
 *ChatV1Api* | [**chat_v1_delete_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_project) | **DELETE** /chat/v1/agents/{agent_id}/projects/{project_id} | Delete Agent Project
 *ChatV1Api* | [**chat_v1_delete_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
 *ChatV1Api* | [**chat_v1_delete_input_buffer**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
@@ -121,9 +120,10 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_download_agent_workspace_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_agent_workspace_file) | **GET** /chat/v1/agents/{agent_id}/workspace/download | Download Agent Workspace File
 *ChatV1Api* | [**chat_v1_download_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 *ChatV1Api* | [**chat_v1_edit_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
-*ChatV1Api* | [**chat_v1_get_active_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_active_agent_session) | **GET** /chat/v1/agents/{agent_id}/active-session | Get Active Agent Session
+*ChatV1Api* | [**chat_v1_get_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id} | Get Agent Session
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/context | Get Agent Session Context
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
+*ChatV1Api* | [**chat_v1_get_team_primary_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_team_primary_agent_session) | **GET** /chat/v1/agents/{agent_id}/team-primary-session | Get Team Primary Agent Session
 *ChatV1Api* | [**chat_v1_issue_ws_ticket**](azentspublicclient/docs/ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
 *ChatV1Api* | [**chat_v1_list_agent_project_registration_requests**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_project_registration_requests) | **GET** /chat/v1/agents/{agent_id}/project-registration-requests | List Agent Project Registration Requests
 *ChatV1Api* | [**chat_v1_list_agent_projects**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/projects | List Agent Projects
@@ -172,14 +172,14 @@ Class | Method | HTTP request | Description
 *SecurityV1Api* | [**security_v1_remove_password**](azentspublicclient/docs/SecurityV1Api.md#security_v1_remove_password) | **DELETE** /security/v1/password | Remove Password
 *SecurityV1Api* | [**security_v1_send_elevation_code**](azentspublicclient/docs/SecurityV1Api.md#security_v1_send_elevation_code) | **POST** /security/v1/elevate/send-code | Send Elevation Code
 *SecurityV1Api* | [**security_v1_set_password**](azentspublicclient/docs/SecurityV1Api.md#security_v1_set_password) | **POST** /security/v1/password | Set Password
-*ToolkitOAuthV1Api* | [**toolkit_oauth_v1_authorize**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_authorize) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/authorize | Authorize
+*ToolkitOAuthV1Api* | [**toolkit_oauth_v1_connect_oauth**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_connect_oauth) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/connect | Connect Oauth
+*ToolkitOAuthV1Api* | [**toolkit_oauth_v1_disconnect_oauth_connection**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_disconnect_oauth_connection) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/connection | Disconnect Oauth Connection
+*ToolkitOAuthV1Api* | [**toolkit_oauth_v1_exchange_oauth_connection**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_exchange_oauth_connection) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/exchange | Exchange Oauth Connection
 *ToolkitOAuthV1Api* | [**toolkit_oauth_v1_get_github_platform_install_url**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_get_github_platform_install_url) | **GET** /toolkit/v1/workspaces/{handle}/github/platform-install-url | Get Github Platform Install Url
 *ToolkitOAuthV1Api* | [**toolkit_oauth_v1_get_github_platform_installations**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_get_github_platform_installations) | **POST** /toolkit/v1/workspaces/{handle}/github/platform-installations | Get Github Platform Installations
 *ToolkitOAuthV1Api* | [**toolkit_oauth_v1_get_github_platform_oauth_url**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_get_github_platform_oauth_url) | **GET** /toolkit/v1/workspaces/{handle}/github/platform-oauth-url | Get Github Platform Oauth Url
-*ToolkitOAuthV1Api* | [**toolkit_oauth_v1_oauth_exchange**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_oauth_exchange) | **POST** /toolkit/v1/toolkit-oauth/exchange | Oauth Exchange
 *ToolkitOAuthV1Api* | [**toolkit_oauth_v1_test_connection_saved**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_test_connection_saved) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/test-connection | Test Connection Saved
 *ToolkitOAuthV1Api* | [**toolkit_oauth_v1_test_connection_unsaved**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_test_connection_unsaved) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/test-connection | Test Connection Unsaved
-*ToolkitOAuthV1Api* | [**toolkit_oauth_v1_user_authorize**](azentspublicclient/docs/ToolkitOAuthV1Api.md#toolkit_oauth_v1_user_authorize) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/user-authorize | User Authorize
 *ToolkitV1Api* | [**toolkit_v1_attach_toolkit_to_agent**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_attach_toolkit_to_agent) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits | Attach Toolkit To Agent
 *ToolkitV1Api* | [**toolkit_v1_create_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_create_toolkit_config) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs | Create Toolkit Config
 *ToolkitV1Api* | [**toolkit_v1_create_toolkit_scope**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_create_toolkit_scope) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes | Create Toolkit Scope
@@ -226,10 +226,10 @@ Class | Method | HTTP request | Description
  - [AgentRuntimeLifecycleResponse](azentspublicclient/docs/AgentRuntimeLifecycleResponse.md)
  - [AgentRuntimeRawStateResponse](azentspublicclient/docs/AgentRuntimeRawStateResponse.md)
  - [AgentRuntimeResponse](azentspublicclient/docs/AgentRuntimeResponse.md)
- - [AgentSessionRunState](azentspublicclient/docs/AgentSessionRunState.md)
  - [AgentRuntimeSummaryResponse](azentspublicclient/docs/AgentRuntimeSummaryResponse.md)
  - [AgentSessionListResponse](azentspublicclient/docs/AgentSessionListResponse.md)
  - [AgentSessionResponse](azentspublicclient/docs/AgentSessionResponse.md)
+ - [AgentSessionRunState](azentspublicclient/docs/AgentSessionRunState.md)
  - [AgentSubagentCreateRequest](azentspublicclient/docs/AgentSubagentCreateRequest.md)
  - [AgentSubagentListResponse](azentspublicclient/docs/AgentSubagentListResponse.md)
  - [AgentSubagentResponse](azentspublicclient/docs/AgentSubagentResponse.md)
@@ -314,6 +314,8 @@ Class | Method | HTTP request | Description
  - [LLMProviderIntegrationUpdateRequest](azentspublicclient/docs/LLMProviderIntegrationUpdateRequest.md)
  - [LiveEventListResponse](azentspublicclient/docs/LiveEventListResponse.md)
  - [LoginMethodsResponse](azentspublicclient/docs/LoginMethodsResponse.md)
+ - [MCPOAuthConnectionStatus](azentspublicclient/docs/MCPOAuthConnectionStatus.md)
+ - [MCPOAuthConnectionSummaryResponse](azentspublicclient/docs/MCPOAuthConnectionSummaryResponse.md)
  - [MeResponse](azentspublicclient/docs/MeResponse.md)
  - [ModelBuiltInToolCapabilities](azentspublicclient/docs/ModelBuiltInToolCapabilities.md)
  - [ModelCapabilities](azentspublicclient/docs/ModelCapabilities.md)
@@ -331,7 +333,6 @@ Class | Method | HTTP request | Description
  - [ModelReasoningEffort](azentspublicclient/docs/ModelReasoningEffort.md)
  - [ModelToolCallingCapabilities](azentspublicclient/docs/ModelToolCallingCapabilities.md)
  - [MyJoinRequestResponse](azentspublicclient/docs/MyJoinRequestResponse.md)
- - [OAuthAuthorizeRequest](azentspublicclient/docs/OAuthAuthorizeRequest.md)
  - [OAuthAuthorizeResponse](azentspublicclient/docs/OAuthAuthorizeResponse.md)
  - [OAuthExchangeRequest](azentspublicclient/docs/OAuthExchangeRequest.md)
  - [PATStatusResponse](azentspublicclient/docs/PATStatusResponse.md)
@@ -430,3 +431,7 @@ Authentication schemes defined for the API:
 
 
 ## Author
+
+
+
+

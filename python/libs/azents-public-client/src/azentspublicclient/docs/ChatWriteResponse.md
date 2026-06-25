@@ -6,11 +6,11 @@ REST chat write response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**session_id** | **str** | AgentSession ID |
-**client_request_id** | **str** | Client-generated idempotency key |
-**accepted** | [**ChatWriteAcceptedResponse**](ChatWriteAcceptedResponse.md) | Accepted write target |
-**snapshot** | [**ChatWriteSnapshotResponse**](ChatWriteSnapshotResponse.md) | Authoritative live snapshot after commit |
-**history_reload_required** | **bool** | Whether durable history reload is needed |
+**session_id** | **str** | AgentSession ID | 
+**client_request_id** | **str** | Client-generated idempotency key | 
+**accepted** | [**ChatWriteAcceptedResponse**](ChatWriteAcceptedResponse.md) | Accepted write target | 
+**snapshot** | [**ChatWriteSnapshotResponse**](ChatWriteSnapshotResponse.md) | Authoritative live snapshot after commit | 
+**history_reload_required** | **bool** | Whether durable history reload is needed | 
 
 ## Example
 
@@ -30,3 +30,5 @@ chat_write_response_dict = chat_write_response_instance.to_dict()
 chat_write_response_from_dict = ChatWriteResponse.from_dict(chat_write_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

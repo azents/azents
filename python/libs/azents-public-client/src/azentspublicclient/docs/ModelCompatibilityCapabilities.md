@@ -6,9 +6,9 @@ Provider compatibility capability.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**provider_family** | **str** |  | [optional]
-**responses_api** | **bool** |  | [optional]
-**unsupported_media_policy** | [**UnsupportedMediaPolicy**](UnsupportedMediaPolicy.md) |  | [optional]
+**provider_family** | **str** |  | [optional] 
+**responses_api** | **bool** |  | [optional] 
+**unsupported_media_policy** | [**UnsupportedMediaPolicy**](UnsupportedMediaPolicy.md) |  | [optional] 
 
 ## Example
 
@@ -28,3 +28,5 @@ model_compatibility_capabilities_dict = model_compatibility_capabilities_instanc
 model_compatibility_capabilities_from_dict = ModelCompatibilityCapabilities.from_dict(model_compatibility_capabilities_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

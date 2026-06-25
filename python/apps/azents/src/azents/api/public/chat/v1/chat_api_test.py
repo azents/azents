@@ -15,6 +15,8 @@ from azents.api.public.chat.v1 import (
     _write_edit_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     delete_input_buffer,
+    get_agent_session,
+    get_team_primary_agent_session,
     list_history_events,
     list_live_events,
     mount,
@@ -62,6 +64,7 @@ from azents.services.chat.data import (
     EnsureSessionInput,
     PaginatedEvents,
     SessionAccessDenied,
+    SessionNotFound,
     UpdateGoalResult,
     UpdateGoalStatusInput,
 )
@@ -524,6 +527,85 @@ class _EventService:
         )
 
 
+class _AgentSessionRouteChatService:
+    """Agent session route service double for tests."""
+
+    def __init__(self) -> None:
+        self.agent_id: str | None = None
+        self.session_id: str | None = None
+        self.result: Success[AgentSession] | Failure[SessionNotFound] = Success(
+            AgentSession(
+                id="1123456789abcdef0123456789abcdef",
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                status=AgentSessionStatus.ACTIVE,
+                start_reason=AgentSessionStartReason.INITIAL,
+                started_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+                created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+                updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+            )
+        )
+
+    async def get_team_primary_session(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Success[AgentSession] | Failure[SessionNotFound]:
+        """Return team primary session lookup result."""
+        del user_id
+        self.agent_id = agent_id
+        return self.result
+
+    async def get_agent_session(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Success[AgentSession] | Failure[SessionNotFound]:
+        """Return agent/session lookup result."""
+        del user_id
+        self.agent_id = agent_id
+        self.session_id = session_id
+        return self.result
+
+
+class TestAgentSessionRoutes:
+    """Agent session route behavior."""
+
+    async def test_get_team_primary_agent_session_returns_session(self) -> None:
+        """Team primary session route exposes the session response."""
+        chat_service = _AgentSessionRouteChatService()
+
+        response = await get_team_primary_agent_session(
+            agent_id="agent-1",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+        )
+
+        assert response.id == "1123456789abcdef0123456789abcdef"
+        assert response.agent_id == "agent-1"
+        assert chat_service.agent_id == "agent-1"
+
+    async def test_get_agent_session_mismatch_is_not_found(self) -> None:
+        """Agent/session mismatch and access denial are exposed as 404."""
+        chat_service = _AgentSessionRouteChatService()
+        chat_service.result = Failure(SessionNotFound())
+
+        try:
+            await get_agent_session(
+                agent_id="agent-1",
+                session_id="2223456789abcdef0123456789abcdef",
+                current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            )
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 404
+        else:
+            raise AssertionError("Expected HTTPException")
+
+
 class TestUpdateSessionGoalStatus:
     """Tests for PATCH /chat/v1/sessions/{session_id}/goal/status."""
 
@@ -600,7 +682,7 @@ class TestStopSessionRun:
                 broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             )
         except Exception as exc:
-            assert getattr(exc, "status_code", None) == 403
+            assert getattr(exc, "status_code", None) == 404
         else:
             raise AssertionError("Expected HTTPException")
 

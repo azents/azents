@@ -6,7 +6,7 @@ Partial history live projection response to compose into Chat timeline.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Partial history event projection list |
+**items** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Partial history event projection list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ partial_history_response_dict = partial_history_response_instance.to_dict()
 partial_history_response_from_dict = PartialHistoryResponse.from_dict(partial_history_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,8 +6,8 @@ Agent Workspace ready access response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**manifest** | [**AgentWorkspaceManifestResponse**](AgentWorkspaceManifestResponse.md) | Agent Workspace manifest |
+**type** | **str** | Response type | 
+**manifest** | [**AgentWorkspaceManifestResponse**](AgentWorkspaceManifestResponse.md) | Agent Workspace manifest | 
 
 ## Example
 
@@ -27,3 +27,5 @@ agent_workspace_ready_access_response_dict = agent_workspace_ready_access_respon
 agent_workspace_ready_access_response_from_dict = AgentWorkspaceReadyAccessResponse.from_dict(agent_workspace_ready_access_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

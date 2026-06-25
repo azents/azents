@@ -6,8 +6,8 @@ GitHub Platform App installation list request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**code** | **str** | GitHub OAuth authorization code |
-**state** | **str** | OAuth state parameter for CSRF validation |
+**code** | **str** | GitHub OAuth authorization code | 
+**state** | **str** | OAuth state parameter for CSRF validation | 
 
 ## Example
 
@@ -27,3 +27,5 @@ git_hub_platform_installations_request_dict = git_hub_platform_installations_req
 git_hub_platform_installations_request_from_dict = GitHubPlatformInstallationsRequest.from_dict(git_hub_platform_installations_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

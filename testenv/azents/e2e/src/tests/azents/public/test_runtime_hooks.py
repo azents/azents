@@ -222,9 +222,21 @@ def _run_message(
     """REST write boundary t t turn t runt session_id t returnt."""
     del public_api_client
     if session_id is None:
-        path = "/chat/v1/sessions/new/messages"
+        session_response = requests.get(
+            f"{public_url}/chat/v1/agents/{agent_id}/team-primary-session",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        session_response.raise_for_status()
+        session_payload = session_response.json()
+        session_id_value = session_payload.get("id")
+        if not isinstance(session_id_value, str):
+            raise AssertionError(
+                f"Team primary response did not include id: {session_payload!r}"
+            )
     else:
-        path = f"/chat/v1/sessions/{session_id}/messages"
+        session_id_value = session_id
+    path = f"/chat/v1/sessions/{session_id_value}/messages"
     response = requests.post(
         f"{public_url}{path}",
         headers={

@@ -6,8 +6,8 @@ Workspace read/list failure response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**detail** | **str** | Status description |
+**type** | **str** | Response type | 
+**detail** | **str** | Status description | 
 
 ## Example
 
@@ -27,3 +27,5 @@ agent_workspace_read_failed_access_response_dict = agent_workspace_read_failed_a
 agent_workspace_read_failed_access_response_from_dict = AgentWorkspaceReadFailedAccessResponse.from_dict(agent_workspace_read_failed_access_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

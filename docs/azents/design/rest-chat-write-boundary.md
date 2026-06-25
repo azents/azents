@@ -282,7 +282,7 @@ Response:
 
 ### New session message write
 
-`POST /chat/v1/sessions/new/messages`
+`GET /chat/v1/agents/{agent_id}/team-primary-session` followed by `POST /chat/v1/sessions/{session_id}/messages`
 
 Request is same as existing session message write, but has no session id path parameter. Server creates session and includes `session_id` in response.
 
@@ -396,7 +396,7 @@ Remove message/edit/command send responsibility from `useChatWebSocket`. WebSock
 
 ### New session UX
 
-- In new chat without session id, first send calls `/sessions/new/messages` REST endpoint.
+- In new chat, Web first resolves `/agents/{agent_id}/team-primary-session`, then sends to `/sessions/{session_id}/messages`.
 - Reflect response session id to container state, URL, sidebar sync.
 - Compose screen from response snapshot.
 - Start WebSocket live subscription with confirmed session id afterward.

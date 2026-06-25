@@ -473,9 +473,7 @@ async def _build_chat_write_snapshot(
                 case SessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403, detail="Session access denied."
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:
@@ -576,10 +574,7 @@ def _handle_agent_session_input_result(
                 case AgentSessionInputSessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case AgentSessionInputWrongAgent():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case AgentSessionInputInactiveSession():
                     raise HTTPException(
                         status_code=409,
@@ -614,48 +609,13 @@ async def _handle_ensure_session_for_rest(
                 case AgentNotFound():
                     raise HTTPException(status_code=404, detail="Agent not found.")
                 case NotWorkspaceMember():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Workspace membership required.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:
             assert_never(result)
-
-
-@router.post("/sessions/new/messages")
-async def create_session_message(
-    request: ChatMessageWriteRequest,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    chat_service: Annotated[ChatSessionService, Depends()],
-    agent_session_input_service: Annotated[AgentSessionInputService, Depends()],
-    exchange_file_service: Annotated[ExchangeFileService, Depends()],
-    model_file_service: Annotated[ModelFileService, Depends()],
-    broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
-    live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
-    timezone: str | None = None,
-) -> ChatWriteResponse:
-    """Accept the first message of a new session at the REST input buffer boundary."""
-    return await _write_message_via_rest(
-        chat_service,
-        agent_session_input_service,
-        exchange_file_service,
-        model_file_service,
-        broker,
-        broadcast,
-        live_event_store,
-        request,
-        session_id=None,
-        user_id=current_user.user_id,
-        tz=_parse_timezone(timezone),
-    )
 
 
 @router.patch("/sessions/{session_id}/goal")
@@ -701,10 +661,7 @@ async def update_session_goal(
                 case SessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case InvalidGoalStatusTransition():
                     raise HTTPException(
                         status_code=409,
@@ -764,10 +721,7 @@ async def update_session_goal_status(
                 case SessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case InvalidGoalStatusTransition():
                     raise HTTPException(
                         status_code=409,
@@ -811,9 +765,7 @@ async def stop_session_run(
                 case SessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403, detail="Session access denied."
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:
@@ -1050,7 +1002,7 @@ async def get_agent_session_context(
     context_service: Annotated[SessionContextService, Depends()],
     limit: Annotated[int, Query(ge=1, le=500)] = 300,
 ) -> SessionContextResponse:
-    """Return Agent active session context inspector information."""
+    """Return Agent team primary session context inspector information."""
     result = await context_service.get_agent_context(
         agent_id=agent_id,
         user_id=current_user.user_id,
@@ -1064,49 +1016,58 @@ async def get_agent_session_context(
                 case AgentNotFound():
                     raise HTTPException(status_code=404, detail="Agent not found.")
                 case NotWorkspaceMember():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Workspace membership required.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:
             assert_never(result)
 
 
-@router.get("/agents/{agent_id}/active-session")
-async def get_active_agent_session(
+@router.get("/agents/{agent_id}/team-primary-session")
+async def get_team_primary_agent_session(
     agent_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
 ) -> AgentSessionResponse:
-    """Get an Agent's active AgentSession, creating one if absent."""
-    result = await chat_service.get_active_session(
+    """Get an Agent's team primary AgentSession, creating one if absent."""
+    result = await chat_service.get_team_primary_session(
         agent_id=agent_id,
         user_id=current_user.user_id,
     )
     match result:
         case Success(session):
-            return AgentSessionResponse(
-                id=session.id,
-                agent_id=session.agent_id,
-                created_at=session.created_at,
-                updated_at=session.updated_at,
-            )
+            return AgentSessionResponse.from_domain(session)
         case Failure(error):
             match error:
-                case AgentNotFound():
-                    raise HTTPException(status_code=404, detail="Agent not found.")
-                case NotWorkspaceMember():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Workspace membership required.",
-                    )
-                case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
+                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/agents/{agent_id}/sessions/{session_id}")
+async def get_agent_session(
+    agent_id: str,
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentSessionResponse:
+    """Get a URL-selected AgentSession by agent/session pair."""
+    _validate_session_id(session_id)
+    result = await chat_service.get_agent_session(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(session):
+            return AgentSessionResponse.from_domain(session)
+        case Failure(error):
+            match error:
+                case SessionNotFound():
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:
@@ -1375,10 +1336,7 @@ async def list_history_events(
                         detail="Session not found.",
                     )
                 case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:
@@ -1437,10 +1395,7 @@ async def list_live_events(
                         detail="Session not found.",
                     )
                 case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:
@@ -1499,10 +1454,7 @@ async def delete_input_buffer(
                 case SessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:
@@ -1668,10 +1620,7 @@ async def delete_session(
         case Failure(error):
             match error:
                 case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
+                    raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:

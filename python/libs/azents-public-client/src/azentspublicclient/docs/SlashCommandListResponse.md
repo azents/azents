@@ -6,7 +6,7 @@ Slash command list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SlashCommandResponse]**](SlashCommandResponse.md) | Available slash command list |
+**items** | [**List[SlashCommandResponse]**](SlashCommandResponse.md) | Available slash command list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ slash_command_list_response_dict = slash_command_list_response_instance.to_dict(
 slash_command_list_response_from_dict = SlashCommandListResponse.from_dict(slash_command_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

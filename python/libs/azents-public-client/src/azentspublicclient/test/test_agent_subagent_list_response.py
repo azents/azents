@@ -37,12 +37,12 @@ class TestAgentSubagentListResponse(unittest.TestCase):
             return AgentSubagentListResponse(
                 items = [
                     azentspublicclient.models.agent_subagent_response.AgentSubagentResponse(
-                        id = '',
-                        agent_id = '',
-                        subagent_id = '',
-                        description = '',
-                        enabled = True,
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        agent_id = '', 
+                        subagent_id = '', 
+                        description = '', 
+                        enabled = True, 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -50,12 +50,12 @@ class TestAgentSubagentListResponse(unittest.TestCase):
             return AgentSubagentListResponse(
                 items = [
                     azentspublicclient.models.agent_subagent_response.AgentSubagentResponse(
-                        id = '',
-                        agent_id = '',
-                        subagent_id = '',
-                        description = '',
-                        enabled = True,
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        agent_id = '', 
+                        subagent_id = '', 
+                        description = '', 
+                        enabled = True, 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

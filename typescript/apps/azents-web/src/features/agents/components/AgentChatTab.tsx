@@ -3,7 +3,7 @@
 /**
  * Agent detail Chat tab UI.
  *
- * Renders one active session of Agent across full area, centered on Direct chat.
+ * Renders one URL-selected Agent session across full area, centered on Direct chat.
  * WebSocket/buffer is isolated by per-session remount (ChatSessionView key).
  */
 
@@ -18,7 +18,7 @@ export function AgentChatTab(
 ): React.ReactElement {
   const {
     agent,
-    activeSessionState,
+    sessionState,
     mountKey,
     mountInitialSessionId,
     onConnectionStatusChange,
@@ -48,7 +48,7 @@ export function AgentChatTab(
     };
   }, []);
 
-  switch (activeSessionState.type) {
+  switch (sessionState.type) {
     case "LOADING": {
       return (
         <Center className={styles.chatArea} style={{ flex: 1, minHeight: 0 }}>
@@ -60,7 +60,7 @@ export function AgentChatTab(
     case "ERROR": {
       return (
         <Center className={styles.chatArea} style={{ flex: 1, minHeight: 0 }}>
-          <Text c="red">{activeSessionState.message}</Text>
+          <Text c="red">{sessionState.message}</Text>
         </Center>
       );
     }

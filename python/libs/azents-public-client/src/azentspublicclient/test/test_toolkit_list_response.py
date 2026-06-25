@@ -37,10 +37,10 @@ class TestToolkitListResponse(unittest.TestCase):
             return ToolkitListResponse(
                 items = [
                     azentspublicclient.models.toolkit_response.ToolkitResponse(
-                        slug = '',
-                        name = '',
-                        description = '',
-                        config_schema = { },
+                        slug = '', 
+                        name = '', 
+                        description = '', 
+                        config_schema = { }, 
                         system_prompt = '', )
                     ]
             )
@@ -48,10 +48,10 @@ class TestToolkitListResponse(unittest.TestCase):
             return ToolkitListResponse(
                 items = [
                     azentspublicclient.models.toolkit_response.ToolkitResponse(
-                        slug = '',
-                        name = '',
-                        description = '',
-                        config_schema = { },
+                        slug = '', 
+                        name = '', 
+                        description = '', 
+                        config_schema = { }, 
                         system_prompt = '', )
                     ],
         )

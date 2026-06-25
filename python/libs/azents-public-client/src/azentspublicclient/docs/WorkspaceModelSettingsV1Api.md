@@ -45,7 +45,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceModelSettingsV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # Get Workspace Model Settings
@@ -63,7 +63,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -125,8 +125,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceModelSettingsV1Api(api_client)
-    handle = 'handle_example' # str |
-    workspace_model_settings_update_request = azentspublicclient.WorkspaceModelSettingsUpdateRequest() # WorkspaceModelSettingsUpdateRequest |
+    handle = 'handle_example' # str | 
+    workspace_model_settings_update_request = azentspublicclient.WorkspaceModelSettingsUpdateRequest() # WorkspaceModelSettingsUpdateRequest | 
 
     try:
         # Update Workspace Model Settings
@@ -144,8 +144,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **workspace_model_settings_update_request** | [**WorkspaceModelSettingsUpdateRequest**](WorkspaceModelSettingsUpdateRequest.md)|  |
+ **handle** | **str**|  | 
+ **workspace_model_settings_update_request** | [**WorkspaceModelSettingsUpdateRequest**](WorkspaceModelSettingsUpdateRequest.md)|  | 
 
 ### Return type
 
@@ -168,3 +168,4 @@ Name | Type | Description  | Notes
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

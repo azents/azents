@@ -314,8 +314,21 @@ def create_chat_session_with_agent(
         _headers={"Authorization": f"Bearer {token}"},
     )
 
+    session_response = http_requests.get(
+        f"{server_url}/chat/v1/agents/{agent.id}/team-primary-session",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    session_response.raise_for_status()
+    session_payload = session_response.json()
+    session_id = session_payload.get("id")
+    if not isinstance(session_id, str):
+        raise RuntimeError(
+            f"Team primary session response did not include id: {session_payload!r}"
+        )
+
     response = http_requests.post(
-        f"{server_url}/chat/v1/sessions/new/messages",
+        f"{server_url}/chat/v1/sessions/{session_id}/messages",
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -328,12 +341,6 @@ def create_chat_session_with_agent(
         timeout=10,
     )
     response.raise_for_status()
-    payload = response.json()
-    session_id = payload.get("session_id")
-    if not isinstance(session_id, str):
-        raise RuntimeError(
-            f"REST write response did not include session_id: {payload!r}"
-        )
 
     return token, session_id, agent.id
 

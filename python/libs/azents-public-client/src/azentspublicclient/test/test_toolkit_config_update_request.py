@@ -35,7 +35,7 @@ class TestToolkitConfigUpdateRequest(unittest.TestCase):
         model = ToolkitConfigUpdateRequest()
         if include_optional:
             return ToolkitConfigUpdateRequest(
-                slug = '',
+                slug = 'p0',
                 name = '',
                 description = '',
                 config = { },

@@ -6,10 +6,10 @@ Agent Runtime lifecycle action set response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**start** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional]
-**stop** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional]
-**restart** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional]
-**reset** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional]
+**start** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional] 
+**stop** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional] 
+**restart** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional] 
+**reset** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional] 
 
 ## Example
 
@@ -29,3 +29,5 @@ agent_workspace_actions_response_dict = agent_workspace_actions_response_instanc
 agent_workspace_actions_response_from_dict = AgentWorkspaceActionsResponse.from_dict(agent_workspace_actions_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

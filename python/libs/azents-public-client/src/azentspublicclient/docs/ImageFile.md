@@ -6,9 +6,9 @@ Single image for API response — resolved URL + resolution.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**url** | **str** | CDN URL or 1-hour presigned GET URL |
-**width** | **int** | Width pixels |
-**height** | **int** | Height pixels |
+**url** | **str** | CDN URL or 1-hour presigned GET URL | 
+**width** | **int** | Width pixels | 
+**height** | **int** | Height pixels | 
 
 ## Example
 
@@ -28,3 +28,5 @@ image_file_dict = image_file_instance.to_dict()
 image_file_from_dict = ImageFile.from_dict(image_file_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

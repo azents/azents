@@ -6,8 +6,8 @@ Avatar upload ticket issue request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**content_type** | **str** | MIME of the file to upload. JPEG/PNG/WebP allowed |
-**content_length** | **int** | Byte size of the file to upload, up to 5MB |
+**content_type** | **str** | MIME of the file to upload. JPEG/PNG/WebP allowed | 
+**content_length** | **int** | Byte size of the file to upload, up to 5MB | 
 
 ## Example
 
@@ -27,3 +27,5 @@ avatar_upload_request_dict = avatar_upload_request_instance.to_dict()
 avatar_upload_request_from_dict = AvatarUploadRequest.from_dict(avatar_upload_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

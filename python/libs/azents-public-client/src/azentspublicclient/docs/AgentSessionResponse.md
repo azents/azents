@@ -6,10 +6,10 @@ Conversation session response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Session ID |
-**agent_id** | **str** | Agent ID |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | Session ID | 
+**agent_id** | **str** | Agent ID | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 
@@ -29,3 +29,5 @@ agent_session_response_dict = agent_session_response_instance.to_dict()
 agent_session_response_from_dict = AgentSessionResponse.from_dict(agent_session_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

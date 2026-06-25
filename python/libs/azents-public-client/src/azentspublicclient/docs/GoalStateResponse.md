@@ -6,10 +6,10 @@ Chat live goal state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**objective** | **str** |  | [optional]
-**status** | **str** |  | [optional]
-**created_at** | **str** |  | [optional]
-**updated_at** | **str** |  | [optional]
+**objective** | **str** |  | [optional] 
+**status** | **str** |  | [optional] 
+**created_at** | **str** |  | [optional] 
+**updated_at** | **str** |  | [optional] 
 
 ## Example
 
@@ -29,3 +29,5 @@ goal_state_response_dict = goal_state_response_instance.to_dict()
 goal_state_response_from_dict = GoalStateResponse.from_dict(goal_state_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

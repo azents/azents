@@ -6,9 +6,9 @@ Agent Runtime failure response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**generation** | **int** |  |
-**code** | **str** |  |
-**message** | **str** |  |
+**generation** | **int** |  | 
+**code** | **str** |  | 
+**message** | **str** |  | 
 
 ## Example
 
@@ -28,3 +28,5 @@ agent_runtime_failure_response_dict = agent_runtime_failure_response_instance.to
 agent_runtime_failure_response_from_dict = AgentRuntimeFailureResponse.from_dict(agent_runtime_failure_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

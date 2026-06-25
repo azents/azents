@@ -6,8 +6,8 @@ Join request list response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[JoinRequestResponse]**](JoinRequestResponse.md) | Join request list |
-**total** | **int** | Total count |
+**items** | [**List[JoinRequestResponse]**](JoinRequestResponse.md) | Join request list | 
+**total** | **int** | Total count | 
 
 ## Example
 
@@ -27,3 +27,5 @@ join_request_list_response_dict = join_request_list_response_instance.to_dict()
 join_request_list_response_from_dict = JoinRequestListResponse.from_dict(join_request_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

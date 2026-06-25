@@ -6,9 +6,9 @@ Agent Workspace directory response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**path** | **str** | Directory path |
-**entries** | [**List[AgentWorkspaceEntryResponse]**](AgentWorkspaceEntryResponse.md) | Entry list |
+**type** | **str** | Response type | 
+**path** | **str** | Directory path | 
+**entries** | [**List[AgentWorkspaceEntryResponse]**](AgentWorkspaceEntryResponse.md) | Entry list | 
 
 ## Example
 
@@ -28,3 +28,5 @@ agent_workspace_directory_response_dict = agent_workspace_directory_response_ins
 agent_workspace_directory_response_from_dict = AgentWorkspaceDirectoryResponse.from_dict(agent_workspace_directory_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

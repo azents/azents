@@ -6,8 +6,8 @@ Agent Runtime response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  |
-**state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  |
+**runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  | 
+**state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  | 
 
 ## Example
 
@@ -27,3 +27,5 @@ agent_runtime_response_dict = agent_runtime_response_instance.to_dict()
 agent_runtime_response_from_dict = AgentRuntimeResponse.from_dict(agent_runtime_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

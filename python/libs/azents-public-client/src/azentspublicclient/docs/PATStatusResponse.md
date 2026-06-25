@@ -6,10 +6,10 @@ PAT status response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**registered** | **bool** | Whether PAT is registered |
-**github_username** | **str** |  | [optional]
-**display_hint** | **str** |  | [optional]
-**expires_at** | **datetime** |  | [optional]
+**registered** | **bool** | Whether PAT is registered | 
+**github_username** | **str** |  | [optional] 
+**display_hint** | **str** |  | [optional] 
+**expires_at** | **datetime** |  | [optional] 
 
 ## Example
 
@@ -29,3 +29,5 @@ pat_status_response_dict = pat_status_response_instance.to_dict()
 pat_status_response_from_dict = PATStatusResponse.from_dict(pat_status_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

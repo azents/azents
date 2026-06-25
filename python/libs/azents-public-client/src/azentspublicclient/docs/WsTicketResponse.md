@@ -6,7 +6,7 @@ Short-lived ticket response for WebSocket connection.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**ticket** | **str** | Short-lived HMAC-signed ticket, valid for 30 seconds |
+**ticket** | **str** | Short-lived HMAC-signed ticket, valid for 30 seconds | 
 
 ## Example
 
@@ -26,3 +26,5 @@ ws_ticket_response_dict = ws_ticket_response_instance.to_dict()
 ws_ticket_response_from_dict = WsTicketResponse.from_dict(ws_ticket_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

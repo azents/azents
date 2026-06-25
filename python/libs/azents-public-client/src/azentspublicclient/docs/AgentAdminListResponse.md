@@ -6,7 +6,7 @@ AgentAdmin list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[AgentAdminResponse]**](AgentAdminResponse.md) |  |
+**items** | [**List[AgentAdminResponse]**](AgentAdminResponse.md) |  | 
 
 ## Example
 
@@ -26,3 +26,5 @@ agent_admin_list_response_dict = agent_admin_list_response_instance.to_dict()
 agent_admin_list_response_from_dict = AgentAdminListResponse.from_dict(agent_admin_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

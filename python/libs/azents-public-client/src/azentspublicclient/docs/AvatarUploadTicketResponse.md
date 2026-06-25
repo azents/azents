@@ -6,9 +6,9 @@ Presigned PUT ticket response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**upload_key** | **str** | Upload key to pass during finalize |
-**upload_url** | **str** | Presigned URL for the client to PUT to |
-**expires_at** | **datetime** | URL expiration time, ISO 8601 and tz-aware |
+**upload_key** | **str** | Upload key to pass during finalize | 
+**upload_url** | **str** | Presigned URL for the client to PUT to | 
+**expires_at** | **datetime** | URL expiration time, ISO 8601 and tz-aware | 
 
 ## Example
 
@@ -28,3 +28,5 @@ avatar_upload_ticket_response_dict = avatar_upload_ticket_response_instance.to_d
 avatar_upload_ticket_response_from_dict = AvatarUploadTicketResponse.from_dict(avatar_upload_ticket_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

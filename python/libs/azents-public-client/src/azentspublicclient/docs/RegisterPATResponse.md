@@ -6,8 +6,8 @@ PAT registration success response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**github_username** | **str** | GitHub username |
-**expires_at** | **datetime** |  | [optional]
+**github_username** | **str** | GitHub username | 
+**expires_at** | **datetime** |  | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ register_pat_response_dict = register_pat_response_instance.to_dict()
 register_pat_response_from_dict = RegisterPATResponse.from_dict(register_pat_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

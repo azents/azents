@@ -36,16 +36,16 @@ class TestImageThumbnails(unittest.TestCase):
         if include_optional:
             return ImageThumbnails(
                 small = azentspublicclient.models.image_file.ImageFile(
-                    url = '',
-                    width = 56,
+                    url = '', 
+                    width = 56, 
                     height = 56, ),
                 medium = azentspublicclient.models.image_file.ImageFile(
-                    url = '',
-                    width = 56,
+                    url = '', 
+                    width = 56, 
                     height = 56, ),
                 large = azentspublicclient.models.image_file.ImageFile(
-                    url = '',
-                    width = 56,
+                    url = '', 
+                    width = 56, 
                     height = 56, )
             )
         else:

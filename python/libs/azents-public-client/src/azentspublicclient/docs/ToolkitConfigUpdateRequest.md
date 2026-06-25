@@ -6,13 +6,13 @@ Toolkit Config update request, for partial updates.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**slug** | **str** | Unique slug within workspace | [optional]
-**name** | **str** | Display name | [optional]
-**description** | **str** |  | [optional]
-**config** | **Dict[str, object]** | Tool settings | [optional]
-**prompt** | **str** |  | [optional]
-**credentials** | **Dict[str, object]** |  | [optional]
-**enabled** | **bool** | Enabled flag | [optional]
+**slug** | **str** | Workspace-unique slug. Use lowercase letters, numbers, and underscores only. | [optional] 
+**name** | **str** | Display name | [optional] 
+**description** | **str** |  | [optional] 
+**config** | **Dict[str, object]** | Tool settings | [optional] 
+**prompt** | **str** |  | [optional] 
+**credentials** | **Dict[str, object]** |  | [optional] 
+**enabled** | **bool** | Enabled flag | [optional] 
 
 ## Example
 
@@ -32,3 +32,5 @@ toolkit_config_update_request_dict = toolkit_config_update_request_instance.to_d
 toolkit_config_update_request_from_dict = ToolkitConfigUpdateRequest.from_dict(toolkit_config_update_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

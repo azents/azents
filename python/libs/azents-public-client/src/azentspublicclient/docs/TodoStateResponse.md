@@ -6,7 +6,7 @@ Chat live todo state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[TodoItemResponse]**](TodoItemResponse.md) | Todo item list |
+**items** | [**List[TodoItemResponse]**](TodoItemResponse.md) | Todo item list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ todo_state_response_dict = todo_state_response_instance.to_dict()
 todo_state_response_from_dict = TodoStateResponse.from_dict(todo_state_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

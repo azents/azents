@@ -40,17 +40,17 @@ class TestWorkspace(unittest.TestCase):
                 detail = '',
                 retry_after_ms = 56,
                 manifest = azentspublicclient.models.agent_workspace_manifest_response.AgentWorkspaceManifestResponse(
-                    root = '',
-                    cwd = '',
+                    root = '', 
+                    cwd = '', 
                     entries = [
                         azentspublicclient.models.agent_workspace_entry_response.AgentWorkspaceEntryResponse(
-                            name = '',
-                            path = '',
-                            kind = 'file',
-                            size = 56,
-                            media_type = '',
+                            name = '', 
+                            path = '', 
+                            kind = 'file', 
+                            size = 56, 
+                            media_type = '', 
                             modified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
-                        ],
+                        ], 
                     git = { }, )
             )
         else:
@@ -60,17 +60,17 @@ class TestWorkspace(unittest.TestCase):
                 detail = '',
                 retry_after_ms = 56,
                 manifest = azentspublicclient.models.agent_workspace_manifest_response.AgentWorkspaceManifestResponse(
-                    root = '',
-                    cwd = '',
+                    root = '', 
+                    cwd = '', 
                     entries = [
                         azentspublicclient.models.agent_workspace_entry_response.AgentWorkspaceEntryResponse(
-                            name = '',
-                            path = '',
-                            kind = 'file',
-                            size = 56,
-                            media_type = '',
+                            name = '', 
+                            path = '', 
+                            kind = 'file', 
+                            size = 56, 
+                            media_type = '', 
                             modified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
-                        ],
+                        ], 
                     git = { }, ),
         )
         """

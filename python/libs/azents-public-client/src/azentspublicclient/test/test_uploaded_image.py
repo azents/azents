@@ -37,18 +37,18 @@ class TestUploadedImage(unittest.TestCase):
             return UploadedImage(
                 filename = '',
                 default = azentspublicclient.models.image_file.ImageFile(
-                    url = '',
-                    width = 56,
+                    url = '', 
+                    width = 56, 
                     height = 56, ),
                 thumbnails = azentspublicclient.models.image_thumbnails.ImageThumbnails(
                     small = azentspublicclient.models.image_file.ImageFile(
-                        url = '',
-                        width = 56,
-                        height = 56, ),
+                        url = '', 
+                        width = 56, 
+                        height = 56, ), 
                     medium = azentspublicclient.models.image_file.ImageFile(
-                        url = '',
-                        width = 56,
-                        height = 56, ),
+                        url = '', 
+                        width = 56, 
+                        height = 56, ), 
                     large = , ),
                 uploaded_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
@@ -56,18 +56,18 @@ class TestUploadedImage(unittest.TestCase):
             return UploadedImage(
                 filename = '',
                 default = azentspublicclient.models.image_file.ImageFile(
-                    url = '',
-                    width = 56,
+                    url = '', 
+                    width = 56, 
                     height = 56, ),
                 thumbnails = azentspublicclient.models.image_thumbnails.ImageThumbnails(
                     small = azentspublicclient.models.image_file.ImageFile(
-                        url = '',
-                        width = 56,
-                        height = 56, ),
+                        url = '', 
+                        width = 56, 
+                        height = 56, ), 
                     medium = azentspublicclient.models.image_file.ImageFile(
-                        url = '',
-                        width = 56,
-                        height = 56, ),
+                        url = '', 
+                        width = 56, 
+                        height = 56, ), 
                     large = , ),
                 uploaded_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )

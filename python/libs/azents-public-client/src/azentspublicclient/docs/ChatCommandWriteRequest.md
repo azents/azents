@@ -6,9 +6,9 @@ REST slash command request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**agent_id** | **str** | Agent ID |
-**client_request_id** | **str** | Client-generated idempotency key |
-**command** | **str** | Command name, for example compact |
+**agent_id** | **str** | Agent ID | 
+**client_request_id** | **str** | Client-generated idempotency key | 
+**command** | **str** | Command name, for example compact | 
 
 ## Example
 
@@ -28,3 +28,5 @@ chat_command_write_request_dict = chat_command_write_request_instance.to_dict()
 chat_command_write_request_from_dict = ChatCommandWriteRequest.from_dict(chat_command_write_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

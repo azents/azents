@@ -6,8 +6,8 @@ User-controlled Goal status update request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**status** | **str** | User-controlled goal status. Active resumes paused or blocked goals; paused pauses active goals. |
-**resume_hint** | **str** |  | [optional]
+**status** | **str** | User-controlled goal status. Active resumes paused or blocked goals; paused pauses active goals. | 
+**resume_hint** | **str** |  | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ goal_status_update_request_dict = goal_status_update_request_instance.to_dict()
 goal_status_update_request_from_dict = GoalStatusUpdateRequest.from_dict(goal_status_update_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

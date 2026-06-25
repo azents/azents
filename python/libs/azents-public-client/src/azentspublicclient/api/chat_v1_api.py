@@ -885,9 +885,9 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if timezone is not None:
-
+            
             _query_params.append(('timezone', timezone))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -925,300 +925,6 @@ class ChatV1Api:
         return self.api_client.param_serialize(
             method='POST',
             resource_path='/chat/v1/sessions/{session_id}/messages',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def chat_v1_create_session_message(
-        self,
-        chat_message_write_request: ChatMessageWriteRequest,
-        timezone: Optional[StrictStr] = None,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ChatWriteResponse:
-        """Create Session Message
-
-        Accept the first message of a new session at the REST input buffer boundary.
-
-        :param chat_message_write_request: (required)
-        :type chat_message_write_request: ChatMessageWriteRequest
-        :param timezone:
-        :type timezone: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._chat_v1_create_session_message_serialize(
-            chat_message_write_request=chat_message_write_request,
-            timezone=timezone,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ChatWriteResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def chat_v1_create_session_message_with_http_info(
-        self,
-        chat_message_write_request: ChatMessageWriteRequest,
-        timezone: Optional[StrictStr] = None,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[ChatWriteResponse]:
-        """Create Session Message
-
-        Accept the first message of a new session at the REST input buffer boundary.
-
-        :param chat_message_write_request: (required)
-        :type chat_message_write_request: ChatMessageWriteRequest
-        :param timezone:
-        :type timezone: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._chat_v1_create_session_message_serialize(
-            chat_message_write_request=chat_message_write_request,
-            timezone=timezone,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ChatWriteResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def chat_v1_create_session_message_without_preload_content(
-        self,
-        chat_message_write_request: ChatMessageWriteRequest,
-        timezone: Optional[StrictStr] = None,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Create Session Message
-
-        Accept the first message of a new session at the REST input buffer boundary.
-
-        :param chat_message_write_request: (required)
-        :type chat_message_write_request: ChatMessageWriteRequest
-        :param timezone:
-        :type timezone: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._chat_v1_create_session_message_serialize(
-            chat_message_write_request=chat_message_write_request,
-            timezone=timezone,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ChatWriteResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _chat_v1_create_session_message_serialize(
-        self,
-        chat_message_write_request,
-        timezone,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        # process the query parameters
-        if timezone is not None:
-
-            _query_params.append(('timezone', timezone))
-
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if chat_message_write_request is not None:
-            _body_params = chat_message_write_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/chat/v1/sessions/new/messages',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2561,9 +2267,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if path is not None:
-
+            
             _query_params.append(('path', path))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -2837,7 +2543,7 @@ class ChatV1Api:
         if 'Accept' not in _header_params:
             _header_params['Accept'] = self.api_client.select_header_accept(
                 [
-                    'application/octet-stream',
+                    'application/octet-stream', 
                     'application/json'
                 ]
             )
@@ -3120,9 +2826,9 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if timezone is not None:
-
+            
             _query_params.append(('timezone', timezone))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -3176,9 +2882,10 @@ class ChatV1Api:
 
 
     @validate_call
-    def chat_v1_get_active_agent_session(
+    def chat_v1_get_agent_session(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3192,12 +2899,14 @@ class ChatV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> AgentSessionResponse:
-        """Get Active Agent Session
+        """Get Agent Session
 
-        Get an Agent's active AgentSession, creating one if absent.
+        Get a URL-selected AgentSession by agent/session pair.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3220,8 +2929,9 @@ class ChatV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._chat_v1_get_active_agent_session_serialize(
+        _param = self._chat_v1_get_agent_session_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3244,9 +2954,10 @@ class ChatV1Api:
 
 
     @validate_call
-    def chat_v1_get_active_agent_session_with_http_info(
+    def chat_v1_get_agent_session_with_http_info(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3260,12 +2971,14 @@ class ChatV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[AgentSessionResponse]:
-        """Get Active Agent Session
+        """Get Agent Session
 
-        Get an Agent's active AgentSession, creating one if absent.
+        Get a URL-selected AgentSession by agent/session pair.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3288,8 +3001,9 @@ class ChatV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._chat_v1_get_active_agent_session_serialize(
+        _param = self._chat_v1_get_agent_session_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3312,9 +3026,10 @@ class ChatV1Api:
 
 
     @validate_call
-    def chat_v1_get_active_agent_session_without_preload_content(
+    def chat_v1_get_agent_session_without_preload_content(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3328,12 +3043,14 @@ class ChatV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Get Active Agent Session
+        """Get Agent Session
 
-        Get an Agent's active AgentSession, creating one if absent.
+        Get a URL-selected AgentSession by agent/session pair.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3356,8 +3073,9 @@ class ChatV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._chat_v1_get_active_agent_session_serialize(
+        _param = self._chat_v1_get_agent_session_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3375,9 +3093,10 @@ class ChatV1Api:
         return response_data.response
 
 
-    def _chat_v1_get_active_agent_session_serialize(
+    def _chat_v1_get_agent_session_serialize(
         self,
         agent_id,
+        session_id,
         _request_auth,
         _content_type,
         _headers,
@@ -3401,6 +3120,8 @@ class ChatV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if session_id is not None:
+            _path_params['session_id'] = session_id
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -3423,7 +3144,7 @@ class ChatV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/chat/v1/agents/{agent_id}/active-session',
+            resource_path='/chat/v1/agents/{agent_id}/sessions/{session_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -3459,7 +3180,7 @@ class ChatV1Api:
     ) -> SessionContextResponse:
         """Get Agent Session Context
 
-        Return Agent active session context inspector information.
+        Return Agent team primary session context inspector information.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -3531,7 +3252,7 @@ class ChatV1Api:
     ) -> ApiResponse[SessionContextResponse]:
         """Get Agent Session Context
 
-        Return Agent active session context inspector information.
+        Return Agent team primary session context inspector information.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -3603,7 +3324,7 @@ class ChatV1Api:
     ) -> RESTResponseType:
         """Get Agent Session Context
 
-        Return Agent active session context inspector information.
+        Return Agent team primary session context inspector information.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -3680,9 +3401,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -3969,6 +3690,270 @@ class ChatV1Api:
         return self.api_client.param_serialize(
             method='GET',
             resource_path='/chat/v1/agents/{agent_id}/workspace',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def chat_v1_get_team_primary_agent_session(
+        self,
+        agent_id: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> AgentSessionResponse:
+        """Get Team Primary Agent Session
+
+        Get an Agent's team primary AgentSession, creating one if absent.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._chat_v1_get_team_primary_agent_session_serialize(
+            agent_id=agent_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AgentSessionResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def chat_v1_get_team_primary_agent_session_with_http_info(
+        self,
+        agent_id: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[AgentSessionResponse]:
+        """Get Team Primary Agent Session
+
+        Get an Agent's team primary AgentSession, creating one if absent.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._chat_v1_get_team_primary_agent_session_serialize(
+            agent_id=agent_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AgentSessionResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def chat_v1_get_team_primary_agent_session_without_preload_content(
+        self,
+        agent_id: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Get Team Primary Agent Session
+
+        Get an Agent's team primary AgentSession, creating one if absent.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._chat_v1_get_team_primary_agent_session_serialize(
+            agent_id=agent_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "AgentSessionResponse",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _chat_v1_get_team_primary_agent_session_serialize(
+        self,
+        agent_id,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if agent_id is not None:
+            _path_params['agent_id'] = agent_id
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='GET',
+            resource_path='/chat/v1/agents/{agent_id}/team-primary-session',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -5025,17 +5010,17 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         if before is not None:
-
+            
             _query_params.append(('before', before))
-
+            
         if after is not None:
-
+            
             _query_params.append(('after', after))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -6100,13 +6085,13 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if path is not None:
-
+            
             _query_params.append(('path', path))
-
+            
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -7851,3 +7836,5 @@ class ChatV1Api:
             _host=_host,
             _request_auth=_request_auth
         )
+
+

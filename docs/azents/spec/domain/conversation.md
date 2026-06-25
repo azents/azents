@@ -50,11 +50,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/toolkit_state/**
 api_routes:
   - /chat/v1
-  - /chat/v1/sessions/new/messages
   - /chat/v1/sessions/{session_id}/messages
   - /chat/v1/sessions/{session_id}/edit-message
   - /chat/v1/sessions/{session_id}/commands
-  - /chat/v1/agents/{agent_id}/active-session
+  - /chat/v1/agents/{agent_id}/team-primary-session
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/projects
   - /chat/v1/agents/{agent_id}/projects/register
   - /chat/v1/sessions/{session_id}/history
@@ -65,7 +65,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-25
-spec_version: 66
+spec_version: 67
 ---
 
 # Conversation & Events
@@ -92,7 +92,7 @@ erDiagram
 ```
 
 `AgentSession` is the conversation boundary. Direct session write routes target the requested session.
-The default team conversation is the agent's active team primary session, represented by
+The default team conversation is the agent's team primary session, represented by
 `agent_sessions.primary_kind = 'team_primary'`. Runtime current/active session lookup must not
 redirect direct session writes or default team session lookup to another session.
 
@@ -118,7 +118,7 @@ command, stop intent, or run heartbeat.
 | `pending_command_*` | mixed | Single pending idle command for this session |
 | `stop_requested_*` | mixed | Durable stop intent for this session |
 
-Only one active team primary session may exist per agent in the current product state. Direct session
+Only one team primary session may exist per agent in the current product state. Direct session
 writes are session-scoped. When a route contains `session_id`, input buffers, live projections,
 broker wake-up, and the REST response use that same session id. Runtime current/active session lookup
 is invalid for that direct write path and for default team session selection. If any internal write
@@ -133,7 +133,7 @@ context. `SessionWorkspaceProject` and `SessionWorkspaceProjectRegistrationReque
 `AgentSession` through `session_id`. Runtime owns only the physical workspace where project paths
 exist.
 
-Agent-scoped project routes currently resolve the agent's active team primary session, then read or
+Agent-scoped project routes currently resolve the agent's team primary session, then read or
 write that session's project rows. Runtime lookup is allowed only after that session context is
 selected, and only for physical workspace validation or runner filesystem operations. Runtime current
 project, selected project, active project, and runtime-owned project catalog state are not part of the
@@ -299,8 +299,11 @@ Wake-up delivery is a signal only. The persisted buffer plus the `running` state
 recovery source of truth if the signal is lost.
 
 Web chat message/edit/command writes use REST commit endpoints instead of WebSocket write payloads.
-`POST /chat/v1/sessions/new/messages` resolves or creates the agent's active team primary session
-and commits the first/default message there.
+`GET /chat/v1/agents/{agent_id}/team-primary-session` resolves or creates the agent's team
+primary session and returns its `session_id`.
+`GET /chat/v1/agents/{agent_id}/sessions/{session_id}` validates that a URL-selected session belongs
+to the path agent and is visible to the requester; session missing, agent/session mismatch, and access
+denied all return 404.
 `POST /chat/v1/sessions/{session_id}/messages` appends a user message input to an existing session.
 `POST /chat/v1/sessions/{session_id}/edit-message` and
 `POST /chat/v1/sessions/{session_id}/commands` are idle-only control boundaries. All REST write
@@ -328,9 +331,10 @@ WebSocket. Stop is a REST control boundary: `POST /chat/v1/sessions/{session_id}
 Stop records a durable `agent_sessions.stop_requested_at` intent and sends a best-effort broker stop
 signal so an active runner can cancel immediately. Runner polling of the DB intent covers broker
 signal loss.
-`/chat/v1/sessions/new` is not a WebSocket write or subscription route; the first/default message
-resolves or creates the team primary session through `POST /chat/v1/sessions/new/messages`, and the
-client connects to `/chat/v1/sessions/{session_id}` after receiving the REST response. Legacy message/edit/command/stop
+`/chat/v1/sessions/new` is not a WebSocket write or subscription route. Web clients first resolve
+the team primary session through `GET /chat/v1/agents/{agent_id}/team-primary-session`, navigate to
+`/w/{handle}/agents/{agent_id}/sessions/{session_id}`, and then write through
+`POST /chat/v1/sessions/{session_id}/messages`. Legacy message/edit/command/stop
 WebSocket compatibility paths are not part of the public contract and must not create input buffers,
 edits, commands, stop requests, or compatibility error responses.
 

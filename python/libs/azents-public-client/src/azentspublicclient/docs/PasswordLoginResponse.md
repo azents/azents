@@ -6,9 +6,9 @@ Password login response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**access_token** | **str** | JWT access token |
-**refresh_token** | **str** | Refresh token |
-**expires_in** | **int** | Access token expiration time (seconds) |
+**access_token** | **str** | JWT access token | 
+**refresh_token** | **str** | Refresh token | 
+**expires_in** | **int** | Access token expiration time (seconds) | 
 
 ## Example
 
@@ -28,3 +28,5 @@ password_login_response_dict = password_login_response_instance.to_dict()
 password_login_response_from_dict = PasswordLoginResponse.from_dict(password_login_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,7 +6,7 @@ Password reset token preview request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | **str** | Password reset token |
+**token** | **str** | Password reset token | 
 
 ## Example
 
@@ -26,3 +26,5 @@ preview_password_reset_token_request_dict = preview_password_reset_token_request
 preview_password_reset_token_request_from_dict = PreviewPasswordResetTokenRequest.from_dict(preview_password_reset_token_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

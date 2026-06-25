@@ -6,11 +6,11 @@ File upload response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**attachment_id** | **str** | Exchange attachment ID |
-**uri** | **str** | Uploaded file URI |
-**media_type** | **str** | File MIME type |
-**size** | **int** | File size in bytes |
-**name** | **str** | Display filename |
+**attachment_id** | **str** | Exchange attachment ID | 
+**uri** | **str** | Uploaded file URI | 
+**media_type** | **str** | File MIME type | 
+**size** | **int** | File size in bytes | 
+**name** | **str** | Display filename | 
 
 ## Example
 
@@ -30,3 +30,5 @@ upload_response_dict = upload_response_instance.to_dict()
 upload_response_from_dict = UploadResponse.from_dict(upload_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,11 +6,11 @@ AgentToolkit response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**agent_id** | **str** |  |
-**toolkit_id** | **str** |  |
-**toolkit_type** | **str** |  |
-**created_at** | **datetime** |  |
+**id** | **str** |  | 
+**agent_id** | **str** |  | 
+**toolkit_id** | **str** |  | 
+**toolkit_type** | **str** |  | 
+**created_at** | **datetime** |  | 
 
 ## Example
 
@@ -30,3 +30,5 @@ agent_toolkit_response_dict = agent_toolkit_response_instance.to_dict()
 agent_toolkit_response_from_dict = AgentToolkitResponse.from_dict(agent_toolkit_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

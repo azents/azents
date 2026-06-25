@@ -6,9 +6,9 @@ Signup token redeem request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | **str** | Signup token |
-**email** | **str** | Signup email |
-**password** | **str** | Initial password |
+**token** | **str** | Signup token | 
+**email** | **str** | Signup email | 
+**password** | **str** | Initial password | 
 
 ## Example
 
@@ -28,3 +28,5 @@ redeem_signup_token_request_dict = redeem_signup_token_request_instance.to_dict(
 redeem_signup_token_request_from_dict = RedeemSignupTokenRequest.from_dict(redeem_signup_token_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

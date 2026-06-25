@@ -38,7 +38,7 @@ For `POST /chat/v1/sessions/{session_id}/messages`:
 - `InputBufferService.enqueue(...)` marks that same session running.
 - Live projection publish, broker `SessionWakeUp`, snapshot, and response all use that same session id.
 
-For `POST /chat/v1/sessions/new/messages`, the route may still create or resolve the initial session before enqueue. Once a concrete session id is resolved, the enqueue service must not replace it.
+For the default team-primary chat entry, Web resolves `GET /chat/v1/agents/{agent_id}/team-primary-session` before enqueue, then writes through `POST /chat/v1/sessions/{session_id}/messages`. Once a concrete session id is resolved, the enqueue service must not replace it.
 
 ## Clean Migration Rule
 

@@ -6,8 +6,8 @@ Elevation response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**access_token** | **str** | Elevated JWT access token |
-**expires_in** | **int** | Access token expiration time (seconds) |
+**access_token** | **str** | Elevated JWT access token | 
+**expires_in** | **int** | Access token expiration time (seconds) | 
 
 ## Example
 
@@ -27,3 +27,5 @@ elevate_response_dict = elevate_response_instance.to_dict()
 elevate_response_from_dict = ElevateResponse.from_dict(elevate_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

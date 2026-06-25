@@ -6,11 +6,11 @@ Workspace access status
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**reason** | **str** | Unavailable reason |
-**detail** | **str** | Status description |
-**retry_after_ms** | **int** | Recommended retry delay |
-**manifest** | [**AgentWorkspaceManifestResponse**](AgentWorkspaceManifestResponse.md) | Agent Workspace manifest |
+**type** | **str** | Response type | 
+**reason** | **str** | Unavailable reason | 
+**detail** | **str** | Status description | 
+**retry_after_ms** | **int** | Recommended retry delay | 
+**manifest** | [**AgentWorkspaceManifestResponse**](AgentWorkspaceManifestResponse.md) | Agent Workspace manifest | 
 
 ## Example
 
@@ -30,3 +30,5 @@ workspace_dict = workspace_instance.to_dict()
 workspace_from_dict = Workspace.from_dict(workspace_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,11 +6,11 @@ ToolkitScope response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**toolkit_id** | **str** |  |
-**scope_type** | [**ToolkitScopeType**](ToolkitScopeType.md) |  |
-**scope_id** | **str** |  |
-**created_at** | **datetime** |  |
+**id** | **str** |  | 
+**toolkit_id** | **str** |  | 
+**scope_type** | [**ToolkitScopeType**](ToolkitScopeType.md) |  | 
+**scope_id** | **str** |  | 
+**created_at** | **datetime** |  | 
 
 ## Example
 
@@ -30,3 +30,5 @@ toolkit_scope_response_dict = toolkit_scope_response_instance.to_dict()
 toolkit_scope_response_from_dict = ToolkitScopeResponse.from_dict(toolkit_scope_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

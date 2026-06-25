@@ -6,7 +6,7 @@ Signup token preview request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | **str** | Signup token |
+**token** | **str** | Signup token | 
 
 ## Example
 
@@ -26,3 +26,5 @@ preview_signup_token_request_dict = preview_signup_token_request_instance.to_dic
 preview_signup_token_request_from_dict = PreviewSignupTokenRequest.from_dict(preview_signup_token_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

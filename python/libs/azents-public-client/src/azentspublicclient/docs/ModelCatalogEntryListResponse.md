@@ -6,14 +6,14 @@ Stored model catalog entry list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**catalog_id** | **str** |  |
-**current_snapshot_id** | **str** |  |
-**current_snapshot_created_at** | **datetime** |  |
-**latest_attempt** | [**ModelCatalogSyncAttemptResponse**](ModelCatalogSyncAttemptResponse.md) |  |
-**entries** | [**List[ModelCatalogEntryResponse]**](ModelCatalogEntryResponse.md) |  |
-**total** | **int** |  |
-**limit** | **int** |  |
-**offset** | **int** |  |
+**catalog_id** | **str** |  | 
+**current_snapshot_id** | **str** |  | 
+**current_snapshot_created_at** | **datetime** |  | 
+**latest_attempt** | [**ModelCatalogSyncAttemptResponse**](ModelCatalogSyncAttemptResponse.md) |  | 
+**entries** | [**List[ModelCatalogEntryResponse]**](ModelCatalogEntryResponse.md) |  | 
+**total** | **int** |  | 
+**limit** | **int** |  | 
+**offset** | **int** |  | 
 
 ## Example
 
@@ -33,3 +33,5 @@ model_catalog_entry_list_response_dict = model_catalog_entry_list_response_insta
 model_catalog_entry_list_response_from_dict = ModelCatalogEntryListResponse.from_dict(model_catalog_entry_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,13 +6,13 @@ Session context system prompt fragment response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Prompt fragment ID |
-**source** | **str** | Prompt fragment source |
-**label** | **str** | Display label |
-**content** | **str** | Full prompt content |
-**preview** | **str** | Prompt preview |
-**length** | **int** | Prompt content length |
-**metadata** | **Dict[str, str]** | Source metadata |
+**id** | **str** | Prompt fragment ID | 
+**source** | **str** | Prompt fragment source | 
+**label** | **str** | Display label | 
+**content** | **str** | Full prompt content | 
+**preview** | **str** | Prompt preview | 
+**length** | **int** | Prompt content length | 
+**metadata** | **Dict[str, str]** | Source metadata | 
 
 ## Example
 
@@ -32,3 +32,5 @@ session_context_system_prompt_fragment_response_dict = session_context_system_pr
 session_context_system_prompt_fragment_response_from_dict = SessionContextSystemPromptFragmentResponse.from_dict(session_context_system_prompt_fragment_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

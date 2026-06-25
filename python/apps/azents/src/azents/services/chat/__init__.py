@@ -163,21 +163,47 @@ class ChatSessionService:
                 return Failure(SessionAccessDenied())
             return Success(agent_session)
 
-    async def get_active_session(
+    async def get_team_primary_session(
         self,
         *,
         agent_id: str,
         user_id: str,
     ) -> Result[AgentSession, EnsureSessionError]:
-        """Ensure active AgentSession of Agent and check access permission.
+        """Ensure team primary AgentSession of Agent and check access permission.
 
         :param agent_id: Agent ID
         :param user_id: Requester user ID
-        :return: active AgentSession on success, error on failure
+        :return: team primary AgentSession on success, error on failure
         """
         return await self.ensure_session(
             EnsureSessionInput(session_id=None, agent_id=agent_id, user_id=user_id)
         )
+
+    async def get_agent_session(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[AgentSession, SessionNotFound]:
+        """Fetch an AgentSession by agent/session pair with 404-safe semantics."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None or agent_session.agent_id != agent_id:
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent_session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionNotFound())
+            return Success(agent_session)
 
     async def list_sessions(
         self, user_id: str, workspace_id: str

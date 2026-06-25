@@ -6,8 +6,8 @@ Email OTP elevation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**code** | **str** | 6-digit authentication code |
-**csrf_token** | **str** | CSRF token |
+**code** | **str** | 6-digit authentication code | 
+**csrf_token** | **str** | CSRF token | 
 
 ## Example
 
@@ -27,3 +27,5 @@ elevate_with_email_request_dict = elevate_with_email_request_instance.to_dict()
 elevate_with_email_request_from_dict = ElevateWithEmailRequest.from_dict(elevate_with_email_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

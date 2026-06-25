@@ -6,8 +6,8 @@ Invitation accept/reject response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Invitation ID |
-**status** | [**InvitationStatus**](InvitationStatus.md) | Changed status |
+**id** | **str** | Invitation ID | 
+**status** | [**InvitationStatus**](InvitationStatus.md) | Changed status | 
 
 ## Example
 
@@ -27,3 +27,5 @@ accept_decline_response_dict = accept_decline_response_instance.to_dict()
 accept_decline_response_from_dict = AcceptDeclineResponse.from_dict(accept_decline_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

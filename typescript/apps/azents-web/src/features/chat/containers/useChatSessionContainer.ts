@@ -1138,7 +1138,7 @@ export function useChatSessionContainer(
   } = props;
 
   // internal sessionId status: mount time of initialSessionId  with start.
-  // /sessions/new response server-assigned sid  update when received.
+  // The canonical session route provides the server-assigned session id.
   // useChatWebSocket  sessionIdRef  with latest value textso with reconnect triggertext text.
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
 

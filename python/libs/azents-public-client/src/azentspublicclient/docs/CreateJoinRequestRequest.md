@@ -6,7 +6,7 @@ Join request creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**message** | **str** |  | [optional]
+**message** | **str** |  | [optional] 
 
 ## Example
 
@@ -26,3 +26,5 @@ create_join_request_request_dict = create_join_request_request_instance.to_dict(
 create_join_request_request_from_dict = CreateJoinRequestRequest.from_dict(create_join_request_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

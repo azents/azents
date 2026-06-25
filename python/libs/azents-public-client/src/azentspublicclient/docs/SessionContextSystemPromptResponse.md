@@ -6,10 +6,10 @@ Session context system prompt analysis response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**agent_prompt** | [**SessionContextSystemPromptFragmentResponse**](SessionContextSystemPromptFragmentResponse.md) |  | [optional]
-**toolkit_prompts** | [**List[SessionContextSystemPromptFragmentResponse]**](SessionContextSystemPromptFragmentResponse.md) | Toolkit prompt fragments |
-**injected_prompts** | [**List[SessionContextSystemPromptFragmentResponse]**](SessionContextSystemPromptFragmentResponse.md) | Turn injected prompt fragments |
-**final_prompt** | [**SessionContextSystemPromptFragmentResponse**](SessionContextSystemPromptFragmentResponse.md) |  | [optional]
+**agent_prompt** | [**SessionContextSystemPromptFragmentResponse**](SessionContextSystemPromptFragmentResponse.md) |  | [optional] 
+**toolkit_prompts** | [**List[SessionContextSystemPromptFragmentResponse]**](SessionContextSystemPromptFragmentResponse.md) | Toolkit prompt fragments | 
+**injected_prompts** | [**List[SessionContextSystemPromptFragmentResponse]**](SessionContextSystemPromptFragmentResponse.md) | Turn injected prompt fragments | 
+**final_prompt** | [**SessionContextSystemPromptFragmentResponse**](SessionContextSystemPromptFragmentResponse.md) |  | [optional] 
 
 ## Example
 
@@ -29,3 +29,5 @@ session_context_system_prompt_response_dict = session_context_system_prompt_resp
 session_context_system_prompt_response_from_dict = SessionContextSystemPromptResponse.from_dict(session_context_system_prompt_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,7 +6,7 @@ LLM Provider Integration list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[LLMProviderIntegrationResponse]**](LLMProviderIntegrationResponse.md) |  |
+**items** | [**List[LLMProviderIntegrationResponse]**](LLMProviderIntegrationResponse.md) |  | 
 
 ## Example
 
@@ -26,3 +26,5 @@ llm_provider_integration_list_response_dict = llm_provider_integration_list_resp
 llm_provider_integration_list_response_from_dict = LLMProviderIntegrationListResponse.from_dict(llm_provider_integration_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

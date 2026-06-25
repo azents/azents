@@ -16,6 +16,7 @@ from azents.core.enums import (
 from azents.engine.events.types import Event
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
+from azents.repos.agent_session.data import AgentSession
 from azents.repos.session_workspace_project.data import (
     SessionWorkspaceProject,
     SessionWorkspaceProjectRegistrationRequest,
@@ -949,6 +950,16 @@ class AgentSessionResponse(BaseModel):
     agent_id: str = Field(description="Agent ID")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
+
+    @classmethod
+    def from_domain(cls, session: AgentSession) -> Self:
+        """Convert from domain model."""
+        return cls(
+            id=session.id,
+            agent_id=session.agent_id,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+        )
 
 
 class AgentSessionListResponse(BaseModel):

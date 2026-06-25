@@ -6,10 +6,10 @@ Workspace response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Workspace name |
-**handle** | **str** | Workspace unique handle |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**name** | **str** | Workspace name | 
+**handle** | **str** | Workspace unique handle | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 
@@ -29,3 +29,5 @@ workspace_response_dict = workspace_response_instance.to_dict()
 workspace_response_from_dict = WorkspaceResponse.from_dict(workspace_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

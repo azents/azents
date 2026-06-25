@@ -6,15 +6,15 @@ Model catalog sync response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**provider** | [**LLMProvider**](LLMProvider.md) |  |
-**catalog_id** | **str** |  |
-**snapshot_id** | **str** |  |
-**visible_count** | **int** |  |
-**hidden_count** | **int** |  |
-**status** | **str** |  |
-**failure_code** | **str** |  |
-**failure_message** | **str** |  |
-**action_hint** | **str** |  |
+**provider** | [**LLMProvider**](LLMProvider.md) |  | 
+**catalog_id** | **str** |  | 
+**snapshot_id** | **str** |  | 
+**visible_count** | **int** |  | 
+**hidden_count** | **int** |  | 
+**status** | **str** |  | 
+**failure_code** | **str** |  | 
+**failure_message** | **str** |  | 
+**action_hint** | **str** |  | 
 
 ## Example
 
@@ -34,3 +34,5 @@ model_catalog_sync_response_dict = model_catalog_sync_response_instance.to_dict(
 model_catalog_sync_response_from_dict = ModelCatalogSyncResponse.from_dict(model_catalog_sync_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

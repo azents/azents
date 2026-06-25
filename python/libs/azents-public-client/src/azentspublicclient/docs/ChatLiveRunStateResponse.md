@@ -6,9 +6,9 @@ Current live run state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**run_id** | **str** | AgentRun ID |
-**phase** | [**AgentRunPhase**](AgentRunPhase.md) | Current run phase |
-**status** | [**AgentRunStatus**](AgentRunStatus.md) | Current run status |
+**run_id** | **str** | AgentRun ID | 
+**phase** | [**AgentRunPhase**](AgentRunPhase.md) | Current run phase | 
+**status** | [**AgentRunStatus**](AgentRunStatus.md) | Current run status | 
 
 ## Example
 
@@ -28,3 +28,5 @@ chat_live_run_state_response_dict = chat_live_run_state_response_instance.to_dic
 chat_live_run_state_response_from_dict = ChatLiveRunStateResponse.from_dict(chat_live_run_state_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

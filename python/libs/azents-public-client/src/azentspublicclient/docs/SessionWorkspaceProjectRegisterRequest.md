@@ -6,7 +6,7 @@ Existing Agent Workspace folder Project registration request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**path** | **str** | Existing directory path under /workspace/agent |
+**path** | **str** | Existing directory path under /workspace/agent | 
 
 ## Example
 
@@ -26,3 +26,5 @@ session_workspace_project_register_request_dict = session_workspace_project_regi
 session_workspace_project_register_request_from_dict = SessionWorkspaceProjectRegisterRequest.from_dict(session_workspace_project_register_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

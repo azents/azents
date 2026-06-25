@@ -47,13 +47,6 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
-    def test_chat_v1_create_session_message(self) -> None:
-        """Test case for chat_v1_create_session_message
-
-        Create Session Message
-        """
-        pass
-
     def test_chat_v1_delete_agent_project(self) -> None:
         """Test case for chat_v1_delete_agent_project
 
@@ -103,10 +96,10 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
-    def test_chat_v1_get_active_agent_session(self) -> None:
-        """Test case for chat_v1_get_active_agent_session
+    def test_chat_v1_get_agent_session(self) -> None:
+        """Test case for chat_v1_get_agent_session
 
-        Get Active Agent Session
+        Get Agent Session
         """
         pass
 
@@ -121,6 +114,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_get_agent_workspace
 
         Get Agent Workspace
+        """
+        pass
+
+    def test_chat_v1_get_team_primary_agent_session(self) -> None:
+        """Test case for chat_v1_get_team_primary_agent_session
+
+        Get Team Primary Agent Session
         """
         pass
 

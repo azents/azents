@@ -167,7 +167,7 @@ class SessionContextRawEvent(BaseModel):
 
 
 class SessionContext(BaseModel):
-    """Agent active session context inspector payload."""
+    """Agent team primary session context inspector payload."""
 
     session: SessionContextSession
     usage: TokenUsagePayload | None
@@ -179,7 +179,7 @@ class SessionContext(BaseModel):
 
 @dataclasses.dataclass
 class SessionContextService:
-    """Agent active session context inspector service."""
+    """Agent team primary session context inspector service."""
 
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
@@ -202,7 +202,7 @@ class SessionContextService:
         user_id: str,
         limit: int,
     ) -> Result[SessionContext, AgentNotFound | NotWorkspaceMember]:
-        """Fetch active session context of Agent accessible by user."""
+        """Fetch team primary session context of Agent accessible by user."""
         bounded_limit = max(1, min(limit, 500))
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
@@ -236,7 +236,7 @@ class SessionContextService:
 
 
 def _empty_context(agent_id: str) -> SessionContext:
-    """Create empty context for Agent without active session."""
+    """Create empty context for Agent without a team primary session."""
     return SessionContext(
         session=SessionContextSession(
             id=None,
@@ -253,17 +253,17 @@ def _empty_context(agent_id: str) -> SessionContext:
 
 
 def _build_context(
-    active_session: AgentSession,
+    primary_session: AgentSession,
     events: list[Event],
 ) -> SessionContext:
     """Build context inspector payload from events."""
     usage = _latest_usage(events)
     return SessionContext(
         session=SessionContextSession(
-            id=active_session.id,
-            agent_id=active_session.agent_id,
-            created_at=active_session.created_at,
-            updated_at=active_session.updated_at,
+            id=primary_session.id,
+            agent_id=primary_session.agent_id,
+            created_at=primary_session.created_at,
+            updated_at=primary_session.updated_at,
         ),
         usage=usage,
         stats=_build_stats(events),

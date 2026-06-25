@@ -6,7 +6,7 @@ AgentSubagent list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[AgentSubagentResponse]**](AgentSubagentResponse.md) |  |
+**items** | [**List[AgentSubagentResponse]**](AgentSubagentResponse.md) |  | 
 
 ## Example
 
@@ -26,3 +26,5 @@ agent_subagent_list_response_dict = agent_subagent_list_response_instance.to_dic
 agent_subagent_list_response_from_dict = AgentSubagentListResponse.from_dict(agent_subagent_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

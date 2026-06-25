@@ -1,6 +1,6 @@
 /* Chat tab view state definition:
  *
- * | viewport | activeSessionId | Rendering method                                 |
+ * | viewport | sessionId | Rendering method                                 |
  * |----------|-----------------|-------------------------------------------|
  * | ≥ lg     | any             | Group flex child (side panel + chat)      |
  * | < lg     | null            | hiddenFrom="lg" → show only session panel      |

@@ -6,8 +6,8 @@ Built-in tool setting to enable on an Agent.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Built-in tool name, for example web_search |
-**config** | **Dict[str, object]** | Per-tool options | [optional]
+**name** | **str** | Built-in tool name, for example web_search | 
+**config** | **Dict[str, object]** | Per-tool options | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ builtin_tool_config_dict = builtin_tool_config_instance.to_dict()
 builtin_tool_config_from_dict = BuiltinToolConfig.from_dict(builtin_tool_config_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

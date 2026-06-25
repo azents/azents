@@ -17,12 +17,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
 from pydantic import StrictStr
-from typing import Optional
 from azentspublicclient.models.git_hub_platform_install_url_response import GitHubPlatformInstallUrlResponse
 from azentspublicclient.models.git_hub_platform_installations_request import GitHubPlatformInstallationsRequest
 from azentspublicclient.models.git_hub_platform_installations_response import GitHubPlatformInstallationsResponse
 from azentspublicclient.models.git_hub_platform_o_auth_url_response import GitHubPlatformOAuthUrlResponse
-from azentspublicclient.models.o_auth_authorize_request import OAuthAuthorizeRequest
 from azentspublicclient.models.o_auth_authorize_response import OAuthAuthorizeResponse
 from azentspublicclient.models.o_auth_exchange_request import OAuthExchangeRequest
 from azentspublicclient.models.test_connection_request import TestConnectionRequest
@@ -47,11 +45,10 @@ class ToolkitOAuthV1Api:
 
 
     @validate_call
-    def toolkit_oauth_v1_authorize(
+    def toolkit_oauth_v1_connect_oauth(
         self,
-        toolkit_config_id: StrictStr,
         handle: StrictStr,
-        o_auth_authorize_request: Optional[OAuthAuthorizeRequest] = None,
+        toolkit_config_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -65,16 +62,14 @@ class ToolkitOAuthV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> OAuthAuthorizeResponse:
-        """Authorize
+        """Connect Oauth
 
-        Create an OAuth2 authorization URL for administrators.  If the body includes credentials/config, store them in DB before starting auth flow. Used to run OAuth tests with unsaved form values.  Requires Toolkit write permission.
+        Create a manager-owned toolkit OAuth authorization URL.  Requires Toolkit write permission.
 
-        :param toolkit_config_id: (required)
-        :type toolkit_config_id: str
         :param handle: (required)
         :type handle: str
-        :param o_auth_authorize_request:
-        :type o_auth_authorize_request: OAuthAuthorizeRequest
+        :param toolkit_config_id: (required)
+        :type toolkit_config_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -97,10 +92,9 @@ class ToolkitOAuthV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._toolkit_oauth_v1_authorize_serialize(
-            toolkit_config_id=toolkit_config_id,
+        _param = self._toolkit_oauth_v1_connect_oauth_serialize(
             handle=handle,
-            o_auth_authorize_request=o_auth_authorize_request,
+            toolkit_config_id=toolkit_config_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -123,11 +117,10 @@ class ToolkitOAuthV1Api:
 
 
     @validate_call
-    def toolkit_oauth_v1_authorize_with_http_info(
+    def toolkit_oauth_v1_connect_oauth_with_http_info(
         self,
-        toolkit_config_id: StrictStr,
         handle: StrictStr,
-        o_auth_authorize_request: Optional[OAuthAuthorizeRequest] = None,
+        toolkit_config_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -141,16 +134,14 @@ class ToolkitOAuthV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> ApiResponse[OAuthAuthorizeResponse]:
-        """Authorize
+        """Connect Oauth
 
-        Create an OAuth2 authorization URL for administrators.  If the body includes credentials/config, store them in DB before starting auth flow. Used to run OAuth tests with unsaved form values.  Requires Toolkit write permission.
+        Create a manager-owned toolkit OAuth authorization URL.  Requires Toolkit write permission.
 
-        :param toolkit_config_id: (required)
-        :type toolkit_config_id: str
         :param handle: (required)
         :type handle: str
-        :param o_auth_authorize_request:
-        :type o_auth_authorize_request: OAuthAuthorizeRequest
+        :param toolkit_config_id: (required)
+        :type toolkit_config_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -173,10 +164,9 @@ class ToolkitOAuthV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._toolkit_oauth_v1_authorize_serialize(
-            toolkit_config_id=toolkit_config_id,
+        _param = self._toolkit_oauth_v1_connect_oauth_serialize(
             handle=handle,
-            o_auth_authorize_request=o_auth_authorize_request,
+            toolkit_config_id=toolkit_config_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -199,11 +189,10 @@ class ToolkitOAuthV1Api:
 
 
     @validate_call
-    def toolkit_oauth_v1_authorize_without_preload_content(
+    def toolkit_oauth_v1_connect_oauth_without_preload_content(
         self,
-        toolkit_config_id: StrictStr,
         handle: StrictStr,
-        o_auth_authorize_request: Optional[OAuthAuthorizeRequest] = None,
+        toolkit_config_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -217,16 +206,14 @@ class ToolkitOAuthV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Authorize
+        """Connect Oauth
 
-        Create an OAuth2 authorization URL for administrators.  If the body includes credentials/config, store them in DB before starting auth flow. Used to run OAuth tests with unsaved form values.  Requires Toolkit write permission.
+        Create a manager-owned toolkit OAuth authorization URL.  Requires Toolkit write permission.
 
-        :param toolkit_config_id: (required)
-        :type toolkit_config_id: str
         :param handle: (required)
         :type handle: str
-        :param o_auth_authorize_request:
-        :type o_auth_authorize_request: OAuthAuthorizeRequest
+        :param toolkit_config_id: (required)
+        :type toolkit_config_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -249,10 +236,9 @@ class ToolkitOAuthV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._toolkit_oauth_v1_authorize_serialize(
-            toolkit_config_id=toolkit_config_id,
+        _param = self._toolkit_oauth_v1_connect_oauth_serialize(
             handle=handle,
-            o_auth_authorize_request=o_auth_authorize_request,
+            toolkit_config_id=toolkit_config_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -270,11 +256,10 @@ class ToolkitOAuthV1Api:
         return response_data.response
 
 
-    def _toolkit_oauth_v1_authorize_serialize(
+    def _toolkit_oauth_v1_connect_oauth_serialize(
         self,
-        toolkit_config_id,
         handle,
-        o_auth_authorize_request,
+        toolkit_config_id,
         _request_auth,
         _content_type,
         _headers,
@@ -296,16 +281,587 @@ class ToolkitOAuthV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
-        if toolkit_config_id is not None:
-            _path_params['toolkit_config_id'] = toolkit_config_id
         if handle is not None:
             _path_params['handle'] = handle
+        if toolkit_config_id is not None:
+            _path_params['toolkit_config_id'] = toolkit_config_id
         # process the query parameters
         # process the header parameters
         # process the form parameters
         # process the body parameter
-        if o_auth_authorize_request is not None:
-            _body_params = o_auth_authorize_request
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/connect',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def toolkit_oauth_v1_disconnect_oauth_connection(
+        self,
+        handle: StrictStr,
+        toolkit_config_id: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> None:
+        """Disconnect Oauth Connection
+
+        Delete a toolkit-level OAuth connection.
+
+        :param handle: (required)
+        :type handle: str
+        :param toolkit_config_id: (required)
+        :type toolkit_config_id: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._toolkit_oauth_v1_disconnect_oauth_connection_serialize(
+            handle=handle,
+            toolkit_config_id=toolkit_config_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '204': None,
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def toolkit_oauth_v1_disconnect_oauth_connection_with_http_info(
+        self,
+        handle: StrictStr,
+        toolkit_config_id: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[None]:
+        """Disconnect Oauth Connection
+
+        Delete a toolkit-level OAuth connection.
+
+        :param handle: (required)
+        :type handle: str
+        :param toolkit_config_id: (required)
+        :type toolkit_config_id: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._toolkit_oauth_v1_disconnect_oauth_connection_serialize(
+            handle=handle,
+            toolkit_config_id=toolkit_config_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '204': None,
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def toolkit_oauth_v1_disconnect_oauth_connection_without_preload_content(
+        self,
+        handle: StrictStr,
+        toolkit_config_id: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Disconnect Oauth Connection
+
+        Delete a toolkit-level OAuth connection.
+
+        :param handle: (required)
+        :type handle: str
+        :param toolkit_config_id: (required)
+        :type toolkit_config_id: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._toolkit_oauth_v1_disconnect_oauth_connection_serialize(
+            handle=handle,
+            toolkit_config_id=toolkit_config_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '204': None,
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _toolkit_oauth_v1_disconnect_oauth_connection_serialize(
+        self,
+        handle,
+        toolkit_config_id,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
+        if toolkit_config_id is not None:
+            _path_params['toolkit_config_id'] = toolkit_config_id
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='DELETE',
+            resource_path='/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/connection',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def toolkit_oauth_v1_exchange_oauth_connection(
+        self,
+        handle: StrictStr,
+        toolkit_config_id: StrictStr,
+        o_auth_exchange_request: OAuthExchangeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> None:
+        """Exchange Oauth Connection
+
+        Exchange authorization code for a toolkit-level OAuth connection.
+
+        :param handle: (required)
+        :type handle: str
+        :param toolkit_config_id: (required)
+        :type toolkit_config_id: str
+        :param o_auth_exchange_request: (required)
+        :type o_auth_exchange_request: OAuthExchangeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._toolkit_oauth_v1_exchange_oauth_connection_serialize(
+            handle=handle,
+            toolkit_config_id=toolkit_config_id,
+            o_auth_exchange_request=o_auth_exchange_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '204': None,
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def toolkit_oauth_v1_exchange_oauth_connection_with_http_info(
+        self,
+        handle: StrictStr,
+        toolkit_config_id: StrictStr,
+        o_auth_exchange_request: OAuthExchangeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[None]:
+        """Exchange Oauth Connection
+
+        Exchange authorization code for a toolkit-level OAuth connection.
+
+        :param handle: (required)
+        :type handle: str
+        :param toolkit_config_id: (required)
+        :type toolkit_config_id: str
+        :param o_auth_exchange_request: (required)
+        :type o_auth_exchange_request: OAuthExchangeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._toolkit_oauth_v1_exchange_oauth_connection_serialize(
+            handle=handle,
+            toolkit_config_id=toolkit_config_id,
+            o_auth_exchange_request=o_auth_exchange_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '204': None,
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def toolkit_oauth_v1_exchange_oauth_connection_without_preload_content(
+        self,
+        handle: StrictStr,
+        toolkit_config_id: StrictStr,
+        o_auth_exchange_request: OAuthExchangeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Exchange Oauth Connection
+
+        Exchange authorization code for a toolkit-level OAuth connection.
+
+        :param handle: (required)
+        :type handle: str
+        :param toolkit_config_id: (required)
+        :type toolkit_config_id: str
+        :param o_auth_exchange_request: (required)
+        :type o_auth_exchange_request: OAuthExchangeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._toolkit_oauth_v1_exchange_oauth_connection_serialize(
+            handle=handle,
+            toolkit_config_id=toolkit_config_id,
+            o_auth_exchange_request=o_auth_exchange_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '204': None,
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _toolkit_oauth_v1_exchange_oauth_connection_serialize(
+        self,
+        handle,
+        toolkit_config_id,
+        o_auth_exchange_request,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
+        if toolkit_config_id is not None:
+            _path_params['toolkit_config_id'] = toolkit_config_id
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+        if o_auth_exchange_request is not None:
+            _body_params = o_auth_exchange_request
 
 
         # set the HTTP header `Accept`
@@ -337,7 +893,7 @@ class ToolkitOAuthV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/authorize',
+            resource_path='/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/exchange',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1174,282 +1730,6 @@ class ToolkitOAuthV1Api:
 
 
     @validate_call
-    def toolkit_oauth_v1_oauth_exchange(
-        self,
-        o_auth_exchange_request: OAuthExchangeRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> None:
-        """Oauth Exchange
-
-        Exchange MCP OAuth2 authorization code for tokens.  Called from the frontend callback page. Authentication is not required; HMAC signature in state verifies the user.
-
-        :param o_auth_exchange_request: (required)
-        :type o_auth_exchange_request: OAuthExchangeRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._toolkit_oauth_v1_oauth_exchange_serialize(
-            o_auth_exchange_request=o_auth_exchange_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def toolkit_oauth_v1_oauth_exchange_with_http_info(
-        self,
-        o_auth_exchange_request: OAuthExchangeRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[None]:
-        """Oauth Exchange
-
-        Exchange MCP OAuth2 authorization code for tokens.  Called from the frontend callback page. Authentication is not required; HMAC signature in state verifies the user.
-
-        :param o_auth_exchange_request: (required)
-        :type o_auth_exchange_request: OAuthExchangeRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._toolkit_oauth_v1_oauth_exchange_serialize(
-            o_auth_exchange_request=o_auth_exchange_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def toolkit_oauth_v1_oauth_exchange_without_preload_content(
-        self,
-        o_auth_exchange_request: OAuthExchangeRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Oauth Exchange
-
-        Exchange MCP OAuth2 authorization code for tokens.  Called from the frontend callback page. Authentication is not required; HMAC signature in state verifies the user.
-
-        :param o_auth_exchange_request: (required)
-        :type o_auth_exchange_request: OAuthExchangeRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._toolkit_oauth_v1_oauth_exchange_serialize(
-            o_auth_exchange_request=o_auth_exchange_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _toolkit_oauth_v1_oauth_exchange_serialize(
-        self,
-        o_auth_exchange_request,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if o_auth_exchange_request is not None:
-            _body_params = o_auth_exchange_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/toolkit/v1/toolkit-oauth/exchange',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
     def toolkit_oauth_v1_test_connection_saved(
         self,
         toolkit_config_id: StrictStr,
@@ -2018,280 +2298,3 @@ class ToolkitOAuthV1Api:
         )
 
 
-
-
-    @validate_call
-    def toolkit_oauth_v1_user_authorize(
-        self,
-        toolkit_config_id: StrictStr,
-        handle: StrictStr,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> OAuthAuthorizeResponse:
-        """User Authorize
-
-        Create an OAuth2 authorization URL for regular users.  Used to continue toolkit OAuth authentication after platform account linking. Requires only WorkspaceMember authentication; TOOLKITS_WRITE permission is not needed. Has no form data storage logic.
-
-        :param toolkit_config_id: (required)
-        :type toolkit_config_id: str
-        :param handle: (required)
-        :type handle: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._toolkit_oauth_v1_user_authorize_serialize(
-            toolkit_config_id=toolkit_config_id,
-            handle=handle,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "OAuthAuthorizeResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def toolkit_oauth_v1_user_authorize_with_http_info(
-        self,
-        toolkit_config_id: StrictStr,
-        handle: StrictStr,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[OAuthAuthorizeResponse]:
-        """User Authorize
-
-        Create an OAuth2 authorization URL for regular users.  Used to continue toolkit OAuth authentication after platform account linking. Requires only WorkspaceMember authentication; TOOLKITS_WRITE permission is not needed. Has no form data storage logic.
-
-        :param toolkit_config_id: (required)
-        :type toolkit_config_id: str
-        :param handle: (required)
-        :type handle: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._toolkit_oauth_v1_user_authorize_serialize(
-            toolkit_config_id=toolkit_config_id,
-            handle=handle,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "OAuthAuthorizeResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def toolkit_oauth_v1_user_authorize_without_preload_content(
-        self,
-        toolkit_config_id: StrictStr,
-        handle: StrictStr,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """User Authorize
-
-        Create an OAuth2 authorization URL for regular users.  Used to continue toolkit OAuth authentication after platform account linking. Requires only WorkspaceMember authentication; TOOLKITS_WRITE permission is not needed. Has no form data storage logic.
-
-        :param toolkit_config_id: (required)
-        :type toolkit_config_id: str
-        :param handle: (required)
-        :type handle: str
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._toolkit_oauth_v1_user_authorize_serialize(
-            toolkit_config_id=toolkit_config_id,
-            handle=handle,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "OAuthAuthorizeResponse",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _toolkit_oauth_v1_user_authorize_serialize(
-        self,
-        toolkit_config_id,
-        handle,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if toolkit_config_id is not None:
-            _path_params['toolkit_config_id'] = toolkit_config_id
-        if handle is not None:
-            _path_params['handle'] = handle
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/oauth/user-authorize',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )

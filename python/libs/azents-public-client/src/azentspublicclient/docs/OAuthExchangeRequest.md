@@ -6,8 +6,8 @@ OAuth2 token exchange request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**code** | **str** | OAuth2 authorization code |
-**state** | **str** | OAuth2 state parameter |
+**code** | **str** | OAuth2 authorization code | 
+**state** | **str** | OAuth2 state parameter | 
 
 ## Example
 
@@ -27,3 +27,5 @@ o_auth_exchange_request_dict = o_auth_exchange_request_instance.to_dict()
 o_auth_exchange_request_from_dict = OAuthExchangeRequest.from_dict(o_auth_exchange_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

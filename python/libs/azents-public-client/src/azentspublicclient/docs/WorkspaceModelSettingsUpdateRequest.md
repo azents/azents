@@ -6,8 +6,8 @@ Workspace model settings update request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**default_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**default_lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
+**default_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**default_lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ workspace_model_settings_update_request_dict = workspace_model_settings_update_r
 workspace_model_settings_update_request_from_dict = WorkspaceModelSettingsUpdateRequest.from_dict(workspace_model_settings_update_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

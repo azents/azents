@@ -61,10 +61,10 @@ __all__ = [
     "AgentRuntimeLifecycleResponse",
     "AgentRuntimeRawStateResponse",
     "AgentRuntimeResponse",
-    "AgentSessionRunState",
     "AgentRuntimeSummaryResponse",
     "AgentSessionListResponse",
     "AgentSessionResponse",
+    "AgentSessionRunState",
     "AgentSubagentCreateRequest",
     "AgentSubagentListResponse",
     "AgentSubagentResponse",
@@ -149,6 +149,8 @@ __all__ = [
     "LLMProviderIntegrationUpdateRequest",
     "LiveEventListResponse",
     "LoginMethodsResponse",
+    "MCPOAuthConnectionStatus",
+    "MCPOAuthConnectionSummaryResponse",
     "MeResponse",
     "ModelBuiltInToolCapabilities",
     "ModelCapabilities",
@@ -166,7 +168,6 @@ __all__ = [
     "ModelReasoningEffort",
     "ModelToolCallingCapabilities",
     "MyJoinRequestResponse",
-    "OAuthAuthorizeRequest",
     "OAuthAuthorizeResponse",
     "OAuthExchangeRequest",
     "PATStatusResponse",
@@ -301,10 +302,10 @@ from azentspublicclient.models.agent_runtime_failure_response import AgentRuntim
 from azentspublicclient.models.agent_runtime_lifecycle_response import AgentRuntimeLifecycleResponse as AgentRuntimeLifecycleResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse as AgentRuntimeRawStateResponse
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse as AgentRuntimeResponse
-from azentspublicclient.models.agent_session_run_state import AgentSessionRunState as AgentSessionRunState
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse as AgentRuntimeSummaryResponse
 from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse as AgentSessionListResponse
 from azentspublicclient.models.agent_session_response import AgentSessionResponse as AgentSessionResponse
+from azentspublicclient.models.agent_session_run_state import AgentSessionRunState as AgentSessionRunState
 from azentspublicclient.models.agent_subagent_create_request import AgentSubagentCreateRequest as AgentSubagentCreateRequest
 from azentspublicclient.models.agent_subagent_list_response import AgentSubagentListResponse as AgentSubagentListResponse
 from azentspublicclient.models.agent_subagent_response import AgentSubagentResponse as AgentSubagentResponse
@@ -389,6 +390,8 @@ from azentspublicclient.models.llm_provider_integration_response import LLMProvi
 from azentspublicclient.models.llm_provider_integration_update_request import LLMProviderIntegrationUpdateRequest as LLMProviderIntegrationUpdateRequest
 from azentspublicclient.models.live_event_list_response import LiveEventListResponse as LiveEventListResponse
 from azentspublicclient.models.login_methods_response import LoginMethodsResponse as LoginMethodsResponse
+from azentspublicclient.models.mcpo_auth_connection_status import MCPOAuthConnectionStatus as MCPOAuthConnectionStatus
+from azentspublicclient.models.mcpo_auth_connection_summary_response import MCPOAuthConnectionSummaryResponse as MCPOAuthConnectionSummaryResponse
 from azentspublicclient.models.me_response import MeResponse as MeResponse
 from azentspublicclient.models.model_built_in_tool_capabilities import ModelBuiltInToolCapabilities as ModelBuiltInToolCapabilities
 from azentspublicclient.models.model_capabilities import ModelCapabilities as ModelCapabilities
@@ -406,7 +409,6 @@ from azentspublicclient.models.model_reasoning_capabilities import ModelReasonin
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort as ModelReasoningEffort
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities as ModelToolCallingCapabilities
 from azentspublicclient.models.my_join_request_response import MyJoinRequestResponse as MyJoinRequestResponse
-from azentspublicclient.models.o_auth_authorize_request import OAuthAuthorizeRequest as OAuthAuthorizeRequest
 from azentspublicclient.models.o_auth_authorize_response import OAuthAuthorizeResponse as OAuthAuthorizeResponse
 from azentspublicclient.models.o_auth_exchange_request import OAuthExchangeRequest as OAuthExchangeRequest
 from azentspublicclient.models.pat_status_response import PATStatusResponse as PATStatusResponse
@@ -491,3 +493,4 @@ from azentspublicclient.models.workspace_user_list_response import WorkspaceUser
 from azentspublicclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
 from azentspublicclient.models.ws_ticket_response import WsTicketResponse as WsTicketResponse
+

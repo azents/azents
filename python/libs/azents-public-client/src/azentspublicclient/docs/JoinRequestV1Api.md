@@ -51,8 +51,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.JoinRequestV1Api(api_client)
-    join_request_id = 'join_request_id_example' # str |
-    handle = 'handle_example' # str |
+    join_request_id = 'join_request_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Approve Join Request
@@ -70,8 +70,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **join_request_id** | **str**|  |
- **handle** | **str**|  |
+ **join_request_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -135,8 +135,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.JoinRequestV1Api(api_client)
-    handle = 'handle_example' # str |
-    create_join_request_request = azentspublicclient.CreateJoinRequestRequest() # CreateJoinRequestRequest |
+    handle = 'handle_example' # str | 
+    create_join_request_request = azentspublicclient.CreateJoinRequestRequest() # CreateJoinRequestRequest | 
 
     try:
         # Create Join Request
@@ -154,8 +154,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **create_join_request_request** | [**CreateJoinRequestRequest**](CreateJoinRequestRequest.md)|  |
+ **handle** | **str**|  | 
+ **create_join_request_request** | [**CreateJoinRequestRequest**](CreateJoinRequestRequest.md)|  | 
 
 ### Return type
 
@@ -217,8 +217,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.JoinRequestV1Api(api_client)
-    join_request_id = 'join_request_id_example' # str |
-    handle = 'handle_example' # str |
+    join_request_id = 'join_request_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Delete Join Request
@@ -234,8 +234,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **join_request_id** | **str**|  |
- **handle** | **str**|  |
+ **join_request_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -296,7 +296,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.JoinRequestV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # Get My Join Request
@@ -314,7 +314,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -377,7 +377,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.JoinRequestV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # List Join Requests
@@ -395,7 +395,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -457,8 +457,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.JoinRequestV1Api(api_client)
-    join_request_id = 'join_request_id_example' # str |
-    handle = 'handle_example' # str |
+    join_request_id = 'join_request_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Mute Join Request
@@ -476,8 +476,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **join_request_id** | **str**|  |
- **handle** | **str**|  |
+ **join_request_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -539,8 +539,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.JoinRequestV1Api(api_client)
-    join_request_id = 'join_request_id_example' # str |
-    handle = 'handle_example' # str |
+    join_request_id = 'join_request_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Reject Join Request
@@ -558,8 +558,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **join_request_id** | **str**|  |
- **handle** | **str**|  |
+ **join_request_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -582,3 +582,4 @@ Name | Type | Description  | Notes
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
