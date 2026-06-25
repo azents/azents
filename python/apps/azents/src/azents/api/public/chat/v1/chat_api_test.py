@@ -394,7 +394,6 @@ class _RestWriteIdempotencyService:
         )
         return AcceptedEditInput(
             request=AcceptedChatWriteRequest(
-                agent_runtime_id="1123456789abcdef0123456789abcdef",
                 session_id=str(kwargs["session_id"]),
                 record=record,
                 created=self.created,
@@ -415,7 +414,6 @@ class _RestWriteIdempotencyService:
         )
         return AcceptedPendingCommand(
             request=AcceptedChatWriteRequest(
-                agent_runtime_id="1123456789abcdef0123456789abcdef",
                 session_id=str(kwargs["session_id"]),
                 record=record,
                 created=self.created,
@@ -433,7 +431,6 @@ class _RestWriteIdempotencyService:
         """Create an idempotency record for tests."""
         record = ChatWriteRequest(
             id="write-request-1",
-            agent_runtime_id="1123456789abcdef0123456789abcdef",
             session_id=str(kwargs["session_id"]),
             user_id=str(kwargs["user_id"]),
             client_request_id=str(kwargs["client_request_id"]),

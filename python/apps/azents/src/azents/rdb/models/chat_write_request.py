@@ -43,11 +43,6 @@ class RDBChatWriteRequest(RDBModel):
         init=False,
         default_factory=lambda: uuid7().hex,
     )
-    agent_runtime_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_runtimes.id", ondelete="CASCADE"),
-        nullable=False,
-    )
     session_id: Mapped[str] = mapped_column(
         sa.String(32),
         sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
@@ -78,11 +73,11 @@ class RDBChatWriteRequest(RDBModel):
     )
 
     IX_SESSION_ID = sa.Index("ix_chat_write_requests_session_id", "session_id")
-    UQ_RUNTIME_USER_CLIENT_REQUEST = sa.UniqueConstraint(
-        "agent_runtime_id",
+    UQ_SESSION_USER_CLIENT_REQUEST = sa.UniqueConstraint(
+        "session_id",
         "user_id",
         "client_request_id",
-        name="uq_chat_write_requests_runtime_user_client_request",
+        name="uq_chat_write_requests_session_user_client_request",
     )
 
-    __table_args__ = (IX_SESSION_ID, UQ_RUNTIME_USER_CLIENT_REQUEST)
+    __table_args__ = (IX_SESSION_ID, UQ_SESSION_USER_CLIENT_REQUEST)

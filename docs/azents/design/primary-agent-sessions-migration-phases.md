@@ -128,7 +128,8 @@ Make `AgentSession` an agent-owned model, not a runtime child.
 
 Phase 4-A removes `agent_sessions.agent_runtime_id`, deletes runtime-owned active/rotate session
 repository APIs, and treats `AgentSession.model_input_head_event_id` as the event transcript head.
-Runtime-scoped project registration and REST write idempotency remain as follow-up ownership cleanup.
+Phase 4-B migrates REST write idempotency from `AgentRuntime` ownership to `AgentSession` ownership.
+Runtime-scoped project registration is handled in Phase 5.
 
 ## Phase 5: Session-owned projects
 

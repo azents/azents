@@ -1,7 +1,6 @@
 """REST chat write service tests."""
 
 import datetime
-from typing import cast
 
 import sqlalchemy as sa
 from azcommon.result import Success
@@ -22,7 +21,6 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
@@ -102,7 +100,6 @@ def _service(
         event_transcript_repository=EventTranscriptRepository(),
     )
     return ChatWriteService(
-        agent_runtime_repository=AgentRuntimeRepository(),
         agent_session_repository=AgentSessionRepository(),
         chat_write_request_repository=ChatWriteRequestRepository(),
         message_repository=MessageRepository(),
@@ -142,7 +139,6 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
         return (
             ChatWriteRequest(
                 id="write-request-1",
-                agent_runtime_id=create.agent_runtime_id,
                 session_id=self.existing_session_id,
                 user_id=create.user_id,
                 client_request_id=create.client_request_id,
@@ -160,39 +156,41 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
 class TestChatWriteService:
     """REST chat write service behavior."""
 
-    async def test_idempotency_record_for_another_session_is_rejected(self) -> None:
+    async def test_idempotency_record_for_another_session_is_rejected(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
         """Reject existing idempotency records from another explicit session."""
         service = ChatWriteService(
-            agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             chat_write_request_repository=_ExistingWriteRequestRepository(
                 "2223456789abcdef0123456789abcdef"
             ),
             message_repository=MessageRepository(),
             input_buffer_service=InputBufferService(
-                session_manager=cast(SessionManager[AsyncSession], object()),
+                session_manager=rdb_session_manager,
                 input_buffer_repository=InputBufferRepository(),
                 exchange_file_service=_ExchangeFileService(),
                 model_file_service=_ModelFileService(),
                 agent_session_repository=AgentSessionRepository(),
                 event_transcript_repository=EventTranscriptRepository(),
             ),
-            session_manager=cast(SessionManager[AsyncSession], object()),
+            session_manager=rdb_session_manager,
         )
 
         try:
-            await service._create_idempotent_record(  # pyright: ignore[reportPrivateUsage]  # Pin explicit-session idempotency guard directly.
-                cast(AsyncSession, object()),
-                runtime_id="1123456789abcdef0123456789abcdef",
-                session_id="3333456789abcdef0123456789abcdef",
-                user_id="user-1",
-                client_request_id="same-client-request",
-                write_type=ChatWriteRequestType.COMMAND,
-                accepted_type=ChatWriteRequestType.COMMAND,
-                accepted_id="command-1",
-                history_reload_required=True,
-                payload={"command": "compact"},
-            )
+            async with rdb_session_manager() as session:
+                await service._create_idempotent_record(  # pyright: ignore[reportPrivateUsage]  # Pin explicit-session idempotency guard directly.
+                    session,
+                    session_id="3333456789abcdef0123456789abcdef",
+                    user_id="user-1",
+                    client_request_id="same-client-request",
+                    write_type=ChatWriteRequestType.COMMAND,
+                    accepted_type=ChatWriteRequestType.COMMAND,
+                    accepted_id="command-1",
+                    history_reload_required=True,
+                    payload={"command": "compact"},
+                )
         except ValueError as exc:
             assert str(exc) == "Client request ID already used for another session"
         else:
@@ -210,15 +208,11 @@ class TestChatWriteService:
             )
             user_id = await _create_user(session, "chat-write-edit-head@example.com")
             agent_id = await _create_agent(session, workspace_id, "chat-write-edit")
-            runtime = await AgentRuntimeRepository().ensure_for_agent(
-                session,
-                agent_id,
-            )
             agent_session = (
                 await AgentSessionRepository().ensure_team_primary_for_agent(
                     session,
-                    workspace_id=runtime.workspace_id,
-                    agent_id=runtime.agent_id,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
                 )
             )
             transcript_repo = EventTranscriptRepository()
@@ -285,11 +279,11 @@ class TestChatWriteService:
             assert session_after is not None
             assert session_after.run_state == AgentSessionRunState.RUNNING
 
-    async def test_idempotent_command_rejects_retry_from_another_session(
+    async def test_idempotent_command_key_is_session_scoped(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Do not return another session's idempotent write record."""
+        """Allow the same client request ID in a different explicit session."""
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(
                 session,
@@ -304,12 +298,10 @@ class TestChatWriteService:
                 workspace_id,
                 "chat-write-idempotent-session",
             )
-            runtime = await AgentRuntimeRepository().ensure_for_agent(
-                session,
-                agent_id,
-            )
             first = await AgentSessionRepository().ensure_team_primary_for_agent(
-                session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
             )
 
         service = _service(rdb_session_manager)
@@ -333,16 +325,15 @@ class TestChatWriteService:
                 ),
             )
 
-        try:
-            await service.create_idempotent_pending_command(
-                agent_id=agent_id,
-                session_id=second.id,
-                user_id=user_id,
-                client_request_id="same-client-request",
-                command_name="compact",
-                payload=payload,
-            )
-        except ValueError as exc:
-            assert str(exc) == "Client request ID already used for another session"
-        else:
-            raise AssertionError("Expected ValueError")
+        result = await service.create_idempotent_pending_command(
+            agent_id=agent_id,
+            session_id=second.id,
+            user_id=user_id,
+            client_request_id="same-client-request",
+            command_name="compact",
+            payload=payload,
+        )
+
+        assert result.request.created is True
+        assert result.request.session_id == second.id
+        assert result.command_id is not None
