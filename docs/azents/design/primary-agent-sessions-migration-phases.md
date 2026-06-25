@@ -150,6 +150,13 @@ Move project registrations into session working context.
 - Runtime has no current project or project catalog ownership role.
 - The team primary session contains the agent's initial project working context.
 
+### Implementation Status
+
+Phase 5-A migrates `session_workspace_projects` and project registration requests from
+`AgentRuntime` ownership to `AgentSession` ownership. Existing agent-scoped project routes remain as
+team-primary compatibility entrypoints during this phase, while Runtime lookup is kept only for
+physical workspace validation and runner filesystem operations.
+
 ## Phase 6: URL-selected Web session
 
 ### Goal

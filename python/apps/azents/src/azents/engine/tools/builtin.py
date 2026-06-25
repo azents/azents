@@ -607,7 +607,7 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
         if self._excluded_tools:
             tools = [t for t in tools if t.spec.name not in self._excluded_tools]
 
-        projects = await self._load_projects(agent_id=runtime_agent_id)
+        projects = await self._load_projects(session_id=self._session_id)
         self._last_projects = projects
         agents_prompt = await self._load_project_agents_prompt(file_ss, projects)
         prompt = self._render_config_prompt(
@@ -622,23 +622,19 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
     async def _load_projects(
         self,
         *,
-        agent_id: str,
+        session_id: str,
     ) -> list[SessionWorkspaceProject]:
-        """Fetch Project list registered to AgentRuntime."""
+        """Fetch Project list registered to AgentSession."""
         if (
-            not agent_id
+            not session_id
             or self._session_manager is None
-            or self._agent_runtime_repo is None
             or self._project_repo is None
         ):
             return []
         async with self._session_manager() as session:
-            runtime = await self._agent_runtime_repo.get_by_agent_id(session, agent_id)
-            if runtime is None:
-                return []
             return await self._project_repo.list_projects(
                 session,
-                agent_runtime_id=runtime.id,
+                session_id=session_id,
             )
 
     def _render_config_prompt(

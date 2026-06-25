@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import LLMProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -23,8 +23,8 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_runtime(session: AsyncSession, workspace_id: str, slug: str) -> str:
-    """Create AgentRuntime for tests."""
+async def _create_session(session: AsyncSession, workspace_id: str, slug: str) -> str:
+    """Create AgentSession for tests."""
 
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -53,8 +53,12 @@ async def _create_runtime(session: AsyncSession, workspace_id: str, slug: str) -
     session.add(agent)
     await session.flush()
 
-    runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent.id)
-    return runtime.id
+    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+        session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+    )
+    return agent_session.id
 
 
 class TestSessionWorkspaceProjectRepository:
@@ -63,44 +67,44 @@ class TestSessionWorkspaceProjectRepository:
     async def test_create_and_list_projects(self, rdb_session: AsyncSession) -> None:
         """Create Project and fetch in path order."""
         workspace_id = await _create_workspace(rdb_session, "swp-list")
-        runtime_id = await _create_runtime(rdb_session, workspace_id, "swp-list")
+        session_id = await _create_session(rdb_session, workspace_id, "swp-list")
         repo = SessionWorkspaceProjectRepository()
 
         second = await repo.create_project(
             rdb_session,
             SessionWorkspaceProjectCreate(
-                agent_runtime_id=runtime_id,
+                session_id=session_id,
                 path="/workspace/agent/backend",
             ),
         )
         first = await repo.create_project(
             rdb_session,
             SessionWorkspaceProjectCreate(
-                agent_runtime_id=runtime_id,
+                session_id=session_id,
                 path="/workspace/agent/api",
             ),
         )
 
-        projects = await repo.list_projects(rdb_session, agent_runtime_id=runtime_id)
+        projects = await repo.list_projects(rdb_session, session_id=session_id)
 
         assert [project.id for project in projects] == [first.id, second.id]
 
     async def test_get_project_by_path(self, rdb_session: AsyncSession) -> None:
-        """Fetch Project by AgentRuntime and path."""
+        """Fetch Project by AgentSession and path."""
         workspace_id = await _create_workspace(rdb_session, "swp-by-path")
-        runtime_id = await _create_runtime(rdb_session, workspace_id, "swp-by-path")
+        session_id = await _create_session(rdb_session, workspace_id, "swp-by-path")
         repo = SessionWorkspaceProjectRepository()
         project = await repo.create_project(
             rdb_session,
             SessionWorkspaceProjectCreate(
-                agent_runtime_id=runtime_id,
+                session_id=session_id,
                 path="/workspace/agent/lookup",
             ),
         )
 
         loaded = await repo.get_project_by_path(
             rdb_session,
-            agent_runtime_id=runtime_id,
+            session_id=session_id,
             path="/workspace/agent/lookup",
         )
 
@@ -110,12 +114,12 @@ class TestSessionWorkspaceProjectRepository:
     async def test_delete_project(self, rdb_session: AsyncSession) -> None:
         """Delete Project row."""
         workspace_id = await _create_workspace(rdb_session, "swp-delete")
-        runtime_id = await _create_runtime(rdb_session, workspace_id, "swp-delete")
+        session_id = await _create_session(rdb_session, workspace_id, "swp-delete")
         repo = SessionWorkspaceProjectRepository()
         project = await repo.create_project(
             rdb_session,
             SessionWorkspaceProjectCreate(
-                agent_runtime_id=runtime_id,
+                session_id=session_id,
                 path="/workspace/agent/delete-me",
             ),
         )
@@ -123,7 +127,7 @@ class TestSessionWorkspaceProjectRepository:
         deleted = await repo.delete_project(
             rdb_session,
             project.id,
-            agent_runtime_id=runtime_id,
+            session_id=session_id,
         )
         loaded = await repo.get_project_by_id(rdb_session, project.id)
 

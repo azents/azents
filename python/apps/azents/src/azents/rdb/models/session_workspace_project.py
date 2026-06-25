@@ -28,23 +28,23 @@ session_workspace_project_registration_request_status_enum = ENUM(
 
 
 class RDBSessionWorkspaceProject(RDBModel):
-    """Project registered from an existing AgentRuntime folder."""
+    """Project registered for an AgentSession working context."""
 
     __tablename__ = "session_workspace_projects"
 
-    UQ_RUNTIME_PATH = sa.UniqueConstraint(
-        "agent_runtime_id",
+    UQ_SESSION_PATH = sa.UniqueConstraint(
+        "session_id",
         "path",
-        name="uq_session_workspace_projects_runtime_path",
+        name="uq_session_workspace_projects_session_path",
     )
-    IX_AGENT_RUNTIME_ID = sa.Index(
-        "ix_session_workspace_projects_agent_runtime_id",
-        "agent_runtime_id",
+    IX_SESSION_ID = sa.Index(
+        "ix_session_workspace_projects_session_id",
+        "session_id",
     )
 
-    agent_runtime_id: Mapped[str] = mapped_column(
+    session_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agent_runtimes.id", ondelete="CASCADE"),
+        sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
     path: Mapped[str] = mapped_column(sa.Text, nullable=False)
@@ -67,7 +67,7 @@ class RDBSessionWorkspaceProject(RDBModel):
         onupdate=sa.func.now(),
     )
 
-    __table_args__ = (UQ_RUNTIME_PATH, IX_AGENT_RUNTIME_ID)
+    __table_args__ = (UQ_SESSION_PATH, IX_SESSION_ID)
 
 
 class RDBSessionWorkspaceProjectRegistrationRequest(RDBModel):
@@ -75,9 +75,9 @@ class RDBSessionWorkspaceProjectRegistrationRequest(RDBModel):
 
     __tablename__ = "session_workspace_project_registration_requests"
 
-    IX_RUNTIME_STATUS = sa.Index(
-        "ix_swp_registration_requests_runtime_status",
-        "agent_runtime_id",
+    IX_SESSION_STATUS = sa.Index(
+        "ix_swp_registration_requests_session_status",
+        "session_id",
         "status",
     )
     IX_PROJECT_ID = sa.Index(
@@ -85,9 +85,9 @@ class RDBSessionWorkspaceProjectRegistrationRequest(RDBModel):
         "project_id",
     )
 
-    agent_runtime_id: Mapped[str] = mapped_column(
+    session_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agent_runtimes.id", ondelete="CASCADE"),
+        sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
     path: Mapped[str] = mapped_column(sa.Text, nullable=False)
@@ -123,9 +123,9 @@ class RDBSessionWorkspaceProjectRegistrationRequest(RDBModel):
         onupdate=sa.func.now(),
     )
 
-    IX_PENDING_PATH = sa.Index(
-        "ix_swp_registration_requests_pending_path",
-        "agent_runtime_id",
+    IX_PENDING_SESSION_PATH = sa.Index(
+        "ix_swp_registration_requests_pending_session_path",
+        "session_id",
         "path",
         unique=True,
         postgresql_where=(
@@ -133,4 +133,4 @@ class RDBSessionWorkspaceProjectRegistrationRequest(RDBModel):
         ),
     )
 
-    __table_args__ = (IX_RUNTIME_STATUS, IX_PENDING_PATH, IX_PROJECT_ID)
+    __table_args__ = (IX_SESSION_STATUS, IX_PENDING_SESSION_PATH, IX_PROJECT_ID)

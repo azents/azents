@@ -479,7 +479,7 @@ def _make_project(*, path: str) -> SessionWorkspaceProject:
     now = datetime.now(UTC)
     return SessionWorkspaceProject(
         id=f"project-{path.rsplit('/', maxsplit=1)[-1]}",
-        agent_runtime_id="runtime-1",
+        session_id="session-1",
         path=path,
         created_at=now,
         updated_at=now,

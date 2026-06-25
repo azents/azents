@@ -19,6 +19,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import (
     SessionWorkspaceProject,
@@ -81,9 +82,11 @@ class ProjectAccessDenied:
 
 
 @dataclasses.dataclass(frozen=True)
-class AccessibleProjectRuntime:
-    """AgentRuntime context accessible by user."""
+class AccessibleProjectContext:
+    """Project context accessible by user."""
 
+    agent_id: str
+    session_id: str
     agent_runtime_id: str
     workspace_id: str
 
@@ -149,6 +152,10 @@ class SessionWorkspaceProjectService:
         AgentRuntimeRepository,
         Depends(AgentRuntimeRepository),
     ]
+    agent_session_repository: Annotated[
+        AgentSessionRepository,
+        Depends(AgentSessionRepository),
+    ]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository,
         Depends(WorkspaceUserRepository),
@@ -164,12 +171,12 @@ class SessionWorkspaceProjectService:
     async def create_project(
         self,
         *,
-        agent_runtime_id: str,
+        session_id: str,
         path: str,
     ) -> Result[SessionWorkspaceProject, ProjectCreateError]:
         """Create Project registry row."""
         normalized_result = await self._validate_project_path(
-            agent_runtime_id=agent_runtime_id,
+            session_id=session_id,
             path=path,
         )
         match normalized_result:
@@ -181,7 +188,7 @@ class SessionWorkspaceProjectService:
             project = await self.repository.create_project(
                 session,
                 SessionWorkspaceProjectCreate(
-                    agent_runtime_id=agent_runtime_id,
+                    session_id=session_id,
                     path=normalized_path,
                 ),
             )
@@ -200,6 +207,15 @@ class SessionWorkspaceProjectService:
     ]:
         """Agent requests Project registration approval from user."""
         async with self.session_manager() as session:
+            context_result = await self._get_accessible_project_context_for_agent(
+                session,
+                agent_id=agent_id,
+            )
+            match context_result:
+                case Success(context):
+                    pass
+                case Failure(error):
+                    return Failure(error)
             runtime = await self.agent_runtime_repository.get_by_agent_id(
                 session,
                 agent_id,
@@ -208,7 +224,7 @@ class SessionWorkspaceProjectService:
                 return Failure(AgentNotFound())
             validation = await self._validate_project_path_in_session(
                 session,
-                agent_runtime_id=runtime.id,
+                session_id=context.session_id,
                 path=path,
             )
             match validation:
@@ -233,7 +249,7 @@ class SessionWorkspaceProjectService:
                 )
             existing = await self.repository.get_pending_registration_request_by_path(
                 session,
-                agent_runtime_id=runtime.id,
+                session_id=context.session_id,
                 path=normalized_path,
             )
             if existing is not None:
@@ -241,7 +257,7 @@ class SessionWorkspaceProjectService:
             request = await self.repository.create_registration_request(
                 session,
                 SessionWorkspaceProjectRegistrationRequestCreate(
-                    agent_runtime_id=runtime.id,
+                    session_id=context.session_id,
                     path=normalized_path,
                     reason=request_reason,
                 ),
@@ -258,19 +274,19 @@ class SessionWorkspaceProjectService:
     ) -> Result[SessionWorkspaceProject, ProjectFolderRegistrationError]:
         """Register existing directory in Agent Workspace as Project."""
         async with self.session_manager() as session:
-            runtime_result = await self._get_accessible_runtime(
+            context_result = await self._get_accessible_project_context(
                 session,
                 agent_id=agent_id,
                 user_id=user_id,
             )
-            match runtime_result:
+            match context_result:
                 case Success(context):
                     pass
                 case Failure(error):
                     return Failure(error)
             validation = await self._validate_project_path_in_session(
                 session,
-                agent_runtime_id=context.agent_runtime_id,
+                session_id=context.session_id,
                 path=path,
             )
             match validation:
@@ -297,7 +313,7 @@ class SessionWorkspaceProjectService:
             project = await self.repository.create_project(
                 session,
                 SessionWorkspaceProjectCreate(
-                    agent_runtime_id=context.agent_runtime_id,
+                    session_id=context.session_id,
                     path=normalized_path,
                 ),
             )
@@ -312,19 +328,19 @@ class SessionWorkspaceProjectService:
     ) -> Result[list[SessionWorkspaceProjectRegistrationRequest], ProjectAccessError]:
         """Fetch Project registration request of Agent accessible by user."""
         async with self.session_manager() as session:
-            runtime_result = await self._get_accessible_runtime(
+            context_result = await self._get_accessible_project_context(
                 session,
                 agent_id=agent_id,
                 user_id=user_id,
             )
-            match runtime_result:
+            match context_result:
                 case Success(context):
                     pass
                 case Failure(error):
                     return Failure(error)
             requests = await self.repository.list_registration_requests(
                 session,
-                agent_runtime_id=context.agent_runtime_id,
+                session_id=context.session_id,
             )
             return Success(requests)
 
@@ -337,12 +353,12 @@ class SessionWorkspaceProjectService:
     ) -> Result[SessionWorkspaceProject, ProjectRegistrationRequestError]:
         """User approves Agent Project registration request."""
         async with self.session_manager() as session:
-            runtime_result = await self._get_accessible_runtime(
+            context_result = await self._get_accessible_project_context(
                 session,
                 agent_id=agent_id,
                 user_id=user_id,
             )
-            match runtime_result:
+            match context_result:
                 case Success(context):
                     pass
                 case Failure(error):
@@ -351,7 +367,7 @@ class SessionWorkspaceProjectService:
                 session,
                 request_id,
             )
-            if request is None or request.agent_runtime_id != context.agent_runtime_id:
+            if request is None or request.session_id != context.session_id:
                 return Failure(RegistrationRequestNotFound())
             if (
                 request.status
@@ -360,7 +376,7 @@ class SessionWorkspaceProjectService:
                 return Failure(RegistrationRequestAlreadyResolved())
             validation = await self._validate_project_path_in_session(
                 session,
-                agent_runtime_id=context.agent_runtime_id,
+                session_id=context.session_id,
                 path=request.path,
             )
             match validation:
@@ -387,21 +403,21 @@ class SessionWorkspaceProjectService:
             project = await self.repository.create_project(
                 session,
                 SessionWorkspaceProjectCreate(
-                    agent_runtime_id=context.agent_runtime_id,
+                    session_id=context.session_id,
                     path=normalized_path,
                 ),
             )
             updated = await self.repository.mark_registration_request_approved(
                 session,
                 request_id,
-                agent_runtime_id=context.agent_runtime_id,
+                session_id=context.session_id,
                 project_id=project.id,
             )
             if not updated:
                 await self.repository.delete_project(
                     session,
                     project.id,
-                    agent_runtime_id=context.agent_runtime_id,
+                    session_id=context.session_id,
                 )
                 return Failure(RegistrationRequestAlreadyResolved())
             await session.commit()
@@ -421,12 +437,12 @@ class SessionWorkspaceProjectService:
     ]:
         """User rejects Agent Project registration request."""
         async with self.session_manager() as session:
-            runtime_result = await self._get_accessible_runtime(
+            context_result = await self._get_accessible_project_context(
                 session,
                 agent_id=agent_id,
                 user_id=user_id,
             )
-            match runtime_result:
+            match context_result:
                 case Success(context):
                     pass
                 case Failure(error):
@@ -435,7 +451,7 @@ class SessionWorkspaceProjectService:
                 session,
                 request_id,
             )
-            if request is None or request.agent_runtime_id != context.agent_runtime_id:
+            if request is None or request.session_id != context.session_id:
                 return Failure(RegistrationRequestNotFound())
             if (
                 request.status
@@ -445,7 +461,7 @@ class SessionWorkspaceProjectService:
             updated = await self.repository.mark_registration_request_rejected(
                 session,
                 request_id,
-                agent_runtime_id=context.agent_runtime_id,
+                session_id=context.session_id,
             )
             if not updated:
                 return Failure(RegistrationRequestAlreadyResolved())
@@ -455,13 +471,13 @@ class SessionWorkspaceProjectService:
     async def list_projects(
         self,
         *,
-        agent_runtime_id: str,
+        session_id: str,
     ) -> list[SessionWorkspaceProject]:
-        """Return Project list of AgentRuntime."""
+        """Return Project list of AgentSession."""
         async with self.session_manager() as session:
             return await self.repository.list_projects(
                 session,
-                agent_runtime_id=agent_runtime_id,
+                session_id=session_id,
             )
 
     async def list_projects_for_agent(
@@ -472,26 +488,26 @@ class SessionWorkspaceProjectService:
     ) -> Result[list[SessionWorkspaceProject], ProjectAccessError]:
         """Fetch Project list of Agent accessible by user."""
         async with self.session_manager() as session:
-            runtime_result = await self._get_accessible_runtime(
+            context_result = await self._get_accessible_project_context(
                 session,
                 agent_id=agent_id,
                 user_id=user_id,
             )
-            match runtime_result:
+            match context_result:
                 case Success(context):
                     pass
                 case Failure(error):
                     return Failure(error)
             projects = await self.repository.list_projects(
                 session,
-                agent_runtime_id=context.agent_runtime_id,
+                session_id=context.session_id,
             )
             return Success(projects)
 
     async def delete_project(
         self,
         *,
-        agent_runtime_id: str,
+        session_id: str,
         project_id: str,
     ) -> Result[None, ProjectNotFound]:
         """Delete only Project registry row."""
@@ -499,7 +515,7 @@ class SessionWorkspaceProjectService:
             deleted = await self.repository.delete_project(
                 session,
                 project_id,
-                agent_runtime_id=agent_runtime_id,
+                session_id=session_id,
             )
             if not deleted:
                 return Failure(ProjectNotFound())
@@ -515,12 +531,12 @@ class SessionWorkspaceProjectService:
     ) -> Result[None, ProjectAccessError | ProjectNotFound]:
         """Delete Project registry row of Agent accessible by user."""
         async with self.session_manager() as session:
-            runtime_result = await self._get_accessible_runtime(
+            context_result = await self._get_accessible_project_context(
                 session,
                 agent_id=agent_id,
                 user_id=user_id,
             )
-            match runtime_result:
+            match context_result:
                 case Success(context):
                     pass
                 case Failure(error):
@@ -528,7 +544,7 @@ class SessionWorkspaceProjectService:
             deleted = await self.repository.delete_project(
                 session,
                 project_id,
-                agent_runtime_id=context.agent_runtime_id,
+                session_id=context.session_id,
             )
             if not deleted:
                 return Failure(ProjectNotFound())
@@ -538,14 +554,14 @@ class SessionWorkspaceProjectService:
     async def _validate_project_path(
         self,
         *,
-        agent_runtime_id: str,
+        session_id: str,
         path: str,
     ) -> Result[str, InvalidProjectPath | ProjectPathConflict]:
         """Validate Project path contract and existing Project conflicts."""
         async with self.session_manager() as session:
             return await self._validate_project_path_in_session(
                 session,
-                agent_runtime_id=agent_runtime_id,
+                session_id=session_id,
                 path=path,
             )
 
@@ -553,7 +569,7 @@ class SessionWorkspaceProjectService:
         self,
         session: AsyncSession,
         *,
-        agent_runtime_id: str,
+        session_id: str,
         path: str,
     ) -> Result[str, InvalidProjectPath | ProjectPathConflict]:
         """Validate Project path inside open DB session."""
@@ -564,7 +580,7 @@ class SessionWorkspaceProjectService:
         candidate = PurePosixPath(normalized)
         existing_projects = await self.repository.list_projects(
             session,
-            agent_runtime_id=agent_runtime_id,
+            session_id=session_id,
         )
         for project in existing_projects:
             existing = PurePosixPath(project.path)
@@ -577,14 +593,14 @@ class SessionWorkspaceProjectService:
                 )
         return Success(normalized)
 
-    async def _get_accessible_runtime(
+    async def _get_accessible_project_context(
         self,
         session: AsyncSession,
         *,
         agent_id: str,
         user_id: str,
-    ) -> Result[AccessibleProjectRuntime, ProjectAccessError]:
-        """Check Agent access permission and return AgentRuntime context."""
+    ) -> Result[AccessibleProjectContext, ProjectAccessError]:
+        """Check Agent access permission and return Project context."""
         agent = await self.agent_repository.get_by_id(session, agent_id)
         if agent is None:
             return Failure(AgentNotFound())
@@ -595,14 +611,53 @@ class SessionWorkspaceProjectService:
         )
         if workspace_user is None:
             return Failure(ProjectAccessDenied())
+        return await self._ensure_project_context_for_agent(
+            session,
+            agent_id=agent_id,
+            workspace_id=agent.workspace_id,
+        )
+
+    async def _get_accessible_project_context_for_agent(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> Result[AccessibleProjectContext, AgentNotFound]:
+        """Return Project context for an Agent without user access check."""
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if agent is None:
+            return Failure(AgentNotFound())
+        return await self._ensure_project_context_for_agent(
+            session,
+            agent_id=agent_id,
+            workspace_id=agent.workspace_id,
+        )
+
+    async def _ensure_project_context_for_agent(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        workspace_id: str,
+    ) -> Success[AccessibleProjectContext]:
+        """Ensure team primary session and runtime for Project operations."""
+        agent_session = (
+            await self.agent_session_repository.ensure_team_primary_for_agent(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        )
         runtime = await self.agent_runtime_repository.ensure_for_agent(
             session,
             agent_id,
         )
         return Success(
-            AccessibleProjectRuntime(
+            AccessibleProjectContext(
+                agent_id=agent_id,
+                session_id=agent_session.id,
                 agent_runtime_id=runtime.id,
-                workspace_id=agent.workspace_id,
+                workspace_id=workspace_id,
             )
         )
 
