@@ -123,8 +123,9 @@ _14 documents_
 - [ADR-0071: Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections](adr/0071-toolkit-level-mcp-oauth.md)
 - [ADR-0072: Release and Snapshot Artifact Policy](adr/0072-release-and-snapshot-artifact-policy.md)
 - [ADR-0073: Open Source CI Policy](adr/0073-open-source-ci-policy.md)
+- [ADR-0074: Primary Agent Sessions and Team-First Multi-Session UX](adr/0074-primary-agent-sessions.md)
 
-_74 documents_
+_75 documents_
 
 ## Issues (Bug Tracking)
 
@@ -154,4 +155,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 298
+- Total documents: 301

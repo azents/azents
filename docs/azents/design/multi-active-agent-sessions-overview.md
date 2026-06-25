@@ -3,6 +3,7 @@ title: "Multi-Active AgentSession Migration Overview"
 tags: [backend, engine, architecture, migration]
 created: 2026-06-25
 updated: 2026-06-25
+abandoned: 2026-06-25
 ---
 
 # Multi-Active AgentSession Migration Overview
