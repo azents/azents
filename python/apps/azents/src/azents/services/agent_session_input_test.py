@@ -3,7 +3,7 @@
 import dataclasses
 import datetime
 
-from azcommon.result import Success
+from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -34,7 +34,10 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import make_test_model_selection_dict
 
-from .agent_session_input import AgentSessionInputService
+from .agent_session_input import (
+    AgentSessionInputInactiveSession,
+    AgentSessionInputService,
+)
 from .input_buffer import (
     InputBufferEnqueue,
     InputBufferEnqueueResult,
@@ -55,6 +58,8 @@ class _AgentSessionRecord:
 
     id: str
     agent_runtime_id: str
+    agent_id: str = "agent-1"
+    status: AgentSessionStatus = AgentSessionStatus.ACTIVE
 
 
 class _SessionScope:
@@ -306,14 +311,15 @@ class TestAgentSessionInputService:
             user_id="user-1",
         )
 
-        assert result.agent_runtime_id == "runtime-1"
-        assert result.agent_session_id == "session-1"
-        assert result.input_buffer.id == "buffer-1"
+        assert isinstance(result, Success)
+        value = result.value
+        assert value.agent_runtime_id == "runtime-1"
+        assert value.agent_session_id == "session-1"
+        assert value.input_buffer.id == "buffer-1"
         assert calls == [
-            "ensure_for_agent",
-            "ensure_active_with_runtime_lock",
-            "ensureevent_session",
             "get_by_id",
+            "ensure_for_agent",
+            "ensureevent_session",
             "enqueue_input_buffer",
         ]
         assert input_buffer_service.enqueued is not None
@@ -421,11 +427,11 @@ class TestAgentSessionInputService:
         assert [buffer.id for buffer in new_buffers] == [created.id]
         assert new_buffers[0].content == "pending before rollover"
 
-    async def test_buffered_agent_input_uses_current_session_after_rollover(
+    async def test_buffered_agent_input_rejects_archived_session_after_rollover(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """User input with stale session id is stored in current active session."""
+        """User input with stale session id is rejected instead of redirected."""
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(
                 session, "agent-session-stale-buffer"
@@ -469,13 +475,18 @@ class TestAgentSessionInputService:
             user_id=user_id,
         )
 
-        assert result.agent_session_id == new_session.id
-        assert result.input_buffer.session_id == new_session.id
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, AgentSessionInputInactiveSession)
+
         async with rdb_session_manager() as session:
             old_buffers = await InputBufferRepository().list_by_session_id(
                 session, old_session.id
             )
+            new_buffers = await InputBufferRepository().list_by_session_id(
+                session, new_session.id
+            )
         assert old_buffers == []
+        assert new_buffers == []
 
     async def test_create_buffered_agent_input_marks_session_running(
         self,
@@ -503,7 +514,7 @@ class TestAgentSessionInputService:
             session_manager=rdb_session_manager,
         )
 
-        await service.create_buffered_agent_input(
+        result = await service.create_buffered_agent_input(
             agent_id=agent_id,
             agent_session_id=agent_session.id,
             message=InputMessage(
@@ -515,6 +526,7 @@ class TestAgentSessionInputService:
             ),
             user_id=user_id,
         )
+        assert isinstance(result, Success)
 
         async with rdb_session_manager() as session:
             updated = await AgentSessionRepository().get_by_id(
@@ -579,11 +591,15 @@ class TestAgentSessionInputService:
             client_request_id="client-request-1",
         )
 
-        assert second.input_buffer.id == first.input_buffer.id
-        assert second.input_buffer.content == "first"
-        assert second.input_buffer.idempotency_key == "client-request-1"
+        assert isinstance(first, Success)
+        assert isinstance(second, Success)
+        first_value = first.value
+        second_value = second.value
+        assert second_value.input_buffer.id == first_value.input_buffer.id
+        assert second_value.input_buffer.content == "first"
+        assert second_value.input_buffer.idempotency_key == "client-request-1"
         async with rdb_session_manager() as session:
             buffers = await InputBufferRepository().list_by_session_id(
                 session, agent_session.id
             )
-        assert [buffer.id for buffer in buffers] == [first.input_buffer.id]
+        assert [buffer.id for buffer in buffers] == [first_value.input_buffer.id]
