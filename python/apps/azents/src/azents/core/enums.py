@@ -192,20 +192,14 @@ class AgentSessionStartReason(enum.StrEnum):
     """AgentSession start reason."""
 
     INITIAL = "initial"
-    MANUAL_NEW = "manual_new"
-    MANUAL_RESET = "manual_reset"
     SYSTEM_RECOVERY = "system_recovery"
-    COMPACT_ROTATE = "compact_rotate"
 
 
 class AgentSessionEndReason(enum.StrEnum):
     """AgentSession end reason."""
 
-    MANUAL_NEW = "manual_new"
-    MANUAL_RESET = "manual_reset"
     IDLE = "idle"
     SAFETY = "safety"
-    COMPACT_ROTATE = "compact_rotate"
     DELETED = "deleted"
 
 

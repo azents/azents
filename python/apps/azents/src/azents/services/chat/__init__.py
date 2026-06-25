@@ -125,8 +125,10 @@ class ChatSessionService:
                 session, input.agent_id
             )
             agent_session = (
-                await self.agent_session_repository.ensure_team_primary_for_runtime(
-                    session, agent_runtime.id
+                await self.agent_session_repository.ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=agent_runtime.workspace_id,
+                    agent_id=input.agent_id,
                 )
             )
 

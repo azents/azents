@@ -127,7 +127,9 @@ async def _create_agent_and_session(
     workspace_id = await _create_workspace(session, f"toolkit-state-{suffix}")
     agent_id = await _create_agent(session, workspace_id, f"toolkit-state-{suffix}")
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-    agent_session = await AgentSessionRepository().ensure_active(session, runtime.id)
+    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+        session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
+    )
     return agent_id, agent_session.id
 
 

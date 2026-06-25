@@ -78,10 +78,7 @@ from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_execution import (
-    EventSessionRepository,
-    EventTranscriptRepository,
-)
+from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_subagent import AgentSubagentRepository
@@ -186,9 +183,6 @@ class RunExecutor:
     ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
-    ]
-    event_session_repository: Annotated[
-        EventSessionRepository, Depends(EventSessionRepository)
     ]
     event_transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
@@ -915,7 +909,7 @@ class RunExecutor:
     async def _has_actionable_model_input(self, session_id: str) -> bool:
         """Return whether transcript state after the latest run marker needs a run."""
         async with self.session_manager() as session:
-            session_state = await self.event_session_repository.get_by_id(
+            session_state = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
             )

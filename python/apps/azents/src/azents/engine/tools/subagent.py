@@ -7,7 +7,6 @@ and selects target subagent with `agent` parameter.
 
 import asyncio
 import dataclasses
-import datetime
 import json
 import logging
 import time
@@ -21,7 +20,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker
-from azents.core.enums import AgentSessionEndReason, AgentSessionStartReason
 from azents.core.tools import (
     SessionType,
     SubagentToolkitContext,
@@ -211,18 +209,15 @@ async def _resolve_subagent_session_id(
     ctx: SubagentToolContext,
     subagent_id: str,
     existing_session_id: str | None,
-    now: datetime.datetime | None = None,
 ) -> str:
     """Decide session ID to use for Subagent call.
 
     If ``session_id`` is given and actual row exists, reuse it as-is. Otherwise,
-    archive current active session and create new active session. This avoids
-    conflict with partial unique index that keeps only one active session per runtime.
+    use the target subagent's team primary session.
 
     :param ctx: Subagent tool dependency context
     :param subagent_id: Target subagent Agent ID
     :param existing_session_id: Existing session ID requested for reuse
-    :param now: Rotation base time for test injection
     :return: Subagent session ID to use
     """
     if existing_session_id is not None:
@@ -241,17 +236,16 @@ async def _resolve_subagent_session_id(
             },
         )
 
-    rotate_at = now or datetime.datetime.now(datetime.timezone.utc)
     async with ctx.session_manager() as db_session:
         runtime = await ctx.agent_runtime_repository.ensure_for_agent(
             db_session, subagent_id
         )
-        agent_session = await ctx.agent_session_repository.rotate_active(
-            db_session,
-            runtime.id,
-            start_reason=AgentSessionStartReason.MANUAL_NEW,
-            end_reason=AgentSessionEndReason.MANUAL_NEW,
-            now=rotate_at,
+        agent_session = (
+            await ctx.agent_session_repository.ensure_team_primary_for_agent(
+                db_session,
+                workspace_id=runtime.workspace_id,
+                agent_id=subagent_id,
+            )
         )
         await db_session.commit()
         return agent_session.id

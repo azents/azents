@@ -21,7 +21,6 @@ from azents.repos.agent_execution.data import (
     AgentRunCreate,
     EventCreate,
 )
-from azents.repos.agent_session.data import AgentSession
 
 
 class NativeModelRequest(BaseModel):
@@ -242,8 +241,8 @@ class EventPayloadRepository(Protocol):
         ...
 
 
-class EventSessionHeadRepository(Protocol):
-    """Event session head repository."""
+class SessionHeadMoveRepository(Protocol):
+    """Session head update repository."""
 
     async def move_model_input_head(
         self,
@@ -273,30 +272,6 @@ class EventAppendRepository(EventPayloadRepository, Protocol):
         order_by_event_id: dict[str, int],
     ) -> None:
         """Update Event model input logical order."""
-        ...
-
-
-class LegacySessionLookupRepository(Protocol):
-    """Legacy AgentSession lookup repository protocol."""
-
-    async def get_by_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        """Fetch legacy session."""
-        ...
-
-
-class EventSessionMirrorRepository(Protocol):
-    """Event session mirror repository protocol."""
-
-    async def ensure_from_legacy_session(
-        self,
-        session: AsyncSession,
-        legacy_session: AgentSession,
-    ) -> object:
-        """Ensure event session row with same ID as legacy session."""
         ...
 
 

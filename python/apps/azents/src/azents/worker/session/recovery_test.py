@@ -94,7 +94,6 @@ def _agent_session(
     return AgentSession(
         id=session_id,
         workspace_id=workspace_id,
-        agent_runtime_id="runtime-001",
         agent_id=agent_id,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,

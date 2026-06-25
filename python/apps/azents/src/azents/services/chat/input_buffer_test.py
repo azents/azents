@@ -158,7 +158,9 @@ async def _create_session_with_buffer(
     await _add_workspace_user(session, workspace_id=workspace_id, user_id=user_id)
     agent_id = await _create_agent(session, workspace_id, slug)
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-    agent_session = await AgentSessionRepository().ensure_active(session, runtime.id)
+    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+        session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
+    )
     input_buffer = await InputBufferRepository().create(
         session,
         InputBufferCreate(

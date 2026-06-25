@@ -1,31 +1,27 @@
 """AgentSessionInputService tests."""
 
-import dataclasses
 import datetime
 
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentSessionEndReason,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
-    InputBufferKind,
     LLMProvider,
 )
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import (
-    EventSessionRepository,
-    EventTranscriptRepository,
-)
+from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSession
 from azents.repos.input_buffer import InputBufferRepository
-from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
+from azents.repos.input_buffer.data import InputBuffer
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -45,101 +41,60 @@ from .input_buffer import (
 )
 
 
-@dataclasses.dataclass(frozen=True)
-class _RuntimeRecord:
-    """Runtime record for tests."""
-
-    id: str
-
-
-@dataclasses.dataclass(frozen=True)
-class _AgentSessionRecord:
-    """AgentSession record for tests."""
-
-    id: str
-    agent_runtime_id: str
-    agent_id: str = "agent-1"
-    status: AgentSessionStatus = AgentSessionStatus.ACTIVE
-
-
-class _SessionScope:
-    """Session context manager for tests."""
-
-    async def __aenter__(self) -> object:
-        """Return fake session object."""
-        return object()
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: object,
-    ) -> None:
-        """No cleanup work."""
-        del exc_type, exc, traceback
-
-
-class _SessionManagerDouble:
-    """Session manager for tests."""
-
-    def __call__(self) -> _SessionScope:
-        """Return session scope."""
-        return _SessionScope()
-
-
-class _RuntimeRepositoryDouble:
+class _RuntimeRepositoryDouble(AgentRuntimeRepository):
     """Runtime repository for tests."""
 
     def __init__(self, calls: list[str]) -> None:
         self.calls = calls
 
-    async def ensure_for_agent(self, session: object, agent_id: str) -> _RuntimeRecord:
-        """Ensure runtime."""
-        del session, agent_id
-        self.calls.append("ensure_for_agent")
-        return _RuntimeRecord(id="runtime-1")
-
-    async def mark_running_for_input_wakeup(
+    async def ensure_for_agent(
         self,
-        session: object,
-        session_id: str,
-    ) -> None:
-        """Record input wake-up running transition."""
-        del session, session_id
-        self.calls.append("mark_running_for_input_wakeup")
+        session: AsyncSession,
+        agent_id: str,
+        *,
+        default_runtime_provider_id: str | None = None,
+    ) -> AgentRuntime:
+        """Ensure runtime."""
+        del session, agent_id, default_runtime_provider_id
+        self.calls.append("ensure_for_agent")
+        now = datetime.datetime.now(datetime.UTC)
+        return AgentRuntime(
+            id="runtime-1",
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            created_at=now,
+            updated_at=now,
+        )
 
 
-class _AgentSessionRepositoryDouble:
+class _AgentSessionRepositoryDouble(AgentSessionRepository):
     """AgentSession repository for tests."""
 
     def __init__(self, calls: list[str]) -> None:
         self.calls = calls
 
-    async def ensure_active_with_runtime_lock(
-        self,
-        session: object,
-        runtime_id: str,
-    ) -> _AgentSessionRecord:
-        """Ensure active session with lock."""
-        del session
-        self.calls.append("ensure_active_with_runtime_lock")
-        return _AgentSessionRecord(id="session-1", agent_runtime_id=runtime_id)
-
     async def get_by_id(
         self,
-        session: object,
+        session: AsyncSession,
         agent_session_id: str,
-    ) -> _AgentSessionRecord:
+    ) -> AgentSession:
         """Fetch session."""
         del session
         self.calls.append("get_by_id")
-        return _AgentSessionRecord(
+        now = datetime.datetime.now(datetime.UTC)
+        return AgentSession(
             id=agent_session_id,
-            agent_runtime_id="runtime-1",
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            status=AgentSessionStatus.ACTIVE,
+            start_reason=AgentSessionStartReason.INITIAL,
+            started_at=now,
+            created_at=now,
+            updated_at=now,
         )
 
 
-class _InputBufferServiceDouble:
+class _InputBufferServiceDouble(InputBufferService):
     """InputBufferService double for tests."""
 
     def __init__(self, calls: list[str]) -> None:
@@ -149,7 +104,7 @@ class _InputBufferServiceDouble:
 
     async def enqueue(
         self,
-        session: object,
+        session: AsyncSession,
         input: InputBufferEnqueue,
     ) -> InputBufferEnqueueResult:
         """Record InputBuffer creation."""
@@ -172,7 +127,7 @@ class _InputBufferServiceDouble:
 
     async def move_by_session_id(
         self,
-        session: object,
+        session: AsyncSession,
         *,
         from_session_id: str,
         to_session_id: str,
@@ -182,22 +137,6 @@ class _InputBufferServiceDouble:
         self.calls.append("move_input_buffer")
         self.moved = (from_session_id, to_session_id)
         return 1
-
-
-class _EventSessionRepositoryDouble:
-    """Event session repository for tests."""
-
-    def __init__(self, calls: list[str]) -> None:
-        self.calls = calls
-
-    async def ensure_from_legacy_session(
-        self,
-        session: object,
-        agent_session: _AgentSessionRecord,
-    ) -> None:
-        """Record event session ensure call."""
-        del session, agent_session
-        self.calls.append("ensureevent_session")
 
 
 class _ExchangeFileService(ExchangeFileService):
@@ -283,19 +222,18 @@ class TestAgentSessionInputService:
 
     async def test_create_buffered_agent_input_marks_running_before_return(
         self,
+        rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
         """REST input storage marks runtime running before broker send."""
         calls: list[str] = []
         runtime_repository = _RuntimeRepositoryDouble(calls)
         session_repository = _AgentSessionRepositoryDouble(calls)
         input_buffer_service = _InputBufferServiceDouble(calls)
-        event_repository = _EventSessionRepositoryDouble(calls)
         service = AgentSessionInputService(
-            agent_runtime_repository=runtime_repository,  # pyright: ignore[reportArgumentType]  # test double.
-            agent_session_repository=session_repository,  # pyright: ignore[reportArgumentType]  # test double.
-            input_buffer_service=input_buffer_service,  # pyright: ignore[reportArgumentType]  # test double.
-            event_session_repository=event_repository,  # pyright: ignore[reportArgumentType]  # test double.
-            session_manager=_SessionManagerDouble(),  # pyright: ignore[reportArgumentType]  # test double.
+            agent_runtime_repository=runtime_repository,
+            agent_session_repository=session_repository,
+            input_buffer_service=input_buffer_service,
+            session_manager=rdb_session_manager,
         )
 
         result = await service.create_buffered_agent_input(
@@ -319,113 +257,11 @@ class TestAgentSessionInputService:
         assert calls == [
             "get_by_id",
             "ensure_for_agent",
-            "ensureevent_session",
             "enqueue_input_buffer",
         ]
         assert input_buffer_service.enqueued is not None
         assert input_buffer_service.enqueued.session_id == "session-1"
         assert input_buffer_service.enqueued.content == "restore me"
-
-    async def test_rotate_agent_session_preserves_previous_session(
-        self,
-        rdb_session_manager: SessionManager[AsyncSession],
-    ) -> None:
-        """AgentSession rotation preserves previous session as archived."""
-        async with rdb_session_manager() as session:
-            workspace_id = await _create_workspace(
-                session, "agent-session-rotate-input"
-            )
-            agent_id = await _create_agent(
-                session, workspace_id, "agent-session-rotate-input"
-            )
-            runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-            first = await AgentSessionRepository().ensure_active(session, runtime.id)
-
-        service = AgentSessionInputService(
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
-            event_session_repository=EventSessionRepository(
-                transcript_repo=EventTranscriptRepository()
-            ),
-            session_manager=rdb_session_manager,
-        )
-
-        rotated_id = await service.rotate_agent_session(
-            agent_id=agent_id,
-            start_reason=AgentSessionStartReason.MANUAL_RESET,
-            end_reason=AgentSessionEndReason.MANUAL_RESET,
-        )
-
-        async with rdb_session_manager() as session:
-            repo = AgentSessionRepository()
-            archived = await repo.get_by_id(session, first.id)
-            active = await repo.get_by_id(session, rotated_id)
-        assert archived is not None
-        assert archived.status == AgentSessionStatus.ARCHIVED
-        assert archived.end_reason == AgentSessionEndReason.MANUAL_RESET
-        assert active is not None
-        assert active.status == AgentSessionStatus.ACTIVE
-        assert active.start_reason == AgentSessionStartReason.MANUAL_RESET
-
-    async def test_rotate_agent_session_moves_pending_buffers_to_next_session(
-        self,
-        rdb_session_manager: SessionManager[AsyncSession],
-    ) -> None:
-        """AgentSession rollover transfers pending buffer to next session."""
-        async with rdb_session_manager() as session:
-            workspace_id = await _create_workspace(
-                session, "agent-session-rotate-buffer"
-            )
-            user_id = await _create_user(session, "rotate-buffer@example.com")
-            agent_id = await _create_agent(
-                session, workspace_id, "agent-session-rotate-buffer"
-            )
-            runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-            agent_session = await AgentSessionRepository().ensure_active(
-                session, runtime.id
-            )
-            created = await InputBufferRepository().create(
-                session,
-                InputBufferCreate(
-                    session_id=agent_session.id,
-                    kind=InputBufferKind.USER_MESSAGE,
-                    actor_user_id=user_id,
-                    content="pending before rollover",
-                    idempotency_key=None,
-                    metadata={"source": "chat"},
-                    attachments=[],
-                    file_parts=[],
-                ),
-            )
-
-        service = AgentSessionInputService(
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            input_buffer_service=_input_buffer_service(rdb_session_manager),
-            event_session_repository=EventSessionRepository(
-                transcript_repo=EventTranscriptRepository()
-            ),
-            session_manager=rdb_session_manager,
-        )
-
-        rotated_id = await service.rotate_agent_session(
-            agent_id=agent_id,
-            start_reason=AgentSessionStartReason.COMPACT_ROTATE,
-            end_reason=AgentSessionEndReason.COMPACT_ROTATE,
-        )
-
-        async with rdb_session_manager() as session:
-            old_buffers = await InputBufferRepository().list_by_session_id(
-                session, agent_session.id
-            )
-            new_buffers = await InputBufferRepository().list_by_session_id(
-                session, rotated_id
-            )
-
-        assert old_buffers == []
-        assert [buffer.id for buffer in new_buffers] == [created.id]
-        assert new_buffers[0].content == "pending before rollover"
 
     async def test_buffered_agent_input_rejects_archived_session_after_rollover(
         self,
@@ -441,24 +277,21 @@ class TestAgentSessionInputService:
                 session, workspace_id, "agent-session-stale-buffer"
             )
             runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-            old_session = await AgentSessionRepository().ensure_active(
-                session, runtime.id
-            )
-            new_session = await AgentSessionRepository().rotate_active(
+            old_session = await AgentSessionRepository().ensure_team_primary_for_agent(
                 session,
-                runtime.id,
-                start_reason=AgentSessionStartReason.COMPACT_ROTATE,
-                end_reason=AgentSessionEndReason.COMPACT_ROTATE,
-                now=datetime.datetime.now(datetime.timezone.utc),
+                workspace_id=runtime.workspace_id,
+                agent_id=runtime.agent_id,
+            )
+            await AgentSessionRepository().archive(
+                session,
+                old_session.id,
+                ended_at=datetime.datetime.now(datetime.timezone.utc),
             )
 
         service = AgentSessionInputService(
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
-            event_session_repository=EventSessionRepository(
-                transcript_repo=EventTranscriptRepository()
-            ),
             session_manager=rdb_session_manager,
         )
 
@@ -482,11 +315,7 @@ class TestAgentSessionInputService:
             old_buffers = await InputBufferRepository().list_by_session_id(
                 session, old_session.id
             )
-            new_buffers = await InputBufferRepository().list_by_session_id(
-                session, new_session.id
-            )
         assert old_buffers == []
-        assert new_buffers == []
 
     async def test_create_buffered_agent_input_marks_session_running(
         self,
@@ -500,17 +329,18 @@ class TestAgentSessionInputService:
                 session, workspace_id, "buffered-chat-running"
             )
             runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-            agent_session = await AgentSessionRepository().ensure_active(
-                session, runtime.id
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=runtime.workspace_id,
+                    agent_id=runtime.agent_id,
+                )
             )
 
         service = AgentSessionInputService(
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
-            event_session_repository=EventSessionRepository(
-                transcript_repo=EventTranscriptRepository()
-            ),
             session_manager=rdb_session_manager,
         )
 
@@ -550,17 +380,18 @@ class TestAgentSessionInputService:
                 session, workspace_id, "buffered-chat-idempotent"
             )
             runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-            agent_session = await AgentSessionRepository().ensure_active(
-                session, runtime.id
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=runtime.workspace_id,
+                    agent_id=runtime.agent_id,
+                )
             )
 
         service = AgentSessionInputService(
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
-            event_session_repository=EventSessionRepository(
-                transcript_repo=EventTranscriptRepository()
-            ),
             session_manager=rdb_session_manager,
         )
 

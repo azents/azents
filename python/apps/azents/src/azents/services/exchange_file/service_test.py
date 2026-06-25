@@ -250,7 +250,6 @@ def _make_agent_session() -> AgentSession:
     return AgentSession(
         id="session-1",
         workspace_id="workspace-1",
-        agent_runtime_id="runtime-1",
         agent_id="agent-1",
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,

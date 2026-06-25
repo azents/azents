@@ -1,7 +1,6 @@
 """AgentSession repository."""
 
 import datetime
-from dataclasses import dataclass
 from typing import Any, cast
 
 import sqlalchemy as sa
@@ -17,18 +16,10 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
 )
-from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.event import RDBEvent
 
 from .data import AgentSession, AgentSessionCreate, PendingSessionCommand
-
-
-@dataclass(frozen=True)
-class AgentSessionRotation:
-    """AgentSession rollover result."""
-
-    previous: AgentSession | None
-    current: AgentSession
 
 
 class AgentSessionRepository:
@@ -42,7 +33,6 @@ class AgentSessionRepository:
         """Create AgentSession."""
         rdb = RDBAgentSession(
             workspace_id=create.workspace_id,
-            agent_runtime_id=create.agent_runtime_id,
             agent_id=create.agent_id,
             primary_kind=create.primary_kind,
             start_reason=create.start_reason,
@@ -58,23 +48,6 @@ class AgentSessionRepository:
     ) -> AgentSession | None:
         """Fetch AgentSession by ID."""
         rdb = await session.get(RDBAgentSession, agent_session_id)
-        if rdb is None:
-            return None
-        return self._build(rdb)
-
-    async def get_active_by_runtime_id(
-        self,
-        session: AsyncSession,
-        runtime_id: str,
-    ) -> AgentSession | None:
-        """Fetch active AgentSession of AgentRuntime."""
-        result = await session.execute(
-            sa.select(RDBAgentSession).where(
-                RDBAgentSession.agent_runtime_id == runtime_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-            )
-        )
-        rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
         return self._build(rdb)
@@ -119,48 +92,6 @@ class AgentSessionRepository:
         )
         await session.flush()
 
-    async def ensure_active(
-        self,
-        session: AsyncSession,
-        runtime_id: str,
-    ) -> AgentSession:
-        """Compatibility wrapper ensuring the Agent's team primary session."""
-        return await self.ensure_team_primary_for_runtime(session, runtime_id)
-
-    async def ensure_team_primary_for_runtime(
-        self,
-        session: AsyncSession,
-        runtime_id: str,
-    ) -> AgentSession:
-        """Ensure active team primary AgentSession for Runtime's Agent.
-
-        :param session: Database session
-        :param runtime_id: AgentRuntime ID
-        :return: active team primary AgentSession
-        """
-        runtime = await session.get(RDBAgentRuntime, runtime_id)
-        if runtime is None:
-            raise ValueError("AgentRuntime not found")
-
-        return await self._ensure_active_for_runtime(session, runtime)
-
-    async def ensure_active_with_runtime_lock(
-        self,
-        session: AsyncSession,
-        runtime_id: str,
-    ) -> AgentSession:
-        """Ensure active AgentSession after acquiring AgentRuntime row lock."""
-        result = await session.execute(
-            sa.select(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime_id)
-            .with_for_update()
-        )
-        runtime = result.scalar_one_or_none()
-        if runtime is None:
-            raise ValueError("AgentRuntime not found")
-
-        return await self._ensure_active_for_runtime(session, runtime)
-
     async def get_team_primary_by_agent_id(
         self,
         session: AsyncSession,
@@ -179,60 +110,30 @@ class AgentSessionRepository:
             return None
         return self._build(rdb)
 
-    async def _ensure_active_for_runtime(
+    async def ensure_team_primary_for_agent(
         self,
         session: AsyncSession,
-        runtime: RDBAgentRuntime,
+        *,
+        workspace_id: str,
+        agent_id: str,
     ) -> AgentSession:
-        """Fetch or create active team primary AgentSession for Runtime's Agent."""
-        existing_primary = await self.get_team_primary_by_agent_id(
-            session,
-            runtime.agent_id,
-        )
+        """Ensure active team primary AgentSession for Agent."""
+        existing_primary = await self.get_team_primary_by_agent_id(session, agent_id)
         if existing_primary is not None:
             return existing_primary
-
-        active = await self.get_active_by_runtime_id(session, runtime.id)
-        if active is not None:
-            promoted = await self._promote_active_to_team_primary(
-                session,
-                active.id,
-            )
-            if promoted is not None:
-                return promoted
-
         return await self._create_team_primary_if_absent(
             session,
-            runtime,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
             start_reason=AgentSessionStartReason.INITIAL,
         )
-
-    async def _promote_active_to_team_primary(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> AgentSession | None:
-        """Promote an existing active AgentSession to team primary."""
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-            )
-            .values(primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY)
-            .returning(RDBAgentSession)
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        await session.flush()
-        return self._build(rdb)
 
     async def _create_team_primary_if_absent(
         self,
         session: AsyncSession,
-        runtime: RDBAgentRuntime,
         *,
+        workspace_id: str,
+        agent_id: str,
         start_reason: AgentSessionStartReason,
     ) -> AgentSession:
         """Create team primary AgentSession race-safely or return existing row."""
@@ -240,9 +141,8 @@ class AgentSessionRepository:
             pg_insert(RDBAgentSession)
             .values(
                 id=uuid7().hex,
-                workspace_id=runtime.workspace_id,
-                agent_runtime_id=runtime.id,
-                agent_id=runtime.agent_id,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
                 status=AgentSessionStatus.ACTIVE,
                 primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
                 start_reason=start_reason,
@@ -259,7 +159,7 @@ class AgentSessionRepository:
         if rdb is not None:
             return self._build(rdb)
 
-        primary = await self.get_team_primary_by_agent_id(session, runtime.agent_id)
+        primary = await self.get_team_primary_by_agent_id(session, agent_id)
         if primary is None:
             raise RuntimeError("Team primary AgentSession conflict target not found")
         return primary
@@ -319,32 +219,29 @@ class AgentSessionRepository:
         )
         return result.scalar_one_or_none()
 
-    async def rotate_active(
+    async def move_model_input_head(
         self,
         session: AsyncSession,
-        runtime_id: str,
-        *,
-        start_reason: AgentSessionStartReason,
-        end_reason: AgentSessionEndReason,
-        now: datetime.datetime,
+        session_id: str,
+        event_id: str,
     ) -> AgentSession:
-        """End current active AgentSession with preservation and create new active.
-
-        :param session: Database session
-        :param runtime_id: AgentRuntime ID
-        :param start_reason: New AgentSession start reason
-        :param end_reason: Existing AgentSession end reason
-        :param now: Rotation reference time
-        :return: New active AgentSession
-        """
-        rotation = await self.rotate_active_with_previous(
-            session,
-            runtime_id,
-            start_reason=start_reason,
-            end_reason=end_reason,
-            now=now,
+        """Move Model input head to specified event."""
+        event_exists = await session.scalar(
+            sa.select(RDBEvent.id).where(
+                RDBEvent.session_id == session_id,
+                RDBEvent.id == event_id,
+            )
         )
-        return rotation.current
+        if event_exists is None:
+            raise ValueError("Model input head event not found in session")
+
+        rdb = await session.get(RDBAgentSession, session_id)
+        if rdb is None:
+            raise ValueError("AgentSession not found")
+        rdb.model_input_head_event_id = event_id
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
 
     async def mark_running(self, session: AsyncSession, session_id: str) -> None:
         """Transition AgentSession run state to RUNNING."""
@@ -571,58 +468,17 @@ class AgentSessionRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
-    async def rotate_active_with_previous(
-        self,
-        session: AsyncSession,
-        runtime_id: str,
-        *,
-        start_reason: AgentSessionStartReason,
-        end_reason: AgentSessionEndReason,
-        now: datetime.datetime,
-    ) -> AgentSessionRotation:
-        """Rotate current active AgentSession and return previous session too."""
-        result = await session.execute(
-            sa.select(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime_id)
-            .with_for_update()
-        )
-        runtime = result.scalar_one_or_none()
-        if runtime is None:
-            raise ValueError("AgentRuntime not found")
-
-        current = await self.get_active_by_runtime_id(session, runtime_id)
-        if current is not None:
-            await self.archive(
-                session,
-                current.id,
-                ended_at=now,
-                end_reason=end_reason,
-            )
-
-        created = await self.create(
-            session,
-            AgentSessionCreate(
-                workspace_id=runtime.workspace_id,
-                agent_runtime_id=runtime.id,
-                agent_id=runtime.agent_id,
-                primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
-                start_reason=start_reason,
-            ),
-        )
-        await session.flush()
-        return AgentSessionRotation(previous=current, current=created)
-
     def _build(self, rdb: RDBAgentSession) -> AgentSession:
         """Convert RDB model to domain model."""
         return AgentSession(
             id=rdb.id,
             workspace_id=rdb.workspace_id,
-            agent_runtime_id=rdb.agent_runtime_id,
             agent_id=rdb.agent_id,
             status=rdb.status,
             primary_kind=rdb.primary_kind,
             start_reason=rdb.start_reason,
             end_reason=rdb.end_reason,
+            model_input_head_event_id=rdb.model_input_head_event_id,
             started_at=rdb.started_at,
             lifecycle_started_at=rdb.lifecycle_started_at,
             run_state=rdb.run_state,

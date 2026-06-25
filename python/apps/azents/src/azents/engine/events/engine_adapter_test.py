@@ -63,6 +63,7 @@ from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE, CheckStop
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file.data import ExchangeFile
@@ -180,8 +181,8 @@ class _RunRepo:
         return object()
 
 
-class _AgentSessionRepo:
-    """Legacy session repo for tests."""
+class _AgentSessionRepo(AgentSessionRepository):
+    """AgentSession repo for tests."""
 
     async def get_by_id(
         self,
@@ -191,19 +192,6 @@ class _AgentSessionRepo:
         """Handle session lookup call."""
         del session, agent_session_id
         return _agent_session()
-
-
-class _EventSessionRepo:
-    """Event session mirror repo for tests."""
-
-    async def ensure_from_legacy_session(
-        self,
-        session: AsyncSession,
-        legacy_session: AgentSession,
-    ) -> object:
-        """Handle mirror call."""
-        del session, legacy_session
-        return object()
 
 
 class _EventSessionHeadState:
@@ -532,7 +520,6 @@ async def test_event_engine_adapter_runs_execution() -> None:
         model_file_service=_ModelFileService(),
         run_repo=run_repo,
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
         execution_factory=lambda **kwargs: execution,
     )
 
@@ -575,7 +562,6 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
         execution_factory=_StreamingExecutionFactory(execution),
     )
 
@@ -616,7 +602,6 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
         execution_factory=_StreamingExecutionFactory(execution),
     )
     emitted = asyncio.Event()
@@ -663,7 +648,6 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
         execution_factory=_StreamingExecutionFactory(execution),
     )
 
@@ -702,7 +686,6 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
         execution_factory=lambda **kwargs: execution,
     )
 
@@ -745,7 +728,6 @@ async def test_adapter_emits_user_visible_model_call_error() -> None:
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
         transcript_repo=_TranscriptRepo([]),
         execution_factory=lambda **kwargs: _FailingExecution(),
     )
@@ -794,7 +776,6 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
         execution_factory=factory,
     )
 
@@ -842,7 +823,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         captured.update(kwargs)
         return _Execution()
 
-    event_session_head_repo = _EventSessionHeadRepo(None)
+    session_head_repo = _EventSessionHeadRepo(None)
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
         artifact_service=_ArtifactService(),
@@ -850,8 +831,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
-        event_session_head_repo=event_session_head_repo,
+        session_head_repo=session_head_repo,
         execution_factory=factory,
     )
 
@@ -891,7 +871,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
     assert [item.__class__.__name__ for item in post_lower_filter.filters] == [
         "NativeRequestSizeGuard",
     ]
-    assert captured["session_repo"] is event_session_head_repo
+    assert captured["session_repo"] is session_head_repo
 
 
 async def test_manual_compact_runs_append_only_event_compactor() -> None:
@@ -931,8 +911,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
-        event_session_head_repo=_EventSessionHeadRepo("1" * 32),
+        session_head_repo=_EventSessionHeadRepo("1" * 32),
         transcript_repo=transcript_repo,
         compactor=compactor,
         summary_model_call=summarize,
@@ -1043,8 +1022,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
-        event_session_head_repo=_EventSessionHeadRepo("6" * 32),
+        session_head_repo=_EventSessionHeadRepo("6" * 32),
         transcript_repo=transcript_repo,
         compactor=compactor,
         summary_model_call=summarize,
@@ -1098,8 +1076,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        event_session_repo=_EventSessionRepo(),
-        event_session_head_repo=_EventSessionHeadRepo("1" * 32),
+        session_head_repo=_EventSessionHeadRepo("1" * 32),
         transcript_repo=transcript_repo,
         compactor=_FailingCompactor(),
     )
@@ -1161,7 +1138,6 @@ def _agent_session() -> AgentSession:
     return AgentSession(
         id="session-1",
         workspace_id="workspace-1",
-        agent_runtime_id="runtime-1",
         agent_id="agent-1",
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
@@ -1190,8 +1166,7 @@ def _agent_engine_adapter(
     execution_factory: RunExecutionFactory | None = None,
     run_repo: _RunRepo | None = None,
     agent_session_repo: _AgentSessionRepo | None = None,
-    event_session_repo: _EventSessionRepo | None = None,
-    event_session_head_repo: _EventSessionHeadRepo | None = None,
+    session_head_repo: _EventSessionHeadRepo | None = None,
     transcript_repo: _TranscriptRepo | None = None,
     compactor: _Compactor | _FailingCompactor | None = None,
     summary_model_call: SummaryModelCall | None = None,
@@ -1206,8 +1181,7 @@ def _agent_engine_adapter(
         execution_factory=execution_factory or (lambda **kwargs: _Execution()),
         run_repo=run_repo or _RunRepo(),
         agent_session_repo=agent_session_repo or _AgentSessionRepo(),
-        event_session_repo=event_session_repo or _EventSessionRepo(),
-        event_session_head_repo=event_session_head_repo or _EventSessionHeadRepo(None),
+        session_head_repo=session_head_repo or _EventSessionHeadRepo(None),
         transcript_repo=transcript_repo or _TranscriptRepo([]),
         compactor=compactor or _Compactor(),
         summary_model_call=summary_model_call or summarize_text_with_model,
