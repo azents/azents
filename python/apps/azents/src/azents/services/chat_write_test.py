@@ -8,9 +8,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentSessionEndReason,
     AgentSessionRunState,
-    AgentSessionStartReason,
     EventKind,
     InputBufferKind,
     LLMProvider,
@@ -22,13 +20,11 @@ from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import (
-    EventSessionRepository,
-    EventTranscriptRepository,
-)
+from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import (
     ChatWriteRequest,
@@ -218,22 +214,18 @@ class TestChatWriteService:
                 session,
                 agent_id,
             )
-            agent_session = await AgentSessionRepository().ensure_active(
-                session,
-                runtime.id,
-            )
-            session_repo = EventSessionRepository(
-                transcript_repo=EventTranscriptRepository()
-            )
-            event_session = await session_repo.ensure_from_legacy_session(
-                session,
-                agent_session,
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=runtime.workspace_id,
+                    agent_id=runtime.agent_id,
+                )
             )
             transcript_repo = EventTranscriptRepository()
             target = await transcript_repo.append(
                 session,
                 EventCreate(
-                    session_id=event_session.id,
+                    session_id=agent_session.id,
                     kind=EventKind.USER_MESSAGE,
                     payload=UserMessagePayload(content="original").model_dump(
                         mode="json"
@@ -243,20 +235,20 @@ class TestChatWriteService:
             later = await transcript_repo.append(
                 session,
                 EventCreate(
-                    session_id=event_session.id,
+                    session_id=agent_session.id,
                     kind=EventKind.USER_MESSAGE,
                     payload=UserMessagePayload(content="later").model_dump(mode="json"),
                 ),
             )
-            await session_repo.move_model_input_head(
+            await AgentSessionRepository().move_model_input_head(
                 session,
-                event_session.id,
+                agent_session.id,
                 target.id,
             )
 
         result = await _service(rdb_session_manager).create_idempotent_edit_input(
             agent_id=agent_id,
-            session_id=event_session.id,
+            session_id=agent_session.id,
             user_id=user_id,
             client_request_id="edit-at-head",
             message_id=target.id,
@@ -281,14 +273,14 @@ class TestChatWriteService:
             buffers = (
                 await session.execute(
                     sa.select(RDBInputBuffer).where(
-                        RDBInputBuffer.session_id == event_session.id
+                        RDBInputBuffer.session_id == agent_session.id
                     )
                 )
             ).scalars()
             assert [buffer.content for buffer in buffers] == ["edited"]
             session_after = await AgentSessionRepository().get_by_id(
                 session,
-                event_session.id,
+                agent_session.id,
             )
             assert session_after is not None
             assert session_after.run_state == AgentSessionRunState.RUNNING
@@ -316,7 +308,9 @@ class TestChatWriteService:
                 session,
                 agent_id,
             )
-            first = await AgentSessionRepository().ensure_active(session, runtime.id)
+            first = await AgentSessionRepository().ensure_team_primary_for_agent(
+                session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
+            )
 
         service = _service(rdb_session_manager)
         payload: dict[str, object] = {"command": "compact"}
@@ -330,12 +324,13 @@ class TestChatWriteService:
         )
 
         async with rdb_session_manager() as session:
-            second = await AgentSessionRepository().rotate_active(
+            second = await AgentSessionRepository().create(
                 session,
-                runtime.id,
-                start_reason=AgentSessionStartReason.MANUAL_NEW,
-                end_reason=AgentSessionEndReason.MANUAL_NEW,
-                now=datetime.datetime.now(datetime.UTC),
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    primary_kind=None,
+                ),
             )
 
         try:

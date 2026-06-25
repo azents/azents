@@ -96,7 +96,7 @@ class ChatWriteService:
     ) -> AcceptedEditInput:
         """Accept idle session edit idempotently and create edited buffer."""
         async with self.session_manager() as session:
-            runtime, _agent_session = await self._lock_runtime_for_idle_control(
+            runtime, _agent_session = await self._lock_session_for_idle_control(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
@@ -178,7 +178,7 @@ class ChatWriteService:
     ) -> AcceptedPendingCommand:
         """Store idle session command as single pending command."""
         async with self.session_manager() as session:
-            runtime, _agent_session = await self._lock_runtime_for_idle_control(
+            runtime, _agent_session = await self._lock_session_for_idle_control(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
@@ -254,7 +254,7 @@ class ChatWriteService:
             runtime_was_running=updated is not None,
         )
 
-    async def _lock_runtime_for_idle_control(
+    async def _lock_session_for_idle_control(
         self,
         session: AsyncSession,
         *,
@@ -262,22 +262,22 @@ class ChatWriteService:
         session_id: str,
     ) -> tuple[AgentRuntime, AgentSession]:
         """Acquire session row lock for idle-only control action."""
-        runtime = await self.agent_runtime_repository.ensure_for_agent(
-            session,
-            agent_id,
-        )
         locked = await self.agent_session_repository.lock_by_id(
             session,
             session_id,
         )
         if locked is None:
             raise ValueError("AgentSession not found")
-        if locked.agent_runtime_id != runtime.id:
-            raise ValueError("AgentSession does not belong to the agent runtime")
+        if locked.agent_id != agent_id:
+            raise ValueError("AgentSession does not belong to the agent")
         if locked.run_state != AgentSessionRunState.IDLE:
             raise ValueError("Session is running")
         if locked.pending_command_id is not None:
             raise ValueError("Session has pending command")
+        runtime = await self.agent_runtime_repository.ensure_for_agent(
+            session,
+            agent_id,
+        )
         return runtime, locked
 
     async def _create_idempotent_record(

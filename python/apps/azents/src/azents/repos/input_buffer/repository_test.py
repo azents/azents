@@ -1,22 +1,16 @@
 """InputBufferRepository tests."""
 
-import datetime
-
 import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import (
-    AgentSessionEndReason,
-    AgentSessionStartReason,
-    InputBufferKind,
-    LLMProvider,
-)
+from azents.core.enums import InputBufferKind, LLMProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -88,7 +82,9 @@ async def _create_agent_session(
     user_id = await _create_user(session, f"{handle}@example.com")
     agent_id = await _create_agent(session, workspace_id, slug)
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-    agent_session = await AgentSessionRepository().ensure_active(session, runtime.id)
+    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+        session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
+    )
     return agent_session.id, user_id, workspace_id
 
 
@@ -338,17 +334,13 @@ class TestInputBufferRepository:
             from_session_id,
         )
         assert from_session is not None
-        runtime = await AgentRuntimeRepository().get_by_id(
+        to_session = await AgentSessionRepository().create(
             rdb_session,
-            from_session.agent_runtime_id,
-        )
-        assert runtime is not None
-        to_session = await AgentSessionRepository().rotate_active(
-            rdb_session,
-            runtime.id,
-            start_reason=AgentSessionStartReason.COMPACT_ROTATE,
-            end_reason=AgentSessionEndReason.COMPACT_ROTATE,
-            now=datetime.datetime.now(datetime.timezone.utc),
+            AgentSessionCreate(
+                workspace_id=from_session.workspace_id,
+                agent_id=from_session.agent_id,
+                primary_kind=None,
+            ),
         )
         other_session_id, _, _ = await _create_agent_session(
             rdb_session,

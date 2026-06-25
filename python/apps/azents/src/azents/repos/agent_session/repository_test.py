@@ -8,15 +8,12 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
-    AgentSessionEndReason,
     AgentSessionPrimaryKind,
-    AgentSessionStartReason,
     AgentSessionStatus,
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -77,11 +74,14 @@ class TestAgentSessionRepository:
         """Ensure only one active AgentSession per AgentRuntime."""
         workspace_id = await _create_workspace(rdb_session, "agent-session-ws")
         agent_id = await _create_agent(rdb_session, workspace_id, "agent-session-model")
-        runtime = await AgentRuntimeRepository().ensure_for_agent(rdb_session, agent_id)
         repo = AgentSessionRepository()
 
-        first = await repo.ensure_active(rdb_session, runtime.id)
-        second = await repo.ensure_active(rdb_session, runtime.id)
+        first = await repo.ensure_team_primary_for_agent(
+            rdb_session, workspace_id=workspace_id, agent_id=agent_id
+        )
+        second = await repo.ensure_team_primary_for_agent(
+            rdb_session, workspace_id=workspace_id, agent_id=agent_id
+        )
 
         assert first.id == second.id
         assert first.status == AgentSessionStatus.ACTIVE
@@ -95,16 +95,19 @@ class TestAgentSessionRepository:
         agent_id = await _create_agent(
             rdb_session, workspace_id, "agent-session-archive-model"
         )
-        runtime = await AgentRuntimeRepository().ensure_for_agent(rdb_session, agent_id)
         repo = AgentSessionRepository()
-        first = await repo.ensure_active(rdb_session, runtime.id)
+        first = await repo.ensure_team_primary_for_agent(
+            rdb_session, workspace_id=workspace_id, agent_id=agent_id
+        )
         await repo.archive(
             rdb_session,
             first.id,
             ended_at=datetime.datetime.now(datetime.timezone.utc),
         )
 
-        second = await repo.ensure_active(rdb_session, runtime.id)
+        second = await repo.ensure_team_primary_for_agent(
+            rdb_session, workspace_id=workspace_id, agent_id=agent_id
+        )
 
         assert second.id != first.id
         assert second.status == AgentSessionStatus.ACTIVE
@@ -124,20 +127,21 @@ class TestAgentSessionRepository:
                 workspace_id,
                 f"agent-session-race-model-{suffix}",
             )
-            runtime = await AgentRuntimeRepository().ensure_for_agent(
-                setup_session, agent_id
-            )
             await setup_session.commit()
 
         repo = AgentSessionRepository()
         async with AsyncSession(rdb_engine, expire_on_commit=False) as first_session:
-            first = await repo.ensure_active(first_session, runtime.id)
+            first = await repo.ensure_team_primary_for_agent(
+                first_session, workspace_id=workspace_id, agent_id=agent_id
+            )
 
             async with AsyncSession(
                 rdb_engine, expire_on_commit=False
             ) as second_session:
                 second_task = asyncio.create_task(
-                    repo.ensure_active(second_session, runtime.id)
+                    repo.ensure_team_primary_for_agent(
+                        second_session, workspace_id=workspace_id, agent_id=agent_id
+                    )
                 )
                 await asyncio.sleep(0.1)
                 await first_session.commit()
@@ -146,37 +150,6 @@ class TestAgentSessionRepository:
 
         assert second.id == first.id
         assert second.status == AgentSessionStatus.ACTIVE
-
-    async def test_rotate_active_archives_current_and_creates_new(
-        self, rdb_session: AsyncSession
-    ) -> None:
-        """rotation ends existing active with preservation and makes new active."""
-        workspace_id = await _create_workspace(rdb_session, "agent-session-rotate-ws")
-        agent_id = await _create_agent(
-            rdb_session, workspace_id, "agent-session-rotate-model"
-        )
-        runtime = await AgentRuntimeRepository().ensure_for_agent(rdb_session, agent_id)
-        repo = AgentSessionRepository()
-        first = await repo.ensure_active(rdb_session, runtime.id)
-        now = datetime.datetime.now(datetime.timezone.utc)
-
-        second = await repo.rotate_active(
-            rdb_session,
-            runtime.id,
-            start_reason=AgentSessionStartReason.MANUAL_RESET,
-            end_reason=AgentSessionEndReason.MANUAL_RESET,
-            now=now,
-        )
-
-        archived = await repo.get_by_id(rdb_session, first.id)
-        assert archived is not None
-        assert archived.status == AgentSessionStatus.ARCHIVED
-        assert archived.end_reason == AgentSessionEndReason.MANUAL_RESET
-        assert archived.ended_at == now
-        assert second.id != first.id
-        assert second.status == AgentSessionStatus.ACTIVE
-        assert second.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
-        assert second.start_reason == AgentSessionStartReason.MANUAL_RESET
 
     async def test_claim_lifecycle_start_sets_marker_once(
         self, rdb_session: AsyncSession
@@ -188,9 +161,10 @@ class TestAgentSessionRepository:
         agent_id = await _create_agent(
             rdb_session, workspace_id, "agent-session-lifecycle-model"
         )
-        runtime = await AgentRuntimeRepository().ensure_for_agent(rdb_session, agent_id)
         repo = AgentSessionRepository()
-        agent_session = await repo.ensure_active(rdb_session, runtime.id)
+        agent_session = await repo.ensure_team_primary_for_agent(
+            rdb_session, workspace_id=workspace_id, agent_id=agent_id
+        )
         first_claimed_at = datetime.datetime.now(datetime.timezone.utc)
         second_claimed_at = first_claimed_at + datetime.timedelta(seconds=1)
 
@@ -214,53 +188,3 @@ class TestAgentSessionRepository:
         refreshed = await repo.get_by_id(rdb_session, agent_session.id)
         assert refreshed is not None
         assert refreshed.lifecycle_started_at == first_claimed_at
-
-    async def test_claim_lifecycle_start_allows_rotated_session(
-        self, rdb_session: AsyncSession
-    ) -> None:
-        """New session created by rotation has separate lifecycle marker."""
-        workspace_id = await _create_workspace(
-            rdb_session, "agent-session-lifecycle-rotate-ws"
-        )
-        agent_id = await _create_agent(
-            rdb_session, workspace_id, "agent-session-lifecycle-rotate-model"
-        )
-        runtime = await AgentRuntimeRepository().ensure_for_agent(rdb_session, agent_id)
-        repo = AgentSessionRepository()
-        first = await repo.ensure_active(rdb_session, runtime.id)
-        first_claimed_at = datetime.datetime.now(datetime.timezone.utc)
-        rotated_at = first_claimed_at + datetime.timedelta(seconds=1)
-        second_claimed_at = first_claimed_at + datetime.timedelta(seconds=2)
-
-        assert (
-            await repo.claim_lifecycle_start(
-                rdb_session,
-                first.id,
-                now=first_claimed_at,
-            )
-            is True
-        )
-        second = await repo.rotate_active(
-            rdb_session,
-            runtime.id,
-            start_reason=AgentSessionStartReason.MANUAL_RESET,
-            end_reason=AgentSessionEndReason.MANUAL_RESET,
-            now=rotated_at,
-        )
-
-        second_claimed = await repo.claim_lifecycle_start(
-            rdb_session,
-            second.id,
-            now=second_claimed_at,
-        )
-
-        assert second.id != first.id
-        assert second_claimed is True
-        assert (
-            await repo.get_lifecycle_started_at(rdb_session, first.id)
-            == first_claimed_at
-        )
-        assert (
-            await repo.get_lifecycle_started_at(rdb_session, second.id)
-            == second_claimed_at
-        )

@@ -65,7 +65,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-25
-spec_version: 63
+spec_version: 64
 ---
 
 # Conversation & Events
@@ -109,10 +109,9 @@ command, stop intent, or run heartbeat.
 | --- | --- | --- |
 | `id` | `str(32)` | UUID7 hex |
 | `workspace_id` / `agent_id` | FK | Workspace and agent boundary |
-| `agent_runtime_id` | FK `agent_runtimes` | Transitional denormalized runtime reference; not the session ownership edge |
 | `status` | enum | `active` or `archived` |
 | `primary_kind` | enum \| null | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind. |
-| `start_reason` | enum | `initial`, `manual_new`, `manual_reset`, `system_recovery`, `compact_rotate` |
+| `start_reason` | enum | `initial`, `system_recovery` |
 | `end_reason` | enum \| null | Archive reason |
 | `model_input_head_event_id` | `str(32)` \| null | Event model-input head after append-only compaction |
 | `run_state` / `run_heartbeat_at` | enum / timestamptz | Session execution recovery state |
@@ -120,11 +119,12 @@ command, stop intent, or run heartbeat.
 | `stop_requested_*` | mixed | Durable stop intent for this session |
 
 Only one active team primary session may exist per agent in the current product state. Direct session
-writes are already session-scoped. When a route contains `session_id`, input buffers, live projections,
+writes are session-scoped. When a route contains `session_id`, input buffers, live projections,
 broker wake-up, and the REST response use that same session id. Runtime current/active session lookup
 is invalid for that direct write path and for default team session selection. If any internal write
 helper produces a different session id from the REST boundary's resolved target, the write is invalid
-and must not enqueue a broker wake-up for that alternate session.
+and must not enqueue a broker wake-up for that alternate session. `agent_runtime_id` is not stored on
+`AgentSession`; runtime lookup happens only after a session target has already been selected.
 
 ## 3. AgentRun
 
@@ -254,8 +254,7 @@ input. Session runner payload ingress uses input buffers. The supported input bu
 messages do not carry model input payloads.
 
 Input buffers are session-bound. The `input_buffers` table stores `session_id`, not
-`agent_runtime_id`; any current runtime identity is derived through the owning active
-`AgentSession`. Runtime-specific columns or runtime-scoped buffer queries are invalid because the
+`agent_runtime_id`. Runtime-specific columns or runtime-scoped buffer queries are invalid because the
 buffer is part of the conversation, not the sandbox lifecycle.
 
 `InputBufferService` owns all input-buffer reads and writes. Public chat routes, worker idle

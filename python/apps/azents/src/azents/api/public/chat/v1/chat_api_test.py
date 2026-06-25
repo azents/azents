@@ -229,7 +229,6 @@ class _RestWriteChatService:
             AgentSession(
                 id=self.session_id,
                 workspace_id="workspace-1",
-                agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_id="agent-1",
                 status=AgentSessionStatus.ACTIVE,
                 start_reason=AgentSessionStartReason.INITIAL,
@@ -267,7 +266,6 @@ class _StopChatService:
             AgentSession(
                 id="1123456789abcdef0123456789abcdef",
                 workspace_id="workspace-1",
-                agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_id="agent-1",
                 status=AgentSessionStatus.ACTIVE,
                 start_reason=AgentSessionStartReason.INITIAL,

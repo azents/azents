@@ -60,7 +60,6 @@ from azents.services.agent_session_input import (
     AgentSessionInputService,
     AgentSessionInputSessionNotFound,
     AgentSessionInputWrongAgent,
-    AgentSessionInputWrongRuntime,
     BufferedAgentSessionInputResult,
 )
 from azents.services.chat import ChatSessionService
@@ -576,7 +575,7 @@ def _handle_agent_session_input_result(
             match error:
                 case AgentSessionInputSessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
-                case AgentSessionInputWrongAgent() | AgentSessionInputWrongRuntime():
+                case AgentSessionInputWrongAgent():
                     raise HTTPException(
                         status_code=403,
                         detail="Session access denied.",

@@ -207,7 +207,6 @@ def _executor(
             AgentSessionRepository,
             _AgentSessionRepository(),
         ),
-        event_session_repository=cast(Any, object()),
         event_transcript_repository=cast(Any, object()),
         session_lifecycle=cast(SessionLifecycleService, session_lifecycle),
         worker_config=AgentWorkerConfig(

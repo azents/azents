@@ -1,12 +1,9 @@
 """Event agent execution repository."""
 
-import dataclasses
 import datetime
-from typing import Annotated
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from fastapi import Depends
 from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,14 +36,11 @@ from azents.engine.events.types import (
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import JSONValue, RDBEvent
-from azents.repos.agent_session.data import AgentSession
 
 from .data import (
     AgentRunCreate,
     AgentRunPatch,
     EventCreate,
-    EventSessionCreate,
-    EventSessionState,
 )
 
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
@@ -395,116 +389,6 @@ class EventTranscriptRepository:
             native_format=rdb.native_format,
             schema_version=rdb.schema_version,
             created_at=rdb.created_at,
-        )
-
-
-@dataclasses.dataclass(frozen=True)
-class EventSessionRepository:
-    """Event agent session repository."""
-
-    transcript_repo: Annotated[
-        EventTranscriptRepository, Depends(EventTranscriptRepository)
-    ]
-
-    async def create(
-        self,
-        session: AsyncSession,
-        create: EventSessionCreate,
-    ) -> EventSessionState:
-        """Create Event session row."""
-        rdb = RDBAgentSession(
-            workspace_id=create.workspace_id,
-            agent_runtime_id=create.agent_runtime_id,
-            agent_id=create.agent_id,
-            status=create.status,
-            start_reason=create.start_reason,
-            end_reason=create.end_reason,
-        )
-        if create.id is not None:
-            rdb.id = create.id
-        rdb.ended_at = create.ended_at
-        session.add(rdb)
-        await session.flush()
-        return self._build(rdb)
-
-    async def ensure_from_legacy_session(
-        self,
-        session: AsyncSession,
-        legacy_session: AgentSession,
-    ) -> EventSessionState:
-        """Return existing session row as event state model."""
-        rdb = await session.get(RDBAgentSession, legacy_session.id)
-        if rdb is not None:
-            rdb.status = legacy_session.status
-            rdb.start_reason = legacy_session.start_reason
-            rdb.end_reason = legacy_session.end_reason
-            rdb.ended_at = legacy_session.ended_at
-            await session.flush()
-            await session.refresh(rdb)
-            return self._build(rdb)
-        return await self.create(
-            session,
-            EventSessionCreate(
-                id=legacy_session.id,
-                workspace_id=legacy_session.workspace_id,
-                agent_runtime_id=legacy_session.agent_runtime_id,
-                agent_id=legacy_session.agent_id,
-                status=legacy_session.status,
-                start_reason=legacy_session.start_reason,
-                end_reason=legacy_session.end_reason,
-                ended_at=legacy_session.ended_at,
-            ),
-        )
-
-    async def get_by_id(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> EventSessionState | None:
-        """Fetch event session by ID."""
-        rdb = await session.get(RDBAgentSession, session_id)
-        if rdb is None:
-            return None
-        return self._build(rdb)
-
-    async def move_model_input_head(
-        self,
-        session: AsyncSession,
-        session_id: str,
-        event_id: str,
-    ) -> EventSessionState:
-        """Move Model input head to specified event."""
-        exists = await self.transcript_repo.exists_in_session(
-            session,
-            session_id,
-            event_id,
-        )
-        if not exists:
-            raise ValueError("Model input head event not found in session")
-
-        rdb = await session.get(RDBAgentSession, session_id)
-        if rdb is None:
-            raise ValueError("Event session not found")
-        rdb.model_input_head_event_id = event_id
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
-
-    def _build(self, rdb: RDBAgentSession) -> EventSessionState:
-        """Convert RDB row to domain model."""
-        return EventSessionState(
-            id=rdb.id,
-            workspace_id=rdb.workspace_id,
-            agent_runtime_id=rdb.agent_runtime_id,
-            agent_id=rdb.agent_id,
-            status=rdb.status,
-            start_reason=rdb.start_reason,
-            end_reason=rdb.end_reason,
-            model_input_head_event_id=rdb.model_input_head_event_id,
-            started_at=rdb.started_at,
-            ended_at=rdb.ended_at,
-            created_at=rdb.created_at,
-            updated_at=rdb.updated_at,
         )
 
 

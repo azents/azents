@@ -18,7 +18,6 @@ class AgentSession(BaseModel):
 
     id: str = Field(description="AgentSession ID")
     workspace_id: str = Field(description="Workspace ID")
-    agent_runtime_id: str = Field(description="AgentRuntime ID")
     agent_id: str = Field(description="Agent ID")
     status: AgentSessionStatus = Field(description="AgentSession status")
     primary_kind: AgentSessionPrimaryKind | None = Field(
@@ -28,6 +27,10 @@ class AgentSession(BaseModel):
     start_reason: AgentSessionStartReason = Field(description="Start reason")
     end_reason: AgentSessionEndReason | None = Field(
         default=None, description="End reason"
+    )
+    model_input_head_event_id: str | None = Field(
+        default=None,
+        description="Model input head event ID",
     )
     started_at: datetime.datetime = Field(description="Start time")
     lifecycle_started_at: datetime.datetime | None = Field(
@@ -87,10 +90,9 @@ class AgentSessionCreate(BaseModel):
     """AgentSession create schema."""
 
     workspace_id: str = Field(description="Workspace ID")
-    agent_runtime_id: str = Field(description="AgentRuntime ID")
     agent_id: str = Field(description="Agent ID")
     primary_kind: AgentSessionPrimaryKind | None = Field(
-        default=AgentSessionPrimaryKind.TEAM_PRIMARY,
+        default=None,
         description="Primary session role",
     )
     start_reason: AgentSessionStartReason = Field(

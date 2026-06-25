@@ -64,8 +64,6 @@ from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
     AgentRunCreateRepository,
     ClientToolExecutor,
-    EventSessionMirrorRepository,
-    LegacySessionLookupRepository,
     ManualCompactor,
     NormalizedAdapterOutput,
     SessionHeadRepository,
@@ -117,11 +115,7 @@ from azents.engine.run.types import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import (
-    AgentRunRepository,
-    EventSessionRepository,
-    EventTranscriptRepository,
-)
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.services.artifact import ArtifactService
@@ -201,14 +195,9 @@ class AgentEngineAdapter:
     ]
     run_repo: Annotated[AgentRunCreateRepository, Depends(AgentRunRepository)]
     agent_session_repo: Annotated[
-        LegacySessionLookupRepository, Depends(AgentSessionRepository)
+        AgentSessionRepository, Depends(AgentSessionRepository)
     ]
-    event_session_repo: Annotated[
-        EventSessionMirrorRepository, Depends(EventSessionRepository)
-    ]
-    event_session_head_repo: Annotated[
-        SessionHeadRepository, Depends(EventSessionRepository)
-    ]
+    session_head_repo: Annotated[SessionHeadRepository, Depends(AgentSessionRepository)]
     transcript_repo: Annotated[TranscriptRepository, Depends(EventTranscriptRepository)]
     compactor: Annotated[ManualCompactor, Depends(EventCompactor)]
     summary_model_call: Annotated[SummaryModelCall, Depends(_summary_model_call)]
@@ -236,16 +225,15 @@ class AgentEngineAdapter:
         """Run manual event compaction in append-only style."""
         yield ephemeral(CompactionStarted())
         async with self.session_manager() as session:
-            await _ensure_event_session(
+            await _ensure_agent_session(
                 session,
                 request.session_id,
                 agent_session_repo=self.agent_session_repo,
-                event_session_repo=self.event_session_repo,
             )
             transcript = await _current_model_input_transcript(
                 session,
                 request.session_id,
-                session_repo=self.event_session_head_repo,
+                session_repo=self.session_head_repo,
                 transcript_repo=self.transcript_repo,
             )
             await self.compactor.compact(
@@ -273,11 +261,10 @@ class AgentEngineAdapter:
     ) -> AsyncIterator[Emit]:
         """Run Event AgentRunExecution and yield terminal event."""
         async with self.session_manager() as session:
-            await _ensure_event_session(
+            await _ensure_agent_session(
                 session,
                 request.session_id,
                 agent_session_repo=self.agent_session_repo,
-                event_session_repo=self.event_session_repo,
             )
             user_message_events = await _append_run_user_messages(
                 session,
@@ -422,7 +409,7 @@ class AgentEngineAdapter:
             pre_model_lower_hook=model_file_materializer.materialize,
             run_repo=self.run_repo,
             transcript_repo=self.transcript_repo,
-            session_repo=self.event_session_head_repo,
+            session_repo=self.session_head_repo,
         )
 
         async def execute_run() -> AgentRunStatus:
@@ -980,18 +967,13 @@ async def _append_run_user_messages(
     return appended
 
 
-async def _ensure_event_session(
+async def _ensure_agent_session(
     session: AsyncSession,
     session_id: str,
     *,
-    agent_session_repo: LegacySessionLookupRepository,
-    event_session_repo: EventSessionMirrorRepository,
+    agent_session_repo: AgentSessionRepository,
 ) -> None:
-    """Ensure event session shadow row with same ID as legacy AgentSession row."""
-    legacy_session = await agent_session_repo.get_by_id(session, session_id)
-    if legacy_session is None:
+    """Ensure AgentSession row exists before event processing."""
+    agent_session = await agent_session_repo.get_by_id(session, session_id)
+    if agent_session is None:
         raise ValueError("AgentSession not found")
-    await event_session_repo.ensure_from_legacy_session(
-        session,
-        legacy_session,
-    )

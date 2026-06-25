@@ -17,11 +17,11 @@ from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
     EventAppendRepository,
     EventPayloadRepository,
-    EventSessionHeadRepository,
     ManualCompactor,
     NativeModelRequest,
     PostLowerFilter,
     PreLowerFilter,
+    SessionHeadMoveRepository,
     SummaryGenerator,
 )
 from azents.engine.events.system_reminders import (
@@ -57,11 +57,9 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.engine.run.errors import CompactionFailedError
-from azents.repos.agent_execution import (
-    EventSessionRepository,
-    EventTranscriptRepository,
-)
+from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.model_file import ModelFileRepository
 
@@ -327,7 +325,7 @@ class EventCompactor:
     transcript_repo: Annotated[
         EventAppendRepository, Depends(EventTranscriptRepository)
     ]
-    session_repo: Annotated[EventSessionHeadRepository, Depends(EventSessionRepository)]
+    session_repo: Annotated[SessionHeadMoveRepository, Depends(AgentSessionRepository)]
     summary_context_window_tokens: int | None = None
 
     async def compact(

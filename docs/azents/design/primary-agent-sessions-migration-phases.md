@@ -113,6 +113,8 @@ Make `AgentSession` an agent-owned model, not a runtime child.
 - Remove `AgentSession` construction requirements that depend on `agent_runtime_id`.
 - Remove runtime-keyed active-session uniqueness.
 - Replace runtime-keyed session repository methods with agent/session methods.
+- Merge the old event-session facade into `AgentSessionRepository`.
+- Remove rotate/reset session semantics; compaction advances `model_input_head_event_id` instead.
 - Keep runtime lookup only for runtime services needed after a session has already been selected.
 
 ### Exit Criteria
@@ -120,6 +122,13 @@ Make `AgentSession` an agent-owned model, not a runtime child.
 - Session ownership is represented through `agent_id`.
 - Runtime is not the ownership edge or selection authority for sessions.
 - Tests can create/fetch sessions through agent/session ownership paths.
+- No runtime-keyed active/rotate repository API remains.
+
+### Implementation Status
+
+Phase 4-A removes `agent_sessions.agent_runtime_id`, deletes runtime-owned active/rotate session
+repository APIs, and treats `AgentSession.model_input_head_event_id` as the event transcript head.
+Runtime-scoped project registration and REST write idempotency remain as follow-up ownership cleanup.
 
 ## Phase 5: Session-owned projects
 

@@ -11,7 +11,6 @@ from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
     AgentSessionEndReason,
-    AgentSessionStatus,
     EventKind,
     LLMProvider,
 )
@@ -21,17 +20,10 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.repos.agent_execution import (
-    AgentRunRepository,
-    EventSessionRepository,
-    EventTranscriptRepository,
-)
-from azents.repos.agent_execution.data import (
-    AgentRunCreate,
-    EventCreate,
-    EventSessionCreate,
-)
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -87,9 +79,9 @@ async def _create_agent_runtime(
     return workspace_id, agent.id, runtime.id
 
 
-def _event_session_repository() -> EventSessionRepository:
-    """Create EventSessionRepository for tests."""
-    return EventSessionRepository(transcript_repo=EventTranscriptRepository())
+def _agent_session_repository() -> AgentSessionRepository:
+    """Create AgentSessionRepository for tests."""
+    return AgentSessionRepository()
 
 
 class TestEventExecutionRepositories:
@@ -100,14 +92,13 @@ class TestEventExecutionRepositories:
         rdb_session: AsyncSession,
     ) -> None:
         """Validate transcript append/read and model input head move."""
-        workspace_id, agent_id, runtime_id = await _create_agent_runtime(rdb_session)
-        session_repo = _event_session_repository()
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        session_repo = _agent_session_repository()
         transcript_repo = EventTranscriptRepository()
         event_session = await session_repo.create(
             rdb_session,
-            EventSessionCreate(
+            AgentSessionCreate(
                 workspace_id=workspace_id,
-                agent_runtime_id=runtime_id,
                 agent_id=agent_id,
             ),
         )
@@ -164,12 +155,11 @@ class TestEventExecutionRepositories:
         rdb_session: AsyncSession,
     ) -> None:
         """Append with same External ID returns existing event."""
-        workspace_id, agent_id, runtime_id = await _create_agent_runtime(rdb_session)
-        event_session = await _event_session_repository().create(
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        event_session = await _agent_session_repository().create(
             rdb_session,
-            EventSessionCreate(
+            AgentSessionCreate(
                 workspace_id=workspace_id,
-                agent_runtime_id=runtime_id,
                 agent_id=agent_id,
             ),
         )
@@ -214,15 +204,14 @@ class TestEventExecutionRepositories:
         """Automatic model_order assignment runs after session row lock."""
         session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
         async with session_factory() as setup_session:
-            workspace_id, agent_id, runtime_id = await _create_agent_runtime(
+            workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
                 setup_session,
                 "event-runtime-lock-ws",
             )
-            event_session = await _event_session_repository().create(
+            event_session = await _agent_session_repository().create(
                 setup_session,
-                EventSessionCreate(
+                AgentSessionCreate(
                     workspace_id=workspace_id,
-                    agent_runtime_id=runtime_id,
                     agent_id=agent_id,
                 ),
             )
@@ -275,12 +264,11 @@ class TestEventExecutionRepositories:
         rdb_session: AsyncSession,
     ) -> None:
         """Model input is fetched by model_order, not physical id."""
-        workspace_id, agent_id, runtime_id = await _create_agent_runtime(rdb_session)
-        event_session = await _event_session_repository().create(
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        event_session = await _agent_session_repository().create(
             rdb_session,
-            EventSessionCreate(
+            AgentSessionCreate(
                 workspace_id=workspace_id,
-                agent_runtime_id=runtime_id,
                 agent_id=agent_id,
             ),
         )
@@ -333,12 +321,11 @@ class TestEventExecutionRepositories:
         rdb_session: AsyncSession,
     ) -> None:
         """Validate Agent run phase and terminal state updates."""
-        workspace_id, agent_id, runtime_id = await _create_agent_runtime(rdb_session)
-        event_session = await _event_session_repository().create(
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        event_session = await _agent_session_repository().create(
             rdb_session,
-            EventSessionCreate(
+            AgentSessionCreate(
                 workspace_id=workspace_id,
-                agent_runtime_id=runtime_id,
                 agent_id=agent_id,
             ),
         )
@@ -394,12 +381,11 @@ class TestEventExecutionRepositories:
         rdb_session: AsyncSession,
     ) -> None:
         """Creating a new run closes remaining running projection in same session."""
-        workspace_id, agent_id, runtime_id = await _create_agent_runtime(rdb_session)
-        event_session = await _event_session_repository().create(
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        event_session = await _agent_session_repository().create(
             rdb_session,
-            EventSessionCreate(
+            AgentSessionCreate(
                 workspace_id=workspace_id,
-                agent_runtime_id=runtime_id,
                 agent_id=agent_id,
             ),
         )
@@ -432,12 +418,11 @@ class TestEventExecutionRepositories:
         rdb_session: AsyncSession,
     ) -> None:
         """Worker fallback does not overwrite terminal run state."""
-        workspace_id, agent_id, runtime_id = await _create_agent_runtime(rdb_session)
-        event_session = await _event_session_repository().create(
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        event_session = await _agent_session_repository().create(
             rdb_session,
-            EventSessionCreate(
+            AgentSessionCreate(
                 workspace_id=workspace_id,
-                agent_runtime_id=runtime_id,
                 agent_id=agent_id,
             ),
         )
@@ -468,25 +453,27 @@ class TestEventExecutionRepositories:
         rdb_session: AsyncSession,
     ) -> None:
         """Agent run index increments within session scope."""
-        workspace_id, agent_id, runtime_id = await _create_agent_runtime(rdb_session)
-        first_session = await _event_session_repository().create(
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        first_session = await _agent_session_repository().create(
             rdb_session,
-            EventSessionCreate(
+            AgentSessionCreate(
                 workspace_id=workspace_id,
-                agent_runtime_id=runtime_id,
                 agent_id=agent_id,
             ),
         )
-        second_session = await _event_session_repository().create(
+        second_session = await _agent_session_repository().create(
             rdb_session,
-            EventSessionCreate(
+            AgentSessionCreate(
                 workspace_id=workspace_id,
-                agent_runtime_id=runtime_id,
                 agent_id=agent_id,
-                status=AgentSessionStatus.ARCHIVED,
-                end_reason=AgentSessionEndReason.COMPACT_ROTATE,
-                ended_at=datetime.datetime.now(datetime.UTC),
+                primary_kind=None,
             ),
+        )
+        await _agent_session_repository().archive(
+            rdb_session,
+            second_session.id,
+            ended_at=datetime.datetime.now(datetime.UTC),
+            end_reason=AgentSessionEndReason.DELETED,
         )
         repo = AgentRunRepository()
 
@@ -505,77 +492,3 @@ class TestEventExecutionRepositories:
         assert first.run_index == 1
         assert second.run_index == 2
         assert other.run_index == 1
-
-    async def test_ensure_from_legacy_session_preserves_id(
-        self,
-        rdb_session: AsyncSession,
-    ) -> None:
-        """Ensure event shadow session with same existing agent_sessions id."""
-        _workspace_id, _agent_id, runtime_id = await _create_agent_runtime(rdb_session)
-        legacy_session = await AgentSessionRepository().ensure_active(
-            rdb_session,
-            runtime_id,
-        )
-
-        repo = _event_session_repository()
-        event = await repo.ensure_from_legacy_session(
-            rdb_session,
-            legacy_session,
-        )
-        again = await repo.ensure_from_legacy_session(
-            rdb_session,
-            legacy_session,
-        )
-
-        assert event.id == legacy_session.id
-        assert again.id == legacy_session.id
-
-        await AgentSessionRepository().archive(
-            rdb_session,
-            legacy_session.id,
-            ended_at=datetime.datetime.now(datetime.UTC),
-            end_reason=AgentSessionEndReason.MANUAL_RESET,
-        )
-        archived_legacy = await AgentSessionRepository().get_by_id(
-            rdb_session,
-            legacy_session.id,
-        )
-        assert archived_legacy is not None
-        archived = await repo.ensure_from_legacy_session(
-            rdb_session,
-            archived_legacy,
-        )
-        assert archived.status == AgentSessionStatus.ARCHIVED
-        assert archived.end_reason == AgentSessionEndReason.MANUAL_RESET
-
-    async def test_ensure_from_archived_legacy_session_without_existing_mirror(
-        self,
-        rdb_session: AsyncSession,
-    ) -> None:
-        """First mirrored archived legacy session is also created as archived state."""
-        _workspace_id, _agent_id, runtime_id = await _create_agent_runtime(rdb_session)
-        legacy_session = await AgentSessionRepository().ensure_active(
-            rdb_session,
-            runtime_id,
-        )
-        await AgentSessionRepository().archive(
-            rdb_session,
-            legacy_session.id,
-            ended_at=datetime.datetime.now(datetime.UTC),
-            end_reason=AgentSessionEndReason.COMPACT_ROTATE,
-        )
-        archived_legacy = await AgentSessionRepository().get_by_id(
-            rdb_session,
-            legacy_session.id,
-        )
-        assert archived_legacy is not None
-
-        event = await _event_session_repository().ensure_from_legacy_session(
-            rdb_session,
-            archived_legacy,
-        )
-
-        assert event.id == archived_legacy.id
-        assert event.status == AgentSessionStatus.ARCHIVED
-        assert event.end_reason == AgentSessionEndReason.COMPACT_ROTATE
-        assert event.ended_at == archived_legacy.ended_at

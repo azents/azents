@@ -92,9 +92,6 @@ class RDBAgentSession(RDBModel):
 
     IX_WORKSPACE_ID = sa.Index("ix_agent_sessions_workspace_id", "workspace_id")
     IX_AGENT_ID = sa.Index("ix_agent_sessions_agent_id", "agent_id")
-    IX_AGENT_RUNTIME_ID = sa.Index(
-        "ix_agent_sessions_agent_runtime_id", "agent_runtime_id"
-    )
     IX_MODEL_INPUT_HEAD_EVENT_ID = sa.Index(
         "ix_agent_sessions_model_input_head_event_id",
         "model_input_head_event_id",
@@ -114,12 +111,6 @@ class RDBAgentSession(RDBModel):
         "run_heartbeat_at",
         postgresql_where=sa.text("run_state = 'running'"),
     )
-    UQ_RUNTIME_ACTIVE = sa.Index(
-        "uq_agent_sessions_runtime_active",
-        "agent_runtime_id",
-        unique=True,
-        postgresql_where=sa.text("status = 'active'"),
-    )
     UQ_AGENT_ACTIVE_TEAM_PRIMARY = sa.Index(
         "uq_agent_sessions_agent_active_team_primary",
         "agent_id",
@@ -138,11 +129,6 @@ class RDBAgentSession(RDBModel):
         sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=False,
     )
-    agent_runtime_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_runtimes.id", ondelete="CASCADE"),
-        nullable=False,
-    )
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
         sa.ForeignKey("agents.id", ondelete="CASCADE"),
@@ -156,7 +142,7 @@ class RDBAgentSession(RDBModel):
     primary_kind: Mapped[AgentSessionPrimaryKind | None] = mapped_column(
         agent_session_primary_kind_enum,
         nullable=True,
-        default=AgentSessionPrimaryKind.TEAM_PRIMARY,
+        default=None,
     )
     start_reason: Mapped[AgentSessionStartReason] = mapped_column(
         agent_session_start_reason_enum,
@@ -269,11 +255,9 @@ class RDBAgentSession(RDBModel):
     __table_args__ = (
         IX_WORKSPACE_ID,
         IX_AGENT_ID,
-        IX_AGENT_RUNTIME_ID,
         IX_MODEL_INPUT_HEAD_EVENT_ID,
         IX_PENDING_COMMAND,
         IX_STOP_REQUESTED_AT,
         IX_RUN_STATE_RUNNING,
-        UQ_RUNTIME_ACTIVE,
         UQ_AGENT_ACTIVE_TEAM_PRIMARY,
     )
