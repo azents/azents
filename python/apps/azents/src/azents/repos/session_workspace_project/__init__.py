@@ -27,7 +27,7 @@ class SessionWorkspaceProjectRepository:
     ) -> SessionWorkspaceProject:
         """Create Project row."""
         rdb = RDBSessionWorkspaceProject(
-            agent_runtime_id=create.agent_runtime_id,
+            session_id=create.session_id,
             path=create.path,
         )
         session.add(rdb)
@@ -50,13 +50,13 @@ class SessionWorkspaceProjectRepository:
         self,
         session: AsyncSession,
         *,
-        agent_runtime_id: str,
+        session_id: str,
         path: str,
     ) -> SessionWorkspaceProject | None:
-        """Fetch Project by AgentRuntime and path."""
+        """Fetch Project by AgentSession and path."""
         result = await session.execute(
             sa.select(RDBSessionWorkspaceProject).where(
-                RDBSessionWorkspaceProject.agent_runtime_id == agent_runtime_id,
+                RDBSessionWorkspaceProject.session_id == session_id,
                 RDBSessionWorkspaceProject.path == path,
             )
         )
@@ -69,12 +69,12 @@ class SessionWorkspaceProjectRepository:
         self,
         session: AsyncSession,
         *,
-        agent_runtime_id: str,
+        session_id: str,
     ) -> list[SessionWorkspaceProject]:
-        """Fetch Project list of AgentRuntime ordered by path."""
+        """Fetch Project list of AgentSession ordered by path."""
         result = await session.execute(
             sa.select(RDBSessionWorkspaceProject)
-            .where(RDBSessionWorkspaceProject.agent_runtime_id == agent_runtime_id)
+            .where(RDBSessionWorkspaceProject.session_id == session_id)
             .order_by(RDBSessionWorkspaceProject.path)
         )
         return [self._build_project(rdb) for rdb in result.scalars()]
@@ -84,13 +84,13 @@ class SessionWorkspaceProjectRepository:
         session: AsyncSession,
         project_id: str,
         *,
-        agent_runtime_id: str,
+        session_id: str,
     ) -> bool:
         """Delete Project row."""
         result = await session.execute(
             sa.delete(RDBSessionWorkspaceProject).where(
                 RDBSessionWorkspaceProject.id == project_id,
-                RDBSessionWorkspaceProject.agent_runtime_id == agent_runtime_id,
+                RDBSessionWorkspaceProject.session_id == session_id,
             )
         )
         await session.flush()
@@ -103,7 +103,7 @@ class SessionWorkspaceProjectRepository:
     ) -> SessionWorkspaceProjectRegistrationRequest:
         """Create Project registration request row."""
         rdb = RDBSessionWorkspaceProjectRegistrationRequest(
-            agent_runtime_id=create.agent_runtime_id,
+            session_id=create.session_id,
             path=create.path,
             reason=create.reason,
         )
@@ -146,14 +146,13 @@ class SessionWorkspaceProjectRepository:
         self,
         session: AsyncSession,
         *,
-        agent_runtime_id: str,
+        session_id: str,
         path: str,
     ) -> SessionWorkspaceProjectRegistrationRequest | None:
         """Fetch pending registration request with same path."""
         result = await session.execute(
             sa.select(RDBSessionWorkspaceProjectRegistrationRequest).where(
-                RDBSessionWorkspaceProjectRegistrationRequest.agent_runtime_id
-                == agent_runtime_id,
+                RDBSessionWorkspaceProjectRegistrationRequest.session_id == session_id,
                 RDBSessionWorkspaceProjectRegistrationRequest.path == path,
                 RDBSessionWorkspaceProjectRegistrationRequest.status
                 == SessionWorkspaceProjectRegistrationRequestStatus.PENDING,
@@ -168,14 +167,13 @@ class SessionWorkspaceProjectRepository:
         self,
         session: AsyncSession,
         *,
-        agent_runtime_id: str,
+        session_id: str,
     ) -> list[SessionWorkspaceProjectRegistrationRequest]:
-        """Fetch Project registration request list for AgentRuntime."""
+        """Fetch Project registration request list for AgentSession."""
         result = await session.execute(
             sa.select(RDBSessionWorkspaceProjectRegistrationRequest)
             .where(
-                RDBSessionWorkspaceProjectRegistrationRequest.agent_runtime_id
-                == agent_runtime_id
+                RDBSessionWorkspaceProjectRegistrationRequest.session_id == session_id
             )
             .order_by(RDBSessionWorkspaceProjectRegistrationRequest.created_at)
         )
@@ -186,7 +184,7 @@ class SessionWorkspaceProjectRepository:
         session: AsyncSession,
         request_id: str,
         *,
-        agent_runtime_id: str,
+        session_id: str,
         project_id: str,
     ) -> bool:
         """Transition Registration request to approved state."""
@@ -194,8 +192,7 @@ class SessionWorkspaceProjectRepository:
             sa.update(RDBSessionWorkspaceProjectRegistrationRequest)
             .where(
                 RDBSessionWorkspaceProjectRegistrationRequest.id == request_id,
-                RDBSessionWorkspaceProjectRegistrationRequest.agent_runtime_id
-                == agent_runtime_id,
+                RDBSessionWorkspaceProjectRegistrationRequest.session_id == session_id,
                 RDBSessionWorkspaceProjectRegistrationRequest.status
                 == SessionWorkspaceProjectRegistrationRequestStatus.PENDING,
             )
@@ -212,15 +209,14 @@ class SessionWorkspaceProjectRepository:
         session: AsyncSession,
         request_id: str,
         *,
-        agent_runtime_id: str,
+        session_id: str,
     ) -> bool:
         """Transition Registration request to rejected state."""
         result = await session.execute(
             sa.update(RDBSessionWorkspaceProjectRegistrationRequest)
             .where(
                 RDBSessionWorkspaceProjectRegistrationRequest.id == request_id,
-                RDBSessionWorkspaceProjectRegistrationRequest.agent_runtime_id
-                == agent_runtime_id,
+                RDBSessionWorkspaceProjectRegistrationRequest.session_id == session_id,
                 RDBSessionWorkspaceProjectRegistrationRequest.status
                 == SessionWorkspaceProjectRegistrationRequestStatus.PENDING,
             )
@@ -236,7 +232,7 @@ class SessionWorkspaceProjectRepository:
         """Convert RDB Project row to domain model."""
         return SessionWorkspaceProject(
             id=rdb.id,
-            agent_runtime_id=rdb.agent_runtime_id,
+            session_id=rdb.session_id,
             path=rdb.path,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
@@ -249,7 +245,7 @@ class SessionWorkspaceProjectRepository:
         """Convert RDB registration request row to domain model."""
         return SessionWorkspaceProjectRegistrationRequest(
             id=rdb.id,
-            agent_runtime_id=rdb.agent_runtime_id,
+            session_id=rdb.session_id,
             path=rdb.path,
             reason=rdb.reason,
             status=rdb.status,

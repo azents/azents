@@ -4,8 +4,6 @@ import dataclasses
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
-from typing import cast
 
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +18,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -28,6 +27,7 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.runtime.control_protocol.runner_operations import (
+    RuntimeFileListResult,
     RuntimeRunnerOperationClient,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -60,9 +60,10 @@ class _RuntimeFixture:
 
     agent_id: str
     runtime_id: str
+    session_id: str
 
 
-class _FakeRunnerOperations:
+class _FakeRunnerOperations(RuntimeRunnerOperationClient):
     """Runner operation fake for tests."""
 
     def __init__(self) -> None:
@@ -74,12 +75,14 @@ class _FakeRunnerOperations:
         runtime_id: str,
         runner_generation: int,
         path: str,
+        recursive: bool = False,
+        exclude_patterns: list[str] | None = None,
         deadline_at: datetime.datetime,
-    ) -> object:
+    ) -> RuntimeFileListResult:
         """Treat Directory existence check as success."""
-        del runtime_id, runner_generation, deadline_at
+        del runtime_id, runner_generation, recursive, exclude_patterns, deadline_at
         self.paths.append(path)
-        return SimpleNamespace(entries=(), final_cursor="0")
+        return RuntimeFileListResult(entries=(), final_cursor="0")
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -94,7 +97,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 async def _create_runtime_fixture(
     session: AsyncSession, workspace_id: str, slug: str
 ) -> _RuntimeFixture:
-    """Create AgentRuntime for tests."""
+    """Create AgentRuntime and team primary AgentSession for tests."""
 
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -124,13 +127,22 @@ async def _create_runtime_fixture(
     await session.flush()
 
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent.id)
-    return _RuntimeFixture(agent_id=agent.id, runtime_id=runtime.id)
+    agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+        session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+    )
+    return _RuntimeFixture(
+        agent_id=agent.id,
+        runtime_id=runtime.id,
+        session_id=agent_session.id,
+    )
 
 
-async def _create_runtime(session: AsyncSession, workspace_id: str, slug: str) -> str:
-    """Create AgentRuntime ID for tests."""
+async def _create_session(session: AsyncSession, workspace_id: str, slug: str) -> str:
+    """Create AgentSession ID for tests."""
     fixture = await _create_runtime_fixture(session, workspace_id, slug)
-    return fixture.runtime_id
+    return fixture.session_id
 
 
 async def _create_workspace_user(
@@ -164,6 +176,7 @@ def _service(
         repository=SessionWorkspaceProjectRepository(),
         agent_repository=AgentRepository(),
         agent_runtime_repository=AgentRuntimeRepository(),
+        agent_session_repository=AgentSessionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_manager=_SessionManager(session),
         runner_operations=runner_operations,
@@ -187,11 +200,11 @@ class TestSessionWorkspaceProjectService:
     ) -> None:
         """Reject path outside Session Workspace."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-prefix")
-        runtime_id = await _create_runtime(rdb_session, workspace_id, "swp-svc-prefix")
+        session_id = await _create_session(rdb_session, workspace_id, "swp-svc-prefix")
         service = _service(rdb_session)
 
         result = await service.create_project(
-            agent_runtime_id=runtime_id,
+            session_id=session_id,
             path="/tmp/bad",
         )
 
@@ -203,16 +216,16 @@ class TestSessionWorkspaceProjectService:
     ) -> None:
         """Reject path nested with existing Project."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-nested")
-        runtime_id = await _create_runtime(rdb_session, workspace_id, "swp-svc-nested")
+        session_id = await _create_session(rdb_session, workspace_id, "swp-svc-nested")
         service = _service(rdb_session)
         first = await service.create_project(
-            agent_runtime_id=runtime_id,
+            session_id=session_id,
             path="/workspace/agent/app",
         )
         assert isinstance(first, Success)
 
         result = await service.create_project(
-            agent_runtime_id=runtime_id,
+            session_id=session_id,
             path="/workspace/agent/app/frontend",
         )
 
@@ -224,18 +237,18 @@ class TestSessionWorkspaceProjectService:
     ) -> None:
         """Reject path same as existing Project."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-duplicate")
-        runtime_id = await _create_runtime(
+        session_id = await _create_session(
             rdb_session, workspace_id, "swp-svc-duplicate"
         )
         service = _service(rdb_session)
         first = await service.create_project(
-            agent_runtime_id=runtime_id,
+            session_id=session_id,
             path="/workspace/agent/app",
         )
         assert isinstance(first, Success)
 
         result = await service.create_project(
-            agent_runtime_id=runtime_id,
+            session_id=session_id,
             path="/workspace/agent/app",
         )
 
@@ -263,7 +276,7 @@ class TestSessionWorkspaceProjectService:
         runner_operations = _FakeRunnerOperations()
         service = _service(
             rdb_session,
-            runner_operations=cast(RuntimeRunnerOperationClient, runner_operations),
+            runner_operations=runner_operations,
         )
 
         result = await service.register_existing_folder_for_agent(
@@ -297,7 +310,7 @@ class TestSessionWorkspaceProjectService:
         runner_operations = _FakeRunnerOperations()
         service = _service(
             rdb_session,
-            runner_operations=cast(RuntimeRunnerOperationClient, runner_operations),
+            runner_operations=runner_operations,
         )
 
         result = await service.register_existing_folder_for_agent(
@@ -307,6 +320,7 @@ class TestSessionWorkspaceProjectService:
         )
 
         assert isinstance(result, Success)
+        assert result.value.session_id == fixture.session_id
         assert result.value.path == "/workspace/agent/app"
         assert runner_operations.paths == ["/workspace/agent/app"]
 
@@ -347,7 +361,7 @@ class TestSessionWorkspaceProjectService:
     async def test_list_projects_for_agent_returns_registered_projects(
         self, rdb_session: AsyncSession
     ) -> None:
-        """Workspace member fetches Project list registered in AgentRuntime."""
+        """Workspace member fetches Project list registered in team primary session."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-access-list")
         fixture = await _create_runtime_fixture(
             rdb_session,
@@ -361,7 +375,7 @@ class TestSessionWorkspaceProjectService:
         )
         service = _service(rdb_session)
         created = await service.create_project(
-            agent_runtime_id=fixture.runtime_id,
+            session_id=fixture.session_id,
             path="/workspace/agent/app",
         )
         assert isinstance(created, Success)

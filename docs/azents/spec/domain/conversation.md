@@ -65,7 +65,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-25
-spec_version: 64
+spec_version: 65
 ---
 
 # Conversation & Events
@@ -86,8 +86,8 @@ erDiagram
     AgentSession ||--o{ Event : "event transcript"
     AgentSession ||--o{ AgentRun : "durable execution runs"
     AgentSession ||--o{ ExchangeFile : "shows uploads and artifacts"
+    AgentSession ||--o{ SessionWorkspaceProject : "working projects"
     AgentRuntime ||--o{ ExchangeFile : "owns sandbox artifacts"
-    AgentRuntime ||--o{ SessionWorkspaceProject : "loads"
     ScheduledTask }o--|| Agent : "targets"
 ```
 
@@ -125,6 +125,23 @@ is invalid for that direct write path and for default team session selection. If
 helper produces a different session id from the REST boundary's resolved target, the write is invalid
 and must not enqueue a broker wake-up for that alternate session. `agent_runtime_id` is not stored on
 `AgentSession`; runtime lookup happens only after a session target has already been selected.
+
+### SessionWorkspaceProject
+
+`rdb/models/session_workspace_project.py` stores the project registry used as session working
+context. `SessionWorkspaceProject` and `SessionWorkspaceProjectRegistrationRequest` rows are owned by
+`AgentSession` through `session_id`. Runtime owns only the physical workspace where project paths
+exist.
+
+Agent-scoped project routes currently resolve the agent's active team primary session, then read or
+write that session's project rows. Runtime lookup is allowed only after that session context is
+selected, and only for physical workspace validation or runner filesystem operations. Runtime current
+project, selected project, active project, and runtime-owned project catalog state are not part of the
+conversation contract.
+
+RuntimeToolkit loads registered project prompt content from the current logical `AgentSession` ID.
+Runtime context sharing affects shell/file operations; it must not make project registry ownership or
+project prompt selection fall back to a parent or runtime session.
 
 ## 3. AgentRun
 
