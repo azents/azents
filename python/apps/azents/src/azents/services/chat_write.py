@@ -311,6 +311,8 @@ class ChatWriteService:
         )
         if record.write_type != write_type:
             raise ValueError("Client request ID already used for another write type")
+        if record.session_id != session_id:
+            raise ValueError("Client request ID already used for another session")
         if record.payload != payload:
             raise ValueError("Client request ID already used for another payload")
         return record, created
