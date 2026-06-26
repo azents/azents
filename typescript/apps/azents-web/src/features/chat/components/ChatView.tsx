@@ -255,6 +255,7 @@ export function ChatView({
   messages,
   pendingInputBuffers,
   activeAgent,
+  sessionId = null,
   isResponsePending,
   isWritePending,
   isModelResponsePending,
@@ -937,6 +938,7 @@ export function ChatView({
             <Box maw={rem(920)} mx="auto">
               <ChatInput
                 agentId={activeAgent?.id ?? null}
+                sessionId={sessionId}
                 isMobile={isMobile}
                 isUploading={isUploading || isWritePending}
                 pendingFiles={pendingFiles}

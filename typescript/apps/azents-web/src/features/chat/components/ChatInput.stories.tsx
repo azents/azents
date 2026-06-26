@@ -40,6 +40,7 @@ type Story = StoryObj<typeof meta>;
 
 const baseArgs = {
   agentId: "story-agent-001",
+  sessionId: "story-session-001",
   isMobile: false,
   isUploading: false,
   pendingFiles: [],
