@@ -1,10 +1,13 @@
 import { TRPCError } from "@trpc/server";
 import { notFound } from "next/navigation";
 import { AgentChatTabPage } from "@/features/agents/AgentChatTabPage";
+import { AgentContextPage } from "@/features/agents/AgentContextPage";
 import { trpc } from "@/trpc/server";
-import type { AgentChatInnerView } from "@/features/agents/containers/useAgentChatContainer";
+import type { AgentContextPageView } from "@/features/agents/AgentContextPage";
 
-function parseInnerView(value?: string | string[]): AgentChatInnerView {
+type SessionPageView = "chat" | AgentContextPageView;
+
+function parsePageView(value?: string | string[]): SessionPageView {
   const rawValue = Array.isArray(value) ? value[0] : value;
   if (
     rawValue === "context" ||
@@ -32,13 +35,19 @@ export default async function Page({
       trpc.agent.get({ handle, agentId }),
       trpc.chat.getAgentSession({ agentId, sessionId }),
     ]);
+    const view = parsePageView(query.page);
+    if (view !== "chat") {
+      return (
+        <AgentContextPage
+          handle={handle}
+          agent={agent}
+          sessionId={sessionId}
+          view={view}
+        />
+      );
+    }
     return (
-      <AgentChatTabPage
-        handle={handle}
-        agent={agent}
-        sessionId={sessionId}
-        view={parseInnerView(query.page)}
-      />
+      <AgentChatTabPage handle={handle} agent={agent} sessionId={sessionId} />
     );
   } catch (e) {
     if (e instanceof TRPCError && e.code === "NOT_FOUND") {

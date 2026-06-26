@@ -36,6 +36,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-23 | 3 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-20 | 1 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-06-25 | 7 |
-| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-06-26 | 6 |
+| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-06-26 | 7 |
 | [Subagent Delegation Flow](flow/subagent-delegation.md) | @Hardtack | 2026-06-16 | 12 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |

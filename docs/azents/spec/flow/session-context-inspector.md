@@ -6,7 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
 last_verified_at: 2026-06-26
-spec_version: 6
+spec_version: 7
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -15,9 +15,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/data.py
   - python/apps/azents/src/azents/repos/agent_execution/__init__.py
   - typescript/apps/azents-web/src/features/agents/components/AgentHeader.tsx
-  - typescript/apps/azents-web/src/features/agents/components/AgentContextView.tsx
-  - typescript/apps/azents-web/src/features/agents/components/AgentChatTab.tsx
-  - typescript/apps/azents-web/src/features/agents/containers/useAgentChatContainer.ts
+  - typescript/apps/azents-web/src/features/agents/AgentContextPage.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
   - typescript/apps/azents-web/src/features/chat/components/TokenUsageIndicator.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
@@ -28,7 +26,7 @@ code_paths:
 
 ## Current Behavior
 
-Agent detail screen provides `Chat` and `Context` header tabs. `Context` is an inner view of the selected session chat page controlled by `?page=context`; it shows model context usage and event source based on the URL-selected AgentSession. `?page=system-prompt` and `?page=raw-events` expose detail views for the same selected session without leaving the session page component.
+Agent detail screen provides `Chat` and `Context` header tabs. `Context` is selected by the session URL query `?page=context`; it shows model context usage and event source based on the URL-selected AgentSession. `?page=system-prompt` and `?page=raw-events` expose detail views for the same selected session. These query-param routes preserve the same page layout as the former dedicated Context pages: Agent header, tab navigation, and a scrollable inspector content area.
 
 ## Backend API
 
@@ -89,7 +87,7 @@ Raw events are exposed only to workspace members. Endpoint applies event limit t
 
 ## Frontend
 
-`/w/{handle}/agents/{agentId}/sessions/{sessionId}?page=context` renders these states inside the chat page component:
+`/w/{handle}/agents/{agentId}/sessions/{sessionId}?page=context` renders these states in the Context page layout:
 
 - loading
 - error

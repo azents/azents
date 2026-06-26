@@ -11,7 +11,6 @@ import { Box, Center, Loader, Text } from "@mantine/core";
 import { useEffect } from "react";
 import { ChatSessionView } from "@/features/chat/components/ChatSessionView";
 import styles from "./AgentChatTab.module.css";
-import { AgentContextView } from "./AgentContextView";
 import type { AgentChatContainerOutput } from "../containers/useAgentChatContainer";
 
 export function AgentChatTab(
@@ -23,7 +22,6 @@ export function AgentChatTab(
     mountKey,
     mountSessionId,
     onConnectionStatusChange,
-    view,
   } = props;
 
   // Lock outer document scroll on chat page.
@@ -69,19 +67,6 @@ export function AgentChatTab(
     case "LOADED": {
       break;
     }
-  }
-
-  if (view !== "chat") {
-    return (
-      <Box className={styles.chatArea} style={{ flex: 1, minHeight: 0 }}>
-        <AgentContextView
-          handle={props.handle}
-          agent={agent}
-          sessionId={mountSessionId}
-          view={view}
-        />
-      </Box>
-    );
   }
 
   return (
