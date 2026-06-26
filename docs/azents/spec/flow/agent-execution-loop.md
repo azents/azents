@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-06-25
-spec_version: 42
+last_verified_at: 2026-06-26
+spec_version: 43
 ---
 
 # Agent Execution Loop
@@ -112,7 +112,8 @@ Durable event kinds:
 - `unknown_adapter_output`
 
 Native/raw artifacts are not interpreted by event core. They are opaque same-native replay
-optimizations and may pass through only when this compat key matches:
+optimizations. The LiteLLM Responses lowerer replays a native artifact item as-is by default when
+this compat key matches. Canonical fallback lowering is used when the compat key does not match.
 
 ```text
 adapter:native_format:provider:model:schema_version
