@@ -28,15 +28,12 @@ class AgentSession(BaseModel):
     start_reason: AgentSessionStartReason = Field(description="Start reason")
     title: str | None = Field(description="User-facing session title")
     title_source: AgentSessionTitleSource | None = Field(
-        default=None,
         description="Source of the current session title",
     )
     title_generated_at: datetime.datetime | None = Field(
-        default=None,
         description="Automatic title generation time",
     )
     title_generation_event_id: str | None = Field(
-        default=None,
         description="Event ID used for automatic title generation",
     )
     end_reason: AgentSessionEndReason | None = Field(

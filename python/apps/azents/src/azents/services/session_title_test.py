@@ -2,6 +2,10 @@
 
 import datetime
 
+import pytest
+from litellm.types.utils import ModelResponse
+
+import azents.services.session_title as session_title_module
 from azents.core.enums import EventKind
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -11,6 +15,7 @@ from azents.engine.events.types import (
 )
 from azents.services.session_title import (
     clean_generated_title,
+    generate_session_title_with_model,
     initial_title_from_user_text,
     title_context_from_events,
 )
@@ -34,6 +39,37 @@ class TestSessionTitleHelpers:
         title = clean_generated_title(
             "<think>internal reasoning</think>\n\n"
             "Insurance option comparison\nMore text"
+        )
+
+        assert title == "Insurance option comparison"
+
+    async def test_generate_session_title_reads_typed_model_response(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Generated title reads LiteLLM's typed ModelResponse shape."""
+
+        async def fake_acompletion(*args: object, **kwargs: object) -> ModelResponse:
+            del args, kwargs
+            return ModelResponse(
+                choices=[
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Insurance option comparison",
+                        },
+                        "finish_reason": "stop",
+                        "index": 0,
+                    }
+                ]
+            )
+
+        monkeypatch.setattr(session_title_module, "acompletion", fake_acompletion)
+
+        title = await generate_session_title_with_model(
+            model="openai/test",
+            credential_kwargs={},
+            context="User: Compare two insurance options",
         )
 
         assert title == "Insurance option comparison"

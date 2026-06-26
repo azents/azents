@@ -4,14 +4,14 @@ import dataclasses
 import logging
 import re
 from collections.abc import Sequence
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 from fastapi import Depends
 from litellm import acompletion
+from litellm.types.utils import ModelResponse
+from openai import OpenAIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_credential_cipher
 from azents.core.enums import AgentSessionTitleSource, EventKind
 from azents.core.llm_mapping import build_credential_kwargs, to_litellm_model
 from azents.engine.events.types import (
@@ -29,6 +29,9 @@ from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.deps import (
+    get_llm_provider_integration_repository,
+)
 from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
 
 logger = logging.getLogger(__name__)
@@ -76,13 +79,6 @@ Your output must be:
 "summarize the attached notes" -> Attached notes summary
 </examples>
 """
-
-
-def get_llm_provider_integration_repository(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> LLMProviderIntegrationRepository:
-    """Create LLM provider integration repository."""
-    return LLMProviderIntegrationRepository(cipher=cipher)
 
 
 def initial_title_from_user_text(text: str) -> str | None:
@@ -153,23 +149,6 @@ class SessionTitleService:
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
 
-    async def set_initial_title_from_event(
-        self,
-        session: AsyncSession,
-        *,
-        event: Event,
-    ) -> AgentSession | None:
-        """Set first-message title from a user event if no title source exists."""
-        title = initial_title_from_event(event)
-        if title is None:
-            return None
-        return await self.agent_session_repository.set_initial_auto_title_if_unset(
-            session,
-            session_id=event.session_id,
-            title=title,
-            event_id=event.id,
-        )
-
     async def generate_after_first_run(self, session_id: str) -> AgentSession | None:
         """Generate LLM title after first run and replace only auto-initial title."""
         async with self.session_manager() as session:
@@ -205,6 +184,8 @@ class SessionTitleService:
         if generated is None:
             return None
         event_id = _latest_event_id(events)
+        if event_id is None:
+            return None
         async with self.session_manager() as session:
             updated = await self.agent_session_repository.replace_initial_auto_title(
                 session,
@@ -250,7 +231,7 @@ class SessionTitleService:
                 context=context,
                 session_id=session_id,
             )
-        except Exception:
+        except OpenAIError:
             logger.warning(
                 "Automatic session title generation failed",
                 extra={"session_id": session_id, "agent_id": agent_id},
@@ -267,23 +248,26 @@ async def generate_session_title_with_model(
     session_id: str | None = None,
 ) -> str | None:
     """Generate a session title with LiteLLM chat completion."""
-    completion_kwargs: dict[str, object] = {
-        "model": model,
-        "messages": [
+    response = await acompletion(
+        model=model,
+        messages=[
             {"role": "system", "content": _TITLE_PROMPT},
             {
                 "role": "user",
                 "content": "Generate a title for this agent session:\n" + context,
             },
         ],
-        "stream": False,
-        "max_tokens": _TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
-        "temperature": 0.5,
-        **credential_kwargs,
-    }
-    response = await acompletion(**cast(Any, completion_kwargs))
+        stream=False,
+        max_tokens=_TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
+        temperature=0.5,
+        **credential_kwargs,  # pyright: ignore[reportArgumentType] # LiteLLM accepts provider-specific credential kwargs through **kwargs.
+    )
     del session_id
+    if not isinstance(response, ModelResponse):
+        return None
     text = _response_text(response)
+    if text is None:
+        return None
     return clean_generated_title(text)
 
 
@@ -324,33 +308,10 @@ def _truncate_title(title: str) -> str:
     return normalized[: _TITLE_MAX_CHARS - 1].rstrip() + "…"
 
 
-def _response_text(response: object) -> str:
-    choices = getattr(response, "choices", None)
-    if isinstance(choices, list) and choices:
-        message = getattr(choices[0], "message", None)
-        content = getattr(message, "content", None)
-        if isinstance(content, str):
-            return content
-    if isinstance(response, dict):
-        choices_value = response.get("choices")
-        if isinstance(choices_value, list) and choices_value:
-            first = choices_value[0]
-            if isinstance(first, dict):
-                message = first.get("message")
-                if isinstance(message, dict):
-                    content = message.get("content")
-                    if isinstance(content, str):
-                        return content
-        value = response.get("output_text") or response.get("text")
-        if isinstance(value, str):
-            return value
-    output_text = getattr(response, "output_text", None)
-    if isinstance(output_text, str):
-        return output_text
-    text = getattr(response, "text", None)
-    if isinstance(text, str):
-        return text
-    return str(response)
+def _response_text(response: ModelResponse) -> str | None:
+    if not response.choices:
+        return None
+    return response.choices[0].message.content
 
 
 def _latest_event_id(events: Sequence[Event]) -> str | None:

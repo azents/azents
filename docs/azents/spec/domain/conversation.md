@@ -151,10 +151,11 @@ Automatic title generation has two phases. When the first user message is promot
 transcript and the session has no title source, the server stores a deterministic `auto_initial` title
 from the beginning of that message. After the first terminal run, the worker uses the Agent's
 lightweight model to generate a concise `auto_generated` title from the session transcript. This
-replacement is race-safe and only applies while `title_source = auto_initial`; if a user renames the
-session before generation completes, the automatic update is skipped. Title generation is best-effort
-and failures must not affect run completion. Clients display `title` when present and otherwise fall
-back to a contextual label such as "Team primary" or "Session".
+replacement is race-safe and only applies while `title_source = auto_initial` and no newer transcript
+event has been appended; if a user renames the session or continues the conversation before generation
+completes, the automatic update is skipped. Title generation is best-effort and failures must not
+affect run completion. Clients display `title` when present and otherwise fall back to a contextual
+label such as "Team primary" or "Session".
 
 `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/archive` archives an active non-primary
 AgentSession. Archive is a soft lifecycle transition: durable transcript data, run rows, exchange

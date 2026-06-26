@@ -251,15 +251,26 @@ class AgentSessionRepository:
         *,
         session_id: str,
         title: str,
-        event_id: str | None,
+        event_id: str,
     ) -> AgentSession | None:
-        """Replace initial automatic title after a run if still not manual."""
+        """Replace initial automatic title if no newer event was appended."""
+        latest_event_id = (
+            sa.select(RDBEvent.id)
+            .where(
+                RDBEvent.session_id == session_id,
+                RDBEvent.reverted.is_(False),
+            )
+            .order_by(RDBEvent.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
         result = await session.execute(
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.title_source == AgentSessionTitleSource.AUTO_INITIAL,
+                latest_event_id == event_id,
             )
             .values(
                 title=title,

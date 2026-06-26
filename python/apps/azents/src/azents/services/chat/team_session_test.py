@@ -354,6 +354,59 @@ class TestChatSessionTeamSessions:
         assert generated.title_source == AgentSessionTitleSource.AUTO_GENERATED
         assert skipped is None
 
+    async def test_generated_auto_title_skips_when_newer_event_exists(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """LLM-generated titles do not apply after newer transcript activity."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-stale-title")
+        agent_id = await _create_agent(rdb_session, workspace_id, "team-stale-title")
+        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        first_event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=agent_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload={
+                    "content": "Compare two insurance options",
+                    "attachments": [],
+                    "metadata": {},
+                },
+            ),
+        )
+        initial = await AgentSessionRepository().set_initial_auto_title_if_unset(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Compare two insurance options",
+            event_id=first_event.id,
+        )
+        await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=agent_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload={
+                    "content": "Actually compare retirement account options",
+                    "attachments": [],
+                    "metadata": {},
+                },
+            ),
+        )
+
+        skipped = await AgentSessionRepository().replace_initial_auto_title(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Insurance option comparison",
+            event_id=first_event.id,
+        )
+
+        assert initial is not None
+        assert skipped is None
+
     async def test_update_session_title_rejects_empty_title(
         self,
         rdb_session: AsyncSession,

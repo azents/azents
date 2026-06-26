@@ -83,6 +83,9 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_subagent import AgentSubagentRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.deps import (
+    get_llm_provider_integration_repository,
+)
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.exchange_file import ExchangeFileService
@@ -99,7 +102,6 @@ from azents.worker.deps import (
     get_broadcast,
     get_builtin_toolkit_provider,
     get_exchange_file_service,
-    get_llm_provider_integration_repository,
     get_toolkit_repository,
     get_worker_broker,
     get_worker_config,
