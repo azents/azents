@@ -95,7 +95,7 @@ def valkey_container(
     container_network: Network,
 ) -> Generator[DockerContainer, None, None]:
     """Valkey (Redis t) container."""
-    valkey_image = get_docker_hub_image("redis:7-alpine")
+    valkey_image = get_docker_hub_image("valkey/valkey:9-alpine")
     with (
         DockerContainer(
             valkey_image,
