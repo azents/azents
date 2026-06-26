@@ -413,15 +413,7 @@ async def list_sessions(
         workspace_id=member.workspace_id,
     )
     return AgentSessionListResponse(
-        items=[
-            AgentSessionResponse(
-                id=s.id,
-                agent_id=s.agent_id,
-                created_at=s.created_at,
-                updated_at=s.updated_at,
-            )
-            for s in sessions
-        ]
+        items=[AgentSessionResponse.from_domain(s) for s in sessions]
     )
 
 
@@ -1031,6 +1023,58 @@ async def get_team_primary_agent_session(
 ) -> AgentSessionResponse:
     """Get an Agent's team primary AgentSession, creating one if absent."""
     result = await chat_service.get_team_primary_session(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(session):
+            return AgentSessionResponse.from_domain(session)
+        case Failure(error):
+            match error:
+                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/agents/{agent_id}/sessions")
+async def list_agent_sessions(
+    agent_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentSessionListResponse:
+    """List active team sessions for an Agent with team primary first."""
+    result = await chat_service.list_agent_sessions(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(sessions):
+            return AgentSessionListResponse(
+                items=[
+                    AgentSessionResponse.from_domain(session) for session in sessions
+                ]
+            )
+        case Failure(error):
+            match error:
+                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/sessions")
+async def create_team_agent_session(
+    agent_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentSessionResponse:
+    """Create a non-primary team AgentSession for an Agent."""
+    result = await chat_service.create_team_session(
         agent_id=agent_id,
         user_id=current_user.user_id,
     )

@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
+    AgentSessionPrimaryKind,
     AgentSessionRunState,
+    AgentSessionStatus,
     EventKind,
 )
 from azents.engine.events.types import Event
@@ -948,6 +950,11 @@ class AgentSessionResponse(BaseModel):
 
     id: str = Field(description="Session ID")
     agent_id: str = Field(description="Agent ID")
+    status: AgentSessionStatus = Field(description="Session status")
+    primary_kind: AgentSessionPrimaryKind | None = Field(
+        default=None,
+        description="Primary session role",
+    )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 
@@ -957,6 +964,8 @@ class AgentSessionResponse(BaseModel):
         return cls(
             id=session.id,
             agent_id=session.agent_id,
+            status=session.status,
+            primary_kind=session.primary_kind,
             created_at=session.created_at,
             updated_at=session.updated_at,
         )

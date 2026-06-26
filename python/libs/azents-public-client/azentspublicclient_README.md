@@ -113,6 +113,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_approve_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_approve_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/project-registration-requests/{request_id}/approve | Approve Agent Project Registration Request
 *ChatV1Api* | [**chat_v1_create_command**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_command) | **POST** /chat/v1/sessions/{session_id}/commands | Create Command
 *ChatV1Api* | [**chat_v1_create_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_message) | **POST** /chat/v1/sessions/{session_id}/messages | Create Message
+*ChatV1Api* | [**chat_v1_create_team_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions | Create Team Agent Session
 *ChatV1Api* | [**chat_v1_delete_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_project) | **DELETE** /chat/v1/agents/{agent_id}/projects/{project_id} | Delete Agent Project
 *ChatV1Api* | [**chat_v1_delete_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
 *ChatV1Api* | [**chat_v1_delete_input_buffer**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
@@ -127,6 +128,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_issue_ws_ticket**](azentspublicclient/docs/ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
 *ChatV1Api* | [**chat_v1_list_agent_project_registration_requests**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_project_registration_requests) | **GET** /chat/v1/agents/{agent_id}/project-registration-requests | List Agent Project Registration Requests
 *ChatV1Api* | [**chat_v1_list_agent_projects**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/projects | List Agent Projects
+*ChatV1Api* | [**chat_v1_list_agent_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions | List Agent Sessions
 *ChatV1Api* | [**chat_v1_list_history_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_history_events) | **GET** /chat/v1/sessions/{session_id}/history | List History Events
 *ChatV1Api* | [**chat_v1_list_live_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
 *ChatV1Api* | [**chat_v1_list_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_sessions) | **GET** /chat/v1/workspaces/{handle}/sessions | List Sessions
@@ -228,8 +230,10 @@ Class | Method | HTTP request | Description
  - [AgentRuntimeResponse](azentspublicclient/docs/AgentRuntimeResponse.md)
  - [AgentRuntimeSummaryResponse](azentspublicclient/docs/AgentRuntimeSummaryResponse.md)
  - [AgentSessionListResponse](azentspublicclient/docs/AgentSessionListResponse.md)
+ - [AgentSessionPrimaryKind](azentspublicclient/docs/AgentSessionPrimaryKind.md)
  - [AgentSessionResponse](azentspublicclient/docs/AgentSessionResponse.md)
  - [AgentSessionRunState](azentspublicclient/docs/AgentSessionRunState.md)
+ - [AgentSessionStatus](azentspublicclient/docs/AgentSessionStatus.md)
  - [AgentSubagentCreateRequest](azentspublicclient/docs/AgentSubagentCreateRequest.md)
  - [AgentSubagentListResponse](azentspublicclient/docs/AgentSubagentListResponse.md)
  - [AgentSubagentResponse](azentspublicclient/docs/AgentSubagentResponse.md)

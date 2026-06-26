@@ -20,8 +20,10 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.message import MessageRepository
+from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.input_buffer import InputBufferService
 
@@ -68,6 +70,10 @@ class ChatSessionService:
     ]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
+    ]
+    session_workspace_project_repository: Annotated[
+        SessionWorkspaceProjectRepository,
+        Depends(SessionWorkspaceProjectRepository),
     ]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
     session_manager: Annotated[
@@ -204,6 +210,87 @@ class ChatSessionService:
             if workspace_user is None:
                 return Failure(SessionNotFound())
             return Success(agent_session)
+
+    async def list_agent_sessions(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[list[AgentSession], EnsureSessionError]:
+        """Fetch active team sessions for an agent with primary first."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            await self.agent_session_repository.ensure_team_primary_for_agent(
+                session,
+                workspace_id=agent.workspace_id,
+                agent_id=agent_id,
+            )
+            sessions = await self.agent_session_repository.list_active_by_agent_id(
+                session,
+                agent_id,
+            )
+            return Success(sessions)
+
+    async def create_team_session(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[AgentSession, EnsureSessionError]:
+        """Create a non-primary team session and copy primary projects."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            primary = await self.agent_session_repository.ensure_team_primary_for_agent(
+                session,
+                workspace_id=agent.workspace_id,
+                agent_id=agent_id,
+            )
+            created = await self.agent_session_repository.create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=agent.workspace_id,
+                    agent_id=agent_id,
+                    primary_kind=None,
+                ),
+            )
+            primary_projects = (
+                await self.session_workspace_project_repository.list_projects(
+                    session,
+                    session_id=primary.id,
+                )
+            )
+            for project in primary_projects:
+                await self.session_workspace_project_repository.create_project(
+                    session,
+                    SessionWorkspaceProjectCreate(
+                        session_id=created.id,
+                        path=project.path,
+                    ),
+                )
+            await session.commit()
+            return Success(created)
 
     async def list_sessions(
         self, user_id: str, workspace_id: str
