@@ -17,7 +17,7 @@ Details of all living specs. Synchronized from frontmatter.
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-06-23 | 6 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-05-10 | 1 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-06-23 | 35 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-06-26 | 36 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-06-18 | 4 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-06-26 | 17 |
 
@@ -26,7 +26,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-06-25 | 42 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-06-23 | 3 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-06-26 | 4 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-06-13 | 1 |
 | [Background Tool Call](flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-06-13 | 6 |

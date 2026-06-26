@@ -373,6 +373,8 @@ class _FakeRunnerOperations:
         exclude_patterns: list[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
+        max_searched_files: int | None = None,
+        max_scanned_bytes: int | None = None,
         deadline_at: datetime,
     ) -> RuntimeGrepResult:
         del (
@@ -382,6 +384,8 @@ class _FakeRunnerOperations:
             exclude_patterns,
             max_matching_files,
             max_lines_per_file,
+            max_searched_files,
+            max_scanned_bytes,
             deadline_at,
         )
         matches: list[RuntimeGrepFileMatch] = []
@@ -407,6 +411,7 @@ class _FakeRunnerOperations:
             searched_file_count=len(self.files),
             matched_file_count=len(matches),
             truncated=False,
+            stopped_reason=None,
             final_cursor="0-1",
         )
 

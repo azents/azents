@@ -66,6 +66,104 @@ class TestGlob:
         assert isinstance(result, str)
         assert "SKILL.md" in result
 
+    async def test_match_recursive_hidden_directory_pattern(self) -> None:
+        """Find recursive patterns under hidden directories."""
+        tool, _ = _make_tool(
+            files={
+                "/workspace/agent/.claude/skills/feature-design/SKILL.md": b"s",
+                "/workspace/agent/.claude/skills/create-pr/SKILL.md": b"c",
+                "/workspace/agent/.claude/settings.json": b"{}",
+            }
+        )
+
+        result = await tool.handler(
+            json.dumps({"pattern": "/workspace/agent/.claude/skills/**"})
+        )
+
+        assert isinstance(result, str)
+        assert "/workspace/agent/.claude/skills/feature-design" in result
+        assert "/workspace/agent/.claude/skills/feature-design/SKILL.md" in result
+        assert "/workspace/agent/.claude/skills/create-pr/SKILL.md" in result
+        assert "settings.json" not in result
+
+    async def test_match_hidden_directory_child_directories(self) -> None:
+        """Glob patterns also return directory matches."""
+        tool, _ = _make_tool(
+            files={
+                "/workspace/agent/.claude/skills/feature-design/SKILL.md": b"s",
+                "/workspace/agent/.claude/skills/create-pr/SKILL.md": b"c",
+            }
+        )
+
+        result = await tool.handler(
+            json.dumps({"pattern": "/workspace/agent/.claude/skills/*"})
+        )
+
+        assert isinstance(result, str)
+        assert "/workspace/agent/.claude/skills/feature-design" in result
+        assert "/workspace/agent/.claude/skills/create-pr" in result
+
+    async def test_default_exclude_skips_node_modules(self) -> None:
+        """Skip heavy directories with default exclude."""
+        tool, _ = _make_tool(
+            files={
+                "/workspace/agent/src/app.ts": b"a",
+                "/workspace/agent/node_modules/pkg/index.ts": b"b",
+            }
+        )
+
+        result = await tool.handler(json.dumps({"pattern": "/workspace/agent/**"}))
+
+        assert isinstance(result, str)
+        assert "/workspace/agent/src/app.ts" in result
+        assert "node_modules" not in result
+
+    async def test_exclude_adds_to_default_excludes(self) -> None:
+        """exclude adds patterns while preserving default excludes."""
+        tool, _ = _make_tool(
+            files={
+                "/workspace/agent/src/app.ts": b"a",
+                "/workspace/agent/generated/output.ts": b"b",
+                "/workspace/agent/node_modules/pkg/index.ts": b"c",
+            }
+        )
+
+        result = await tool.handler(
+            json.dumps(
+                {
+                    "pattern": "/workspace/agent/**",
+                    "exclude": ["generated"],
+                }
+            )
+        )
+
+        assert isinstance(result, str)
+        assert "/workspace/agent/src/app.ts" in result
+        assert "generated" not in result
+        assert "node_modules" not in result
+
+    async def test_disable_default_excludes_allows_node_modules(self) -> None:
+        """disable_default_excludes=true allows default-excluded directories."""
+        tool, _ = _make_tool(
+            files={
+                "/workspace/agent/src/app.ts": b"a",
+                "/workspace/agent/node_modules/pkg/index.ts": b"b",
+            }
+        )
+
+        result = await tool.handler(
+            json.dumps(
+                {
+                    "pattern": "/workspace/agent/**/node_modules/**",
+                    "disable_default_excludes": True,
+                }
+            )
+        )
+
+        assert isinstance(result, str)
+        assert "/workspace/agent/node_modules/pkg/index.ts" in result
+        assert "/workspace/agent/src/app.ts" not in result
+
     async def test_no_matches(self) -> None:
         """Return guidance message when no file matches."""
         tool, _ = _make_tool(files={"/workspace/agent/data.csv": b"x"})
@@ -131,8 +229,9 @@ class TestGlobErrors:
                 user_id: str = "",
                 recursive: bool = False,
                 exclude_patterns: list[str] | None = None,
+                include_directories: bool = False,
             ) -> list[RuntimeAttachment]:
-                _ = agent_id, user_id, recursive, exclude_patterns
+                _ = agent_id, user_id, recursive, exclude_patterns, include_directories
                 raise FileNotFoundError(f"Directory not found: {path}")
 
         storage = _RaisingStorage()

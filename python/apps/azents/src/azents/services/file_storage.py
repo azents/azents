@@ -31,6 +31,7 @@ class GrepResult:
     searched_file_count: int
     matched_file_count: int
     truncated: bool
+    stopped_reason: str | None = None
 
 
 class FileStorage(Protocol):
@@ -67,6 +68,7 @@ class FileStorage(Protocol):
         agent_id: str,
         recursive: bool = False,
         exclude_patterns: list[str] | None = None,
+        include_directories: bool = False,
     ) -> list[RuntimeAttachment]: ...
 
     async def list_dirs(self, path: str, *, agent_id: str) -> list[str]: ...
@@ -81,4 +83,6 @@ class FileStorage(Protocol):
         exclude_patterns: list[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
+        max_searched_files: int | None = None,
+        max_scanned_bytes: int | None = None,
     ) -> GrepResult: ...

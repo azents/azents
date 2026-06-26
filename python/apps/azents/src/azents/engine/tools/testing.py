@@ -92,43 +92,35 @@ class FakeSharedStorage:
         user_id: str = "",
         recursive: bool = False,
         exclude_patterns: list[str] | None = None,
+        include_directories: bool = False,
     ) -> list[RuntimeAttachment]:
-        """Return file list."""
+        """Return the file list."""
         del agent_id, user_id
         if path in self._files:
-            data = self._files[path]
-            name = path.rsplit("/", 1)[-1]
-            return [
-                RuntimeAttachment(
-                    uri=path,
-                    media_type=guess_media_type(path),
-                    size=len(data),
-                    name=name,
-                    text_preview=None,
-                )
-            ]
+            return [_file_attachment(path, self._files[path])]
         prefix = path.rstrip("/") + "/"
         exclude_values = exclude_patterns if exclude_patterns is not None else []
-        results: list[RuntimeAttachment] = []
+        by_uri: dict[str, RuntimeAttachment] = {}
         for key, data in sorted(self._files.items()):
             if not key.startswith(prefix):
                 continue
             remainder = key[len(prefix) :]
-            if not recursive and "/" in remainder:
-                continue
             if _excluded(remainder, exclude_values):
                 continue
-            name = key.rsplit("/", 1)[-1]
-            results.append(
-                RuntimeAttachment(
-                    uri=key,
-                    media_type=guess_media_type(key),
-                    size=len(data),
-                    name=name,
-                    text_preview=None,
+            parts = remainder.split("/")
+            if include_directories:
+                directory_count = (
+                    len(parts) - 1 if recursive else min(len(parts) - 1, 1)
                 )
-            )
-        return results
+                for index in range(1, directory_count + 1):
+                    relative_dir = "/".join(parts[:index])
+                    if _excluded(relative_dir, exclude_values):
+                        continue
+                    uri = prefix + relative_dir
+                    by_uri[uri] = _directory_attachment(uri)
+            if recursive or "/" not in remainder:
+                by_uri[key] = _file_attachment(key, data)
+        return [by_uri[uri] for uri in sorted(by_uri)]
 
     async def list_dirs(
         self,
@@ -160,6 +152,8 @@ class FakeSharedStorage:
         exclude_patterns: list[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
+        max_searched_files: int | None = None,
+        max_scanned_bytes: int | None = None,
     ) -> GrepResult:
         """Simulate grep inside storage."""
         attachments = await self.list(
@@ -170,12 +164,25 @@ class FakeSharedStorage:
         )
         regex = re.compile(pattern)
         files: list[GrepFileMatch] = []
-        truncated = False
+        searched_file_count = 0
+        scanned_bytes = 0
+        stopped_reason: str | None = None
         for attachment in attachments:
             if len(files) >= max_matching_files:
-                truncated = True
+                stopped_reason = "matching_file_limit"
+                break
+            if (
+                max_searched_files is not None
+                and searched_file_count >= max_searched_files
+            ):
+                stopped_reason = "searched_file_limit"
                 break
             data = await self.get(attachment.uri, agent_id=agent_id)
+            searched_file_count += 1
+            scanned_bytes += len(data)
+            if max_scanned_bytes is not None and scanned_bytes > max_scanned_bytes:
+                stopped_reason = "scanned_byte_limit"
+                break
             try:
                 text = data.decode("utf-8")
             except UnicodeDecodeError:
@@ -199,9 +206,10 @@ class FakeSharedStorage:
                 )
         return GrepResult(
             files=tuple(files),
-            searched_file_count=len(attachments),
+            searched_file_count=searched_file_count,
             matched_file_count=len(files),
-            truncated=truncated,
+            truncated=stopped_reason is not None,
+            stopped_reason=stopped_reason,
         )
 
     async def stat(
@@ -241,3 +249,26 @@ def _excluded(relative_path: str, patterns: list[str]) -> bool:
         if any(fnmatch.fnmatch(part, pattern) for part in parts):
             return True
     return False
+
+
+def _file_attachment(path: str, data: bytes) -> RuntimeAttachment:
+    """Build a file RuntimeAttachment."""
+    name = path.rsplit("/", 1)[-1]
+    return RuntimeAttachment(
+        uri=path,
+        media_type=guess_media_type(path),
+        size=len(data),
+        name=name,
+        text_preview=None,
+    )
+
+
+def _directory_attachment(path: str) -> RuntimeAttachment:
+    """Build a directory RuntimeAttachment."""
+    return RuntimeAttachment(
+        uri=path,
+        media_type="inode/directory",
+        size=0,
+        name=path.rstrip("/").rsplit("/", 1)[-1],
+        text_preview=None,
+    )

@@ -182,6 +182,8 @@ class RuntimeRunnerOperationAdapter:
         exclude_patterns: list[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
+        max_searched_files: int | None = None,
+        max_scanned_bytes: int | None = None,
         deadline_at: datetime,
     ) -> RuntimeGrepResult:
         """Run file grep operation and convert to engine result."""
@@ -195,6 +197,8 @@ class RuntimeRunnerOperationAdapter:
                 exclude_patterns=exclude_patterns,
                 max_matching_files=max_matching_files,
                 max_lines_per_file=max_lines_per_file,
+                max_searched_files=max_searched_files,
+                max_scanned_bytes=max_scanned_bytes,
                 deadline_at=deadline_at,
             )
         )
@@ -216,6 +220,7 @@ class RuntimeRunnerOperationAdapter:
             searched_file_count=result.searched_file_count,
             matched_file_count=result.matched_file_count,
             truncated=result.truncated,
+            stopped_reason=result.stopped_reason,
             final_cursor=result.final_cursor,
         )
 

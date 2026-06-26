@@ -339,6 +339,59 @@ async def test_file_grep_skips_symlink_escape(tmp_path: Path) -> None:
     assert raw_file["path"] == f"{tmp_path}/src/app.py"
 
 
+@pytest.mark.asyncio
+async def test_file_grep_stops_at_searched_file_limit(tmp_path: Path) -> None:
+    """file.grep stops at the searched file limit."""
+    for index in range(3):
+        (tmp_path / f"file-{index}.txt").write_text("nothing")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.grep",
+            payload={
+                "path": str(tmp_path),
+                "pattern": "needle",
+                "recursive": True,
+                "max_searched_files": 2,
+            },
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    payload = client.events[-1].payload
+    assert payload["searched_file_count"] == 2
+    assert payload["truncated"] is True
+    assert payload["stopped_reason"] == "searched_file_limit"
+
+
+@pytest.mark.asyncio
+async def test_file_grep_stops_at_scanned_byte_limit(tmp_path: Path) -> None:
+    """file.grep stops at the scanned byte limit."""
+    (tmp_path / "large.txt").write_text("a" * 20)
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.grep",
+            payload={
+                "path": str(tmp_path),
+                "pattern": "needle",
+                "recursive": True,
+                "max_scanned_bytes": 10,
+            },
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    payload = client.events[-1].payload
+    assert payload["searched_file_count"] == 1
+    assert payload["truncated"] is True
+    assert payload["stopped_reason"] == "scanned_byte_limit"
+
+
 def _operation(
     *,
     operation_type: str,
