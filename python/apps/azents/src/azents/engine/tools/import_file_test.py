@@ -36,6 +36,7 @@ def _make_artifact() -> Artifact:
         status=ArtifactStatus.AVAILABLE,
         sha256="1" * 64,
         created_at=_NOW,
+        blob_deleted_at=None,
     )
 
 
@@ -68,6 +69,7 @@ def _make_exchange_file() -> ExchangeFile:
         preview_generated_at=None,
         expires_at=_NOW + datetime.timedelta(days=30),
         expired_at=None,
+        blob_deleted_at=None,
         created_at=_NOW,
     )
 

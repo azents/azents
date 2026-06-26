@@ -58,40 +58,6 @@ PhaseSink = Callable[[AgentRunPhase], Awaitable[None]]
 InputPoller = Callable[[AsyncSession, str], Awaitable[list[Event]]]
 
 
-class ArtifactExpirer(Protocol):
-    """Run-boundary Artifact expiry hook."""
-
-    async def __call__(
-        self,
-        *,
-        session_id: str,
-        current_run_index: int,
-    ) -> object:
-        """Clean up expirable Artifacts based on current run index."""
-        ...
-
-
-class ModelFileExpirer(Protocol):
-    """Run-boundary ModelFile deletion hook."""
-
-    async def __call__(
-        self,
-        *,
-        session_id: str,
-        current_run_index: int,
-    ) -> object:
-        """Clean up deletable ModelFiles based on current run index."""
-        ...
-
-
-class ExchangeFileExpirer(Protocol):
-    """Time-based ExchangeFile expiry hook."""
-
-    async def __call__(self) -> object:
-        """Clean up expirable ExchangeFiles."""
-        ...
-
-
 class PreModelLowerHook(Protocol):
     """Request-local preparation hook before model lowering."""
 
@@ -143,9 +109,6 @@ class AgentRunExecution:
         pre_lower_filter: PreLowerFilter | None = None,
         output_sink: OutputSink | None = None,
         phase_sink: PhaseSink | None = None,
-        artifact_expirer: ArtifactExpirer | None = None,
-        model_file_expirer: ModelFileExpirer | None = None,
-        exchange_file_expirer: ExchangeFileExpirer | None = None,
         pre_model_lower_hook: PreModelLowerHook | None = None,
         run_repo: RunStateRepository | None = None,
         transcript_repo: TranscriptRepository | None = None,
@@ -160,9 +123,6 @@ class AgentRunExecution:
         self._pre_lower_filter = pre_lower_filter
         self._output_sink = output_sink
         self._phase_sink = phase_sink
-        self._artifact_expirer = artifact_expirer
-        self._model_file_expirer = model_file_expirer
-        self._exchange_file_expirer = exchange_file_expirer
         self._pre_model_lower_hook = pre_model_lower_hook
         self._run_repo = run_repo or AgentRunRepository()
         self._transcript_repo = transcript_repo or EventTranscriptRepository()
@@ -222,18 +182,6 @@ class AgentRunExecution:
                     request.run_id,
                     AgentRunPhase.PREPARING_INPUT,
                 )
-                if self._artifact_expirer is not None:
-                    await self._artifact_expirer(
-                        session_id=request.session_id,
-                        current_run_index=request.run_index,
-                    )
-                if self._model_file_expirer is not None:
-                    await self._model_file_expirer(
-                        session_id=request.session_id,
-                        current_run_index=request.run_index,
-                    )
-                if self._exchange_file_expirer is not None:
-                    await self._exchange_file_expirer()
                 compacted = False
                 if self._pre_lower_filter is not None:
                     transcript = await self._pre_lower_filter.apply(session, transcript)

@@ -37,6 +37,9 @@ class Artifact(BaseModel):
     expired_at: datetime.datetime | None = Field(
         default=None, description="Expiration time"
     )
+    blob_deleted_at: datetime.datetime | None = Field(
+        description="Blob deletion success time",
+    )
 
     @property
     def uri(self) -> str:

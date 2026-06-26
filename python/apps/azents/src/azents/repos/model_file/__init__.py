@@ -102,6 +102,100 @@ class ModelFileRepository:
         ).all()
         return [self._build(row) for row in rows]
 
+    async def list_candidate_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[str]:
+        """Return ModelFile sessions with lifecycle candidates."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBModelFile.session_id)
+                .where(
+                    RDBModelFile.status.in_(
+                        [
+                            ModelFileStatus.AVAILABLE,
+                            ModelFileStatus.DEGRADED,
+                            ModelFileStatus.UNREACHABLE,
+                        ]
+                    )
+                )
+                .group_by(RDBModelFile.session_id)
+                .order_by(sa.func.min(RDBModelFile.created_run_index))
+                .limit(limit)
+            )
+        ).all()
+        return list(rows)
+
+    async def list_due_by_latest_run_index(
+        self,
+        session: AsyncSession,
+        *,
+        latest_run_indexes: dict[str, int],
+        limit: int,
+    ) -> list[ModelFile]:
+        """Fetch ModelFiles eligible for scheduler lifecycle processing."""
+        if not latest_run_indexes:
+            return []
+        due_by_session = [
+            sa.and_(
+                RDBModelFile.session_id == session_id,
+                RDBModelFile.created_run_index < latest_run_index,
+            )
+            for session_id, latest_run_index in latest_run_indexes.items()
+        ]
+        if not due_by_session:
+            return []
+        rows = (
+            await session.scalars(
+                sa.select(RDBModelFile)
+                .where(
+                    RDBModelFile.status.in_(
+                        [
+                            ModelFileStatus.AVAILABLE,
+                            ModelFileStatus.DEGRADED,
+                        ]
+                    ),
+                    sa.or_(*due_by_session),
+                )
+                .order_by(RDBModelFile.created_run_index, RDBModelFile.id)
+                .limit(limit)
+            )
+        ).all()
+        unreachable_rows = (
+            await session.scalars(
+                sa.select(RDBModelFile)
+                .where(
+                    RDBModelFile.session_id.in_(latest_run_indexes.keys()),
+                    RDBModelFile.status == ModelFileStatus.UNREACHABLE,
+                )
+                .order_by(RDBModelFile.unreachable_run_index, RDBModelFile.id)
+                .limit(max(0, limit - len(rows)))
+            )
+        ).all()
+        return [self._build(row) for row in [*rows, *unreachable_rows]]
+
+    async def list_deleted_with_blob(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[ModelFile]:
+        """Fetch deleted ModelFiles whose blobs still need deletion."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBModelFile)
+                .where(
+                    RDBModelFile.status == ModelFileStatus.DELETED,
+                    RDBModelFile.blob_deleted_at.is_(None),
+                )
+                .order_by(RDBModelFile.deleted_at, RDBModelFile.id)
+                .limit(limit)
+            )
+        ).all()
+        return [self._build(row) for row in rows]
+
     async def list_statuses_for_session(
         self,
         session: AsyncSession,
@@ -156,6 +250,19 @@ class ModelFileRepository:
         await session.flush()
         return self._build(row)
 
+    async def mark_blob_deleted(
+        self,
+        session: AsyncSession,
+        *,
+        model_file_id: str,
+    ) -> None:
+        """Record successful ModelFile blob deletion."""
+        row = await session.get(RDBModelFile, model_file_id)
+        if row is None or row.blob_deleted_at is not None:
+            return
+        row.blob_deleted_at = datetime.datetime.now(datetime.UTC)
+        await session.flush()
+
     async def mark_unreachable(
         self,
         session: AsyncSession,
@@ -195,4 +302,5 @@ class ModelFileRepository:
             unreachable_run_index=rdb.unreachable_run_index,
             unreachable_at=rdb.unreachable_at,
             deleted_at=rdb.deleted_at,
+            blob_deleted_at=rdb.blob_deleted_at,
         )

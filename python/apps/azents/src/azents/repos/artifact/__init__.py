@@ -99,6 +99,93 @@ class ArtifactRepository:
         await session.flush()
         return [self._build(row) for row in rows]
 
+    async def list_candidate_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[str]:
+        """Return Artifact sessions with available lifecycle candidates."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBArtifact.session_id)
+                .where(RDBArtifact.status == ArtifactStatus.AVAILABLE)
+                .group_by(RDBArtifact.session_id)
+                .order_by(sa.func.min(RDBArtifact.expires_after_run_index))
+                .limit(limit)
+            )
+        ).all()
+        return list(rows)
+
+    async def expire_due_by_latest_run_index(
+        self,
+        session: AsyncSession,
+        *,
+        latest_run_indexes: dict[str, int],
+        expired_at: datetime.datetime,
+        limit: int,
+    ) -> list[Artifact]:
+        """Expire available Artifacts using per-session latest run indexes."""
+        due_by_session = [
+            sa.and_(
+                RDBArtifact.session_id == session_id,
+                RDBArtifact.expires_after_run_index < latest_run_index,
+            )
+            for session_id, latest_run_index in latest_run_indexes.items()
+        ]
+        if not due_by_session:
+            return []
+        rows = (
+            await session.scalars(
+                sa.select(RDBArtifact)
+                .where(
+                    RDBArtifact.status == ArtifactStatus.AVAILABLE,
+                    sa.or_(*due_by_session),
+                )
+                .order_by(RDBArtifact.created_run_index, RDBArtifact.id)
+                .limit(limit)
+            )
+        ).all()
+        for row in rows:
+            row.status = ArtifactStatus.EXPIRED
+            row.expired_at = expired_at
+        expired_rows = list(rows)
+        await session.flush()
+        return [self._build(row) for row in expired_rows]
+
+    async def list_expired_with_blob(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[Artifact]:
+        """Fetch expired Artifacts whose blobs still need deletion."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBArtifact)
+                .where(
+                    RDBArtifact.status == ArtifactStatus.EXPIRED,
+                    RDBArtifact.blob_deleted_at.is_(None),
+                )
+                .order_by(RDBArtifact.expired_at, RDBArtifact.id)
+                .limit(limit)
+            )
+        ).all()
+        return [self._build(row) for row in rows]
+
+    async def mark_blob_deleted(
+        self,
+        session: AsyncSession,
+        *,
+        artifact_id: str,
+    ) -> None:
+        """Record successful Artifact blob deletion."""
+        row = await session.get(RDBArtifact, artifact_id)
+        if row is None or row.blob_deleted_at is not None:
+            return
+        row.blob_deleted_at = datetime.datetime.now(datetime.UTC)
+        await session.flush()
+
     def _build(self, rdb: RDBArtifact) -> Artifact:
         """Convert RDB model to domain model."""
         return Artifact(
@@ -122,4 +209,5 @@ class ArtifactRepository:
             metadata=rdb.metadata_,
             created_at=rdb.created_at,
             expired_at=rdb.expired_at,
+            blob_deleted_at=rdb.blob_deleted_at,
         )

@@ -65,11 +65,6 @@ from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE, CheckStop
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.artifact.data import Artifact
-from azents.repos.exchange_file.data import ExchangeFile
-from azents.repos.model_file.data import ModelFile
-from azents.services.artifact import ArtifactService
-from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 
 
@@ -95,49 +90,11 @@ class _Session(AsyncSession):
         """No-op commit."""
 
 
-class _ArtifactService(ArtifactService):
-    """ArtifactService for tests."""
-
-    def __init__(self) -> None:
-        """Bypass base dataclass initialization."""
-
-    async def expire_for_run_boundary(
-        self,
-        *,
-        session_id: str,
-        current_run_index: int,
-    ) -> list[Artifact]:
-        """Treat as having no expiry targets."""
-        del session_id, current_run_index
-        return []
-
-
-class _ExchangeFileService(ExchangeFileService):
-    """ExchangeFileService for tests."""
-
-    def __init__(self) -> None:
-        """Bypass base dataclass initialization."""
-
-    async def expire_due_files(self) -> list[ExchangeFile]:
-        """Treat as having no expiry targets."""
-        return []
-
-
 class _ModelFileService(ModelFileService):
     """ModelFileService for tests."""
 
     def __init__(self) -> None:
         """Bypass base dataclass initialization."""
-
-    async def expire_for_run_boundary(
-        self,
-        *,
-        session_id: str,
-        current_run_index: int,
-    ) -> list[ModelFile]:
-        """Treat as having no expiry targets."""
-        del session_id, current_run_index
-        return []
 
 
 class _RunRepo:
@@ -515,8 +472,6 @@ async def test_event_engine_adapter_runs_execution() -> None:
     execution = _Execution()
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=run_repo,
         agent_session_repo=_AgentSessionRepo(),
@@ -557,8 +512,6 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
     execution = _StreamingExecution(done)
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -597,8 +550,6 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
     execution = _StreamingExecution(done)
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -643,8 +594,6 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
     execution = _StreamingExecution(done)
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -681,8 +630,6 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
     execution = _Execution()
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -723,8 +670,6 @@ async def test_adapter_emits_user_visible_model_call_error() -> None:
     """User-visible model error is emitted as event system_error event."""
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -771,8 +716,6 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
 
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -826,8 +769,6 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
     session_head_repo = _EventSessionHeadRepo(None)
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -906,8 +847,6 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
 
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -1017,8 +956,6 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
 
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -1071,8 +1008,6 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
     transcript_repo = _TranscriptRepo([transcript_event])
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
-        artifact_service=_ArtifactService(),
-        exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
@@ -1163,8 +1098,6 @@ def _session_context() -> _SessionContext:
 def _agent_engine_adapter(
     *,
     session_manager: Callable[[], _SessionContext] = _session_context,
-    artifact_service: ArtifactService | None = None,
-    exchange_file_service: ExchangeFileService | None = None,
     model_file_service: ModelFileService | None = None,
     config: EventEngineAdapterConfig | None = None,
     execution_factory: RunExecutionFactory | None = None,
@@ -1178,8 +1111,6 @@ def _agent_engine_adapter(
     """Create AgentEngineAdapter for tests."""
     return AgentEngineAdapter(
         session_manager=session_manager,
-        artifact_service=artifact_service or _ArtifactService(),
-        exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
         config=config or EventEngineAdapterConfig(),
         execution_factory=execution_factory or (lambda **kwargs: _Execution()),

@@ -78,6 +78,7 @@ class _FakeArtifactRepository:
             metadata=create.metadata,
             created_at=_NOW,
             expired_at=None,
+            blob_deleted_at=None,
         )
         self.artifacts[artifact.id] = artifact
         return artifact

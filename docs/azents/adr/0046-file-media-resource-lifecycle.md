@@ -9,6 +9,12 @@ tags: [architecture, backend, frontend, engine]
 
 Accepted.
 
+## Amendments 2026-06-26
+
+- Lifecycle cleanup is scheduler-owned rather than run-loop-owned. Normal Agent run input preparation no longer synchronously expires Exchange files, Artifacts, or ModelFiles.
+- The scheduler uses explicit latest run indexes from `agent_runs` to preserve Artifact and ModelFile run-age semantics; it does not infer entity ids or run context from URI strings.
+- Blob deletion is retried through later scheduler passes. Rows record `blob_deleted_at` only after object deletion succeeds; deletion failure is logged and remains retryable while user-facing access is denied by lifecycle status.
+
 ## Amendments 2026-06-03
 
 Original text of this ADR preserves the proposed direction at decision time. During later full migration implementation, this current contract was confirmed:

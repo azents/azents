@@ -79,6 +79,7 @@ class _FakeExchangeFileRepository:
             preview_generated_at=create.preview_generated_at,
             expires_at=create.expires_at,
             expired_at=None,
+            blob_deleted_at=None,
             created_at=_NOW,
         )
         self.files[file.id] = file
@@ -576,8 +577,8 @@ async def test_resolve_attachment_metadata_keeps_expired_attachment_visible() ->
 
 
 @pytest.mark.asyncio
-async def test_expire_due_files_marks_expired_and_deletes_blob() -> None:
-    """Expiration cleanup hook marks due file expired and tries object delete."""
+async def test_expire_due_files_marks_expired_metadata_only() -> None:
+    """Expiration marks metadata only; scheduler owns blob deletion."""
     service, repository, s3_service = _make_service(
         workspace_user=_make_workspace_user()
     )
@@ -597,7 +598,7 @@ async def test_expire_due_files_marks_expired_and_deletes_blob() -> None:
 
     assert [file.id for file in expired] == [created.value.id]
     assert repository.files[created.value.id].status == ExchangeFileStatus.EXPIRED
-    assert created.value.object_key not in s3_service.objects
+    assert created.value.object_key in s3_service.objects
 
 
 @pytest.mark.asyncio

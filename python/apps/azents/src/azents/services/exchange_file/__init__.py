@@ -563,29 +563,14 @@ class ExchangeFileService:
         return Success(file.value)
 
     async def expire_due_files(self) -> list[ExchangeFile]:
-        """Mark expired ExchangeFile as expired and try blob deletion."""
+        """Mark expired ExchangeFile metadata without deleting blobs."""
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
-            expired = await self.exchange_file_repository.expire_due(
+            return await self.exchange_file_repository.expire_due(
                 session,
                 now=now,
                 limit=_EXCHANGE_FILE_EXPIRATION_CLEANUP_LIMIT,
             )
-        for file in expired:
-            try:
-                await self.s3_service.delete(
-                    bucket=self.config.workspace_s3.bucket,
-                    key=file.object_key,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to delete expired exchange file blob",
-                    extra={
-                        "file_id": file.id,
-                        "object_key": file.object_key,
-                    },
-                )
-        return expired
 
     async def _download_by_object_key(
         self,

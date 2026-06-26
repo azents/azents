@@ -52,6 +52,9 @@ class ExchangeFile(BaseModel):
         default=None,
         description="Expiration processing time",
     )
+    blob_deleted_at: datetime.datetime | None = Field(
+        description="Blob deletion success time",
+    )
     created_at: datetime.datetime = Field(description="Created time")
 
     @property

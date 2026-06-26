@@ -141,4 +141,5 @@ def _model_file() -> ModelFile:
         created_at=_NOW,
         degraded_at=None,
         deleted_at=None,
+        blob_deleted_at=None,
     )

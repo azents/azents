@@ -8,19 +8,21 @@ code_paths:
   - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/azents/scheduler/executor.py
   - python/apps/azents/src/azents/scheduler/service.py
+  - python/apps/azents/src/azents/services/file_lifecycle.py
   - python/apps/azents/src/azents/repos/scheduled_task_state/__init__.py
   - python/apps/azents/src/azents/repos/scheduled_task_state/data.py
   - python/apps/azents/src/azents/rdb/models/scheduled_task_state.py
   - python/apps/azents/src/cli/scheduler.py
   - python/apps/azents/src/cli/devserver.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/c7b64368f3a1_add_scheduled_task_states.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/f3c06dfb5496_add_file_blob_deletion_markers.py
   - python/apps/azents/bin/scheduler.sh
   - infra/argocd/azents-server/base/scheduler-deployment.yaml
   - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-06-20
-spec_version: 1
+last_verified_at: 2026-06-26
+spec_version: 2
 ---
 
 # Periodic Execution Flow Spec
@@ -51,7 +53,11 @@ A definition includes:
 
 The database does not store task definitions or schedule overrides. It stores current runtime state only.
 
-The initial registered task is `scheduler_heartbeat`. It is a no-op heartbeat that returns a small execution summary and has no external network dependency.
+Registered tasks include:
+
+- `scheduler_heartbeat`: no-op heartbeat that returns a small execution summary and has no external network dependency.
+- `model_catalog_system_projection`: refreshes system model catalog projections from LiteLLM metadata.
+- `file_lifecycle_cleanup`: expires Exchange files, Artifacts, and ModelFiles in background.
 
 ## Execution backend
 
@@ -146,6 +152,16 @@ Supported v1 policies:
 
 Success resets the failure streak. Failure increments the persisted streak before the next retry time is calculated.
 
+## File lifecycle cleanup task
+
+`file_lifecycle_cleanup` owns attachment and file lifecycle cleanup outside user-visible run execution. It runs in the scheduler role and performs bounded batches for:
+
+- Exchange files whose `expires_at` has passed;
+- Artifacts whose `expires_after_run_index` is older than the explicit latest run index read from `agent_runs` by session;
+- ModelFiles that should degrade, become `unreachable`, or become `deleted` according to ADR-0046 run-age rules.
+
+The task is idempotent. Rows are first transitioned to unavailable lifecycle states (`expired`, `unreachable`, or `deleted`) so user-facing resolution denies access independently of object-storage success. Blob deletion is attempted after the metadata transition. Successful deletion records `blob_deleted_at`. Deletion failure is logged with structured row/storage identifiers and leaves `blob_deleted_at` empty, so later scheduler passes retry deletion. Cleanup code uses database row ids and explicit latest-run-index queries; URI strings remain file locations only and are not parsed for entity ids.
+
 ## CLI operations
 
 The scheduler CLI exposes:
@@ -167,5 +183,3 @@ The periodic execution flow does not provide:
 - attempt history tables;
 - Temporal workflows or activities;
 - external model catalog source sync by itself.
-
-Model catalog source sync is a later consumer of this scheduler.

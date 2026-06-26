@@ -4,7 +4,6 @@ import asyncio
 import dataclasses
 import datetime
 import hashlib
-import logging
 import re
 from typing import Annotated
 
@@ -24,8 +23,6 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
-
-logger = logging.getLogger(__name__)
 
 _ARTIFACT_RETENTION_COMPLETED_RUNS = 2
 
@@ -253,31 +250,15 @@ class ArtifactService:
         session_id: str,
         current_run_index: int,
     ) -> list[Artifact]:
-        """Expire Artifact by run boundary and try blob deletion."""
+        """Expire Artifact metadata at run boundary without deleting blobs."""
         now = datetime.datetime.now(datetime.timezone.utc)
         async with self.session_manager() as session:
-            expired = await self.artifact_repository.expire_for_run_boundary(
+            return await self.artifact_repository.expire_for_run_boundary(
                 session,
                 session_id=session_id,
                 current_run_index=current_run_index,
                 expired_at=now,
             )
-        for artifact in expired:
-            try:
-                await self.s3_service.delete(
-                    bucket=self.config.workspace_s3.bucket,
-                    key=artifact.storage_key,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to delete expired artifact blob",
-                    extra={
-                        "artifact_id": artifact.id,
-                        "session_id": session_id,
-                        "storage_key": artifact.storage_key,
-                    },
-                )
-        return expired
 
     async def _get_accessible_artifact(
         self,

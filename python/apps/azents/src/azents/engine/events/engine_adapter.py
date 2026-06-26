@@ -118,8 +118,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.services.artifact import ArtifactService
-from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 
 logger = logging.getLogger(__name__)
@@ -186,8 +184,6 @@ class AgentEngineAdapter:
         SessionManager[AsyncSession],
         Depends(get_session_manager),
     ]
-    artifact_service: Annotated[ArtifactService, Depends(ArtifactService)]
-    exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     config: Annotated[EventEngineAdapterConfig, Depends(EventEngineAdapterConfig)]
     execution_factory: Annotated[
@@ -403,9 +399,6 @@ class AgentEngineAdapter:
                 phase=phase,
                 pre_lower_filter=pre_lower_filter,
             ),
-            artifact_expirer=self.artifact_service.expire_for_run_boundary,
-            exchange_file_expirer=self.exchange_file_service.expire_due_files,
-            model_file_expirer=self.model_file_service.expire_for_run_boundary,
             pre_model_lower_hook=model_file_materializer.materialize,
             run_repo=self.run_repo,
             transcript_repo=self.transcript_repo,

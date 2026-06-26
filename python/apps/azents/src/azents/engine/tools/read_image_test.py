@@ -40,6 +40,7 @@ _MODEL_FILE = ModelFile(
     created_at=datetime.datetime.now(datetime.UTC),
     degraded_at=None,
     deleted_at=None,
+    blob_deleted_at=None,
 )
 
 

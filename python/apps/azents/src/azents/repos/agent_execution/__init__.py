@@ -1,6 +1,7 @@
 """Event agent execution repository."""
 
 import datetime
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -464,6 +465,24 @@ class AgentRunRepository:
             )
         )
         return (max_run_index or 0) + 1
+
+    async def latest_run_indexes(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str] | None,
+    ) -> dict[str, int]:
+        """Return latest known run_index by session."""
+        stmt = sa.select(
+            RDBAgentRun.session_id,
+            sa.func.max(RDBAgentRun.run_index),
+        ).group_by(RDBAgentRun.session_id)
+        if session_ids is not None:
+            if not session_ids:
+                return {}
+            stmt = stmt.where(RDBAgentRun.session_id.in_(session_ids))
+        rows = (await session.execute(stmt)).all()
+        return {session_id: int(run_index) for session_id, run_index in rows}
 
     async def get_by_id(
         self,

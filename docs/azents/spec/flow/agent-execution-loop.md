@@ -21,6 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/services/model_file.py
+  - python/apps/azents/src/azents/services/file_lifecycle.py
   - python/apps/azents/src/azents/repos/input_buffer/**
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/services/model_listing/**
@@ -32,7 +33,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-06-26
-spec_version: 44
+spec_version: 45
 ---
 
 # Agent Execution Loop
@@ -52,7 +53,7 @@ Main steps:
 1. Worker promotes input buffers to event `RunUserMessage` input.
 2. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
 3. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
-4. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
+4. `PreLowerFilterPipeline` normalizes event transcript content for model input and may mutate event payloads for request-independent transcript repair, but it does not own attachment/file lifecycle cleanup.
 5. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
    into a LiteLLM Responses native request.
 6. `PostLowerFilterPipeline` applies adapter-native request size guard.
@@ -223,10 +224,7 @@ a bounded placeholder and is not silently omitted.
 
 Attachment and Artifact parts are not automatically converted into FilePart. Explicit FilePart
 creation stores a normalized ModelFile and durable events reference it by `model_file_id`,
-not by URI. ModelFile blobs are request-local inputs during lowering only: image blobs degrade at
-run age 1 and 3, image blobs are deleted at run age 10, and non-image blobs are deleted at run age 3.
-No durable event, REST/WS projection, or frontend state stores raw bytes, inline base64, data URL, or
-provider-native file payload.
+not by URI. ModelFile blobs are request-local inputs during lowering only. ADR-0046 lifecycle transitions are scheduler-owned: image blobs degrade at run age 1 and 3, image ModelFiles become unreachable at run age 10, and non-image ModelFiles become unreachable at run age 3. The scheduler later marks unreachable ModelFiles deleted after one run-boundary grace and retries blob deletion until `blob_deleted_at` is recorded. Normal chat run input preparation does not synchronously expire Exchange files, Artifacts, or ModelFiles. No durable event, REST/WS projection, or frontend state stores raw bytes, inline base64, data URL, or provider-native file payload.
 
 Before the event engine builds the tool catalog, `AgentWorker` resolves the
 desired toolkit list for the message and `_SessionRunner` reconciles it through the

@@ -145,6 +145,12 @@ class RDBExchangeFile(RDBModel):
         nullable=True,
         default=None,
     )
+    blob_deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=True,
+        default=None,
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,

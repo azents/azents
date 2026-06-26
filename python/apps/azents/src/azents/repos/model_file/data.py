@@ -45,6 +45,9 @@ class ModelFile(BaseModel):
     deleted_at: datetime.datetime | None = Field(
         default=None, description="Deletion time"
     )
+    blob_deleted_at: datetime.datetime | None = Field(
+        description="Blob deletion success time",
+    )
 
 
 class ModelFileCreate(BaseModel):

@@ -68,6 +68,7 @@ class _FakeArtifactRepository:
             metadata=create.metadata,
             created_at=_NOW,
             expired_at=None,
+            blob_deleted_at=None,
         )
         self.artifacts[artifact.id] = artifact
         return artifact
@@ -330,8 +331,8 @@ async def test_expired_artifact_is_denied_even_if_blob_exists() -> None:
 
 
 @pytest.mark.asyncio
-async def test_expire_for_run_boundary_marks_and_deletes_blobs() -> None:
-    """Run-boundary expiration handles metadata status and object deletion together."""
+async def test_expire_for_run_boundary_marks_expired_metadata_only() -> None:
+    """Run-boundary expiration does not delete blobs outside scheduler cleanup."""
     service, artifact_repo, s3 = _make_service()
     artifact_repo.next_id = "c" * 32
     created = await service.create(
@@ -352,8 +353,8 @@ async def test_expire_for_run_boundary_marks_and_deletes_blobs() -> None:
 
     assert [artifact.id for artifact in expired] == ["c" * 32]
     assert artifact_repo.artifacts["c" * 32].status == ArtifactStatus.EXPIRED
-    assert s3.deleted_keys == [created.value.storage_key]
-    assert created.value.storage_key not in s3.objects
+    assert s3.deleted_keys == []
+    assert created.value.storage_key in s3.objects
 
 
 def test_artifact_uri_returns_storage_key_only() -> None:

@@ -30,16 +30,16 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-06-26 | 44 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-06-26 | 45 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-06-26 | 4 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-06-13 | 1 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-06-13 | 6 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-06-16 | 11 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-06-13 | 7 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-06-26 | 8 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-23 | 3 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-20 | 1 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-26 | 2 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-06-25 | 7 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-06-26 | 7 |
 | [Subagent Delegation Flow](spec/flow/subagent-delegation.md) | @Hardtack | 2026-06-16 | 12 |

@@ -9,10 +9,14 @@ code_paths:
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/artifact.py
   - python/apps/azents/src/azents/services/model_file.py
+  - python/apps/azents/src/azents/services/file_lifecycle.py
+  - python/apps/azents/src/azents/scheduler/registry.py
+  - python/apps/azents/src/azents/repos/agent_execution/**
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/rdb/models/artifact.py
   - python/apps/azents/src/azents/rdb/models/model_file.py
+  - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/services/session_storage.py
   - python/apps/azents/src/azents/services/uploads/**
   - python/apps/azents/src/azents/services/chat/workspace.py
@@ -27,8 +31,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/hooks/useFileUpload.ts
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
-last_verified_at: 2026-06-13
-spec_version: 7
+last_verified_at: 2026-06-26
+spec_version: 8
 ---
 
 # File Exchange Storage
@@ -46,7 +50,7 @@ File Exchange Storage is the flow that separately stores and retrieves user-faci
 3. Successful upload creates user-facing Exchange attachment and model-input ModelFile/FilePart together. If either cannot be created, upload fails and does not return success response.
 4. File body is stored in each store, and attachment URI snapshot and FilePart snapshot remain as independent fields in event/input buffer. Do not reverse-infer FilePart by reading attachment URI.
 5. Agent execution loop does not automatically convert attachment to rich file input when transforming user input event to LLM input. Model rich input is delivered only as FilePart content of user input.
-6. Exchange attachment has `status`, `expires_at`, and `expired_at` metadata. In new run input preparation, Exchange files past expiration time are marked `expired` and blob delete is attempted. Resolver, download API, lowerer, and UI treat expired/unavailable as normal history state based on DB availability.
+6. Exchange attachment has `status`, `expires_at`, `expired_at`, and `blob_deleted_at` metadata. The scheduler-owned `file_lifecycle_cleanup` task marks Exchange files past expiration time as `expired`, deletes blobs in bounded batches, and records `blob_deleted_at` only after object deletion succeeds. Resolver, download API, lowerer, and UI treat expired/unavailable as normal history state based on DB availability.
 
 ### Agent imports user or internal file
 
@@ -56,7 +60,7 @@ File Exchange Storage is the flow that separately stores and retrieves user-faci
 
 ### Agent/tool output artifact
 
-When Agent or MCP-style tool creates internal file artifact, store it as Artifact instead of overloading user-facing attachment. Artifact URI is `artifact://{storage_key}`, and storage key format is `artifacts/{workspace_id}/{session_id}/{created_run_index}/{artifact_id}`. Artifact is valid for creation run index and next 2 completed runs. When `expires_after_run_index` becomes smaller than current run index, metadata status changes to `expired` at run boundary and blob delete is attempted. Resolver rejects access if status is expired regardless of blob existence.
+When Agent or MCP-style tool creates internal file artifact, store it as Artifact instead of overloading user-facing attachment. Artifact URI is `artifact://{storage_key}`, and storage key format is `artifacts/{workspace_id}/{session_id}/{created_run_index}/{artifact_id}`. Artifact is valid for creation run index and next 2 completed runs. The scheduler-owned lifecycle task reads explicit latest run indexes from `agent_runs`, marks Artifacts whose `expires_after_run_index` is older than the session latest run index as `expired`, deletes blobs in bounded batches, and records `blob_deleted_at` only after object deletion succeeds. Resolver rejects access if status is expired regardless of blob existence.
 
 Event transcript keeps only artifact metadata and `artifact://...` URI. Lowerer renders Artifact as bounded metadata text and does not inline raw file body in prompt.
 
@@ -64,7 +68,7 @@ Event transcript keeps only artifact metadata and `artifact://...` URI. Lowerer 
 
 Attachment and Artifact are not automatically converted to ModelFile/FilePart. If model rich input is needed, upload boundary or tool implementation that directly has bytes creates normalized blob in ModelFileStore and returns FilePart. Example is `read_image` tool for showing runtime image bytes to model. A separate FilePart creation tool exposed to model is not current contract. FilePart references ModelFile entity by `model_file_id`, not URI. ModelFile itself does not create URI.
 
-ModelFileStore is model input blob store, not original preservation store. Image ModelFile is normalized to JPEG and degraded to max edge 1024 at run age 1, max edge 300 at run age 3. Image ModelFile becomes `unreachable` from run age 10 and blob access is blocked. Non-image ModelFile is not normalized and only size cap applies; it becomes `unreachable` from run age 3 and model input access is blocked. `unreachable` ModelFile transitions to `deleted` after next run boundary grace and blob delete is attempted.
+ModelFileStore is model input blob store, not original preservation store. Image ModelFile is normalized to JPEG and degraded by the scheduler-owned lifecycle task to max edge 1024 at run age 1 and max edge 300 at run age 3. Image ModelFile becomes `unreachable` from run age 10 and blob access is blocked. Non-image ModelFile is not normalized and only size cap applies; it becomes `unreachable` from run age 3 and model input access is blocked. `unreachable` ModelFile transitions to `deleted` after next run-boundary grace when the scheduler observes the session latest run index has advanced. Blob deletion is retried by later scheduler passes until `blob_deleted_at` is recorded.
 If original non-image payload exceeds size cap, ModelFile is not created and is replaced with user-visible size cap message.
 
 Active transcript FilePart referencing deleted or missing ModelFile is rewritten at pre-lower stage into bounded text placeholder in event payload itself. This rewrite applies equally to user message, assistant message, and client/provider tool result payload, so later compaction, reload, REST/WS projection do not interpret unavailable FilePart as rich input again.
@@ -78,7 +82,8 @@ Active transcript FilePart referencing deleted or missing ModelFile is rewritten
 - Event store does not store file body. Event has only attachment/artifact metadata and URI reference, or FilePart `model_file_id`.
 - Durable event, REST/WS projection, and frontend state do not store raw bytes, inline base64, data URL, or provider-specific file payload.
 - There is no implicit conversion among Attachment, Artifact, and ModelFile/FilePart. URI is storage location, not entity reference, so do not add logic extracting entity id from URI string.
-- Attachment Exchange file has time-based retention/TTL lifecycle. Artifact and ModelFile each have separate run-age lifecycle.
+- Attachment Exchange file has time-based retention/TTL lifecycle. Artifact and ModelFile each have separate run-age lifecycle. Lifecycle cleanup is scheduler-owned; normal Agent run execution does not synchronously perform file lifecycle cleanup during input preparation.
+- Blob deletion failures are logged with structured identifiers and left retryable by keeping `blob_deleted_at` empty. URI strings remain file locations only; cleanup never infers entity ids from URI strings.
 - User upload, agent-presented file, and internal artifact must pass session/workspace ownership verification.
 - Sandbox file query is possible only when active sandbox storage handle exists; inactive/hibernated state follows workspace API action contract.
 - General presigned upload such as Agent avatar uses `UploadService` category handler, but it is separate category/publish contract from chat exchange file.

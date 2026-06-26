@@ -121,6 +121,12 @@ class RDBArtifact(RDBModel):
         nullable=True,
         default=None,
     )
+    blob_deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=True,
+        default=None,
+    )
 
     __table_args__ = (
         IX_WORKSPACE_ID,
