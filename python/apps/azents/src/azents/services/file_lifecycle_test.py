@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 from PIL import Image
@@ -567,9 +568,11 @@ async def test_retry_idempotency_skips_blob_deleted_rows() -> None:
 
 @pytest.mark.asyncio
 async def test_blob_delete_failure_logs_and_leaves_retry_marker(
-    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Blob deletion failures are logged and remain retryable."""
+    exception_logger = Mock()
+    monkeypatch.setattr(file_lifecycle_module.logger, "exception", exception_logger)
     service, exchange_repo, _artifact_repo, _model_file_repo, s3 = _make_service()
     file = _exchange_file(
         file_id="9" * 32,
@@ -579,14 +582,16 @@ async def test_blob_delete_failure_logs_and_leaves_retry_marker(
     s3.objects[file.object_key] = b"hello"
     s3.fail_delete_keys.add(file.object_key)
 
-    with caplog.at_level("ERROR", logger=file_lifecycle_module.logger.name):
-        expired = await service.expire_due_exchange_files()
+    expired = await service.expire_due_exchange_files()
 
     assert [item.id for item in expired] == [file.id]
     assert exchange_repo.files[file.id].status == ExchangeFileStatus.EXPIRED
     assert exchange_repo.files[file.id].blob_deleted_at is None
     assert file.object_key in s3.objects
-    assert "Failed to delete expired exchange file blob" in caplog.text
+    exception_logger.assert_called_once_with(
+        "Failed to delete expired exchange file blob",
+        extra={"file_id": file.id, "object_key": file.object_key},
+    )
 
 
 @pytest.mark.asyncio
