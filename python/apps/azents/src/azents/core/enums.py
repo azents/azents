@@ -106,6 +106,14 @@ class AgentSessionRunState(enum.StrEnum):
     RUNNING = "running"
 
 
+class AgentSessionTitleSource(enum.StrEnum):
+    """Source of the current AgentSession title."""
+
+    MANUAL = "manual"
+    AUTO_INITIAL = "auto_initial"
+    AUTO_GENERATED = "auto_generated"
+
+
 class ScheduledTaskStatus(enum.StrEnum):
     """Current scheduler task status."""
 

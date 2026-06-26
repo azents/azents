@@ -88,6 +88,7 @@ from azents.runtime.types import RuntimeDomainConfig
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
 from azents.services.model_file import ModelFileService
+from azents.services.session_title import SessionTitleService
 from azents.transport.chat import (
     chat_history_event_appended_dump,
     chat_live_event_removed_dump,
@@ -196,6 +197,7 @@ class RunExecutor:
     ]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    session_title_service: Annotated[SessionTitleService, Depends(SessionTitleService)]
     live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
     user_stop_finalizer: Annotated[UserStopFinalizer, Depends(UserStopFinalizer)]
     background_registry: Annotated[
@@ -211,6 +213,10 @@ class RunExecutor:
         GoalToolkitProvider, Depends(get_goal_toolkit_provider)
     ]
     broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)]
+    _session_title_tasks: set[asyncio.Task[object]] = dataclasses.field(
+        default_factory=set,
+        init=False,
+    )
 
     async def execute(
         self,
@@ -793,6 +799,7 @@ class RunExecutor:
                 )
             else:
                 await self.session_lifecycle.clear_session_activity(message.session_id)
+                self._schedule_session_title_generation(message.session_id)
 
         return RunExecutionResult(
             toolkits=run_request.toolkits,
@@ -800,6 +807,29 @@ class RunExecutor:
             no_actionable_work=False,
             run_id=run_id,
         )
+
+    def _schedule_session_title_generation(self, session_id: str) -> None:
+        """Start best-effort automatic title generation after terminal runs."""
+        task = asyncio.create_task(
+            self.session_title_service.generate_after_first_run(session_id),
+            name=f"session_title_{session_id}",
+        )
+        self._session_title_tasks.add(task)
+
+        def on_done(done: asyncio.Task[object]) -> None:
+            try:
+                done.result()
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.warning(
+                    "Automatic session title task failed",
+                    extra={"session_id": session_id},
+                    exc_info=True,
+                )
+
+        task.add_done_callback(self._session_title_tasks.discard)
+        task.add_done_callback(on_done)
 
     async def _run_session_heartbeat_loop(self, session_id: str) -> None:
         """Refresh session heartbeat while the engine run is active."""

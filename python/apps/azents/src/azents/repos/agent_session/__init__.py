@@ -15,6 +15,7 @@ from azents.core.enums import (
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
+    AgentSessionTitleSource,
 )
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
@@ -192,12 +193,80 @@ class AgentSessionRepository:
         *,
         session_id: str,
         title: str | None,
+        title_source: AgentSessionTitleSource | None,
     ) -> AgentSession | None:
-        """Update AgentSession title."""
+        """Update AgentSession title and title source."""
+        values: dict[str, object | None] = {
+            "title": title,
+            "title_source": title_source,
+        }
+        if title_source != AgentSessionTitleSource.AUTO_GENERATED:
+            values["title_generated_at"] = None
+            values["title_generation_event_id"] = None
         result = await session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
-            .values(title=title)
+            .values(**values)
+            .returning(RDBAgentSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build(rdb)
+
+    async def set_initial_auto_title_if_unset(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        title: str,
+        event_id: str | None,
+    ) -> AgentSession | None:
+        """Set first-message title only while no title source exists."""
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.title_source.is_(None),
+            )
+            .values(
+                title=title,
+                title_source=AgentSessionTitleSource.AUTO_INITIAL,
+                title_generated_at=sa.func.now(),
+                title_generation_event_id=event_id,
+            )
+            .returning(RDBAgentSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build(rdb)
+
+    async def replace_initial_auto_title(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        title: str,
+        event_id: str | None,
+    ) -> AgentSession | None:
+        """Replace initial automatic title after a run if still not manual."""
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.title_source == AgentSessionTitleSource.AUTO_INITIAL,
+            )
+            .values(
+                title=title,
+                title_source=AgentSessionTitleSource.AUTO_GENERATED,
+                title_generated_at=sa.func.now(),
+                title_generation_event_id=event_id,
+            )
             .returning(RDBAgentSession)
         )
         rdb = result.scalar_one_or_none()
@@ -520,6 +589,9 @@ class AgentSessionRepository:
             primary_kind=rdb.primary_kind,
             start_reason=rdb.start_reason,
             title=rdb.title,
+            title_source=rdb.title_source,
+            title_generated_at=rdb.title_generated_at,
+            title_generation_event_id=rdb.title_generation_event_id,
             end_reason=rdb.end_reason,
             model_input_head_event_id=rdb.model_input_head_event_id,
             started_at=rdb.started_at,

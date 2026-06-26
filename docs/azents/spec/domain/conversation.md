@@ -120,7 +120,10 @@ command, stop intent, or run heartbeat.
 | `status` | enum | `active` or `archived` |
 | `primary_kind` | enum \| null | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind. |
 | `start_reason` | enum | `initial`, `system_recovery` |
-| `title` | string \| null | Optional user-facing title. `null` means no custom title and clients should render a contextual fallback. |
+| `title` | string \| null | Optional user-facing title. `null` means no title is available and clients should render a contextual fallback. |
+| `title_source` | enum \| null | `manual`, `auto_initial`, or `auto_generated`; null means no title source yet. |
+| `title_generated_at` | timestamptz \| null | Last automatic title generation timestamp. |
+| `title_generation_event_id` | `str(32)` \| null | Event used as the automatic title generation boundary. |
 | `end_reason` | enum \| null | Archive reason |
 | `model_input_head_event_id` | `str(32)` \| null | Event model-input head after append-only compaction |
 | `run_state` / `run_heartbeat_at` | enum / timestamptz | Session execution recovery state |
@@ -138,12 +141,20 @@ surface this list in the Agent rail and navigate selected sessions through
 `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. Creating a session invalidates the Agent
 session list cache and navigates to the newly created session URL.
 
-Each session may have a manual user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
-sets or clears this title after workspace membership validation. The request body uses `{ "title":
+Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
+sets or clears a manual title after workspace membership validation. The request body uses `{ "title":
 string | null }`: non-null titles are trimmed and must be non-empty and at most 200 characters; an
-explicit `null` clears the custom title. The server does not generate automatic titles in this phase.
-Clients display the custom title when present and otherwise fall back to a contextual label such as
-"Team primary" or "Session".
+explicit `null` clears the title and title source so automatic title generation may run again. Manual
+titles set `title_source = manual` and automatic generation must never overwrite them.
+
+Automatic title generation has two phases. When the first user message is promoted into the durable
+transcript and the session has no title source, the server stores a deterministic `auto_initial` title
+from the beginning of that message. After the first terminal run, the worker uses the Agent's
+lightweight model to generate a concise `auto_generated` title from the session transcript. This
+replacement is race-safe and only applies while `title_source = auto_initial`; if a user renames the
+session before generation completes, the automatic update is skipped. Title generation is best-effort
+and failures must not affect run completion. Clients display `title` when present and otherwise fall
+back to a contextual label such as "Team primary" or "Session".
 
 `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/archive` archives an active non-primary
 AgentSession. Archive is a soft lifecycle transition: durable transcript data, run rows, exchange

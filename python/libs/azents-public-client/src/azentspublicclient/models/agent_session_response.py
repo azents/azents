@@ -23,6 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind
 from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
 from azentspublicclient.models.agent_session_status import AgentSessionStatus
+from azentspublicclient.models.agent_session_title_source import AgentSessionTitleSource
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -33,13 +34,14 @@ class AgentSessionResponse(BaseModel):
     id: StrictStr = Field(description="Session ID")
     agent_id: StrictStr = Field(description="Agent ID")
     title: Optional[StrictStr]
+    title_source: Optional[AgentSessionTitleSource]
     status: AgentSessionStatus = Field(description="Session status")
     primary_kind: Optional[AgentSessionPrimaryKind] = None
     run_state: AgentSessionRunState = Field(description="Session execution state")
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "title", "status", "primary_kind", "run_state", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "title", "title_source", "status", "primary_kind", "run_state", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -92,6 +94,11 @@ class AgentSessionResponse(BaseModel):
         if self.title is None and "title" in self.model_fields_set:
             _dict['title'] = None
 
+        # set to None if title_source (nullable) is None
+        # and model_fields_set contains the field
+        if self.title_source is None and "title_source" in self.model_fields_set:
+            _dict['title_source'] = None
+
         # set to None if primary_kind (nullable) is None
         # and model_fields_set contains the field
         if self.primary_kind is None and "primary_kind" in self.model_fields_set:
@@ -112,6 +119,7 @@ class AgentSessionResponse(BaseModel):
             "id": obj.get("id"),
             "agent_id": obj.get("agent_id"),
             "title": obj.get("title"),
+            "title_source": obj.get("title_source"),
             "status": obj.get("status"),
             "primary_kind": obj.get("primary_kind"),
             "run_state": obj.get("run_state"),

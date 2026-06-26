@@ -13,6 +13,7 @@ from azents.core.enums import (
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStatus,
+    AgentSessionTitleSource,
     EventKind,
 )
 from azents.engine.events.types import Event
@@ -962,6 +963,9 @@ class AgentSessionResponse(BaseModel):
     id: str = Field(description="Session ID")
     agent_id: str = Field(description="Agent ID")
     title: str | None = Field(description="User-facing session title")
+    title_source: AgentSessionTitleSource | None = Field(
+        description="Source of the current session title",
+    )
     status: AgentSessionStatus = Field(description="Session status")
     primary_kind: AgentSessionPrimaryKind | None = Field(
         default=None,
@@ -980,6 +984,7 @@ class AgentSessionResponse(BaseModel):
             id=session.id,
             agent_id=session.agent_id,
             title=session.title,
+            title_source=session.title_source,
             status=session.status,
             primary_kind=session.primary_kind,
             run_state=session.run_state,

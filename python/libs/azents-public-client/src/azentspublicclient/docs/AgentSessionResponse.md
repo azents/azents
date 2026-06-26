@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **id** | **str** | Session ID |
 **agent_id** | **str** | Agent ID |
 **title** | **str** |  |
+**title_source** | [**AgentSessionTitleSource**](AgentSessionTitleSource.md) |  |
 **status** | [**AgentSessionStatus**](AgentSessionStatus.md) | Session status |
 **primary_kind** | [**AgentSessionPrimaryKind**](AgentSessionPrimaryKind.md) |  | [optional]
 **run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Session execution state |

@@ -13,6 +13,7 @@ from azents.core.enums import (
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
+    AgentSessionTitleSource,
 )
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
@@ -46,6 +47,13 @@ def _agent_session_start_reason_values(
     return [v.value for v in enum_cls]
 
 
+def _agent_session_title_source_values(
+    enum_cls: type[AgentSessionTitleSource],
+) -> list[str]:
+    """Return AgentSessionTitleSource enum values stored in the DB."""
+    return [v.value for v in enum_cls]
+
+
 def _agent_session_end_reason_values(
     enum_cls: type[AgentSessionEndReason],
 ) -> list[str]:
@@ -76,6 +84,12 @@ agent_session_start_reason_enum = ENUM(
     name="agent_session_start_reason",
     create_type=False,
     values_callable=_agent_session_start_reason_values,
+)
+agent_session_title_source_enum = ENUM(
+    AgentSessionTitleSource,
+    name="agent_session_title_source",
+    create_type=False,
+    values_callable=_agent_session_title_source_values,
 )
 agent_session_end_reason_enum = ENUM(
     AgentSessionEndReason,
@@ -151,6 +165,21 @@ class RDBAgentSession(RDBModel):
     )
     title: Mapped[str | None] = mapped_column(
         sa.String(200),
+        nullable=True,
+        default=None,
+    )
+    title_source: Mapped[AgentSessionTitleSource | None] = mapped_column(
+        agent_session_title_source_enum,
+        nullable=True,
+        default=None,
+    )
+    title_generated_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    title_generation_event_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
         nullable=True,
         default=None,
     )

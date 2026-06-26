@@ -24,6 +24,7 @@ from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.session_title import initial_title_from_event
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
@@ -258,6 +259,15 @@ class InputBufferService:
                 session_id,
                 promoted,
             )
+            for event in event_inserted:
+                title = initial_title_from_event(event)
+                if title is not None:
+                    await self.agent_session_repository.set_initial_auto_title_if_unset(
+                        session,
+                        session_id=session_id,
+                        title=title,
+                        event_id=event.id,
+                    )
             inserted_external_ids = {
                 event.external_id
                 for event in event_inserted

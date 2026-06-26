@@ -236,6 +236,7 @@ Class | Method | HTTP request | Description
  - [AgentSessionResponse](azentspublicclient/docs/AgentSessionResponse.md)
  - [AgentSessionRunState](azentspublicclient/docs/AgentSessionRunState.md)
  - [AgentSessionStatus](azentspublicclient/docs/AgentSessionStatus.md)
+ - [AgentSessionTitleSource](azentspublicclient/docs/AgentSessionTitleSource.md)
  - [AgentSessionTitleUpdateRequest](azentspublicclient/docs/AgentSessionTitleUpdateRequest.md)
  - [AgentSubagentCreateRequest](azentspublicclient/docs/AgentSubagentCreateRequest.md)
  - [AgentSubagentListResponse](azentspublicclient/docs/AgentSubagentListResponse.md)
