@@ -41,7 +41,7 @@ _8 documents_
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-23 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-20 | 1 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-06-25 | 7 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-06-26 | 5 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-06-26 | 6 |
 | [Subagent Delegation Flow](spec/flow/subagent-delegation.md) | @Hardtack | 2026-06-16 | 12 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |
 

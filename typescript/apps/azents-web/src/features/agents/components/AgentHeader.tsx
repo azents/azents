@@ -39,8 +39,8 @@ function resolveActiveTab(
   if (pathname.startsWith(`${basePath}/settings`)) {
     return null;
   }
-  if (/\/sessions\/[^/]+\/context(?:\/|$)/.test(pathname)) {
-    return "context";
+  if (pathname.startsWith(`${basePath}/sessions/`)) {
+    return null;
   }
   return "chat";
 }
@@ -72,10 +72,18 @@ export function AgentHeader({
   const searchParams = useSearchParams();
   const mobileNav = useAgentFocusedShellMobileNav();
   const basePath = `/w/${handle}/agents/${agent.id}`;
-  const activeTab = useMemo(
-    () => resolveActiveTab(pathname, basePath),
-    [pathname, basePath],
-  );
+  const activeTab = useMemo(() => {
+    const pathTab = resolveActiveTab(pathname, basePath);
+    if (pathTab !== null) {
+      return pathTab;
+    }
+    const page = searchParams.get("page");
+    return page === "context" ||
+      page === "system-prompt" ||
+      page === "raw-events"
+      ? "context"
+      : "chat";
+  }, [pathname, searchParams, basePath]);
   const activeSessionId = useMemo(
     () => extractSessionId(pathname, basePath) ?? searchParams.get("sessionId"),
     [pathname, searchParams, basePath],
@@ -93,7 +101,7 @@ export function AgentHeader({
       } else if (value === "context") {
         router.push(
           activeSessionId
-            ? `${basePath}/sessions/${activeSessionId}/context`
+            ? `${basePath}/sessions/${activeSessionId}?page=context`
             : `${basePath}/chat`,
         );
       }
