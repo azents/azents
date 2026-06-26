@@ -9,6 +9,8 @@
  * previous session of WebSocket/buffer new session to ensures it does not leak.
  */
 
+import { useQueryClient } from "@tanstack/react-query";
+import { getQueryKey } from "@trpc/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { applyProviderToolCallItem } from "../hooks/providerToolCallProjection";
@@ -1195,6 +1197,7 @@ export function useChatSessionContainer(
   const connectionInfoQuery = trpc.chat.getConnectionInfo.useQuery();
   const slashCommandsQuery = trpc.chat.listSlashCommands.useQuery();
 
+  const queryClient = useQueryClient();
   const utils = trpc.useUtils();
 
   // Durable historyand current live projection text fetches..
@@ -1205,8 +1208,18 @@ export function useChatSessionContainer(
         sessionId !== null &&
         isSubscribeReady &&
         chatViewState.type === "LOADING_HISTORY",
+      gcTime: 0,
+      staleTime: 0,
     },
   );
+
+  useEffect(() => {
+    const sessionEventsQueryKey = getQueryKey(trpc.chat.listSessionEvents);
+    return () => {
+      void queryClient.invalidateQueries({ queryKey: sessionEventsQueryKey });
+      queryClient.removeQueries({ queryKey: sessionEventsQueryKey });
+    };
+  }, [queryClient]);
 
   const batchReloadRef = useRef<() => boolean>(() => false);
   const compactionReloadRef = useRef<(continuing: boolean) => void>(() => {});
