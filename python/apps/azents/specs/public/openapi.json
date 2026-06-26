@@ -2595,6 +2595,64 @@
         }
       }
     },
+    "/chat/v1/sessions/{session_id}/title": {
+      "patch": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Update Agent Session Title",
+        "description": "Update or clear a user-facing AgentSession title.",
+        "operationId": "chat_v1_update_agent_session_title",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSessionTitleUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/commands": {
       "get": {
         "tags": [
@@ -7748,6 +7806,18 @@
             "title": "Agent Id",
             "description": "Agent ID"
           },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "User-facing session title"
+          },
           "status": {
             "$ref": "#/components/schemas/AgentSessionStatus",
             "description": "Session status"
@@ -7784,6 +7854,7 @@
         "required": [
           "id",
           "agent_id",
+          "title",
           "status",
           "run_state",
           "created_at",
@@ -7809,6 +7880,28 @@
         ],
         "title": "AgentSessionStatus",
         "description": "AgentSession lifecycle status."
+      },
+      "AgentSessionTitleUpdateRequest": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "User-facing session title. Null clears the custom title. Non-null values are trimmed and must be 200 characters or fewer."
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "AgentSessionTitleUpdateRequest",
+        "description": "AgentSession title update request."
       },
       "AgentSubagentCreateRequest": {
         "properties": {

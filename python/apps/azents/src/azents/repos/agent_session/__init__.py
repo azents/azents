@@ -34,6 +34,7 @@ class AgentSessionRepository:
         rdb = RDBAgentSession(
             workspace_id=create.workspace_id,
             agent_id=create.agent_id,
+            title=create.title,
             primary_kind=create.primary_kind,
             start_reason=create.start_reason,
         )
@@ -164,6 +165,7 @@ class AgentSessionRepository:
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 status=AgentSessionStatus.ACTIVE,
+                title=None,
                 primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
                 start_reason=start_reason,
             )
@@ -183,6 +185,26 @@ class AgentSessionRepository:
         if primary is None:
             raise RuntimeError("Team primary AgentSession conflict target not found")
         return primary
+
+    async def update_title(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        title: str | None,
+    ) -> AgentSession | None:
+        """Update AgentSession title."""
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == session_id)
+            .values(title=title)
+            .returning(RDBAgentSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build(rdb)
 
     async def archive(
         self,
@@ -497,6 +519,7 @@ class AgentSessionRepository:
             status=rdb.status,
             primary_kind=rdb.primary_kind,
             start_reason=rdb.start_reason,
+            title=rdb.title,
             end_reason=rdb.end_reason,
             model_input_head_event_id=rdb.model_input_head_event_id,
             started_at=rdb.started_at,

@@ -30,6 +30,7 @@ import {
   chatV1RegisterAgentProject,
   chatV1RejectAgentProjectRegistrationRequest,
   chatV1StopSessionRun,
+  chatV1UpdateAgentSessionTitle,
   chatV1UpdateSessionGoal,
   chatV1UpdateSessionGoalStatus,
 } from "@azents/public-client";
@@ -114,6 +115,33 @@ export const chatRouter = router({
       } catch (e) {
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  updateAgentSessionTitle: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        title: z.string().min(1).max(200).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1UpdateAgentSessionTitle({
+          client: ctx.apiClient,
+          path: { session_id: input.sessionId },
+          body: { title: input.title },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
           404: "NOT_FOUND",
         });
       }

@@ -25,6 +25,7 @@ class AgentSession(BaseModel):
         description="Primary session role",
     )
     start_reason: AgentSessionStartReason = Field(description="Start reason")
+    title: str | None = Field(description="User-facing session title")
     end_reason: AgentSessionEndReason | None = Field(
         default=None, description="End reason"
     )
@@ -91,6 +92,7 @@ class AgentSessionCreate(BaseModel):
 
     workspace_id: str = Field(description="Workspace ID")
     agent_id: str = Field(description="Agent ID")
+    title: str | None = Field(description="User-facing session title")
     primary_kind: AgentSessionPrimaryKind | None = Field(
         default=None,
         description="Primary session role",

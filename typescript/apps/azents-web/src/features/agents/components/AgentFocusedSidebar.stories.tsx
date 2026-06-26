@@ -35,6 +35,7 @@ const sessions: AgentSessionResponse[] = [
   {
     id: "sess_primary",
     agent_id: "agent_01",
+    title: null,
     status: "active",
     primary_kind: "team_primary",
     run_state: "idle",
@@ -44,6 +45,7 @@ const sessions: AgentSessionResponse[] = [
   {
     id: "sess_release",
     agent_id: "agent_01",
+    title: "Release checklist follow-up",
     status: "active",
     primary_kind: null,
     run_state: "running",
@@ -53,6 +55,7 @@ const sessions: AgentSessionResponse[] = [
   {
     id: "sess_ci",
     agent_id: "agent_01",
+    title: null,
     status: "active",
     primary_kind: null,
     run_state: "idle",
@@ -78,6 +81,7 @@ const meta = {
     sessions,
     activeSessionId: "sess_primary",
     onCreateSession: () => {},
+    onRenameSession: async () => {},
   },
 } satisfies Meta<typeof AgentFocusedSidebar>;
 

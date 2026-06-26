@@ -97,6 +97,7 @@ def _agent_session(
         agent_id=agent_id,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
+        title=None,
         end_reason=None,
         started_at=now,
         lifecycle_started_at=None,

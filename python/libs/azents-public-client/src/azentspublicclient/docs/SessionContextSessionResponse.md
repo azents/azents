@@ -6,10 +6,10 @@ Session context session response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | AgentSession ID |
-**agent_id** | **str** | Agent ID |
-**created_at** | **datetime** |  | [optional]
-**updated_at** | **datetime** |  | [optional]
+**id** | **str** | AgentSession ID | 
+**agent_id** | **str** | Agent ID | 
+**created_at** | **datetime** |  | [optional] 
+**updated_at** | **datetime** |  | [optional] 
 
 ## Example
 

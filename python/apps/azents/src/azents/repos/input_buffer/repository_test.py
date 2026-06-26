@@ -339,6 +339,7 @@ class TestInputBufferRepository:
             AgentSessionCreate(
                 workspace_id=from_session.workspace_id,
                 agent_id=from_session.agent_id,
+                title=None,
                 primary_kind=None,
             ),
         )

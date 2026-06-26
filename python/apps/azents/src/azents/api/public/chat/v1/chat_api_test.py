@@ -24,9 +24,11 @@ from azents.api.public.chat.v1 import (
     list_live_events,
     mount,
     stop_session_run,
+    update_agent_session_title,
     update_session_goal_status,
 )
 from azents.api.public.chat.v1.data import (
+    AgentSessionTitleUpdateRequest,
     ChatCommandWriteRequest,
     ChatEditMessageWriteRequest,
     ChatMessageWriteRequest,
@@ -65,6 +67,7 @@ from azents.services.agent_session_input import BufferedAgentSessionInputResult
 from azents.services.chat.data import (
     ChatLiveRunState,
     ChatLiveStateSnapshot,
+    InvalidSessionTitle,
     PaginatedEvents,
     SessionAccessDenied,
     SessionNotFound,
@@ -242,6 +245,7 @@ class _RestWriteChatService:
                 agent_id=agent_id,
                 status=AgentSessionStatus.ACTIVE,
                 start_reason=AgentSessionStartReason.INITIAL,
+                title=None,
                 started_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
@@ -279,6 +283,7 @@ class _StopChatService:
                 agent_id="agent-1",
                 status=AgentSessionStatus.ACTIVE,
                 start_reason=AgentSessionStartReason.INITIAL,
+                title=None,
                 started_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
@@ -547,6 +552,7 @@ class _AgentSessionRouteChatService:
             status=AgentSessionStatus.ACTIVE,
             primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
             start_reason=AgentSessionStartReason.INITIAL,
+            title=None,
             started_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
@@ -558,11 +564,13 @@ class _AgentSessionRouteChatService:
             status=AgentSessionStatus.ACTIVE,
             primary_kind=None,
             start_reason=AgentSessionStartReason.INITIAL,
+            title=None,
             run_state=AgentSessionRunState.RUNNING,
             started_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
         )
+        self.title: str | None = None
         self.result: Success[AgentSession] | Failure[SessionNotFound] = Success(
             self.primary_session
         )
@@ -613,6 +621,21 @@ class _AgentSessionRouteChatService:
         self.session_id = session_id
         return self.result
 
+    async def update_session_title(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        title: str | None,
+    ) -> Success[AgentSession] | Failure[SessionNotFound | InvalidSessionTitle]:
+        """Return title update result."""
+        del user_id
+        self.session_id = session_id
+        self.title = title
+        if title == "invalid":
+            return Failure(InvalidSessionTitle(reason="Invalid title."))
+        return Success(self.primary_session.model_copy(update={"title": title}))
+
 
 class TestAgentSessionRoutes:
     """Agent session route behavior."""
@@ -629,6 +652,7 @@ class TestAgentSessionRoutes:
 
         assert response.id == "1123456789abcdef0123456789abcdef"
         assert response.agent_id == "agent-1"
+        assert response.title is None
         assert chat_service.agent_id == "agent-1"
 
     async def test_list_agent_sessions_returns_primary_metadata(self) -> None:
@@ -663,6 +687,37 @@ class TestAgentSessionRoutes:
         assert response.id == "2123456789abcdef0123456789abcdef"
         assert response.agent_id == "agent-1"
         assert response.primary_kind is None
+
+    async def test_update_agent_session_title_returns_updated_session(self) -> None:
+        """Session title update route returns updated session metadata."""
+        chat_service = _AgentSessionRouteChatService()
+
+        response = await update_agent_session_title(
+            session_id="1123456789abcdef0123456789abcdef",
+            request=AgentSessionTitleUpdateRequest(title="Design review"),
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+        )
+
+        assert response.title == "Design review"
+        assert chat_service.session_id == "1123456789abcdef0123456789abcdef"
+        assert chat_service.title == "Design review"
+
+    async def test_update_agent_session_title_rejects_invalid_title(self) -> None:
+        """Session title update route maps service validation to HTTP 400."""
+        chat_service = _AgentSessionRouteChatService()
+
+        try:
+            await update_agent_session_title(
+                session_id="1123456789abcdef0123456789abcdef",
+                request=AgentSessionTitleUpdateRequest(title="invalid"),
+                current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            )
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 400
+        else:
+            raise AssertionError("Expected HTTPException")
 
     async def test_get_agent_session_mismatch_is_not_found(self) -> None:
         """Agent/session mismatch and access denial are exposed as 404."""

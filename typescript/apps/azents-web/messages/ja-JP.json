@@ -541,7 +541,14 @@
           "primary": "チームプライマリ",
           "session": "セッション",
           "primaryBadge": "プライマリ",
-          "running": "実行中…"
+          "running": "実行中…",
+          "actions": "Session actions",
+          "rename": "Rename",
+          "renameTitle": "Rename session",
+          "renameLabel": "Session title",
+          "clearTitle": "Clear title",
+          "cancel": "Cancel",
+          "save": "Save"
         },
         "inheritModelBadge": "親のモデルを継承",
         "danger": {

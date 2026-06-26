@@ -945,11 +945,23 @@ class LiveEventListResponse(BaseModel):
     )
 
 
+class AgentSessionTitleUpdateRequest(BaseModel):
+    """AgentSession title update request."""
+
+    title: str | None = Field(
+        description=(
+            "User-facing session title. Null clears the custom title. "
+            "Non-null values are trimmed and must be 200 characters or fewer."
+        ),
+    )
+
+
 class AgentSessionResponse(BaseModel):
     """Conversation session response."""
 
     id: str = Field(description="Session ID")
     agent_id: str = Field(description="Agent ID")
+    title: str | None = Field(description="User-facing session title")
     status: AgentSessionStatus = Field(description="Session status")
     primary_kind: AgentSessionPrimaryKind | None = Field(
         default=None,
@@ -967,6 +979,7 @@ class AgentSessionResponse(BaseModel):
         return cls(
             id=session.id,
             agent_id=session.agent_id,
+            title=session.title,
             status=session.status,
             primary_kind=session.primary_kind,
             run_state=session.run_state,

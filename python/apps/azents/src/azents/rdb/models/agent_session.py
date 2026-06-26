@@ -149,6 +149,11 @@ class RDBAgentSession(RDBModel):
         nullable=False,
         default=AgentSessionStartReason.INITIAL,
     )
+    title: Mapped[str | None] = mapped_column(
+        sa.String(200),
+        nullable=True,
+        default=None,
+    )
 
     end_reason: Mapped[AgentSessionEndReason | None] = mapped_column(
         agent_session_end_reason_enum,

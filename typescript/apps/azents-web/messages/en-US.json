@@ -541,7 +541,14 @@
           "primary": "Team primary",
           "session": "Session",
           "primaryBadge": "Primary",
-          "running": "Running…"
+          "running": "Running…",
+          "actions": "Session actions",
+          "rename": "Rename",
+          "renameTitle": "Rename session",
+          "renameLabel": "Session title",
+          "clearTitle": "Clear title",
+          "cancel": "Cancel",
+          "save": "Save"
         },
         "inheritModelBadge": "Inherits model from parent",
         "danger": {

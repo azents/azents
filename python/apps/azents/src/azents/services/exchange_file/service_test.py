@@ -253,6 +253,7 @@ def _make_agent_session() -> AgentSession:
         agent_id="agent-1",
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
+        title=None,
         end_reason=None,
         started_at=_NOW,
         ended_at=None,

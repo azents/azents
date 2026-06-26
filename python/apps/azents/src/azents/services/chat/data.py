@@ -96,8 +96,16 @@ class InvalidGoalStatusTransition:
     """Disallowed Goal status transition."""
 
 
+@dataclasses.dataclass(frozen=True)
+class InvalidSessionTitle:
+    """Invalid AgentSession title."""
+
+    reason: str
+
+
 EnsureSessionError = AgentNotFound | NotWorkspaceMember | SessionAccessDenied
 SessionAccessError = SessionNotFound | SessionAccessDenied
 DeleteSessionError = SessionAccessDenied
 DeleteInputBufferError = SessionNotFound | SessionAccessDenied
 UpdateGoalError = SessionNotFound | SessionAccessDenied | InvalidGoalStatusTransition
+UpdateSessionTitleError = SessionNotFound | SessionAccessDenied | InvalidSessionTitle

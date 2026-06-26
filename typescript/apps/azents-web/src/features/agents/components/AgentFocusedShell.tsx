@@ -78,10 +78,32 @@ export function AgentFocusedShell({
       router.push(`/w/${handle}/agents/${agent.id}/sessions/${session.id}`);
     },
   });
+  const updateTitleMutation = trpc.chat.updateAgentSessionTitle.useMutation();
 
   const handleCreateSession = useCallback((): void => {
     createSessionMutation.mutate({ agentId: agent.id });
   }, [createSessionMutation, agent.id]);
+
+  const handleRenameSession = useCallback(
+    async (sessionId: string, title: string | null): Promise<void> => {
+      await updateTitleMutation.mutateAsync({
+        agentId: agent.id,
+        sessionId,
+        title,
+      });
+      void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.getAgentSession.invalidate({
+        agentId: agent.id,
+        sessionId,
+      });
+    },
+    [
+      agent.id,
+      updateTitleMutation,
+      utils.chat.getAgentSession,
+      utils.chat.listAgentSessions,
+    ],
+  );
 
   const mobileNavContext = useMemo(
     () => ({ openAgentNavigation: openDrawer }),
@@ -106,7 +128,13 @@ export function AgentFocusedShell({
           sessionsError={sessionsQuery.error?.message ?? null}
           activeSessionId={activeSessionId}
           creatingSession={createSessionMutation.isPending}
+          renamingSessionId={
+            updateTitleMutation.isPending
+              ? updateTitleMutation.variables.sessionId
+              : null
+          }
           onCreateSession={handleCreateSession}
+          onRenameSession={handleRenameSession}
           onNavigate={closeDrawer}
         />
       </Drawer>
@@ -128,7 +156,13 @@ export function AgentFocusedShell({
             sessionsError={sessionsQuery.error?.message ?? null}
             activeSessionId={activeSessionId}
             creatingSession={createSessionMutation.isPending}
+            renamingSessionId={
+              updateTitleMutation.isPending
+                ? updateTitleMutation.variables.sessionId
+                : null
+            }
             onCreateSession={handleCreateSession}
+            onRenameSession={handleRenameSession}
           />
         </Box>
         <Box

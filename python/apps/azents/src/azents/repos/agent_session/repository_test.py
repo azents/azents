@@ -86,6 +86,34 @@ class TestAgentSessionRepository:
         assert first.id == second.id
         assert first.status == AgentSessionStatus.ACTIVE
         assert first.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
+        assert first.title is None
+
+    async def test_update_title_round_trips_custom_title(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """AgentSession title can be updated and cleared."""
+        workspace_id = await _create_workspace(rdb_session, "agent-session-title-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "agent-session-title")
+        repo = AgentSessionRepository()
+        agent_session = await repo.ensure_team_primary_for_agent(
+            rdb_session, workspace_id=workspace_id, agent_id=agent_id
+        )
+
+        titled = await repo.update_title(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Design review",
+        )
+        cleared = await repo.update_title(
+            rdb_session,
+            session_id=agent_session.id,
+            title=None,
+        )
+
+        assert titled is not None
+        assert titled.title == "Design review"
+        assert cleared is not None
+        assert cleared.title is None
 
     async def test_ensure_active_recreates_after_archive(
         self, rdb_session: AsyncSession
