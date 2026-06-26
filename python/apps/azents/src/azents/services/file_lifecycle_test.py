@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import azents.services.file_lifecycle as file_lifecycle_module
 from azents.core.enums import (
     ArtifactStatus,
     ExchangeFileOrigin,
@@ -578,7 +579,7 @@ async def test_blob_delete_failure_logs_and_leaves_retry_marker(
     s3.objects[file.object_key] = b"hello"
     s3.fail_delete_keys.add(file.object_key)
 
-    with caplog.at_level("ERROR"):
+    with caplog.at_level("ERROR", logger=file_lifecycle_module.logger.name):
         expired = await service.expire_due_exchange_files()
 
     assert [item.id for item in expired] == [file.id]
