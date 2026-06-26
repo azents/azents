@@ -31,16 +31,23 @@ import { AgentAvatar } from "./AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "./AgentFocusedShell";
 import type { AgentResponse } from "@azents/public-client";
 
-/** Extract active tab from current path */
+function isContextPage(value: string | null): boolean {
+  return (
+    value === "context" || value === "system-prompt" || value === "raw-events"
+  );
+}
+
+/** Extract active tab from current path and query. */
 function resolveActiveTab(
   pathname: string,
   basePath: string,
+  page: string | null,
 ): "chat" | "context" | null {
   if (pathname.startsWith(`${basePath}/settings`)) {
     return null;
   }
-  if (pathname.startsWith(`${basePath}/sessions/`)) {
-    return null;
+  if (pathname.startsWith(`${basePath}/sessions/`) && isContextPage(page)) {
+    return "context";
   }
   return "chat";
 }
@@ -72,18 +79,10 @@ export function AgentHeader({
   const searchParams = useSearchParams();
   const mobileNav = useAgentFocusedShellMobileNav();
   const basePath = `/w/${handle}/agents/${agent.id}`;
-  const activeTab = useMemo(() => {
-    const pathTab = resolveActiveTab(pathname, basePath);
-    if (pathTab !== null) {
-      return pathTab;
-    }
-    const page = searchParams.get("page");
-    return page === "context" ||
-      page === "system-prompt" ||
-      page === "raw-events"
-      ? "context"
-      : "chat";
-  }, [pathname, searchParams, basePath]);
+  const activeTab = useMemo(
+    () => resolveActiveTab(pathname, basePath, searchParams.get("page")),
+    [pathname, searchParams, basePath],
+  );
   const activeSessionId = useMemo(
     () => extractSessionId(pathname, basePath) ?? searchParams.get("sessionId"),
     [pathname, searchParams, basePath],
