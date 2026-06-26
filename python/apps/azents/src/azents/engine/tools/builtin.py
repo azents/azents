@@ -262,13 +262,6 @@ class ExecuteCodeInput(BaseModel):
     )
 
 
-class RequestProjectRegistrationInput(BaseModel):
-    """request_project_registration tool input."""
-
-    path: str = Field(description="Absolute path under /workspace/agent to register")
-    reason: str = Field(description="Why this folder should become a Project")
-
-
 # ---------------------------------------------------------------------------
 # Toolkit Provider
 # ---------------------------------------------------------------------------

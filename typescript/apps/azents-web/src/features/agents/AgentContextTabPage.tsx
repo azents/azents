@@ -12,15 +12,18 @@ import type { AgentResponse } from "@azents/public-client";
 interface AgentContextTabPageProps {
   handle: string;
   agent: AgentResponse;
+  sessionId: string;
 }
 
 export function AgentContextTabPage({
   handle,
   agent,
+  sessionId,
 }: AgentContextTabPageProps): React.ReactElement {
   const t = useTranslations("chat.context");
   const query = trpc.chat.getAgentSessionContext.useQuery({
     agentId: agent.id,
+    sessionId,
     limit: 300,
   });
 
@@ -50,8 +53,8 @@ export function AgentContextTabPage({
         {query.data && (
           <SessionContextView
             context={query.data}
-            systemPromptHref={`/w/${handle}/agents/${agent.id}/context/system-prompt`}
-            rawEventsHref={`/w/${handle}/agents/${agent.id}/context/raw-events`}
+            systemPromptHref={`/w/${handle}/agents/${agent.id}/sessions/${sessionId}/context/system-prompt`}
+            rawEventsHref={`/w/${handle}/agents/${agent.id}/sessions/${sessionId}/context/raw-events`}
           />
         )}
       </Box>

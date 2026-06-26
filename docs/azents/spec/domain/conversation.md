@@ -58,8 +58,11 @@ api_routes:
   - /chat/v1/agents/{agent_id}/team-primary-session
   - /chat/v1/agents/{agent_id}/sessions
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
-  - /chat/v1/agents/{agent_id}/projects
-  - /chat/v1/agents/{agent_id}/projects/register
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/context
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/sessions/{session_id}/exchange-files
@@ -68,7 +71,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-26
-spec_version: 69
+spec_version: 70
 ---
 
 # Conversation & Events
@@ -147,15 +150,17 @@ context. `SessionWorkspaceProject` and `SessionWorkspaceProjectRegistrationReque
 `AgentSession` through `session_id`. Runtime owns only the physical workspace where project paths
 exist.
 
-Agent-scoped project routes currently resolve the agent's team primary session, then read or
-write that session's project rows. Runtime lookup is allowed only after that session context is
-selected, and only for physical workspace validation or runner filesystem operations. Runtime current
-project, selected project, active project, and runtime-owned project catalog state are not part of the
-conversation contract.
+Project and context inspector routes are session-scoped under
+`/chat/v1/agents/{agent_id}/sessions/{session_id}/...`. They validate that the selected session
+belongs to the requested agent and that the requester is a workspace member before reading or writing
+that session's rows. Runtime lookup is allowed only after that session context is selected, and only
+for physical workspace validation or runner filesystem operations. Runtime current project, selected
+project, active project, team-primary fallback, and runtime-owned project catalog state are not part of
+the conversation contract.
 
 RuntimeToolkit loads registered project prompt content from the current logical `AgentSession` ID.
 Runtime context sharing affects shell/file operations; it must not make project registry ownership or
-project prompt selection fall back to a parent or runtime session.
+project prompt selection fall back to a parent, team-primary, or runtime session.
 
 ## 3. AgentRun
 

@@ -46,19 +46,17 @@ import type {
 export type SessionRunState = "idle" | "running";
 
 interface ChatSessionContainerProps {
-  /** mount time of session ID. new chat when null. */
-  initialSessionId: string | null;
+  /** URL-selected AgentSession ID */
+  sessionId: string;
   /** this session agent */
   agent: AgentResponse;
-  /** server new session createtext when parent to notice (URL/sidebar syncfor) */
-  onSessionCreated: (sessionId: string) => void;
   /** WebSocket connection status parent to push (for sidebar badge) */
   onConnectionStatusChange: (status: ConnectionStatus) => void;
 }
 
 export interface ChatSessionContainerOutput {
-  /** current session ID (server-assigned after update) */
-  sessionId: string | null;
+  /** current session ID */
+  sessionId: string;
   /** chat view status */
   chatViewState: ChatViewState;
   /** chat timeline rendering mode */
@@ -1132,21 +1130,11 @@ function mergeWithOlderPages(
 export function useChatSessionContainer(
   props: ChatSessionContainerProps,
 ): ChatSessionContainerOutput {
-  const {
-    initialSessionId,
-    agent,
-    onSessionCreated,
-    onConnectionStatusChange,
-  } = props;
+  const { sessionId, agent, onConnectionStatusChange } = props;
 
-  // internal sessionId status: mount time of initialSessionId  with start.
-  // The canonical session route provides the server-assigned session id.
-  // useChatWebSocket  sessionIdRef  with latest value textso with reconnect triggertext text.
-  const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
-
-  const [chatViewState, setChatViewState] = useState<ChatViewState>(() =>
-    initialSessionId ? { type: "LOADING_HISTORY" } : { type: "READY" },
-  );
+  const [chatViewState, setChatViewState] = useState<ChatViewState>({
+    type: "LOADING_HISTORY",
+  });
   const [chatTimelineState, setChatTimelineState] = useState<ChatTimelineState>(
     { type: "LATEST_FOLLOWING" },
   );
@@ -1162,9 +1150,7 @@ export function useChatSessionContainer(
   const [managedLiveState, setManagedLiveState] = useState<ManagedLiveState>(
     () => emptyManagedLiveState(),
   );
-  const [isSubscribeReady, setIsSubscribeReady] = useState(
-    initialSessionId === null,
-  );
+  const [isSubscribeReady, setIsSubscribeReady] = useState(false);
   const historyNewestCursorRef = useRef<string | null>(null);
   const writeInFlightRef = useRef(false);
   const failedWriteRequestRef = useRef<{ key: string; id: string } | null>(
@@ -1202,12 +1188,9 @@ export function useChatSessionContainer(
 
   // Durable historyand current live projection text fetches..
   const eventsQuery = trpc.chat.listSessionEvents.useQuery(
-    { sessionId: sessionId ?? "" },
+    { sessionId },
     {
-      enabled:
-        sessionId !== null &&
-        isSubscribeReady &&
-        chatViewState.type === "LOADING_HISTORY",
+      enabled: isSubscribeReady && chatViewState.type === "LOADING_HISTORY",
       gcTime: 0,
       staleTime: 0,
     },
@@ -1222,18 +1205,11 @@ export function useChatSessionContainer(
   }, [queryClient]);
 
   useEffect(() => {
-    if (sessionId === null) {
-      return;
-    }
     void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
-  }, [agent.id, sessionId, sessionRunState, utils.chat.listAgentSessions]);
+  }, [agent.id, sessionRunState, utils.chat.listAgentSessions]);
 
   const batchReloadRef = useRef<() => boolean>(() => false);
   const compactionReloadRef = useRef<(continuing: boolean) => void>(() => {});
-
-  // parent with to pass callback ref (callback identity to avoid WS reconnect by identity change)
-  const onSessionCreatedRef = useRef(onSessionCreated);
-  onSessionCreatedRef.current = onSessionCreated;
 
   const handleChatEvent = useCallback(
     (event: ChatEvent): void => {
@@ -1301,7 +1277,7 @@ export function useChatSessionContainer(
             ],
             isResponsePending: true,
           }));
-          if (sessionId !== null && pending.sessionId !== sessionId) {
+          if (pending.sessionId !== sessionId) {
             void connectionInfoQuery.refetch();
           }
           return;
@@ -1458,9 +1434,7 @@ export function useChatSessionContainer(
     onSubscribed: () => {
       setIsSubscribeReady(true);
       setBufferingLiveEvents(true);
-      if (sessionId !== null) {
-        setChatViewState({ type: "LOADING_HISTORY" });
-      }
+      setChatViewState({ type: "LOADING_HISTORY" });
     },
     onAuthError: () => void connectionInfoQuery.refetch(),
     onBufferedLiveEvent: () => {
@@ -1473,7 +1447,7 @@ export function useChatSessionContainer(
   });
 
   const messagesRefetch = useCallback((): boolean => {
-    if (!sessionId || chatViewState.type !== "READY") {
+    if (chatViewState.type !== "READY") {
       return false;
     }
     void requestSubscriptionHealthCheck().then((ok) => {
@@ -1492,7 +1466,6 @@ export function useChatSessionContainer(
     eventsQuery,
     replayBufferedLiveEvents,
     requestSubscriptionHealthCheck,
-    sessionId,
     setBufferingLiveEvents,
   ]);
   batchReloadRef.current = messagesRefetch;
@@ -1522,9 +1495,6 @@ export function useChatSessionContainer(
   );
 
   compactionReloadRef.current = (continuing) => {
-    if (!sessionId) {
-      return;
-    }
     void utils.chat.listSessionEvents.fetch({ sessionId }).then((result) => {
       const mapped = mapSessionEvents(result);
       historyNewestCursorRef.current = mapped.newestCursor;
@@ -1583,7 +1553,7 @@ export function useChatSessionContainer(
   }, [eventsQuery.dataUpdatedAt]);
 
   const onLoadMore = useCallback(() => {
-    if (!sessionId || isLoadingMore || !hasMore) {
+    if (isLoadingMore || !hasMore) {
       return;
     }
 
@@ -1631,7 +1601,6 @@ export function useChatSessionContainer(
 
   const onLoadNewer = useCallback((): void => {
     if (
-      sessionId === null ||
       isLoadingNewer ||
       chatTimelineState.type !== "DETACHED_HISTORY_BROWSING" ||
       !chatTimelineState.hasNewer ||
@@ -1677,9 +1646,6 @@ export function useChatSessionContainer(
   ]);
 
   const onResetToLatest = useCallback((): void => {
-    if (sessionId === null) {
-      return;
-    }
     void applyLatestSnapshot(sessionId, true);
   }, [applyLatestSnapshot, sessionId]);
 
@@ -1701,8 +1667,7 @@ export function useChatSessionContainer(
   const applyWriteResponse = useCallback(
     (response: ChatWriteResponse): void => {
       if (response.session_id !== sessionId) {
-        setSessionId(response.session_id);
-        onSessionCreatedRef.current(response.session_id);
+        throw new Error("Chat write response session mismatch");
       }
       setManagedLiveState(mapChatWriteSnapshot(response));
       if (response.history_reload_required) {
@@ -1797,9 +1762,6 @@ export function useChatSessionContainer(
 
   const onSendCommand = useCallback(
     (command: string): Promise<boolean> => {
-      if (sessionId === null) {
-        return Promise.resolve(false);
-      }
       if (isResponsePending) {
         setWasRestCommandBlocked(true);
         return Promise.resolve(false);
@@ -1837,9 +1799,6 @@ export function useChatSessionContainer(
       message: string,
       attachments?: UploadedFile[],
     ): Promise<boolean> => {
-      if (sessionId === null) {
-        return Promise.resolve(false);
-      }
       if (isResponsePending) {
         return Promise.resolve(false);
       }
@@ -1875,7 +1834,7 @@ export function useChatSessionContainer(
   );
 
   const onStopRequest = useCallback(() => {
-    if (sessionId === null || stopSessionRunMutation.isPending) {
+    if (stopSessionRunMutation.isPending) {
       return;
     }
     setManagedLiveState((prev) => ({ ...prev, isStopPending: true }));
@@ -1888,9 +1847,6 @@ export function useChatSessionContainer(
 
   const onDeletePendingInputBuffer = useCallback(
     (bufferId: string) => {
-      if (!sessionId) {
-        return;
-      }
       setManagedLiveState((prev) => ({
         ...prev,
         pendingInputBuffers: prev.pendingInputBuffers.map((buffer) =>
@@ -1935,9 +1891,6 @@ export function useChatSessionContainer(
 
   const onUpdateGoal = useCallback(
     async (objective: string): Promise<boolean> => {
-      if (!sessionId) {
-        return false;
-      }
       try {
         const updated = await updateSessionGoalMutation.mutateAsync({
           sessionId,
@@ -1957,9 +1910,6 @@ export function useChatSessionContainer(
   );
 
   const onClearGoal = useCallback(async (): Promise<boolean> => {
-    if (!sessionId) {
-      return false;
-    }
     try {
       const updated = await updateSessionGoalMutation.mutateAsync({
         sessionId,
@@ -1978,9 +1928,6 @@ export function useChatSessionContainer(
 
   const updateGoalStatus = useCallback(
     async (status: "active" | "paused", hint?: string): Promise<boolean> => {
-      if (!sessionId) {
-        return false;
-      }
       try {
         const normalizedHint = hint?.trim();
         const updated = await updateSessionGoalStatusMutation.mutateAsync({

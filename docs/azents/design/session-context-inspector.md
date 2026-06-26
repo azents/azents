@@ -107,7 +107,7 @@ Unlimited raw JSON has response size and secret exposure risk. Default limit is 
 ```mermaid
 flowchart TD
   UI[Agent Context tab] --> TRPC[chat.getSessionContext]
-  TRPC --> API[GET /chat/v1/agents/{agent_id}/context]
+  TRPC --> API[GET /chat/v1/agents/{agent_id}/sessions/{session_id}/context]
   API --> Service[SessionContextService]
   Service --> SessionRepo[AgentSessionRepository]
   Service --> EventRepo[CanonicalTranscriptRepository]

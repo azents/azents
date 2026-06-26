@@ -120,12 +120,14 @@ export const chatRouter = router({
     }),
 
   listAgentProjects: publicProcedure
-    .input(z.object({ agentId: z.string().min(1) }))
+    .input(
+      z.object({ agentId: z.string().min(1), sessionId: z.string().min(1) }),
+    )
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await chatV1ListAgentProjects({
           client: ctx.apiClient,
-          path: { agent_id: input.agentId },
+          path: { agent_id: input.agentId, session_id: input.sessionId },
           throwOnError: true,
         });
         return data;
@@ -142,6 +144,7 @@ export const chatRouter = router({
     .input(
       z.object({
         agentId: z.string().min(1),
+        sessionId: z.string().min(1),
         path: z.string().min(1),
       }),
     )
@@ -149,7 +152,7 @@ export const chatRouter = router({
       try {
         const { data } = await chatV1RegisterAgentProject({
           client: ctx.apiClient,
-          path: { agent_id: input.agentId },
+          path: { agent_id: input.agentId, session_id: input.sessionId },
           body: {
             path: input.path,
           },
@@ -169,13 +172,21 @@ export const chatRouter = router({
 
   deleteAgentProject: publicProcedure
     .input(
-      z.object({ agentId: z.string().min(1), projectId: z.string().min(1) }),
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        projectId: z.string().min(1),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
         await chatV1DeleteAgentProject({
           client: ctx.apiClient,
-          path: { agent_id: input.agentId, project_id: input.projectId },
+          path: {
+            agent_id: input.agentId,
+            session_id: input.sessionId,
+            project_id: input.projectId,
+          },
           throwOnError: true,
         });
       } catch (e) {
@@ -188,12 +199,14 @@ export const chatRouter = router({
     }),
 
   listAgentProjectRegistrationRequests: publicProcedure
-    .input(z.object({ agentId: z.string().min(1) }))
+    .input(
+      z.object({ agentId: z.string().min(1), sessionId: z.string().min(1) }),
+    )
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await chatV1ListAgentProjectRegistrationRequests({
           client: ctx.apiClient,
-          path: { agent_id: input.agentId },
+          path: { agent_id: input.agentId, session_id: input.sessionId },
           throwOnError: true,
         });
         return data;
@@ -208,13 +221,21 @@ export const chatRouter = router({
 
   approveAgentProjectRegistrationRequest: publicProcedure
     .input(
-      z.object({ agentId: z.string().min(1), requestId: z.string().min(1) }),
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        requestId: z.string().min(1),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await chatV1ApproveAgentProjectRegistrationRequest({
           client: ctx.apiClient,
-          path: { agent_id: input.agentId, request_id: input.requestId },
+          path: {
+            agent_id: input.agentId,
+            session_id: input.sessionId,
+            request_id: input.requestId,
+          },
           throwOnError: true,
         });
         return data;
@@ -231,13 +252,21 @@ export const chatRouter = router({
 
   rejectAgentProjectRegistrationRequest: publicProcedure
     .input(
-      z.object({ agentId: z.string().min(1), requestId: z.string().min(1) }),
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        requestId: z.string().min(1),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
         await chatV1RejectAgentProjectRegistrationRequest({
           client: ctx.apiClient,
-          path: { agent_id: input.agentId, request_id: input.requestId },
+          path: {
+            agent_id: input.agentId,
+            session_id: input.sessionId,
+            request_id: input.requestId,
+          },
           throwOnError: true,
         });
       } catch (e) {
@@ -344,7 +373,7 @@ export const chatRouter = router({
   sendMessage: publicProcedure
     .input(
       z.object({
-        sessionId: z.string().min(1).nullable(),
+        sessionId: z.string().min(1),
         agentId: z.string().min(1),
         clientRequestId: z.string().min(1).max(64),
         message: z.string().min(1),
@@ -353,19 +382,15 @@ export const chatRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const body = {
-          agent_id: input.agentId,
-          client_request_id: input.clientRequestId,
-          message: input.message,
-          attachments: input.attachments,
-        };
-        if (input.sessionId === null) {
-          throw new Error("Session ID is required for chat messages.");
-        }
         const { data } = await chatV1CreateMessage({
           client: ctx.apiClient,
           path: { session_id: input.sessionId },
-          body,
+          body: {
+            agent_id: input.agentId,
+            client_request_id: input.clientRequestId,
+            message: input.message,
+            attachments: input.attachments,
+          },
           throwOnError: true,
         });
         return data;
@@ -531,6 +556,7 @@ export const chatRouter = router({
     .input(
       z.object({
         agentId: z.string().min(1),
+        sessionId: z.string().min(1),
         limit: z.number().min(1).max(500).optional(),
       }),
     )
@@ -538,7 +564,7 @@ export const chatRouter = router({
       try {
         const { data } = await chatV1GetAgentSessionContext({
           client: ctx.apiClient,
-          path: { agent_id: input.agentId },
+          path: { agent_id: input.agentId, session_id: input.sessionId },
           query: { limit: input.limit },
           throwOnError: true,
         });
@@ -658,6 +684,7 @@ export const chatRouter = router({
     .input(
       z.object({
         agentId: z.string().min(1),
+        sessionId: z.string().min(1),
         path: z.string().min(1),
         limit: z.number().min(1).max(1_048_576).optional(),
       }),

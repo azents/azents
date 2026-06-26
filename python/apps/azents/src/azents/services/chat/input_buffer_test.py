@@ -125,7 +125,6 @@ def _service(
         agent_repository=AgentRepository(),
         agent_run_repository=AgentRunRepository(),
         event_transcript_repository=EventTranscriptRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
         agent_session_repository=AgentSessionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),

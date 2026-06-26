@@ -16,7 +16,6 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -33,7 +32,6 @@ from azents.runtime.control_protocol.runner_operations import (
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import (
-    AgentNotFound,
     InvalidProjectPath,
     ProjectAccessDenied,
     ProjectPathConflict,
@@ -174,7 +172,6 @@ def _service(
     """Create service for tests."""
     return SessionWorkspaceProjectService(
         repository=SessionWorkspaceProjectRepository(),
-        agent_repository=AgentRepository(),
         agent_runtime_repository=AgentRuntimeRepository(),
         agent_session_repository=AgentSessionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
@@ -279,8 +276,9 @@ class TestSessionWorkspaceProjectService:
             runner_operations=runner_operations,
         )
 
-        result = await service.register_existing_folder_for_agent(
+        result = await service.register_existing_folder_for_session(
             agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
             user_id=user_id,
             path="/tmp/not-project",
         )
@@ -313,8 +311,9 @@ class TestSessionWorkspaceProjectService:
             runner_operations=runner_operations,
         )
 
-        result = await service.register_existing_folder_for_agent(
+        result = await service.register_existing_folder_for_session(
             agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
             user_id=user_id,
             path="/workspace/agent/app",
         )
@@ -324,21 +323,33 @@ class TestSessionWorkspaceProjectService:
         assert result.value.path == "/workspace/agent/app"
         assert runner_operations.paths == ["/workspace/agent/app"]
 
-    async def test_list_projects_for_agent_requires_existing_agent(
+    async def test_list_projects_for_session_requires_matching_agent(
         self, rdb_session: AsyncSession
     ) -> None:
-        """Reject Project list fetch of nonexistent Agent."""
+        """Reject Project list fetch when session is not owned by Agent."""
+        workspace_id = await _create_workspace(rdb_session, "swp-svc-agent-mismatch")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-svc-agent-mismatch",
+        )
+        user_id = await _create_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            email="swp-svc-agent-mismatch@example.com",
+        )
         service = _service(rdb_session)
 
-        result = await service.list_projects_for_agent(
-            agent_id="missing-agent",
-            user_id="user-1",
+        result = await service.list_projects_for_session(
+            agent_id="0123456789abcdef0123456789abcdef",
+            session_id=fixture.session_id,
+            user_id=user_id,
         )
 
         assert isinstance(result, Failure)
-        assert isinstance(result.error, AgentNotFound)
+        assert isinstance(result.error, ProjectAccessDenied)
 
-    async def test_list_projects_for_agent_requires_workspace_member(
+    async def test_list_projects_for_session_requires_workspace_member(
         self, rdb_session: AsyncSession
     ) -> None:
         """Reject Project list fetch for user without Workspace membership."""
@@ -350,18 +361,19 @@ class TestSessionWorkspaceProjectService:
         )
         service = _service(rdb_session)
 
-        result = await service.list_projects_for_agent(
+        result = await service.list_projects_for_session(
             agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
             user_id="external-user",
         )
 
         assert isinstance(result, Failure)
         assert isinstance(result.error, ProjectAccessDenied)
 
-    async def test_list_projects_for_agent_returns_registered_projects(
+    async def test_list_projects_for_session_returns_registered_projects(
         self, rdb_session: AsyncSession
     ) -> None:
-        """Workspace member fetches Project list registered in team primary session."""
+        """Workspace member fetches Project list registered in selected session."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-access-list")
         fixture = await _create_runtime_fixture(
             rdb_session,
@@ -380,8 +392,9 @@ class TestSessionWorkspaceProjectService:
         )
         assert isinstance(created, Success)
 
-        result = await service.list_projects_for_agent(
+        result = await service.list_projects_for_session(
             agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
             user_id=user_id,
         )
 

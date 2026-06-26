@@ -20,9 +20,8 @@ export function AgentChatTab(
     agent,
     sessionState,
     mountKey,
-    mountInitialSessionId,
+    mountSessionId,
     onConnectionStatusChange,
-    onInnerSessionCreated,
   } = props;
 
   // Lock outer document scroll on chat page.
@@ -75,9 +74,8 @@ export function AgentChatTab(
       <ChatSessionView
         key={mountKey}
         handle={props.handle}
-        initialSessionId={mountInitialSessionId}
+        sessionId={mountSessionId}
         agent={agent}
-        onSessionCreated={onInnerSessionCreated}
         onConnectionStatusChange={onConnectionStatusChange}
       />
     </Box>

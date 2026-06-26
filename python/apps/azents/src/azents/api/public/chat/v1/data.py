@@ -640,7 +640,7 @@ class AgentWorkspaceInactiveErrorResponse(BaseModel):
 class SessionContextSessionResponse(BaseModel):
     """Session context session response."""
 
-    id: str | None = Field(description="AgentSession ID")
+    id: str = Field(description="AgentSession ID")
     agent_id: str = Field(description="Agent ID")
     created_at: datetime.datetime | None = Field(default=None)
     updated_at: datetime.datetime | None = Field(default=None)

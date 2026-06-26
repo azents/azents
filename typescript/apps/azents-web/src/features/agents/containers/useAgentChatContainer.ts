@@ -33,10 +33,9 @@ export interface AgentChatContainerOutput {
   sessionState: AgentChatSessionState;
   /** ChatSessionView mount identifier */
   mountKey: string;
-  mountInitialSessionId: string;
+  mountSessionId: string;
   sessionConnectionStatus: ConnectionStatus;
   onConnectionStatusChange: (status: ConnectionStatus) => void;
-  onInnerSessionCreated: (sessionId: string) => void;
 }
 
 export function useAgentChatContainer(
@@ -57,12 +56,6 @@ export function useAgentChatContainer(
   const [sessionConnectionStatus, setSessionConnectionStatus] =
     useState<ConnectionStatus>("disconnected");
 
-  const onInnerSessionCreated = useCallback((): void => {
-    // Canonical session routes always mount with a URL-selected session. The
-    // callback remains wired for ChatSessionView compatibility but should not
-    // become a client-side source of truth.
-  }, []);
-
   const onConnectionStatusChange = useCallback(
     (status: ConnectionStatus): void => {
       setSessionConnectionStatus(status);
@@ -78,9 +71,8 @@ export function useAgentChatContainer(
     sessionId,
     sessionState,
     mountKey,
-    mountInitialSessionId: sessionId,
+    mountSessionId: sessionId,
     sessionConnectionStatus,
     onConnectionStatusChange,
-    onInnerSessionCreated,
   };
 }

@@ -37,13 +37,21 @@ function resolveActiveTab(
   pathname: string,
   basePath: string,
 ): "chat" | "context" | "settings" {
-  if (pathname.startsWith(`${basePath}/context`)) {
-    return "context";
-  }
   if (pathname.startsWith(`${basePath}/settings`)) {
     return "settings";
   }
+  if (/\/sessions\/[^/]+\/context(?:\/|$)/.test(pathname)) {
+    return "context";
+  }
   return "chat";
+}
+
+function extractSessionId(pathname: string, basePath: string): string | null {
+  const marker = `${basePath}/sessions/`;
+  if (!pathname.startsWith(marker)) {
+    return null;
+  }
+  return pathname.slice(marker.length).split("/")[0] ?? null;
 }
 
 interface AgentHeaderProps {
@@ -68,19 +76,31 @@ export function AgentHeader({
     () => resolveActiveTab(pathname, basePath),
     [pathname, basePath],
   );
+  const activeSessionId = useMemo(
+    () => extractSessionId(pathname, basePath),
+    [pathname, basePath],
+  );
   const modelSummary = formatModelSelectionSummary(agent.model_selection);
 
   const handleTabChange = useCallback(
     (value: string | null): void => {
       if (value === "chat") {
-        router.push(`${basePath}/chat`);
+        router.push(
+          activeSessionId
+            ? `${basePath}/sessions/${activeSessionId}`
+            : `${basePath}/chat`,
+        );
       } else if (value === "context") {
-        router.push(`${basePath}/context`);
+        router.push(
+          activeSessionId
+            ? `${basePath}/sessions/${activeSessionId}/context`
+            : `${basePath}/chat`,
+        );
       } else if (value === "settings") {
         router.push(`${basePath}/settings`);
       }
     },
-    [router, basePath],
+    [activeSessionId, router, basePath],
   );
 
   return (

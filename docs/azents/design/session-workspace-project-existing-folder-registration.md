@@ -29,19 +29,19 @@ Reduce MVP Project surface to **existing folder registration**.
 
 Keep:
 
-- `GET /chat/v1/agents/{agent_id}/projects`
-- `POST /chat/v1/agents/{agent_id}/projects/register`
-- `DELETE /chat/v1/agents/{agent_id}/projects/{project_id}`
-- `GET /chat/v1/agents/{agent_id}/project-registration-requests`
-- `POST /chat/v1/agents/{agent_id}/project-registration-requests/{request_id}/approve`
-- `POST /chat/v1/agents/{agent_id}/project-registration-requests/{request_id}/reject`
+- `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/projects`
+- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register`
+- `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}`
+- `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests`
+- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/approve`
+- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject`
 
 Remove:
 
 - `GET /chat/v1/agents/{agent_id}/project-sources`
 - `POST /chat/v1/agents/{agent_id}/project-sources/archive`
 - `DELETE /chat/v1/project-sources/{source_id}`
-- `POST /chat/v1/agents/{agent_id}/projects/bootstrap`
+- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/bootstrap`
 
 New register request body:
 
@@ -74,9 +74,9 @@ Remove these UI elements:
 
 This change reduces public surface and removes DB/service/repository/runtime provisioning dead code. Drop existing Project Source table and load-state columns by migration, and remove Runtime pending load helper to simplify Project registry into existing folder boundary registry.
 
-New `register_existing_folder_for_agent` service flow:
+New `register_existing_folder_for_session` service flow:
 
-1. Verify user can access agent.
+1. Verify user can access the selected AgentSession.
 2. Look up AgentRuntime.
 3. Verify path is actual runtime directory through Runner operation.
 4. Validate Project path policy.
@@ -89,7 +89,7 @@ Both response schema and internal DB model do not include source/load fields and
 ### E2E Primary
 
 - In fixture where Agent Workspace is READY, create `/workspace/agent/example` directory.
-- Call `POST /chat/v1/agents/{agent_id}/projects/register`, then verify `GET /projects` returns registered Project with only `id/name/path/created_at/updated_at`.
+- Call `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register`, then verify `GET /projects` returns registered Project with only `id/name/path/created_at/updated_at`.
 - Deleting registered Project removes it from list and keeps filesystem folder.
 - Registering non-existing folder or root/nested path returns 400/409-class error.
 

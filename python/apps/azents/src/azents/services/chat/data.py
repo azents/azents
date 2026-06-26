@@ -59,15 +59,6 @@ class UpdateGoalResult:
 
 
 @dataclasses.dataclass(frozen=True)
-class EnsureSessionInput:
-    """Session ensure input."""
-
-    session_id: str | None
-    agent_id: str
-    user_id: str
-
-
-@dataclasses.dataclass(frozen=True)
 class UpdateGoalStatusInput:
     """Goal status update input."""
 

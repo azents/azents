@@ -64,6 +64,7 @@ class ChatV1Api:
     def chat_v1_approve_agent_project_registration_request(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         request_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -80,10 +81,12 @@ class ChatV1Api:
     ) -> SessionWorkspaceProjectResponse:
         """Approve Agent Project Registration Request
 
-        Approve an Agent Project registration request.
+        Approve an AgentSession Project registration request.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param request_id: (required)
         :type request_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -110,6 +113,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_approve_agent_project_registration_request_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             request_id=request_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -136,6 +140,7 @@ class ChatV1Api:
     def chat_v1_approve_agent_project_registration_request_with_http_info(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         request_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -152,10 +157,12 @@ class ChatV1Api:
     ) -> ApiResponse[SessionWorkspaceProjectResponse]:
         """Approve Agent Project Registration Request
 
-        Approve an Agent Project registration request.
+        Approve an AgentSession Project registration request.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param request_id: (required)
         :type request_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -182,6 +189,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_approve_agent_project_registration_request_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             request_id=request_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -208,6 +216,7 @@ class ChatV1Api:
     def chat_v1_approve_agent_project_registration_request_without_preload_content(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         request_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -224,10 +233,12 @@ class ChatV1Api:
     ) -> RESTResponseType:
         """Approve Agent Project Registration Request
 
-        Approve an Agent Project registration request.
+        Approve an AgentSession Project registration request.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param request_id: (required)
         :type request_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -254,6 +265,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_approve_agent_project_registration_request_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             request_id=request_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -275,6 +287,7 @@ class ChatV1Api:
     def _chat_v1_approve_agent_project_registration_request_serialize(
         self,
         agent_id,
+        session_id,
         request_id,
         _request_auth,
         _content_type,
@@ -299,6 +312,8 @@ class ChatV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if session_id is not None:
+            _path_params['session_id'] = session_id
         if request_id is not None:
             _path_params['request_id'] = request_id
         # process the query parameters
@@ -323,7 +338,7 @@ class ChatV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/chat/v1/agents/{agent_id}/project-registration-requests/{request_id}/approve',
+            resource_path='/chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/approve',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1208,6 +1223,7 @@ class ChatV1Api:
     def chat_v1_delete_agent_project(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         project_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -1224,10 +1240,12 @@ class ChatV1Api:
     ) -> None:
         """Delete Agent Project
 
-        Delete a Project registry row for an Agent.
+        Delete a Project registry row for an AgentSession.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param project_id: (required)
         :type project_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -1254,6 +1272,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_delete_agent_project_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             project_id=project_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1280,6 +1299,7 @@ class ChatV1Api:
     def chat_v1_delete_agent_project_with_http_info(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         project_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -1296,10 +1316,12 @@ class ChatV1Api:
     ) -> ApiResponse[None]:
         """Delete Agent Project
 
-        Delete a Project registry row for an Agent.
+        Delete a Project registry row for an AgentSession.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param project_id: (required)
         :type project_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -1326,6 +1348,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_delete_agent_project_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             project_id=project_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1352,6 +1375,7 @@ class ChatV1Api:
     def chat_v1_delete_agent_project_without_preload_content(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         project_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -1368,10 +1392,12 @@ class ChatV1Api:
     ) -> RESTResponseType:
         """Delete Agent Project
 
-        Delete a Project registry row for an Agent.
+        Delete a Project registry row for an AgentSession.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param project_id: (required)
         :type project_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -1398,6 +1424,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_delete_agent_project_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             project_id=project_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1419,6 +1446,7 @@ class ChatV1Api:
     def _chat_v1_delete_agent_project_serialize(
         self,
         agent_id,
+        session_id,
         project_id,
         _request_auth,
         _content_type,
@@ -1443,6 +1471,8 @@ class ChatV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if session_id is not None:
+            _path_params['session_id'] = session_id
         if project_id is not None:
             _path_params['project_id'] = project_id
         # process the query parameters
@@ -1467,7 +1497,7 @@ class ChatV1Api:
 
         return self.api_client.param_serialize(
             method='DELETE',
-            resource_path='/chat/v1/agents/{agent_id}/projects/{project_id}',
+            resource_path='/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -3428,6 +3458,7 @@ class ChatV1Api:
     def chat_v1_get_agent_session_context(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         limit: Optional[Annotated[int, Field(le=500, strict=True, ge=1)]] = None,
         _request_timeout: Union[
             None,
@@ -3444,10 +3475,12 @@ class ChatV1Api:
     ) -> SessionContextResponse:
         """Get Agent Session Context
 
-        Return Agent team primary session context inspector information.
+        Return URL-selected AgentSession context inspector information.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param limit:
         :type limit: int
         :param _request_timeout: timeout setting for this request. If one
@@ -3474,6 +3507,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_get_agent_session_context_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             limit=limit,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -3500,6 +3534,7 @@ class ChatV1Api:
     def chat_v1_get_agent_session_context_with_http_info(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         limit: Optional[Annotated[int, Field(le=500, strict=True, ge=1)]] = None,
         _request_timeout: Union[
             None,
@@ -3516,10 +3551,12 @@ class ChatV1Api:
     ) -> ApiResponse[SessionContextResponse]:
         """Get Agent Session Context
 
-        Return Agent team primary session context inspector information.
+        Return URL-selected AgentSession context inspector information.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param limit:
         :type limit: int
         :param _request_timeout: timeout setting for this request. If one
@@ -3546,6 +3583,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_get_agent_session_context_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             limit=limit,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -3572,6 +3610,7 @@ class ChatV1Api:
     def chat_v1_get_agent_session_context_without_preload_content(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         limit: Optional[Annotated[int, Field(le=500, strict=True, ge=1)]] = None,
         _request_timeout: Union[
             None,
@@ -3588,10 +3627,12 @@ class ChatV1Api:
     ) -> RESTResponseType:
         """Get Agent Session Context
 
-        Return Agent team primary session context inspector information.
+        Return URL-selected AgentSession context inspector information.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param limit:
         :type limit: int
         :param _request_timeout: timeout setting for this request. If one
@@ -3618,6 +3659,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_get_agent_session_context_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             limit=limit,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -3639,6 +3681,7 @@ class ChatV1Api:
     def _chat_v1_get_agent_session_context_serialize(
         self,
         agent_id,
+        session_id,
         limit,
         _request_auth,
         _content_type,
@@ -3663,6 +3706,8 @@ class ChatV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if session_id is not None:
+            _path_params['session_id'] = session_id
         # process the query parameters
         if limit is not None:
             
@@ -3689,7 +3734,7 @@ class ChatV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/chat/v1/agents/{agent_id}/context',
+            resource_path='/chat/v1/agents/{agent_id}/sessions/{session_id}/context',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -4483,6 +4528,7 @@ class ChatV1Api:
     def chat_v1_list_agent_project_registration_requests(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4498,10 +4544,12 @@ class ChatV1Api:
     ) -> SessionWorkspaceProjectRegistrationRequestListResponse:
         """List Agent Project Registration Requests
 
-        List Project registration requests for an Agent.
+        List Project registration requests for an AgentSession.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4526,6 +4574,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_list_agent_project_registration_requests_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4551,6 +4600,7 @@ class ChatV1Api:
     def chat_v1_list_agent_project_registration_requests_with_http_info(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4566,10 +4616,12 @@ class ChatV1Api:
     ) -> ApiResponse[SessionWorkspaceProjectRegistrationRequestListResponse]:
         """List Agent Project Registration Requests
 
-        List Project registration requests for an Agent.
+        List Project registration requests for an AgentSession.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4594,6 +4646,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_list_agent_project_registration_requests_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4619,6 +4672,7 @@ class ChatV1Api:
     def chat_v1_list_agent_project_registration_requests_without_preload_content(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4634,10 +4688,12 @@ class ChatV1Api:
     ) -> RESTResponseType:
         """List Agent Project Registration Requests
 
-        List Project registration requests for an Agent.
+        List Project registration requests for an AgentSession.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4662,6 +4718,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_list_agent_project_registration_requests_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4682,6 +4739,7 @@ class ChatV1Api:
     def _chat_v1_list_agent_project_registration_requests_serialize(
         self,
         agent_id,
+        session_id,
         _request_auth,
         _content_type,
         _headers,
@@ -4705,6 +4763,8 @@ class ChatV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if session_id is not None:
+            _path_params['session_id'] = session_id
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -4727,7 +4787,7 @@ class ChatV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/chat/v1/agents/{agent_id}/project-registration-requests',
+            resource_path='/chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -4747,6 +4807,7 @@ class ChatV1Api:
     def chat_v1_list_agent_projects(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4762,10 +4823,12 @@ class ChatV1Api:
     ) -> SessionWorkspaceProjectListResponse:
         """List Agent Projects
 
-        List Agent Workspace Projects for an Agent.
+        List Agent Workspace Projects for an AgentSession.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4790,6 +4853,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_list_agent_projects_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4815,6 +4879,7 @@ class ChatV1Api:
     def chat_v1_list_agent_projects_with_http_info(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4830,10 +4895,12 @@ class ChatV1Api:
     ) -> ApiResponse[SessionWorkspaceProjectListResponse]:
         """List Agent Projects
 
-        List Agent Workspace Projects for an Agent.
+        List Agent Workspace Projects for an AgentSession.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4858,6 +4925,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_list_agent_projects_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4883,6 +4951,7 @@ class ChatV1Api:
     def chat_v1_list_agent_projects_without_preload_content(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4898,10 +4967,12 @@ class ChatV1Api:
     ) -> RESTResponseType:
         """List Agent Projects
 
-        List Agent Workspace Projects for an Agent.
+        List Agent Workspace Projects for an AgentSession.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4926,6 +4997,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_list_agent_projects_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4946,6 +5018,7 @@ class ChatV1Api:
     def _chat_v1_list_agent_projects_serialize(
         self,
         agent_id,
+        session_id,
         _request_auth,
         _content_type,
         _headers,
@@ -4969,6 +5042,8 @@ class ChatV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if session_id is not None:
+            _path_params['session_id'] = session_id
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -4991,7 +5066,7 @@ class ChatV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/chat/v1/agents/{agent_id}/projects',
+            resource_path='/chat/v1/agents/{agent_id}/sessions/{session_id}/projects',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -6661,6 +6736,7 @@ class ChatV1Api:
     def chat_v1_register_agent_project(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         session_workspace_project_register_request: SessionWorkspaceProjectRegisterRequest,
         _request_timeout: Union[
             None,
@@ -6681,6 +6757,8 @@ class ChatV1Api:
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param session_workspace_project_register_request: (required)
         :type session_workspace_project_register_request: SessionWorkspaceProjectRegisterRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -6707,6 +6785,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_register_agent_project_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             session_workspace_project_register_request=session_workspace_project_register_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -6733,6 +6812,7 @@ class ChatV1Api:
     def chat_v1_register_agent_project_with_http_info(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         session_workspace_project_register_request: SessionWorkspaceProjectRegisterRequest,
         _request_timeout: Union[
             None,
@@ -6753,6 +6833,8 @@ class ChatV1Api:
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param session_workspace_project_register_request: (required)
         :type session_workspace_project_register_request: SessionWorkspaceProjectRegisterRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -6779,6 +6861,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_register_agent_project_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             session_workspace_project_register_request=session_workspace_project_register_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -6805,6 +6888,7 @@ class ChatV1Api:
     def chat_v1_register_agent_project_without_preload_content(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         session_workspace_project_register_request: SessionWorkspaceProjectRegisterRequest,
         _request_timeout: Union[
             None,
@@ -6825,6 +6909,8 @@ class ChatV1Api:
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param session_workspace_project_register_request: (required)
         :type session_workspace_project_register_request: SessionWorkspaceProjectRegisterRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -6851,6 +6937,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_register_agent_project_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             session_workspace_project_register_request=session_workspace_project_register_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -6872,6 +6959,7 @@ class ChatV1Api:
     def _chat_v1_register_agent_project_serialize(
         self,
         agent_id,
+        session_id,
         session_workspace_project_register_request,
         _request_auth,
         _content_type,
@@ -6896,6 +6984,8 @@ class ChatV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if session_id is not None:
+            _path_params['session_id'] = session_id
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -6933,7 +7023,7 @@ class ChatV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/chat/v1/agents/{agent_id}/projects/register',
+            resource_path='/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -6953,6 +7043,7 @@ class ChatV1Api:
     def chat_v1_reject_agent_project_registration_request(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         request_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -6969,10 +7060,12 @@ class ChatV1Api:
     ) -> None:
         """Reject Agent Project Registration Request
 
-        Reject an Agent Project registration request.
+        Reject an AgentSession Project registration request.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param request_id: (required)
         :type request_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -6999,6 +7092,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_reject_agent_project_registration_request_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             request_id=request_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -7025,6 +7119,7 @@ class ChatV1Api:
     def chat_v1_reject_agent_project_registration_request_with_http_info(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         request_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -7041,10 +7136,12 @@ class ChatV1Api:
     ) -> ApiResponse[None]:
         """Reject Agent Project Registration Request
 
-        Reject an Agent Project registration request.
+        Reject an AgentSession Project registration request.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param request_id: (required)
         :type request_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -7071,6 +7168,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_reject_agent_project_registration_request_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             request_id=request_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -7097,6 +7195,7 @@ class ChatV1Api:
     def chat_v1_reject_agent_project_registration_request_without_preload_content(
         self,
         agent_id: StrictStr,
+        session_id: StrictStr,
         request_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -7113,10 +7212,12 @@ class ChatV1Api:
     ) -> RESTResponseType:
         """Reject Agent Project Registration Request
 
-        Reject an Agent Project registration request.
+        Reject an AgentSession Project registration request.
 
         :param agent_id: (required)
         :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
         :param request_id: (required)
         :type request_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -7143,6 +7244,7 @@ class ChatV1Api:
 
         _param = self._chat_v1_reject_agent_project_registration_request_serialize(
             agent_id=agent_id,
+            session_id=session_id,
             request_id=request_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -7164,6 +7266,7 @@ class ChatV1Api:
     def _chat_v1_reject_agent_project_registration_request_serialize(
         self,
         agent_id,
+        session_id,
         request_id,
         _request_auth,
         _content_type,
@@ -7188,6 +7291,8 @@ class ChatV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if session_id is not None:
+            _path_params['session_id'] = session_id
         if request_id is not None:
             _path_params['request_id'] = request_id
         # process the query parameters
@@ -7212,7 +7317,7 @@ class ChatV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/chat/v1/agents/{agent_id}/project-registration-requests/{request_id}/reject',
+            resource_path='/chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

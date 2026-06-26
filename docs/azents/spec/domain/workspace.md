@@ -31,11 +31,13 @@ api_routes:
   - /workspace-user/v1
   - /invitation/v1
   - /join-request/v1
-  - /chat/v1/agents/{agent_id}/projects
-  - /chat/v1/agents/{agent_id}/projects/register
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-26
-spec_version: 17
+spec_version: 18
 ---
 
 # Workspace & Membership
@@ -93,18 +95,18 @@ erDiagram
         string workspace_id FK
         string agent_id FK
     }
-    AGENT_RUNTIME ||--o{ SESSION_WORKSPACE_PROJECT : "registers"
-    SESSION_WORKSPACE_PROJECT_REGISTRATION_REQUEST }o--|| AGENT_RUNTIME : "requests"
+    AGENT_RUNTIME ||--o{ SESSION_WORKSPACE_PROJECT : "validates paths"
+    AGENT_SESSION ||--o{ SESSION_WORKSPACE_PROJECT : "owns"
+    SESSION_WORKSPACE_PROJECT_REGISTRATION_REQUEST }o--|| AGENT_SESSION : "requests"
 
     SESSION_WORKSPACE_PROJECT {
         string id PK
-        string agent_runtime_id FK
+        string session_id FK
         string path
-        string name
     }
     SESSION_WORKSPACE_PROJECT_REGISTRATION_REQUEST {
         string id PK
-        string agent_runtime_id FK
+        string session_id FK
         string path
         string status "pending|approved|rejected"
     }
@@ -114,8 +116,8 @@ erDiagram
 - **WorkspaceUser** — User × Workspace membership profile. Stores role, display name, and locale.
 - **WorkspaceInvitation** — email-based invitation. `(workspace_id, email)` is unique.
 - **WorkspaceJoinRequest** — user → Workspace join request. `(workspace_id, user_id)` is unique.
-- **SessionWorkspaceProject** — row registering an already-existing directory inside AgentRuntime's Agent Workspace as Project boundary.
-- **SessionWorkspaceProjectRegistrationRequest** — approval row where Agent requests user to register a folder it created as Project.
+- **SessionWorkspaceProject** — session-owned row registering an already-existing directory inside AgentRuntime's Agent Workspace as Project boundary.
+- **SessionWorkspaceProjectRegistrationRequest** — session-owned approval row where Agent requests user to register a folder it created as Project.
 
 ## Behavior
 
@@ -145,11 +147,11 @@ Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/r
 Agent Workspace Project is a boundary registry explicitly registered by user for an existing directory under AgentRuntime's Provider-reported Agent Workspace. Agent Workspace root itself is not a Project. MVP registers only direct child directory in shape `/workspace/agent/<project-folder>` as Project.
 
 - Project Source, archive upload, empty folder bootstrap, Runtime pending load/ACK do not exist in public API or current DB/service/runtime provisioning layers. Provisioning such as file creation, archive extract, and git clone is separated into future Project Import/Provisioning phase.
-- `POST /chat/v1/agents/{agent_id}/projects/register` registers an existing directory as Project. Server validates user access, active Runtime directory existence, and Project path policy, then creates registry row. This API does not modify filesystem.
-- `GET /chat/v1/agents/{agent_id}/projects` returns registered Project list. Public response exposes only `id`, `path`, `created_at`, `updated_at`.
-- `DELETE /chat/v1/agents/{agent_id}/projects/{project_id}` removes only registry row. Filesystem folder deletion is destructive and not included.
+- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` registers an existing directory as Project for the selected AgentSession. Server validates user access, agent/session match, active Runtime directory existence, and Project path policy, then creates the session-owned registry row. This API does not modify filesystem.
+- `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/projects` returns registered Project list for the selected AgentSession. Public response exposes only `id`, `path`, `created_at`, `updated_at`.
+- `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected session's registry row. Filesystem folder deletion is destructive and not included.
 - Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, nested Project forbidden, direct child directory required.
-- Registration request is flow where Agent asks user approval to include a folder it created into Project. Approve validates active Runtime path and creates registered Project; reject does not create Project.
+- Registration request is flow where Agent asks user approval to include a folder it created into the current session's Projects. Approve validates active Runtime path and creates registered Project in the selected AgentSession; reject does not create Project.
 
 Projects tab in azents-web Workspace panel exposes only registered Project list, existing folder registration form, and registration request approve/reject. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
 
@@ -322,9 +324,9 @@ stateDiagram-v2
 | `join_request_v1_approve_join_request` | POST `/join-request/v1/workspaces/{handle}/join-requests/{id}/approve` | `[unique-membership]` |
 | `join_request_v1_reject_join_request` | POST `/join-request/v1/workspaces/{handle}/join-requests/{id}/reject` | — |
 | `join_request_v1_mute_join_request` | POST `/join-request/v1/workspaces/{handle}/join-requests/{id}/mute` | — |
-| `chat_v1_list_agent_projects` | GET `/chat/v1/agents/{agent_id}/projects` | agent workspace membership |
-| `chat_v1_register_agent_project` | POST `/chat/v1/agents/{agent_id}/projects/register` | `[project-existing-directory]` |
-| `chat_v1_delete_agent_project` | DELETE `/chat/v1/agents/{agent_id}/projects/{project_id}` | `[project-registry-only-delete]` |
+| `chat_v1_list_agent_projects` | GET `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects` | agent/session workspace membership |
+| `chat_v1_register_agent_project` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` | `[project-existing-directory]` |
+| `chat_v1_delete_agent_project` | DELETE `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` | `[project-registry-only-delete]` |
 
 ### Admin API
 
@@ -378,3 +380,4 @@ stateDiagram-v2
 - **Display name on JoinRequest approval** — uses raw `user_id[:8]`, which is hard for humans to read. UX improvement candidate (needs separate issue tracking).
 
 - **2026-06-22 (spec_version=15)** — Removed Workspace Team and TeamMember as current domain concepts. WorkspaceUser is the only current membership model.
+- **2026-06-26 (spec_version=18)** — Project and registration request public APIs became AgentSession-scoped. Removed team-primary compatibility lookup from project list/register/delete/approval routes.
