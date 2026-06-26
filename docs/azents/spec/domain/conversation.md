@@ -54,6 +54,7 @@ api_routes:
   - /chat/v1/sessions/{session_id}/edit-message
   - /chat/v1/sessions/{session_id}/commands
   - /chat/v1/agents/{agent_id}/team-primary-session
+  - /chat/v1/agents/{agent_id}/sessions
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/projects
   - /chat/v1/agents/{agent_id}/projects/register
@@ -64,8 +65,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-06-25
-spec_version: 67
+last_verified_at: 2026-06-26
+spec_version: 68
 ---
 
 # Conversation & Events
@@ -118,13 +119,20 @@ command, stop intent, or run heartbeat.
 | `pending_command_*` | mixed | Single pending idle command for this session |
 | `stop_requested_*` | mixed | Durable stop intent for this session |
 
-Only one team primary session may exist per agent in the current product state. Direct session
-writes are session-scoped. When a route contains `session_id`, input buffers, live projections,
-broker wake-up, and the REST response use that same session id. Runtime current/active session lookup
-is invalid for that direct write path and for default team session selection. If any internal write
-helper produces a different session id from the REST boundary's resolved target, the write is invalid
-and must not enqueue a broker wake-up for that alternate session. `agent_runtime_id` is not stored on
-`AgentSession`; runtime lookup happens only after a session target has already been selected.
+Only one team primary session may exist per agent in the current product state. Additional active
+non-primary team sessions may exist under the same agent with `primary_kind = null`.
+`GET /chat/v1/agents/{agent_id}/sessions` lists active agent sessions with the team primary session
+first and the remaining sessions newest-updated first. `POST /chat/v1/agents/{agent_id}/sessions`
+creates an active non-primary team session and snapshot-copies registered projects from the team
+primary session. Pending project registration requests are not copied.
+
+Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
+projections, broker wake-up, and the REST response use that same session id. Runtime current/active
+session lookup is invalid for that direct write path and for default team session selection. If any
+internal write helper produces a different session id from the REST boundary's resolved target, the
+write is invalid and must not enqueue a broker wake-up for that alternate session. `agent_runtime_id`
+is not stored on `AgentSession`; runtime lookup happens only after a session target has already been
+selected.
 
 ### SessionWorkspaceProject
 

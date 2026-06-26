@@ -2435,6 +2435,100 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "List Agent Sessions",
+        "description": "List active team sessions for an Agent with team primary first.",
+        "operationId": "chat_v1_list_agent_sessions",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Create Team Agent Session",
+        "description": "Create a non-primary team AgentSession for an Agent.",
+        "operationId": "chat_v1_create_team_agent_session",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}": {
       "get": {
         "tags": [
@@ -7571,6 +7665,14 @@
         "title": "AgentSessionListResponse",
         "description": "Conversation session list response."
       },
+      "AgentSessionPrimaryKind": {
+        "type": "string",
+        "enum": [
+          "team_primary"
+        ],
+        "title": "AgentSessionPrimaryKind",
+        "description": "AgentSession primary role."
+      },
       "AgentSessionResponse": {
         "properties": {
           "id": {
@@ -7582,6 +7684,21 @@
             "type": "string",
             "title": "Agent Id",
             "description": "Agent ID"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentSessionStatus",
+            "description": "Session status"
+          },
+          "primary_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentSessionPrimaryKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primary session role"
           },
           "created_at": {
             "type": "string",
@@ -7600,6 +7717,7 @@
         "required": [
           "id",
           "agent_id",
+          "status",
           "created_at",
           "updated_at"
         ],
@@ -7614,6 +7732,15 @@
         ],
         "title": "AgentSessionRunState",
         "description": "Engine execution status of AgentSession."
+      },
+      "AgentSessionStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "archived"
+        ],
+        "title": "AgentSessionStatus",
+        "description": "AgentSession lifecycle status."
       },
       "AgentSubagentCreateRequest": {
         "properties": {

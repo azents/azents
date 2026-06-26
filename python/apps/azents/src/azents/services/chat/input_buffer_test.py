@@ -23,6 +23,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBufferCreate
 from azents.repos.message import MessageRepository
+from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -127,6 +128,7 @@ def _service(
         agent_runtime_repository=AgentRuntimeRepository(),
         agent_session_repository=AgentSessionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
+        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         input_buffer_service=input_buffer_service,
         session_manager=rdb_session_manager,
     )

@@ -14,9 +14,11 @@ from azents.api.public.chat.v1 import (
     _write_command_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_edit_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
+    create_team_agent_session,
     delete_input_buffer,
     get_agent_session,
     get_team_primary_agent_session,
+    list_agent_sessions,
     list_history_events,
     list_live_events,
     mount,
@@ -40,6 +42,7 @@ from azents.core.auth.deps import CurrentUser
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
+    AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -533,17 +536,30 @@ class _AgentSessionRouteChatService:
     def __init__(self) -> None:
         self.agent_id: str | None = None
         self.session_id: str | None = None
+        self.primary_session = AgentSession(
+            id="1123456789abcdef0123456789abcdef",
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            status=AgentSessionStatus.ACTIVE,
+            primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
+            start_reason=AgentSessionStartReason.INITIAL,
+            started_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+            created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+            updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+        )
+        self.secondary_session = AgentSession(
+            id="2123456789abcdef0123456789abcdef",
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            status=AgentSessionStatus.ACTIVE,
+            primary_kind=None,
+            start_reason=AgentSessionStartReason.INITIAL,
+            started_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+            created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+            updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
+        )
         self.result: Success[AgentSession] | Failure[SessionNotFound] = Success(
-            AgentSession(
-                id="1123456789abcdef0123456789abcdef",
-                workspace_id="workspace-1",
-                agent_id="agent-1",
-                status=AgentSessionStatus.ACTIVE,
-                start_reason=AgentSessionStartReason.INITIAL,
-                started_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
-                created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
-                updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
-            )
+            self.primary_session
         )
 
     async def get_team_primary_session(
@@ -556,6 +572,28 @@ class _AgentSessionRouteChatService:
         del user_id
         self.agent_id = agent_id
         return self.result
+
+    async def list_agent_sessions(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Success[list[AgentSession]] | Failure[SessionNotFound]:
+        """Return agent session list result."""
+        del user_id
+        self.agent_id = agent_id
+        return Success([self.primary_session, self.secondary_session])
+
+    async def create_team_session(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Success[AgentSession] | Failure[SessionNotFound]:
+        """Return created team session result."""
+        del user_id
+        self.agent_id = agent_id
+        return Success(self.secondary_session)
 
     async def get_agent_session(
         self,
@@ -587,6 +625,37 @@ class TestAgentSessionRoutes:
         assert response.id == "1123456789abcdef0123456789abcdef"
         assert response.agent_id == "agent-1"
         assert chat_service.agent_id == "agent-1"
+
+    async def test_list_agent_sessions_returns_primary_metadata(self) -> None:
+        """Agent session list preserves primary metadata for the UI contract."""
+        chat_service = _AgentSessionRouteChatService()
+
+        response = await list_agent_sessions(
+            agent_id="agent-1",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+        )
+
+        assert [item.id for item in response.items] == [
+            "1123456789abcdef0123456789abcdef",
+            "2123456789abcdef0123456789abcdef",
+        ]
+        assert response.items[0].primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
+        assert response.items[1].primary_kind is None
+
+    async def test_create_team_agent_session_returns_non_primary_session(self) -> None:
+        """Team session creation route returns the created non-primary session."""
+        chat_service = _AgentSessionRouteChatService()
+
+        response = await create_team_agent_session(
+            agent_id="agent-1",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+        )
+
+        assert response.id == "2123456789abcdef0123456789abcdef"
+        assert response.agent_id == "agent-1"
+        assert response.primary_kind is None
 
     async def test_get_agent_session_mismatch_is_not_found(self) -> None:
         """Agent/session mismatch and access denial are exposed as 404."""

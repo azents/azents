@@ -65,6 +65,26 @@ class AgentSessionRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def list_active_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> list[AgentSession]:
+        """Fetch active Agent sessions with team primary first."""
+        primary_order = sa.case(
+            (RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY, 0),
+            else_=1,
+        )
+        result = await session.execute(
+            sa.select(RDBAgentSession)
+            .where(
+                RDBAgentSession.agent_id == agent_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
+            .order_by(primary_order, RDBAgentSession.updated_at.desc())
+        )
+        return [self._build(rdb) for rdb in result.scalars()]
+
     async def lock_by_id(
         self,
         session: AsyncSession,

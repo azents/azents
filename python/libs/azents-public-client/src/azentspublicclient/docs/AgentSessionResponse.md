@@ -8,6 +8,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **str** | Session ID | 
 **agent_id** | **str** | Agent ID | 
+**status** | [**AgentSessionStatus**](AgentSessionStatus.md) | Session status | 
+**primary_kind** | [**AgentSessionPrimaryKind**](AgentSessionPrimaryKind.md) |  | [optional] 
 **created_at** | **datetime** | Created time | 
 **updated_at** | **datetime** | Updated time | 
 

@@ -63,8 +63,10 @@ __all__ = [
     "AgentRuntimeResponse",
     "AgentRuntimeSummaryResponse",
     "AgentSessionListResponse",
+    "AgentSessionPrimaryKind",
     "AgentSessionResponse",
     "AgentSessionRunState",
+    "AgentSessionStatus",
     "AgentSubagentCreateRequest",
     "AgentSubagentListResponse",
     "AgentSubagentResponse",
@@ -304,8 +306,10 @@ from azentspublicclient.models.agent_runtime_raw_state_response import AgentRunt
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse as AgentRuntimeResponse
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse as AgentRuntimeSummaryResponse
 from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse as AgentSessionListResponse
+from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind as AgentSessionPrimaryKind
 from azentspublicclient.models.agent_session_response import AgentSessionResponse as AgentSessionResponse
 from azentspublicclient.models.agent_session_run_state import AgentSessionRunState as AgentSessionRunState
+from azentspublicclient.models.agent_session_status import AgentSessionStatus as AgentSessionStatus
 from azentspublicclient.models.agent_subagent_create_request import AgentSubagentCreateRequest as AgentSubagentCreateRequest
 from azentspublicclient.models.agent_subagent_list_response import AgentSubagentListResponse as AgentSubagentListResponse
 from azentspublicclient.models.agent_subagent_response import AgentSubagentResponse as AgentSubagentResponse

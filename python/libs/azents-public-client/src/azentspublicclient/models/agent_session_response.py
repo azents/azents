@@ -19,7 +19,9 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind
+from azentspublicclient.models.agent_session_status import AgentSessionStatus
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,10 +31,12 @@ class AgentSessionResponse(BaseModel):
     """ # noqa: E501
     id: StrictStr = Field(description="Session ID")
     agent_id: StrictStr = Field(description="Agent ID")
+    status: AgentSessionStatus = Field(description="Session status")
+    primary_kind: Optional[AgentSessionPrimaryKind] = None
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "status", "primary_kind", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,6 +84,11 @@ class AgentSessionResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if primary_kind (nullable) is None
+        # and model_fields_set contains the field
+        if self.primary_kind is None and "primary_kind" in self.model_fields_set:
+            _dict['primary_kind'] = None
+
         return _dict
 
     @classmethod
@@ -94,6 +103,8 @@ class AgentSessionResponse(BaseModel):
         _obj = cls.model_validate({
             "id": obj.get("id"),
             "agent_id": obj.get("agent_id"),
+            "status": obj.get("status"),
+            "primary_kind": obj.get("primary_kind"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
         })
