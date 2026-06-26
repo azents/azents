@@ -65,7 +65,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-25
-spec_version: 65
+spec_version: 66
 ---
 
 # Conversation & Events
@@ -306,9 +306,9 @@ and commits the first/default message there.
 `POST /chat/v1/sessions/{session_id}/commands` are idle-only control boundaries. All REST write
 requests require `client_request_id`; accepted writes are recorded in `chat_write_requests` so
 retries with the same key return the same accepted target instead of creating duplicate side effects.
-The same `client_request_id` must not be reused across different explicit session routes; a retry that
-matches the runtime/user idempotency scope but points at another session is rejected instead of
-returning the original session's accepted target. Message writes commit a `user_message` input buffer
+REST write idempotency is scoped to `(session_id, user_id, client_request_id)`. The same
+`client_request_id` may be reused independently for different explicit session routes because the URL
+session is the write boundary. Message writes commit a `user_message` input buffer
 to the explicit path session before returning success, mark the same session running through
 `InputBufferService`, then send a worker wake-up signal for that session. The message path must not
 resolve runtime current/active session state to replace the requested `session_id`. Edit writes

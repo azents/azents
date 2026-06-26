@@ -12,8 +12,6 @@ from azents.engine.events.types import FileOutputPart
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.session import SessionManager
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request import ChatWriteRequestRepository
@@ -30,7 +28,6 @@ from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 class AcceptedChatWriteRequest:
     """REST write request acceptance result."""
 
-    agent_runtime_id: str
     session_id: str
     record: ChatWriteRequest
     created: bool
@@ -65,9 +62,6 @@ class AcceptedStopRequest:
 class ChatWriteService:
     """REST chat write idempotency facade."""
 
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
-    ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
@@ -96,14 +90,13 @@ class ChatWriteService:
     ) -> AcceptedEditInput:
         """Accept idle session edit idempotently and create edited buffer."""
         async with self.session_manager() as session:
-            runtime, _agent_session = await self._lock_session_for_idle_control(
+            await self._lock_session_for_idle_control(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
             )
             record, created = await self._create_idempotent_record(
                 session,
-                runtime_id=runtime.id,
                 session_id=session_id,
                 user_id=user_id,
                 client_request_id=client_request_id,
@@ -116,7 +109,6 @@ class ChatWriteService:
             if not created:
                 return AcceptedEditInput(
                     request=AcceptedChatWriteRequest(
-                        agent_runtime_id=runtime.id,
                         session_id=record.session_id,
                         record=record,
                         created=False,
@@ -158,7 +150,6 @@ class ChatWriteService:
 
         return AcceptedEditInput(
             request=AcceptedChatWriteRequest(
-                agent_runtime_id=runtime.id,
                 session_id=record.session_id,
                 record=record,
                 created=True,
@@ -178,7 +169,7 @@ class ChatWriteService:
     ) -> AcceptedPendingCommand:
         """Store idle session command as single pending command."""
         async with self.session_manager() as session:
-            runtime, _agent_session = await self._lock_session_for_idle_control(
+            await self._lock_session_for_idle_control(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
@@ -192,7 +183,6 @@ class ChatWriteService:
             command_id = uuid7().hex
             record, created = await self._create_idempotent_record(
                 session,
-                runtime_id=runtime.id,
                 session_id=session_id,
                 user_id=user_id,
                 client_request_id=client_request_id,
@@ -205,7 +195,6 @@ class ChatWriteService:
             if not created:
                 return AcceptedPendingCommand(
                     request=AcceptedChatWriteRequest(
-                        agent_runtime_id=runtime.id,
                         session_id=record.session_id,
                         record=record,
                         created=False,
@@ -225,7 +214,6 @@ class ChatWriteService:
 
         return AcceptedPendingCommand(
             request=AcceptedChatWriteRequest(
-                agent_runtime_id=runtime.id,
                 session_id=record.session_id,
                 record=record,
                 created=True,
@@ -260,7 +248,7 @@ class ChatWriteService:
         *,
         agent_id: str,
         session_id: str,
-    ) -> tuple[AgentRuntime, AgentSession]:
+    ) -> AgentSession:
         """Acquire session row lock for idle-only control action."""
         locked = await self.agent_session_repository.lock_by_id(
             session,
@@ -274,17 +262,12 @@ class ChatWriteService:
             raise ValueError("Session is running")
         if locked.pending_command_id is not None:
             raise ValueError("Session has pending command")
-        runtime = await self.agent_runtime_repository.ensure_for_agent(
-            session,
-            agent_id,
-        )
-        return runtime, locked
+        return locked
 
     async def _create_idempotent_record(
         self,
         session: AsyncSession,
         *,
-        runtime_id: str,
         session_id: str,
         user_id: str,
         client_request_id: str,
@@ -298,7 +281,6 @@ class ChatWriteService:
         record, created = await self.chat_write_request_repository.create_idempotent(
             session,
             ChatWriteRequestCreate(
-                agent_runtime_id=runtime_id,
                 session_id=session_id,
                 user_id=user_id,
                 client_request_id=client_request_id,

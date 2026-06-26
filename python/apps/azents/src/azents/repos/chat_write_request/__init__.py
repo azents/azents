@@ -26,7 +26,6 @@ class ChatWriteRequestRepository:
             pg_insert(RDBChatWriteRequest)
             .values(
                 id=uuid7().hex,
-                agent_runtime_id=create.agent_runtime_id,
                 session_id=create.session_id,
                 user_id=create.user_id,
                 client_request_id=create.client_request_id,
@@ -37,7 +36,7 @@ class ChatWriteRequestRepository:
                 payload=create.payload,
             )
             .on_conflict_do_nothing(
-                constraint="uq_chat_write_requests_runtime_user_client_request"
+                constraint="uq_chat_write_requests_session_user_client_request"
             )
             .returning(RDBChatWriteRequest)
         )
@@ -47,7 +46,7 @@ class ChatWriteRequestRepository:
             return self._build(rdb), True
         existing = await self.get_by_client_request_id(
             session,
-            agent_runtime_id=create.agent_runtime_id,
+            session_id=create.session_id,
             user_id=create.user_id,
             client_request_id=create.client_request_id,
         )
@@ -59,14 +58,14 @@ class ChatWriteRequestRepository:
         self,
         session: AsyncSession,
         *,
-        agent_runtime_id: str,
+        session_id: str,
         user_id: str,
         client_request_id: str,
     ) -> ChatWriteRequest | None:
         """Fetch REST write record by client request ID."""
         result = await session.execute(
             sa.select(RDBChatWriteRequest).where(
-                RDBChatWriteRequest.agent_runtime_id == agent_runtime_id,
+                RDBChatWriteRequest.session_id == session_id,
                 RDBChatWriteRequest.user_id == user_id,
                 RDBChatWriteRequest.client_request_id == client_request_id,
             )
@@ -80,7 +79,6 @@ class ChatWriteRequestRepository:
         """Convert RDB model to domain model."""
         return ChatWriteRequest(
             id=rdb.id,
-            agent_runtime_id=rdb.agent_runtime_id,
             session_id=rdb.session_id,
             user_id=rdb.user_id,
             client_request_id=rdb.client_request_id,

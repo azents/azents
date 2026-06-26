@@ -9,7 +9,6 @@ from azents.core.enums import LLMProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -77,28 +76,27 @@ async def _create_agent_session(
     *,
     handle: str,
     slug: str,
-) -> tuple[str, str, str]:
+) -> tuple[str, str]:
     """Create AgentSession fixture satisfying ChatWriteRequest FK."""
     workspace_id = await _create_workspace(session, handle)
     user_id = await _create_user(session, f"{handle}@example.com")
     agent_id = await _create_agent(session, workspace_id, slug)
-    runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
     agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
-        session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
+        session,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
     )
-    return agent_session.id, runtime.id, user_id
+    return agent_session.id, user_id
 
 
 def _create_payload(
     *,
     session_id: str,
-    agent_runtime_id: str,
     user_id: str,
     client_request_id: str,
 ) -> ChatWriteRequestCreate:
     """Make ChatWriteRequest creation payload."""
     return ChatWriteRequestCreate(
-        agent_runtime_id=agent_runtime_id,
         session_id=session_id,
         user_id=user_id,
         client_request_id=client_request_id,
@@ -118,7 +116,7 @@ class TestChatWriteRequestRepository:
         rdb_session: AsyncSession,
     ) -> None:
         """First request creates record and returns created=True."""
-        session_id, runtime_id, user_id = await _create_agent_session(
+        session_id, user_id = await _create_agent_session(
             rdb_session,
             handle="chat-write-request-create",
             slug="chat-write-request-create",
@@ -129,7 +127,6 @@ class TestChatWriteRequestRepository:
             rdb_session,
             _create_payload(
                 session_id=session_id,
-                agent_runtime_id=runtime_id,
                 user_id=user_id,
                 client_request_id="request-1",
             ),
@@ -138,7 +135,6 @@ class TestChatWriteRequestRepository:
         assert created is True
         assert len(record.id) == 32
         assert record.session_id == session_id
-        assert record.agent_runtime_id == runtime_id
         assert record.user_id == user_id
         assert record.client_request_id == "request-1"
         assert record.write_type == ChatWriteRequestType.COMMAND
@@ -150,8 +146,8 @@ class TestChatWriteRequestRepository:
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """Retry with same runtime/user/client_request_id returns existing record."""
-        session_id, runtime_id, user_id = await _create_agent_session(
+        """Retry with same session/user/client_request_id returns existing record."""
+        session_id, user_id = await _create_agent_session(
             rdb_session,
             handle="chat-write-request-retry",
             slug="chat-write-request-retry",
@@ -159,7 +155,6 @@ class TestChatWriteRequestRepository:
         repo = ChatWriteRequestRepository()
         payload = _create_payload(
             session_id=session_id,
-            agent_runtime_id=runtime_id,
             user_id=user_id,
             client_request_id="request-1",
         )

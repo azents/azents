@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-06-18 | 35 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-06-25 | 65 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-06-25 | 66 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-06-23 | 6 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-05-10 | 1 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
@@ -126,8 +126,9 @@ _14 documents_
 - [ADR-0074: Primary Agent Sessions and Team-First Multi-Session UX](adr/0074-primary-agent-sessions.md)
 - [ADR-0075: Remove AgentSession Runtime Ownership](adr/0075-agent-session-runtime-ownership-removal.md)
 - [ADR-0076: Session-Owned Project Registry](adr/0076-session-owned-project-registry.md)
+- [ADR-0077: Session-Owned REST Write Idempotency](adr/0077-session-owned-rest-write-idempotency.md)
 
-_77 documents_
+_78 documents_
 
 ## Issues (Bug Tracking)
 
@@ -157,4 +158,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 303
+- Total documents: 304

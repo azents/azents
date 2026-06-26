@@ -11,7 +11,6 @@ class ChatWriteRequest(BaseModel):
     """REST write idempotency record."""
 
     id: str = Field(description="ChatWriteRequest ID")
-    agent_runtime_id: str = Field(description="AgentRuntime ID")
     session_id: str = Field(description="AgentSession ID")
     user_id: str = Field(description="Author User ID")
     client_request_id: str = Field(description="Client-generated idempotency key")
@@ -28,7 +27,6 @@ class ChatWriteRequest(BaseModel):
 class ChatWriteRequestCreate(BaseModel):
     """ChatWriteRequest creation schema."""
 
-    agent_runtime_id: str = Field(description="AgentRuntime ID")
     session_id: str = Field(description="AgentSession ID")
     user_id: str = Field(description="Author User ID")
     client_request_id: str = Field(description="Client-generated idempotency key")
