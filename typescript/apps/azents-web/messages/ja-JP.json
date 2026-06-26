@@ -187,7 +187,8 @@
     "light": "ライト",
     "dark": "ダーク",
     "system": "システム",
-    "unknownError": "不明なエラー"
+    "unknownError": "不明なエラー",
+    "colorMode": "カラーモード"
   },
   "auth": {
     "loginStep": {

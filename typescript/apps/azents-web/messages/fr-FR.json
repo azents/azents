@@ -187,7 +187,8 @@
     "light": "Clair",
     "dark": "Sombre",
     "system": "Système",
-    "unknownError": "Erreur inconnue"
+    "unknownError": "Erreur inconnue",
+    "colorMode": "Mode de couleur"
   },
   "auth": {
     "loginStep": {

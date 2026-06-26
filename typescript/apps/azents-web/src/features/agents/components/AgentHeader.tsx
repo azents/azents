@@ -30,20 +30,7 @@ import { type ReactNode, useCallback, useMemo } from "react";
 import { formatModelSelectionSummary } from "../model-selection";
 import { AgentAvatar } from "./AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "./AgentFocusedShell";
-import type { ConnectionStatus } from "@/features/chat/types";
 import type { AgentResponse } from "@azents/public-client";
-
-function getStatusColor(status: ConnectionStatus): string {
-  switch (status) {
-    case "connected":
-      return "green";
-    case "connecting":
-    case "reconnecting":
-      return "yellow";
-    case "disconnected":
-      return "red";
-  }
-}
 
 /** Extract active tab from current path */
 function resolveActiveTab(
@@ -59,22 +46,17 @@ function resolveActiveTab(
   return "chat";
 }
 
-interface AgentHeaderRuntimeControls {
-  connectionStatus: ConnectionStatus;
-  onOpenRuntime: () => void;
-}
-
 interface AgentHeaderProps {
   handle: string;
   agent: AgentResponse;
-  runtimeControls?: AgentHeaderRuntimeControls;
+  onOpenRuntime?: () => void;
   chatControls?: ReactNode;
 }
 
 export function AgentHeader({
   handle,
   agent,
-  runtimeControls,
+  onOpenRuntime,
   chatControls,
 }: AgentHeaderProps): React.ReactElement {
   const t = useTranslations("workspace.agents.detail");
@@ -179,19 +161,12 @@ export function AgentHeader({
         <Text fw={600} size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
           {agent.name}
         </Text>
-        {activeTab === "chat" && runtimeControls && (
+        {activeTab === "chat" && onOpenRuntime && (
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
             {chatControls}
-            <Badge
-              size="sm"
-              variant="dot"
-              color={getStatusColor(runtimeControls.connectionStatus)}
-              aria-label="WebSocket connection status"
-              style={{ minWidth: rem(38) }}
-            />
             <ActionIcon
               variant="subtle"
-              onClick={runtimeControls.onOpenRuntime}
+              onClick={onOpenRuntime}
               aria-label="Open agent runtime"
             >
               <IconFolderOpen size="1rem" />
@@ -200,7 +175,6 @@ export function AgentHeader({
         )}
       </Group>
       <Tabs
-        hiddenFrom="lg"
         value={activeTab}
         onChange={handleTabChange}
         variant="default"
