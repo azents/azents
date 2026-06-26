@@ -7,7 +7,7 @@
  * work a dedicated left rail plus mobile drawer entry point.
  */
 import { Box, Drawer, Group, rem } from "@mantine/core";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -52,13 +52,14 @@ export function AgentFocusedShell({
 }: AgentFocusedShellProps): React.ReactElement {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const utils = trpc.useUtils();
   const [drawerOpened, setDrawerOpened] = useState(false);
   const closeDrawer = (): void => setDrawerOpened(false);
   const openDrawer = useCallback((): void => setDrawerOpened(true), []);
   const activeSessionId = useMemo(
-    () => extractSessionId(pathname, agent.id),
-    [pathname, agent.id],
+    () => extractSessionId(pathname, agent.id) ?? searchParams.get("sessionId"),
+    [pathname, searchParams, agent.id],
   );
 
   const sessionsQuery = trpc.chat.listAgentSessions.useQuery(

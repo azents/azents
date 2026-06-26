@@ -22,7 +22,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-06-26 | 36 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-18 | 4 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-06-26 | 18 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-06-26 | 19 |
 
 _8 documents_
 

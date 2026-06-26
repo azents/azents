@@ -22,6 +22,7 @@ import {
   Stack,
   Text,
   Tooltip,
+  UnstyledButton,
   useMantineColorScheme,
 } from "@mantine/core";
 import {
@@ -38,7 +39,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback } from "react";
 import { useColorMode } from "@/shared/providers/color-mode";
 import { trpc } from "@/trpc/client";
@@ -102,8 +103,13 @@ export function AgentFocusedSidebar({
   const tCommon = useTranslations("common");
   const tWorkspaceSidebar = useTranslations("workspace.sidebar");
   const router = useRouter();
+  const pathname = usePathname();
   const workspacePath = `/w/${handle}`;
   const basePath = `${workspacePath}/agents/${agent.id}`;
+  const settingsHref = activeSessionId
+    ? `${basePath}/settings?sessionId=${encodeURIComponent(activeSessionId)}`
+    : `${basePath}/settings`;
+  const isAgentSettingsActive = pathname.startsWith(`${basePath}/settings`);
   const { mode, preference, setColorMode } = useColorMode();
   const { setColorScheme } = useMantineColorScheme();
 
@@ -144,22 +150,33 @@ export function AgentFocusedSidebar({
         >
           {t("backToWorkspace")}
         </Button>
-        <Group mt="md" gap="sm" wrap="nowrap" align="center">
-          <AgentAvatar
-            name={agent.name}
-            avatar={agent.avatar ?? null}
-            size={40}
-            radius="xl"
-          />
-          <Box style={{ minWidth: 0, flex: 1 }}>
-            <Text fw={700} size="sm" truncate>
-              {agent.name}
-            </Text>
-            <Text size="xs" c="dimmed" truncate>
-              @{handle}
-            </Text>
-          </Box>
-        </Group>
+        <UnstyledButton
+          component={Link}
+          href={settingsHref}
+          mt="md"
+          w="100%"
+          onClick={onNavigate}
+          className={`${styles.agentInfoLink} ${
+            isAgentSettingsActive ? styles.agentInfoLinkActive : ""
+          }`}
+        >
+          <Group gap="sm" wrap="nowrap" align="center">
+            <AgentAvatar
+              name={agent.name}
+              avatar={agent.avatar ?? null}
+              size={40}
+              radius="xl"
+            />
+            <Box style={{ minWidth: 0, flex: 1 }}>
+              <Text fw={700} size="sm" truncate>
+                {agent.name}
+              </Text>
+              <Text size="xs" c="dimmed" truncate>
+                @{handle}
+              </Text>
+            </Box>
+          </Group>
+        </UnstyledButton>
         {agent.description && (
           <Text mt="xs" size="xs" c="dimmed" lineClamp={2}>
             {agent.description}

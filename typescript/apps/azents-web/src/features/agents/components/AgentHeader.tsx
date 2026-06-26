@@ -22,10 +22,9 @@ import {
   IconFolderOpen,
   IconMenu2,
   IconMessageCircle,
-  IconSettings,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useCallback, useMemo } from "react";
 import { formatModelSelectionSummary } from "../model-selection";
 import { AgentAvatar } from "./AgentAvatar";
@@ -36,9 +35,9 @@ import type { AgentResponse } from "@azents/public-client";
 function resolveActiveTab(
   pathname: string,
   basePath: string,
-): "chat" | "context" | "settings" {
+): "chat" | "context" | null {
   if (pathname.startsWith(`${basePath}/settings`)) {
-    return "settings";
+    return null;
   }
   if (/\/sessions\/[^/]+\/context(?:\/|$)/.test(pathname)) {
     return "context";
@@ -70,6 +69,7 @@ export function AgentHeader({
   const t = useTranslations("workspace.agents.detail");
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const mobileNav = useAgentFocusedShellMobileNav();
   const basePath = `/w/${handle}/agents/${agent.id}`;
   const activeTab = useMemo(
@@ -77,8 +77,8 @@ export function AgentHeader({
     [pathname, basePath],
   );
   const activeSessionId = useMemo(
-    () => extractSessionId(pathname, basePath),
-    [pathname, basePath],
+    () => extractSessionId(pathname, basePath) ?? searchParams.get("sessionId"),
+    [pathname, searchParams, basePath],
   );
   const modelSummary = formatModelSelectionSummary(agent.model_selection);
 
@@ -96,8 +96,6 @@ export function AgentHeader({
             ? `${basePath}/sessions/${activeSessionId}/context`
             : `${basePath}/chat`,
         );
-      } else if (value === "settings") {
-        router.push(`${basePath}/settings`);
       }
     },
     [activeSessionId, router, basePath],
@@ -206,9 +204,6 @@ export function AgentHeader({
           </Tabs.Tab>
           <Tabs.Tab value="context" leftSection={<IconChartBar size={14} />}>
             {t("tabs.context")}
-          </Tabs.Tab>
-          <Tabs.Tab value="settings" leftSection={<IconSettings size={14} />}>
-            {t("tabs.settings")}
           </Tabs.Tab>
         </Tabs.List>
       </Tabs>
