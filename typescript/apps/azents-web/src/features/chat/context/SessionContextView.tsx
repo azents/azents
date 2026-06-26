@@ -21,7 +21,6 @@ import {
   Text,
 } from "@mantine/core";
 import {
-  IconAlertCircle,
   IconArrowLeft,
   IconChevronRight,
   IconCopy,
@@ -130,18 +129,6 @@ export function SessionContextView({
   rawEventsHref,
 }: SessionContextViewProps): React.ReactElement {
   const t = useTranslations("chat.context");
-  if (context.session.id === null) {
-    return (
-      <Alert
-        icon={<IconAlertCircle size={rem(16)} />}
-        color="gray"
-        variant="light"
-      >
-        {t("empty")}
-      </Alert>
-    );
-  }
-
   const usage = context.usage ?? null;
   const totalTokens = getUsageNumber(usage, "total_tokens");
   const promptTokens = getUsageNumber(usage, "prompt_tokens");
@@ -320,18 +307,6 @@ export function SessionSystemPromptView({
     promptDetails.find((detail) => detail.id === selectedPromptId)?.prompt ??
     null;
 
-  if (context.session.id === null) {
-    return (
-      <Alert
-        icon={<IconAlertCircle size={rem(16)} />}
-        color="gray"
-        variant="light"
-      >
-        {t("empty")}
-      </Alert>
-    );
-  }
-
   return (
     <Paper withBorder radius="md" p="md">
       <Stack gap="md">
@@ -481,18 +456,6 @@ export function SessionRawEventsView({
 }: SessionRawEventsViewProps): React.ReactElement {
   const t = useTranslations("chat.context");
   const [openedEventId, setOpenedEventId] = useState<string | null>(null);
-
-  if (context.session.id === null) {
-    return (
-      <Alert
-        icon={<IconAlertCircle size={rem(16)} />}
-        color="gray"
-        variant="light"
-      >
-        {t("empty")}
-      </Alert>
-    );
-  }
 
   return (
     <Paper withBorder radius="md" p="md">

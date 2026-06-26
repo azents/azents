@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from azents.api.public.chat.v1 import (
+    _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
     _write_command_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_edit_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
@@ -64,7 +65,6 @@ from azents.services.agent_session_input import BufferedAgentSessionInputResult
 from azents.services.chat.data import (
     ChatLiveRunState,
     ChatLiveStateSnapshot,
-    EnsureSessionInput,
     PaginatedEvents,
     SessionAccessDenied,
     SessionNotFound,
@@ -201,7 +201,7 @@ class _RestWriteChatService:
 
     def __init__(self, session_id: str = "0123456789abcdef0123456789abcdef") -> None:
         self.session_id = session_id
-        self.ensure_inputs: list[EnsureSessionInput] = []
+        self.get_agent_session_calls: list[tuple[str, str, str]] = []
         self.live_session_ids: list[str] = []
         self.event = Event(
             id="1123456789abcdef0123456789abcdef",
@@ -226,16 +226,20 @@ class _RestWriteChatService:
             created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
         )
 
-    async def ensure_session(
-        self, ensure_input: EnsureSessionInput
+    async def get_agent_session(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
     ) -> Success[AgentSession]:
         """Return the confirmed AgentSession."""
-        self.ensure_inputs.append(ensure_input)
+        self.get_agent_session_calls.append((agent_id, session_id, user_id))
         return Success(
             AgentSession(
                 id=self.session_id,
                 workspace_id="workspace-1",
-                agent_id="agent-1",
+                agent_id=agent_id,
                 status=AgentSessionStatus.ACTIVE,
                 start_reason=AgentSessionStartReason.INITIAL,
                 started_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
@@ -887,42 +891,21 @@ class TestRestMessageWriteContract:
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 
-    async def test_new_session_message_uses_sessionless_contract(self) -> None:
-        """New-session REST write ensures without session_id, then creates a buffer."""
-        broker = _MemoryBroker()
-        broadcast = _MemoryBroadcast()
-        chat_service = _RestWriteChatService(
-            session_id="2223456789abcdef0123456789abcdef"
-        )
-        input_service = _BufferedInputService(
-            target_session_id="2223456789abcdef0123456789abcdef"
-        )
+    async def test_session_validation_requires_explicit_session_id(self) -> None:
+        """REST write validation checks the explicit session target."""
+        chat_service = _RestWriteChatService()
 
-        response = await _write_message_via_rest(
+        session_id = await _validate_rest_session(
             chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _exchange_file_service(),
-            _model_file_service(),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            InMemoryLiveEventStore(),
-            ChatMessageWriteRequest(
-                agent_id="agent-1",
-                client_request_id="client-new",
-                message="first hello",
-            ),
-            session_id=None,
+            session_id="0123456789abcdef0123456789abcdef",
+            agent_id="agent-1",
             user_id="user-1",
-            tz=ZoneInfo("UTC"),
         )
 
-        ensure_input = chat_service.ensure_inputs[0]
-        assert ensure_input.session_id is None
-        assert response.session_id == "2223456789abcdef0123456789abcdef"
-        assert input_service.kwargs[0]["agent_session_id"] == (
-            "2223456789abcdef0123456789abcdef"
-        )
-        assert len(broker.messages) == 1
+        assert session_id == "0123456789abcdef0123456789abcdef"
+        assert chat_service.get_agent_session_calls == [
+            ("agent-1", "0123456789abcdef0123456789abcdef", "user-1")
+        ]
 
     async def test_message_write_rejects_changed_input_target(self) -> None:
         """REST boundary rejects an input service result for another session."""

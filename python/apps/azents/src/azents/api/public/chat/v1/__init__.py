@@ -68,7 +68,6 @@ from azents.services.chat.data import (
     AgentNotFound,
     DeleteInputBufferError,
     DeleteSessionError,
-    EnsureSessionInput,
     InvalidGoalStatusTransition,
     NotWorkspaceMember,
     SessionAccessDenied,
@@ -316,11 +315,7 @@ async def chat_websocket(
     if current_user is None:
         return
 
-    # Validate session ownership. Existing sessions are checked; new sessions pass.
-    # Agent/session match validation is performed only on writes in
-    # _handle_ensure_session.
-    # Allow the WS connection itself so azents-web can subscribe to real-time events
-    # for AgentSessions linked to external interface input.
+    # Validate session access before subscribing to live events.
     session_result = await chat_service.get_session(
         session_id, user_id=current_user.user_id
     )
@@ -331,7 +326,8 @@ async def chat_websocket(
                     await websocket.close(code=4003, reason="Session access denied.")
                     return
                 case SessionNotFound():
-                    pass  # New session; created by ensure_session
+                    await websocket.close(code=4004, reason="Session not found.")
+                    return
                 case _:
                     assert_never(error)
         case Success():
@@ -482,12 +478,12 @@ async def _write_message_via_rest(
     live_event_store: LiveEventStore,
     request: ChatMessageWriteRequest,
     *,
-    session_id: str | None,
+    session_id: str,
     user_id: str,
     tz: ZoneInfo,
 ) -> ChatWriteResponse:
     """Handle REST message writes as input buffer commit boundaries."""
-    resolved_session_id = await _handle_ensure_session_for_rest(
+    resolved_session_id = await _validate_rest_session(
         chat_service,
         session_id=session_id,
         agent_id=request.agent_id,
@@ -578,31 +574,25 @@ def _handle_agent_session_input_result(
             assert_never(result)
 
 
-async def _handle_ensure_session_for_rest(
+async def _validate_rest_session(
     chat_service: ChatSessionService,
     *,
-    session_id: str | None,
+    session_id: str,
     agent_id: str,
     user_id: str,
 ) -> str:
-    """Convert ensure_session results for REST writes to HTTP errors."""
-    result = await chat_service.ensure_session(
-        EnsureSessionInput(
-            session_id=session_id,
-            agent_id=agent_id,
-            user_id=user_id,
-        )
+    """Validate the explicit REST session write target."""
+    result = await chat_service.get_agent_session(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=user_id,
     )
     match result:
         case Success(agent_session):
             return agent_session.id
         case Failure(error):
             match error:
-                case AgentNotFound():
-                    raise HTTPException(status_code=404, detail="Agent not found.")
-                case NotWorkspaceMember():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SessionAccessDenied():
+                case SessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
@@ -809,7 +799,7 @@ async def _write_edit_message_via_rest(
     tz: ZoneInfo,
 ) -> ChatWriteResponse:
     """Handle REST edit writes as idle-only input buffer boundaries."""
-    resolved_session_id = await _handle_ensure_session_for_rest(
+    resolved_session_id = await _validate_rest_session(
         chat_service,
         session_id=session_id,
         agent_id=request.agent_id,
@@ -887,7 +877,7 @@ async def _write_command_via_rest(
         raise HTTPException(
             status_code=400, detail=f"Unknown command: /{request.command}"
         )
-    resolved_session_id = await _handle_ensure_session_for_rest(
+    resolved_session_id = await _validate_rest_session(
         chat_service,
         session_id=session_id,
         agent_id=request.agent_id,
@@ -987,16 +977,19 @@ async def create_command(
     )
 
 
-@router.get("/agents/{agent_id}/context")
+@router.get("/agents/{agent_id}/sessions/{session_id}/context")
 async def get_agent_session_context(
     agent_id: str,
+    session_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     context_service: Annotated[SessionContextService, Depends()],
     limit: Annotated[int, Query(ge=1, le=500)] = 300,
 ) -> SessionContextResponse:
-    """Return Agent team primary session context inspector information."""
-    result = await context_service.get_agent_context(
+    """Return URL-selected AgentSession context inspector information."""
+    _validate_session_id(session_id)
+    result = await context_service.get_session_context(
         agent_id=agent_id,
+        session_id=session_id,
         user_id=current_user.user_id,
         limit=limit,
     )
@@ -1005,9 +998,7 @@ async def get_agent_session_context(
             return SessionContextResponse.from_domain(context)
         case Failure(error):
             match error:
-                case AgentNotFound():
-                    raise HTTPException(status_code=404, detail="Agent not found.")
-                case NotWorkspaceMember():
+                case SessionNotFound() | NotWorkspaceMember():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
@@ -1132,15 +1123,18 @@ async def list_slash_commands() -> SlashCommandListResponse:
     )
 
 
-@router.get("/agents/{agent_id}/projects")
+@router.get("/agents/{agent_id}/sessions/{session_id}/projects")
 async def list_agent_projects(
     agent_id: str,
+    session_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     project_service: Annotated[SessionWorkspaceProjectService, Depends()],
 ) -> SessionWorkspaceProjectListResponse:
-    """List Agent Workspace Projects for an Agent."""
-    result = await project_service.list_projects_for_agent(
+    """List Agent Workspace Projects for an AgentSession."""
+    _validate_session_id(session_id)
+    result = await project_service.list_projects_for_session(
         agent_id=agent_id,
+        session_id=session_id,
         user_id=current_user.user_id,
     )
     match result:
@@ -1157,15 +1151,18 @@ async def list_agent_projects(
             assert_never(result)
 
 
-@router.get("/agents/{agent_id}/project-registration-requests")
+@router.get("/agents/{agent_id}/sessions/{session_id}/project-registration-requests")
 async def list_agent_project_registration_requests(
     agent_id: str,
+    session_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     project_service: Annotated[SessionWorkspaceProjectService, Depends()],
 ) -> SessionWorkspaceProjectRegistrationRequestListResponse:
-    """List Project registration requests for an Agent."""
-    result = await project_service.list_registration_requests_for_agent(
+    """List Project registration requests for an AgentSession."""
+    _validate_session_id(session_id)
+    result = await project_service.list_registration_requests_for_session(
         agent_id=agent_id,
+        session_id=session_id,
         user_id=current_user.user_id,
     )
     match result:
@@ -1184,16 +1181,21 @@ async def list_agent_project_registration_requests(
             assert_never(result)
 
 
-@router.post("/agents/{agent_id}/project-registration-requests/{request_id}/approve")
+@router.post(
+    "/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/approve"
+)
 async def approve_agent_project_registration_request(
     agent_id: str,
+    session_id: str,
     request_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     project_service: Annotated[SessionWorkspaceProjectService, Depends()],
 ) -> SessionWorkspaceProjectResponse:
-    """Approve an Agent Project registration request."""
-    result = await project_service.approve_registration_request_for_agent(
+    """Approve an AgentSession Project registration request."""
+    _validate_session_id(session_id)
+    result = await project_service.approve_registration_request_for_session(
         agent_id=agent_id,
+        session_id=session_id,
         user_id=current_user.user_id,
         request_id=request_id,
     )
@@ -1228,18 +1230,21 @@ async def approve_agent_project_registration_request(
 
 
 @router.post(
-    "/agents/{agent_id}/project-registration-requests/{request_id}/reject",
+    "/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject",
     status_code=204,
 )
 async def reject_agent_project_registration_request(
     agent_id: str,
+    session_id: str,
     request_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     project_service: Annotated[SessionWorkspaceProjectService, Depends()],
 ) -> None:
-    """Reject an Agent Project registration request."""
-    result = await project_service.reject_registration_request_for_agent(
+    """Reject an AgentSession Project registration request."""
+    _validate_session_id(session_id)
+    result = await project_service.reject_registration_request_for_session(
         agent_id=agent_id,
+        session_id=session_id,
         user_id=current_user.user_id,
         request_id=request_id,
     )
@@ -1266,16 +1271,19 @@ async def reject_agent_project_registration_request(
             assert_never(result)
 
 
-@router.post("/agents/{agent_id}/projects/register")
+@router.post("/agents/{agent_id}/sessions/{session_id}/projects/register")
 async def register_agent_project(
     agent_id: str,
+    session_id: str,
     request: SessionWorkspaceProjectRegisterRequest,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     project_service: Annotated[SessionWorkspaceProjectService, Depends()],
 ) -> SessionWorkspaceProjectResponse:
     """Register an existing directory in Agent Workspace as a Project."""
-    result = await project_service.register_existing_folder_for_agent(
+    _validate_session_id(session_id)
+    result = await project_service.register_existing_folder_for_session(
         agent_id=agent_id,
+        session_id=session_id,
         user_id=current_user.user_id,
         path=request.path,
     )
@@ -1299,16 +1307,22 @@ async def register_agent_project(
             assert_never(result)
 
 
-@router.delete("/agents/{agent_id}/projects/{project_id}", status_code=204)
+@router.delete(
+    "/agents/{agent_id}/sessions/{session_id}/projects/{project_id}",
+    status_code=204,
+)
 async def delete_agent_project(
     agent_id: str,
+    session_id: str,
     project_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     project_service: Annotated[SessionWorkspaceProjectService, Depends()],
 ) -> None:
-    """Delete a Project registry row for an Agent."""
-    result = await project_service.delete_project_for_agent(
+    """Delete a Project registry row for an AgentSession."""
+    _validate_session_id(session_id)
+    result = await project_service.delete_project_for_session(
         agent_id=agent_id,
+        session_id=session_id,
         user_id=current_user.user_id,
         project_id=project_id,
     )

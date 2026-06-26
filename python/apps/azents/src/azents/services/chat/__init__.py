@@ -18,7 +18,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.message import MessageRepository
@@ -34,7 +33,6 @@ from .data import (
     DeleteInputBufferError,
     DeleteSessionError,
     EnsureSessionError,
-    EnsureSessionInput,
     InvalidGoalStatusTransition,
     NotWorkspaceMember,
     PaginatedEvents,
@@ -58,9 +56,6 @@ class ChatSessionService:
 
     message_repository: Annotated[MessageRepository, Depends(MessageRepository)]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
-    ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     event_transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
@@ -80,64 +75,38 @@ class ChatSessionService:
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
 
-    async def ensure_session(
-        self, input: EnsureSessionInput
+    async def get_team_primary_session(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
     ) -> Result[AgentSession, EnsureSessionError]:
-        """Ensure AgentSession when session is absent.
+        """Ensure team primary AgentSession of Agent and check access permission.
 
-        Access control: verify user_id match for existing session,
-        verify Agent -> workspace member for new session.
-
-        :param input: Session ensure input
-        :return: AgentSession on success, error on failure
+        :param agent_id: Agent ID
+        :param user_id: Requester user ID
+        :return: team primary AgentSession on success, error on failure
         """
         async with self.session_manager() as session:
-            # Check Agent existence
-            agent = await self.agent_repository.get_by_id(session, input.agent_id)
+            agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
                 return Failure(AgentNotFound())
-
-            if input.session_id is not None:
-                existing = await self.agent_session_repository.get_by_id(
-                    session, input.session_id
-                )
-                if existing is None:
-                    return Failure(SessionAccessDenied())
-                if existing.agent_id != input.agent_id:
-                    return Failure(SessionAccessDenied())
-                workspace_user = (
-                    await self.workspace_user_repository.get_by_workspace_and_user(
-                        session,
-                        workspace_id=existing.workspace_id,
-                        user_id=input.user_id,
-                    )
-                )
-                if workspace_user is None:
-                    return Failure(SessionAccessDenied())
-                return Success(existing)
-
-            # Validate workspace member
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
                     session,
                     workspace_id=agent.workspace_id,
-                    user_id=input.user_id,
+                    user_id=user_id,
                 )
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-
-            agent_runtime = await self.agent_runtime_repository.ensure_for_agent(
-                session, input.agent_id
-            )
             agent_session = (
                 await self.agent_session_repository.ensure_team_primary_for_agent(
                     session,
-                    workspace_id=agent_runtime.workspace_id,
-                    agent_id=input.agent_id,
+                    workspace_id=agent.workspace_id,
+                    agent_id=agent_id,
                 )
             )
-
             return Success(agent_session)
 
     async def get_session(
@@ -168,22 +137,6 @@ class ChatSessionService:
             if workspace_user is None:
                 return Failure(SessionAccessDenied())
             return Success(agent_session)
-
-    async def get_team_primary_session(
-        self,
-        *,
-        agent_id: str,
-        user_id: str,
-    ) -> Result[AgentSession, EnsureSessionError]:
-        """Ensure team primary AgentSession of Agent and check access permission.
-
-        :param agent_id: Agent ID
-        :param user_id: Requester user ID
-        :return: team primary AgentSession on success, error on failure
-        """
-        return await self.ensure_session(
-            EnsureSessionInput(session_id=None, agent_id=agent_id, user_id=user_id)
-        )
 
     async def get_agent_session(
         self,

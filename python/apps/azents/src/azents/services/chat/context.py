@@ -27,12 +27,11 @@ from azents.engine.events.types import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.services.chat.data import AgentNotFound, NotWorkspaceMember
+from azents.services.chat.data import NotWorkspaceMember, SessionNotFound
 
 ContextBreakdownKey = Literal["system", "user", "assistant", "tool", "other"]
 
@@ -40,7 +39,7 @@ ContextBreakdownKey = Literal["system", "user", "assistant", "tool", "other"]
 class SessionContextSession(BaseModel):
     """Context inspector session summary."""
 
-    id: str | None = Field(description="AgentSession ID")
+    id: str = Field(description="AgentSession ID")
     agent_id: str = Field(description="Agent ID")
     created_at: datetime.datetime | None = Field(default=None)
     updated_at: datetime.datetime | None = Field(default=None)
@@ -167,7 +166,7 @@ class SessionContextRawEvent(BaseModel):
 
 
 class SessionContext(BaseModel):
-    """Agent team primary session context inspector payload."""
+    """AgentSession context inspector payload."""
 
     session: SessionContextSession
     usage: TokenUsagePayload | None
@@ -179,9 +178,8 @@ class SessionContext(BaseModel):
 
 @dataclasses.dataclass
 class SessionContextService:
-    """Agent team primary session context inspector service."""
+    """AgentSession context inspector service."""
 
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
@@ -195,75 +193,53 @@ class SessionContextService:
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
 
-    async def get_agent_context(
+    async def get_session_context(
         self,
         *,
         agent_id: str,
+        session_id: str,
         user_id: str,
         limit: int,
-    ) -> Result[SessionContext, AgentNotFound | NotWorkspaceMember]:
-        """Fetch team primary session context of Agent accessible by user."""
+    ) -> Result[SessionContext, SessionNotFound | NotWorkspaceMember]:
+        """Fetch context of an AgentSession accessible by user."""
         bounded_limit = max(1, min(limit, 500))
         async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if agent is None:
-                return Failure(AgentNotFound())
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None or agent_session.agent_id != agent_id:
+                return Failure(SessionNotFound())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
                     session,
-                    workspace_id=agent.workspace_id,
+                    workspace_id=agent_session.workspace_id,
                     user_id=user_id,
                 )
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
 
-            primary_session = (
-                await self.agent_session_repository.get_team_primary_by_agent_id(
-                    session,
-                    agent_id,
-                )
-            )
-            if primary_session is None:
-                return Success(_empty_context(agent_id))
-
             events = await self.transcript_repository.list_recent_by_session_id(
                 session,
-                primary_session.id,
+                agent_session.id,
                 limit=bounded_limit,
             )
-            return Success(_build_context(primary_session, events))
-
-
-def _empty_context(agent_id: str) -> SessionContext:
-    """Create empty context for Agent without a team primary session."""
-    return SessionContext(
-        session=SessionContextSession(
-            id=None,
-            agent_id=agent_id,
-            created_at=None,
-            updated_at=None,
-        ),
-        usage=None,
-        stats=SessionContextStats(),
-        breakdown=[],
-        system_prompt=None,
-        raw_events=[],
-    )
+            return Success(_build_context(agent_session, events))
 
 
 def _build_context(
-    primary_session: AgentSession,
+    agent_session: AgentSession,
     events: list[Event],
 ) -> SessionContext:
     """Build context inspector payload from events."""
     usage = _latest_usage(events)
     return SessionContext(
         session=SessionContextSession(
-            id=primary_session.id,
-            agent_id=primary_session.agent_id,
-            created_at=primary_session.created_at,
-            updated_at=primary_session.updated_at,
+            id=agent_session.id,
+            agent_id=agent_session.agent_id,
+            created_at=agent_session.created_at,
+            updated_at=agent_session.updated_at,
         ),
         usage=usage,
         stats=_build_stats(events),

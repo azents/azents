@@ -16,7 +16,6 @@ from azents.core.enums import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
@@ -25,7 +24,6 @@ from azents.repos.session_workspace_project.data import (
     SessionWorkspaceProject,
     SessionWorkspaceProjectCreate,
     SessionWorkspaceProjectRegistrationRequest,
-    SessionWorkspaceProjectRegistrationRequestCreate,
 )
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
@@ -87,8 +85,6 @@ class AccessibleProjectContext:
 
     agent_id: str
     session_id: str
-    agent_runtime_id: str
-    workspace_id: str
 
 
 ProjectCreateError = InvalidProjectPath | ProjectPathConflict
@@ -147,7 +143,6 @@ class SessionWorkspaceProjectService:
         SessionWorkspaceProjectRepository,
         Depends(SessionWorkspaceProjectRepository),
     ]
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_runtime_repository: Annotated[
         AgentRuntimeRepository,
         Depends(AgentRuntimeRepository),
@@ -195,88 +190,20 @@ class SessionWorkspaceProjectService:
             await session.commit()
             return Success(project)
 
-    async def request_registration_for_agent(
+    async def register_existing_folder_for_session(
         self,
         *,
         agent_id: str,
-        path: str,
-        reason: str,
-    ) -> Result[
-        SessionWorkspaceProjectRegistrationRequest,
-        AgentNotFound | InvalidProjectPath | ProjectPathConflict,
-    ]:
-        """Agent requests Project registration approval from user."""
-        async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context_for_agent(
-                session,
-                agent_id=agent_id,
-            )
-            match context_result:
-                case Success(context):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
-            )
-            if runtime is None:
-                return Failure(AgentNotFound())
-            validation = await self._validate_project_path_in_session(
-                session,
-                session_id=context.session_id,
-                path=path,
-            )
-            match validation:
-                case Success(normalized_path):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-            exists_result = await _ensure_real_directory_in_runtime(
-                self.runner_operations,
-                runtime=runtime,
-                path=normalized_path,
-            )
-            match exists_result:
-                case Success():
-                    pass
-                case Failure(error):
-                    return Failure(error)
-            request_reason = reason.strip()
-            if not request_reason:
-                return Failure(
-                    InvalidProjectPath(path=path, reason="Project reason is required")
-                )
-            existing = await self.repository.get_pending_registration_request_by_path(
-                session,
-                session_id=context.session_id,
-                path=normalized_path,
-            )
-            if existing is not None:
-                return Success(existing)
-            request = await self.repository.create_registration_request(
-                session,
-                SessionWorkspaceProjectRegistrationRequestCreate(
-                    session_id=context.session_id,
-                    path=normalized_path,
-                    reason=request_reason,
-                ),
-            )
-            await session.commit()
-            return Success(request)
-
-    async def register_existing_folder_for_agent(
-        self,
-        *,
-        agent_id: str,
+        session_id: str,
         user_id: str,
         path: str,
     ) -> Result[SessionWorkspaceProject, ProjectFolderRegistrationError]:
-        """Register existing directory in Agent Workspace as Project."""
+        """Register existing directory in AgentSession Workspace as Project."""
         async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context(
+            context_result = await self._get_accessible_project_context_for_session(
                 session,
                 agent_id=agent_id,
+                session_id=session_id,
                 user_id=user_id,
             )
             match context_result:
@@ -294,12 +221,15 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
+            runtime_result = await self._get_runtime_for_project_context(
                 session,
-                agent_id,
+                context,
             )
-            if runtime is None:
-                return Failure(AgentNotFound())
+            match runtime_result:
+                case Success(runtime):
+                    pass
+                case Failure(error):
+                    return Failure(error)
             exists_result = await _ensure_real_directory_in_runtime(
                 self.runner_operations,
                 runtime=runtime,
@@ -320,17 +250,19 @@ class SessionWorkspaceProjectService:
             await session.commit()
             return Success(project)
 
-    async def list_registration_requests_for_agent(
+    async def list_registration_requests_for_session(
         self,
         *,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[list[SessionWorkspaceProjectRegistrationRequest], ProjectAccessError]:
-        """Fetch Project registration request of Agent accessible by user."""
+        """Fetch Project registration requests of AgentSession accessible by user."""
         async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context(
+            context_result = await self._get_accessible_project_context_for_session(
                 session,
                 agent_id=agent_id,
+                session_id=session_id,
                 user_id=user_id,
             )
             match context_result:
@@ -344,18 +276,20 @@ class SessionWorkspaceProjectService:
             )
             return Success(requests)
 
-    async def approve_registration_request_for_agent(
+    async def approve_registration_request_for_session(
         self,
         *,
         agent_id: str,
+        session_id: str,
         user_id: str,
         request_id: str,
     ) -> Result[SessionWorkspaceProject, ProjectRegistrationRequestError]:
-        """User approves Agent Project registration request."""
+        """User approves AgentSession Project registration request."""
         async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context(
+            context_result = await self._get_accessible_project_context_for_session(
                 session,
                 agent_id=agent_id,
+                session_id=session_id,
                 user_id=user_id,
             )
             match context_result:
@@ -384,12 +318,15 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
+            runtime_result = await self._get_runtime_for_project_context(
                 session,
-                agent_id,
+                context,
             )
-            if runtime is None:
-                return Failure(AgentNotFound())
+            match runtime_result:
+                case Success(runtime):
+                    pass
+                case Failure(error):
+                    return Failure(error)
             exists_result = await _ensure_real_directory_in_runtime(
                 self.runner_operations,
                 runtime=runtime,
@@ -423,10 +360,11 @@ class SessionWorkspaceProjectService:
             await session.commit()
             return Success(project)
 
-    async def reject_registration_request_for_agent(
+    async def reject_registration_request_for_session(
         self,
         *,
         agent_id: str,
+        session_id: str,
         user_id: str,
         request_id: str,
     ) -> Result[
@@ -435,11 +373,12 @@ class SessionWorkspaceProjectService:
         | RegistrationRequestNotFound
         | RegistrationRequestAlreadyResolved,
     ]:
-        """User rejects Agent Project registration request."""
+        """User rejects AgentSession Project registration request."""
         async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context(
+            context_result = await self._get_accessible_project_context_for_session(
                 session,
                 agent_id=agent_id,
+                session_id=session_id,
                 user_id=user_id,
             )
             match context_result:
@@ -480,17 +419,19 @@ class SessionWorkspaceProjectService:
                 session_id=session_id,
             )
 
-    async def list_projects_for_agent(
+    async def list_projects_for_session(
         self,
         *,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[list[SessionWorkspaceProject], ProjectAccessError]:
-        """Fetch Project list of Agent accessible by user."""
+        """Fetch Project list of AgentSession accessible by user."""
         async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context(
+            context_result = await self._get_accessible_project_context_for_session(
                 session,
                 agent_id=agent_id,
+                session_id=session_id,
                 user_id=user_id,
             )
             match context_result:
@@ -522,18 +463,20 @@ class SessionWorkspaceProjectService:
             await session.commit()
             return Success(None)
 
-    async def delete_project_for_agent(
+    async def delete_project_for_session(
         self,
         *,
         agent_id: str,
+        session_id: str,
         user_id: str,
         project_id: str,
     ) -> Result[None, ProjectAccessError | ProjectNotFound]:
-        """Delete Project registry row of Agent accessible by user."""
+        """Delete Project registry row of AgentSession accessible by user."""
         async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context(
+            context_result = await self._get_accessible_project_context_for_session(
                 session,
                 agent_id=agent_id,
+                session_id=session_id,
                 user_id=user_id,
             )
             match context_result:
@@ -593,71 +536,46 @@ class SessionWorkspaceProjectService:
                 )
         return Success(normalized)
 
-    async def _get_accessible_project_context(
+    async def _get_runtime_for_project_context(
+        self,
+        session: AsyncSession,
+        context: AccessibleProjectContext,
+    ) -> Result[AgentRuntime, AgentNotFound]:
+        """Fetch runtime for a Project context without ensuring new rows."""
+        runtime = await self.agent_runtime_repository.get_by_agent_id(
+            session,
+            context.agent_id,
+        )
+        if runtime is None:
+            return Failure(AgentNotFound())
+        return Success(runtime)
+
+    async def _get_accessible_project_context_for_session(
         self,
         session: AsyncSession,
         *,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[AccessibleProjectContext, ProjectAccessError]:
-        """Check Agent access permission and return Project context."""
-        agent = await self.agent_repository.get_by_id(session, agent_id)
-        if agent is None:
-            return Failure(AgentNotFound())
+        """Check AgentSession access permission and return Project context."""
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            session_id,
+        )
+        if agent_session is None or agent_session.agent_id != agent_id:
+            return Failure(ProjectAccessDenied())
         workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
             session,
-            agent.workspace_id,
+            agent_session.workspace_id,
             user_id,
         )
         if workspace_user is None:
             return Failure(ProjectAccessDenied())
-        return await self._ensure_project_context_for_agent(
-            session,
-            agent_id=agent_id,
-            workspace_id=agent.workspace_id,
-        )
-
-    async def _get_accessible_project_context_for_agent(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-    ) -> Result[AccessibleProjectContext, AgentNotFound]:
-        """Return Project context for an Agent without user access check."""
-        agent = await self.agent_repository.get_by_id(session, agent_id)
-        if agent is None:
-            return Failure(AgentNotFound())
-        return await self._ensure_project_context_for_agent(
-            session,
-            agent_id=agent_id,
-            workspace_id=agent.workspace_id,
-        )
-
-    async def _ensure_project_context_for_agent(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        workspace_id: str,
-    ) -> Success[AccessibleProjectContext]:
-        """Ensure team primary session and runtime for Project operations."""
-        agent_session = (
-            await self.agent_session_repository.ensure_team_primary_for_agent(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-            )
-        )
-        runtime = await self.agent_runtime_repository.ensure_for_agent(
-            session,
-            agent_id,
-        )
         return Success(
             AccessibleProjectContext(
                 agent_id=agent_id,
                 session_id=agent_session.id,
-                agent_runtime_id=runtime.id,
-                workspace_id=workspace_id,
             )
         )
 

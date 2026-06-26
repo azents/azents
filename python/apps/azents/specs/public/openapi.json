@@ -2327,13 +2327,13 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/context": {
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/context": {
       "get": {
         "tags": [
           "Chat v1"
         ],
         "summary": "Get Agent Session Context",
-        "description": "Return Agent team primary session context inspector information.",
+        "description": "Return URL-selected AgentSession context inspector information.",
         "operationId": "chat_v1_get_agent_session_context",
         "security": [
           {
@@ -2348,6 +2348,15 @@
             "schema": {
               "type": "string",
               "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
             }
           },
           {
@@ -2608,13 +2617,13 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/projects": {
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/projects": {
       "get": {
         "tags": [
           "Chat v1"
         ],
         "summary": "List Agent Projects",
-        "description": "List Agent Workspace Projects for an Agent.",
+        "description": "List Agent Workspace Projects for an AgentSession.",
         "operationId": "chat_v1_list_agent_projects",
         "security": [
           {
@@ -2629,6 +2638,15 @@
             "schema": {
               "type": "string",
               "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
             }
           }
         ],
@@ -2656,13 +2674,13 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/project-registration-requests": {
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests": {
       "get": {
         "tags": [
           "Chat v1"
         ],
         "summary": "List Agent Project Registration Requests",
-        "description": "List Project registration requests for an Agent.",
+        "description": "List Project registration requests for an AgentSession.",
         "operationId": "chat_v1_list_agent_project_registration_requests",
         "security": [
           {
@@ -2677,6 +2695,15 @@
             "schema": {
               "type": "string",
               "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
             }
           }
         ],
@@ -2704,13 +2731,13 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/project-registration-requests/{request_id}/approve": {
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/approve": {
       "post": {
         "tags": [
           "Chat v1"
         ],
         "summary": "Approve Agent Project Registration Request",
-        "description": "Approve an Agent Project registration request.",
+        "description": "Approve an AgentSession Project registration request.",
         "operationId": "chat_v1_approve_agent_project_registration_request",
         "security": [
           {
@@ -2725,6 +2752,15 @@
             "schema": {
               "type": "string",
               "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
             }
           },
           {
@@ -2761,13 +2797,13 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/project-registration-requests/{request_id}/reject": {
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject": {
       "post": {
         "tags": [
           "Chat v1"
         ],
         "summary": "Reject Agent Project Registration Request",
-        "description": "Reject an Agent Project registration request.",
+        "description": "Reject an AgentSession Project registration request.",
         "operationId": "chat_v1_reject_agent_project_registration_request",
         "security": [
           {
@@ -2782,6 +2818,15 @@
             "schema": {
               "type": "string",
               "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
             }
           },
           {
@@ -2811,7 +2856,7 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/projects/register": {
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register": {
       "post": {
         "tags": [
           "Chat v1"
@@ -2832,6 +2877,15 @@
             "schema": {
               "type": "string",
               "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
             }
           }
         ],
@@ -2869,13 +2923,13 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/projects/{project_id}": {
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}": {
       "delete": {
         "tags": [
           "Chat v1"
         ],
         "summary": "Delete Agent Project",
-        "description": "Delete a Project registry row for an Agent.",
+        "description": "Delete a Project registry row for an AgentSession.",
         "operationId": "chat_v1_delete_agent_project",
         "security": [
           {
@@ -2890,6 +2944,15 @@
             "schema": {
               "type": "string",
               "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
             }
           },
           {
@@ -12296,14 +12359,7 @@
       "SessionContextSessionResponse": {
         "properties": {
           "id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Id",
             "description": "AgentSession ID"
           },

@@ -24,34 +24,31 @@ import type { AgentResponse } from "@azents/public-client";
 
 interface ChatSessionViewProps {
   handle: string;
-  /** mount time of session ID (new chat null) */
-  initialSessionId: string | null;
+  /** URL-selected AgentSession ID */
+  sessionId: string;
   /** this session agent */
   agent: AgentResponse;
-  /** server new session createtext when parent notice */
-  onSessionCreated: (sessionId: string) => void;
   /** connection status parent to push (for sidebar badge) */
   onConnectionStatusChange: (status: ConnectionStatus) => void;
 }
 
 export function ChatSessionView({
   handle,
-  initialSessionId,
+  sessionId,
   agent,
-  onSessionCreated,
   onConnectionStatusChange,
 }: ChatSessionViewProps): React.ReactElement {
   const t = useTranslations("chat");
   const [runtimeDrawerOpened, setRuntimeDrawerOpened] = useState(false);
   const output = useChatSessionContainer({
-    initialSessionId,
+    sessionId,
     agent,
-    onSessionCreated,
     onConnectionStatusChange,
   });
   const workspacePanel = useWorkspacePanelContainer({
     handle,
     agentId: agent.id,
+    sessionId,
   });
   const effectiveContextWindowTokens =
     agent.effective_context_window_tokens ?? null;

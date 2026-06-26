@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-06-16
-spec_version: 4
+last_verified_at: 2026-06-26
+spec_version: 5
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -26,32 +26,29 @@ code_paths:
 
 ## Current Behavior
 
-Agent detail screen provides `Chat`, `Context`, and `Settings` top-level tabs. `Context` tab is an inspector that shows model context usage and event source based on active session of that Agent.
+Agent detail screen provides `Chat`, `Context`, and `Settings` top-level tabs. `Context` tab is an inspector that shows model context usage and event source based on the URL-selected AgentSession.
 
 ## Backend API
 
 Public chat API provides this endpoint.
 
 ```http
-GET /api/v1/chat/agents/{agent_id}/context?limit=300
+GET /api/v1/chat/agents/{agent_id}/sessions/{session_id}/context?limit=300
 ```
 
 Behavior:
 
-1. Verify Agent exists.
-2. Verify current user is Agent workspace member.
-3. Look up Agent runtime.
-4. Look up active session of runtime.
-5. If active session does not exist, return empty context payload.
-6. If active session exists, query recent events within `limit`.
-7. Use usage of most recent `turn_marker` event as latest usage.
-8. Build event stats, approximate prompt-token breakdown, and raw events from events.
+1. Verify the AgentSession exists and belongs to the requested Agent.
+2. Verify current user is a member of the session workspace.
+3. Query recent events for that exact session within `limit`.
+4. Use usage of most recent `turn_marker` event as latest usage.
+5. Build event stats, approximate prompt-token breakdown, and raw events from events.
 
 `limit` minimum is 1, maximum is 500. Default is 300.
 
-## Empty Session
+## Empty Transcript
 
-Context query is read-only. It does not create new session when Runtime or active session does not exist. In this case, response `session.id` is `null`, `usage` is `null`, and stats/breakdown/raw events are empty.
+Context query is read-only and requires an existing `session_id`. It does not create or fall back to a team-primary session. When the selected session has no context events, response `session.id` remains the selected session id, `usage` is `null`, and stats/breakdown/raw events are empty.
 
 ## Usage Summary
 
@@ -90,11 +87,11 @@ Raw events are exposed only to workspace members. Endpoint applies event limit t
 
 ## Frontend
 
-`/w/{handle}/agents/{agentId}/context` route renders these states:
+`/w/{handle}/agents/{agentId}/sessions/{sessionId}/context` route renders these states:
 
 - loading
 - error
-- empty active session
+- empty selected session transcript
 - ready
 
 Ready state includes this UI:

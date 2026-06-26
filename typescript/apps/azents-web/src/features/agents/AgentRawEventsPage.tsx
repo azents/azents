@@ -22,19 +22,22 @@ import type { AgentResponse } from "@azents/public-client";
 interface AgentRawEventsPageProps {
   handle: string;
   agent: AgentResponse;
+  sessionId: string;
 }
 
 export function AgentRawEventsPage({
   handle,
   agent,
+  sessionId,
 }: AgentRawEventsPageProps): React.ReactElement {
   const t = useTranslations("chat.context");
   const rawEventsT = useTranslations("chat.context.rawEventsPage");
   const query = trpc.chat.getAgentSessionContext.useQuery({
     agentId: agent.id,
+    sessionId,
     limit: 300,
   });
-  const contextPath = `/w/${handle}/agents/${agent.id}/context`;
+  const contextPath = `/w/${handle}/agents/${agent.id}/sessions/${sessionId}/context`;
 
   return (
     <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>

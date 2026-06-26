@@ -20,6 +20,7 @@ const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
 interface UseWorkspacePanelContainerInput {
   handle: string;
   agentId: string;
+  sessionId: string;
 }
 
 export interface WorkspacePanelContainerOutput {
@@ -50,6 +51,7 @@ function getErrorMessage(error: unknown): string {
 export function useWorkspacePanelContainer({
   handle,
   agentId,
+  sessionId,
 }: UseWorkspacePanelContainerInput): WorkspacePanelContainerOutput {
   const [currentDirectoryPath, setCurrentDirectoryPath] = useState<
     string | null
@@ -78,7 +80,7 @@ export function useWorkspacePanelContainer({
     setCurrentDirectoryPath(null);
     setSelectedFilePath(null);
     setDirectoryEntriesByPath({});
-  }, [agentId]);
+  }, [agentId, sessionId]);
 
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
     { agentId },
@@ -95,10 +97,16 @@ export function useWorkspacePanelContainer({
     },
   );
 
-  const projectsQuery = trpc.chat.listAgentProjects.useQuery({ agentId });
+  const projectsQuery = trpc.chat.listAgentProjects.useQuery({
+    agentId,
+    sessionId,
+  });
 
   const registrationRequestsQuery =
-    trpc.chat.listAgentProjectRegistrationRequests.useQuery({ agentId });
+    trpc.chat.listAgentProjectRegistrationRequests.useQuery({
+      agentId,
+      sessionId,
+    });
 
   const manifest = useMemo(() => {
     if (workspaceQuery.data?.workspace.type !== "READY") {
@@ -129,6 +137,7 @@ export function useWorkspacePanelContainer({
   const directoryQuery = trpc.chat.readAgentWorkspacePath.useQuery(
     {
       agentId,
+      sessionId,
       path: activeDirectoryPath,
     },
     {
@@ -141,6 +150,7 @@ export function useWorkspacePanelContainer({
   const fileQuery = trpc.chat.readAgentWorkspacePath.useQuery(
     {
       agentId,
+      sessionId,
       path: selectedFilePath ?? "",
     },
     {
@@ -197,7 +207,7 @@ export function useWorkspacePanelContainer({
   const registerProjectMutation = trpc.chat.registerAgentProject.useMutation({
     onSuccess: async () => {
       setRegisterProjectError(null);
-      await utils.chat.listAgentProjects.invalidate({ agentId });
+      await utils.chat.listAgentProjects.invalidate({ agentId, sessionId });
     },
     onError: (error) => {
       setRegisterProjectError(error.message);
@@ -209,9 +219,10 @@ export function useWorkspacePanelContainer({
       onSuccess: async () => {
         setPendingApproveRequestId(null);
         await Promise.all([
-          utils.chat.listAgentProjects.invalidate({ agentId }),
+          utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
           utils.chat.listAgentProjectRegistrationRequests.invalidate({
             agentId,
+            sessionId,
           }),
         ]);
       },
@@ -226,6 +237,7 @@ export function useWorkspacePanelContainer({
         setPendingRejectRequestId(null);
         await utils.chat.listAgentProjectRegistrationRequests.invalidate({
           agentId,
+          sessionId,
         });
       },
       onError: () => {
@@ -236,7 +248,7 @@ export function useWorkspacePanelContainer({
   const deleteProjectMutation = trpc.chat.deleteAgentProject.useMutation({
     onSuccess: async () => {
       setPendingDeleteProjectId(null);
-      await utils.chat.listAgentProjects.invalidate({ agentId });
+      await utils.chat.listAgentProjects.invalidate({ agentId, sessionId });
     },
     onError: () => {
       setPendingDeleteProjectId(null);
@@ -273,9 +285,10 @@ export function useWorkspacePanelContainer({
     void Promise.all([
       utils.chat.getAgentWorkspace.invalidate({ agentId }),
       utils.chat.readAgentWorkspacePath.invalidate({ agentId }),
-      utils.chat.listAgentProjects.invalidate({ agentId }),
+      utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
       utils.chat.listAgentProjectRegistrationRequests.invalidate({
         agentId,
+        sessionId,
       }),
     ]).finally(() => {
       setIsManualRefreshing(false);
@@ -284,6 +297,7 @@ export function useWorkspacePanelContainer({
     agentId,
     utils.chat.getAgentWorkspace,
     utils.chat.listAgentProjectRegistrationRequests,
+    sessionId,
     utils.chat.listAgentProjects,
     utils.chat.readAgentWorkspacePath,
   ]);
@@ -299,32 +313,41 @@ export function useWorkspacePanelContainer({
     setRegisterProjectError(null);
     registerProjectMutation.mutate({
       agentId,
+      sessionId,
       path: registerProjectPath,
     });
-  }, [agentId, registerProjectMutation, registerProjectPath]);
+  }, [agentId, registerProjectMutation, registerProjectPath, sessionId]);
 
   const onApproveRegistrationRequest = useCallback(
     (requestId: string) => {
       setPendingApproveRequestId(requestId);
-      approveRegistrationRequestMutation.mutate({ agentId, requestId });
+      approveRegistrationRequestMutation.mutate({
+        agentId,
+        sessionId,
+        requestId,
+      });
     },
-    [agentId, approveRegistrationRequestMutation],
+    [agentId, approveRegistrationRequestMutation, sessionId],
   );
 
   const onRejectRegistrationRequest = useCallback(
     (requestId: string) => {
       setPendingRejectRequestId(requestId);
-      rejectRegistrationRequestMutation.mutate({ agentId, requestId });
+      rejectRegistrationRequestMutation.mutate({
+        agentId,
+        sessionId,
+        requestId,
+      });
     },
-    [agentId, rejectRegistrationRequestMutation],
+    [agentId, rejectRegistrationRequestMutation, sessionId],
   );
 
   const onDeleteProject = useCallback(
     (projectId: string) => {
       setPendingDeleteProjectId(projectId);
-      deleteProjectMutation.mutate({ agentId, projectId });
+      deleteProjectMutation.mutate({ agentId, sessionId, projectId });
     },
-    [agentId, deleteProjectMutation],
+    [agentId, deleteProjectMutation, sessionId],
   );
 
   useEffect(() => {
