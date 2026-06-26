@@ -43,6 +43,8 @@ code_paths:
   - python/apps/azents/src/azents/api/internal/agent_home/v1/projects.py
   - python/apps/azents/src/azents/api/internal/agent_home/v1/terminate.py
   - typescript/apps/azents-web/src/app/(app)/api/chat/exchange-files/**
+  - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
+  - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - python/apps/azents/src/azents/engine/tools/todo.py
   - python/apps/azents/src/azents/engine/tools/goal.py
@@ -66,7 +68,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-26
-spec_version: 68
+spec_version: 69
 ---
 
 # Conversation & Events
@@ -124,7 +126,10 @@ non-primary team sessions may exist under the same agent with `primary_kind = nu
 `GET /chat/v1/agents/{agent_id}/sessions` lists active agent sessions with the team primary session
 first and the remaining sessions newest-updated first. `POST /chat/v1/agents/{agent_id}/sessions`
 creates an active non-primary team session and snapshot-copies registered projects from the team
-primary session. Pending project registration requests are not copied.
+primary session. Pending project registration requests are not copied. azents-web Agent detail routes
+surface this list in the Agent rail and navigate selected sessions through
+`/w/{handle}/agents/{agent_id}/sessions/{session_id}`. Creating a session invalidates the Agent
+session list cache and navigates to the newly created session URL.
 
 Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
 projections, broker wake-up, and the REST response use that same session id. Runtime current/active

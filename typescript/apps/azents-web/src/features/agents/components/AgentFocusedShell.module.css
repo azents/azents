@@ -1,0 +1,7 @@
+.sidebarLink :global(.mantine-NavLink-label) {
+  min-width: 0;
+}
+
+.sessionItem :global(.mantine-NavLink-body) {
+  min-width: 0;
+}

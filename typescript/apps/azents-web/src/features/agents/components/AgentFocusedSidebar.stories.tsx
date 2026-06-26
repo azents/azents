@@ -1,0 +1,105 @@
+import { rem } from "@mantine/core";
+import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { AgentFocusedSidebar } from "./AgentFocusedSidebar";
+import type {
+  AgentResponse,
+  AgentSessionResponse,
+} from "@azents/public-client";
+import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+
+const agent: AgentResponse = {
+  id: "agent_01",
+  name: "Release Operator",
+  description:
+    "Coordinates release checklists, CI failures, and follow-up PRs.",
+  type: "private",
+  role: "agent",
+  enabled: true,
+  avatar: null,
+  model_selection: null,
+  lightweight_model_selection: null,
+  effective_context_window_tokens: 128000,
+  effective_auto_compaction_threshold_tokens: 96000,
+  model_parameters: null,
+  system_prompt: "Help the workspace team with release operations.",
+  runtime_provider_id: null,
+  shell_enabled: true,
+  memory_enabled: true,
+  max_turns: null,
+  toolkit_inherit_mode: "none",
+  created_at: "2026-06-25T08:00:00Z",
+  updated_at: "2026-06-25T08:00:00Z",
+};
+
+const sessions: AgentSessionResponse[] = [
+  {
+    id: "sess_primary",
+    agent_id: "agent_01",
+    status: "active",
+    primary_kind: "team_primary",
+    created_at: "2026-06-24T08:00:00Z",
+    updated_at: "2026-06-26T04:30:00Z",
+  },
+  {
+    id: "sess_release",
+    agent_id: "agent_01",
+    status: "active",
+    primary_kind: null,
+    created_at: "2026-06-25T09:00:00Z",
+    updated_at: "2026-06-25T11:45:00Z",
+  },
+  {
+    id: "sess_ci",
+    agent_id: "agent_01",
+    status: "active",
+    primary_kind: null,
+    created_at: "2026-06-25T01:00:00Z",
+    updated_at: "2026-06-25T03:10:00Z",
+  },
+];
+
+const meta = {
+  component: AgentFocusedSidebar,
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(320)}>
+        <div style={{ height: rem(720) }}>
+          <Story />
+        </div>
+      </StorybookCanvas>
+    ),
+  ],
+  args: {
+    handle: "engineering",
+    agent,
+    sessions,
+    activeSessionId: "sess_primary",
+    onCreateSession: () => {},
+  },
+} satisfies Meta<typeof AgentFocusedSidebar>;
+
+export default meta;
+
+type Story = StoryObj<typeof meta>;
+
+export const Loaded = {} satisfies Story;
+
+export const LoadingSessions = {
+  args: {
+    sessions: [],
+    sessionsLoading: true,
+  },
+} satisfies Story;
+
+export const SessionLoadError = {
+  args: {
+    sessions: [],
+    sessionsError: "Failed to load sessions",
+  },
+} satisfies Story;
+
+export const EmptySessions = {
+  args: {
+    sessions: [],
+  },
+} satisfies Story;

@@ -11,6 +11,7 @@ import {
   chatV1ApproveAgentProjectRegistrationRequest,
   chatV1CreateCommand,
   chatV1CreateMessage,
+  chatV1CreateTeamAgentSession,
   chatV1DeleteAgentProject,
   chatV1DeleteInputBuffer,
   chatV1EditMessage,
@@ -21,6 +22,7 @@ import {
   chatV1IssueWsTicket,
   chatV1ListAgentProjectRegistrationRequests,
   chatV1ListAgentProjects,
+  chatV1ListAgentSessions,
   chatV1ListHistoryEvents,
   chatV1ListLiveEvents,
   chatV1ListSlashCommands,
@@ -70,6 +72,42 @@ export const chatRouter = router({
         const { data } = await chatV1GetAgentSession({
           client: ctx.apiClient,
           path: { agent_id: input.agentId, session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  listAgentSessions: publicProcedure
+    .input(z.object({ agentId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1ListAgentSessions({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  createTeamAgentSession: publicProcedure
+    .input(z.object({ agentId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1CreateTeamAgentSession({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
           throwOnError: true,
         });
         return data;

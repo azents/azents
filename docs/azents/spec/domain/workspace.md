@@ -34,8 +34,8 @@ api_routes:
   - /chat/v1/agents/{agent_id}/projects
   - /chat/v1/agents/{agent_id}/projects/register
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-06-23
-spec_version: 16
+last_verified_at: 2026-06-26
+spec_version: 17
 ---
 
 # Workspace & Membership
@@ -155,7 +155,9 @@ Projects tab in azents-web Workspace panel exposes only registered Project list,
 
 ### Workspace Home / Membership UI
 
-azents-web `/w/[handle]` home is an agent-centered entry point inside Workspace. Current UI shows Agent list and subagent rows, and sidebar renders workspace navigation and agent section together. `WorkspaceHome`, `WorkspaceSidebar`, `AgentSidebarSection`, `AgentTeamCard`, and `SubagentTeamRow` compose this IA. The `AgentTeam*` names are frontend IA names and do not represent a Workspace Team domain entity.
+azents-web `/w/[handle]` home is an agent-centered entry point inside Workspace. Current UI shows Agent list and subagent rows, and sidebar renders workspace navigation and agent section together for workspace-scoped pages. `WorkspaceHome`, `WorkspaceSidebar`, `AgentSidebarSection`, `AgentTeamCard`, and `SubagentTeamRow` compose this IA. The `AgentTeam*` names are frontend IA names and do not represent a Workspace Team domain entity.
+
+Agent detail routes under `/w/[handle]/agents/[agentId]` use a separate Agent-focused shell. The outer `/w/[handle]` layout remains the membership/auth boundary, but visual layout is split by route groups: workspace pages use the workspace sidebar shell, while Agent detail pages use an Agent rail. The Agent rail contains workspace escape, Agent identity, Chat/Context/Settings navigation, session list, and session creation. Mobile Agent detail pages keep a single-column content area and expose that rail through a drawer opened from the Agent header. The existing chat runtime/workspace panel remains a desktop right-side panel and a mobile secondary drawer.
 
 Membership UI has these routes:
 

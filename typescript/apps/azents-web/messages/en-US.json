@@ -531,6 +531,16 @@
           "public": "Public",
           "private": "Private"
         },
+        "backToWorkspace": "Back to workspace",
+        "openNavigation": "Open agent navigation",
+        "sessions": {
+          "title": "Sessions",
+          "new": "New session",
+          "empty": "No sessions yet.",
+          "primary": "Team primary",
+          "session": "Session",
+          "primaryBadge": "Primary"
+        },
         "inheritModelBadge": "Inherits model from parent",
         "danger": {
           "title": "Danger Zone",

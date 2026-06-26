@@ -3,8 +3,8 @@
 /**
  * Agent detail header + tab navigation.
  *
- * Displays avatar, name, status/visibility badge, model badge, and tabs (chat/settings).
- * On tab change, moves through Next.js router via URL change.
+ * Shows Agent context for the focused shell. The desktop Agent navigation lives
+ * in the Agent rail; mobile uses this header as the drawer entry point.
  */
 
 import {
@@ -19,8 +19,8 @@ import {
 } from "@mantine/core";
 import {
   IconChartBar,
-  IconChevronLeft,
   IconFolderOpen,
+  IconMenu2,
   IconMessageCircle,
   IconSettings,
 } from "@tabler/icons-react";
@@ -29,6 +29,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useMemo } from "react";
 import { formatModelSelectionSummary } from "../model-selection";
 import { AgentAvatar } from "./AgentAvatar";
+import { useAgentFocusedShellMobileNav } from "./AgentFocusedShell";
 import type { ConnectionStatus } from "@/features/chat/types";
 import type { AgentResponse } from "@azents/public-client";
 
@@ -79,6 +80,7 @@ export function AgentHeader({
   const t = useTranslations("workspace.agents.detail");
   const router = useRouter();
   const pathname = usePathname();
+  const mobileNav = useAgentFocusedShellMobileNav();
   const basePath = `/w/${handle}/agents/${agent.id}`;
   const activeTab = useMemo(
     () => resolveActiveTab(pathname, basePath),
@@ -98,14 +100,11 @@ export function AgentHeader({
     },
     [router, basePath],
   );
-  const handleBackToAgentHome = useCallback((): void => {
-    router.push(basePath);
-  }, [router, basePath]);
 
   return (
     <Box
       style={{
-        borderBottom: "1px solid var(--mantine-color-default-border)",
+        borderBottom: "0.0625rem solid var(--mantine-color-default-border)",
         backgroundColor: "var(--mantine-color-body)",
       }}
     >
@@ -114,8 +113,7 @@ export function AgentHeader({
         align="center"
         gap="md"
         px="lg"
-        pt="md"
-        pb="xs"
+        py="sm"
         wrap="nowrap"
       >
         <AgentAvatar
@@ -163,19 +161,16 @@ export function AgentHeader({
         align="center"
         gap="xs"
         px="md"
-        pt="xs"
-        pb={4}
+        py="xs"
         wrap="nowrap"
       >
-        {activeTab === "chat" && (
-          <ActionIcon
-            variant="subtle"
-            onClick={handleBackToAgentHome}
-            aria-label="Back to agent home"
-          >
-            <IconChevronLeft size={18} />
-          </ActionIcon>
-        )}
+        <ActionIcon
+          variant="subtle"
+          onClick={mobileNav?.openAgentNavigation}
+          aria-label={t("openNavigation")}
+        >
+          <IconMenu2 size={rem(18)} />
+        </ActionIcon>
         <AgentAvatar
           name={agent.name}
           avatar={agent.avatar ?? null}
@@ -205,10 +200,11 @@ export function AgentHeader({
         )}
       </Group>
       <Tabs
+        hiddenFrom="lg"
         value={activeTab}
         onChange={handleTabChange}
         variant="default"
-        px={{ base: "sm", sm: "lg" }}
+        px="sm"
       >
         <Tabs.List>
           <Tabs.Tab value="chat" leftSection={<IconMessageCircle size={14} />}>
