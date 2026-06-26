@@ -48,12 +48,22 @@ interface SessionRawEventsViewProps {
   context: SessionContextResponse;
 }
 
-const BREAKDOWN_COLORS: Record<string, string> = {
-  system: "violet",
-  user: "green",
-  assistant: "blue",
-  tool: "orange",
-  other: "gray",
+interface BreakdownColor {
+  background: string;
+  text: string;
+}
+
+const BREAKDOWN_COLORS: Record<string, BreakdownColor> = {
+  system: { background: "#6D5F93", text: "#F8F7FC" },
+  user: { background: "#4F7F68", text: "#F3FAF7" },
+  assistant: { background: "#4F748D", text: "#F3F8FB" },
+  tool: { background: "#8A6A4D", text: "#FBF7F2" },
+  other: { background: "#667085", text: "#F8FAFC" },
+};
+
+const DEFAULT_BREAKDOWN_COLOR: BreakdownColor = {
+  background: "#667085",
+  text: "#F8FAFC",
 };
 
 const PROMPT_SOURCE_COLORS: Record<string, string> = {
@@ -115,6 +125,10 @@ function totalPromptLength(
 
 function sourceColor(source: string): string {
   return PROMPT_SOURCE_COLORS[source] ?? "gray";
+}
+
+function breakdownColor(key: string): BreakdownColor {
+  return BREAKDOWN_COLORS[key] ?? DEFAULT_BREAKDOWN_COLOR;
 }
 
 function metadataEntries(
@@ -184,28 +198,38 @@ export function SessionContextView({
           {context.breakdown.length > 0 ? (
             <>
               <Progress.Root size="xl" radius="xl">
-                {context.breakdown.map((segment) => (
-                  <Progress.Section
-                    key={segment.key}
-                    value={segment.percent}
-                    color={BREAKDOWN_COLORS[segment.key] ?? "gray"}
-                  />
-                ))}
+                {context.breakdown.map((segment) => {
+                  const color = breakdownColor(segment.key);
+                  return (
+                    <Progress.Section
+                      key={segment.key}
+                      value={segment.percent}
+                      color={color.background}
+                      style={{ backgroundColor: color.background }}
+                    />
+                  );
+                })}
               </Progress.Root>
               <Group gap="xs" wrap="wrap">
-                {context.breakdown.map((segment) => (
-                  <Badge
-                    key={segment.key}
-                    color={BREAKDOWN_COLORS[segment.key] ?? "gray"}
-                    variant="light"
-                  >
-                    {t(`breakdown.${segment.key}`)}:{" "}
-                    {t("characters", {
-                      count: segment.tokens.toLocaleString(),
-                    })}{" "}
-                    ({segment.percent}%)
-                  </Badge>
-                ))}
+                {context.breakdown.map((segment) => {
+                  const color = breakdownColor(segment.key);
+                  return (
+                    <Badge
+                      key={segment.key}
+                      variant="filled"
+                      style={{
+                        backgroundColor: color.background,
+                        color: color.text,
+                      }}
+                    >
+                      {t(`breakdown.${segment.key}`)}:{" "}
+                      {t("characters", {
+                        count: segment.tokens.toLocaleString(),
+                      })}{" "}
+                      ({segment.percent}%)
+                    </Badge>
+                  );
+                })}
               </Group>
             </>
           ) : (
