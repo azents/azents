@@ -73,7 +73,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-27
-spec_version: 71
+spec_version: 73
 ---
 
 # Conversation & Events
@@ -124,6 +124,7 @@ command, stop intent, or run heartbeat.
 | `title_source` | enum \| null | `manual`, `auto_initial`, or `auto_generated`; null means no title source yet. |
 | `title_generated_at` | timestamptz \| null | Last automatic title generation timestamp. |
 | `title_generation_event_id` | `str(32)` \| null | Event used as the automatic title generation boundary. |
+| `last_user_input_at` | timestamptz | Latest non-reverted `user_message` timestamp used for session list ordering; initialized to `created_at` until user input exists. |
 | `end_reason` | enum \| null | Archive reason |
 | `model_input_head_event_id` | `str(32)` \| null | Event model-input head after append-only compaction |
 | `run_state` / `run_heartbeat_at` | enum / timestamptz | Session execution recovery state |
@@ -133,7 +134,10 @@ command, stop intent, or run heartbeat.
 Only one team primary session may exist per agent in the current product state. Additional active
 non-primary team sessions may exist under the same agent with `primary_kind = null`.
 `GET /chat/v1/agents/{agent_id}/sessions` lists active agent sessions with the team primary session
-first and the remaining sessions newest-updated first. Each session item includes `run_state` so
+first and the remaining sessions ordered by persisted `last_user_input_at`, the timestamp of the
+most recent non-reverted `user_message` event or the session creation time when no user input exists.
+This lets newly created sessions appear naturally in the active list before their first message. Each
+session item includes `run_state` so
 azents-web can mark running sessions in the Agent rail session list. `POST /chat/v1/agents/{agent_id}/sessions`
 creates an active non-primary team session and snapshot-copies registered projects from the team
 primary session. Pending project registration requests are not copied. azents-web Agent detail routes

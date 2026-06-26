@@ -106,6 +106,13 @@ class RDBAgentSession(RDBModel):
 
     IX_WORKSPACE_ID = sa.Index("ix_agent_sessions_workspace_id", "workspace_id")
     IX_AGENT_ID = sa.Index("ix_agent_sessions_agent_id", "agent_id")
+    IX_AGENT_ACTIVE_LAST_USER_INPUT = sa.Index(
+        "ix_agent_sessions_agent_active_last_user_input",
+        "agent_id",
+        "primary_kind",
+        "last_user_input_at",
+        postgresql_where=sa.text("status = 'active'"),
+    )
     IX_MODEL_INPUT_HEAD_EVENT_ID = sa.Index(
         "ix_agent_sessions_model_input_head_event_id",
         "model_input_head_event_id",
@@ -182,6 +189,12 @@ class RDBAgentSession(RDBModel):
         sa.String(32),
         nullable=True,
         default=None,
+    )
+    last_user_input_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        server_default=sa.func.now(),
+        nullable=False,
     )
 
     end_reason: Mapped[AgentSessionEndReason | None] = mapped_column(
@@ -289,6 +302,7 @@ class RDBAgentSession(RDBModel):
     __table_args__ = (
         IX_WORKSPACE_ID,
         IX_AGENT_ID,
+        IX_AGENT_ACTIVE_LAST_USER_INPUT,
         IX_MODEL_INPUT_HEAD_EVENT_ID,
         IX_PENDING_COMMAND,
         IX_STOP_REQUESTED_AT,

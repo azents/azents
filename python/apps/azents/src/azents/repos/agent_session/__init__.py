@@ -72,7 +72,11 @@ class AgentSessionRepository:
         session: AsyncSession,
         agent_id: str,
     ) -> list[AgentSession]:
-        """Fetch active Agent sessions with team primary first."""
+        """Fetch active Agent sessions with team primary first.
+
+        Non-primary sessions are ordered by their most recent user-authored input,
+        not by assistant/tool/system activity.
+        """
         primary_order = sa.case(
             (RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY, 0),
             else_=1,
@@ -83,7 +87,11 @@ class AgentSessionRepository:
                 RDBAgentSession.agent_id == agent_id,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
-            .order_by(primary_order, RDBAgentSession.updated_at.desc())
+            .order_by(
+                primary_order,
+                RDBAgentSession.last_user_input_at.desc(),
+                RDBAgentSession.updated_at.desc(),
+            )
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
@@ -603,6 +611,7 @@ class AgentSessionRepository:
             title_source=rdb.title_source,
             title_generated_at=rdb.title_generated_at,
             title_generation_event_id=rdb.title_generation_event_id,
+            last_user_input_at=rdb.last_user_input_at,
             end_reason=rdb.end_reason,
             model_input_head_event_id=rdb.model_input_head_event_id,
             started_at=rdb.started_at,

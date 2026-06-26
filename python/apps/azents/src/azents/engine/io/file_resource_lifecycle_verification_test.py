@@ -150,6 +150,7 @@ class _FakeAgentSessionRepository:
             title_source=None,
             title_generated_at=None,
             title_generation_event_id=None,
+            last_user_input_at=_NOW,
             end_reason=None,
             started_at=_NOW,
             ended_at=None,
