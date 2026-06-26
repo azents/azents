@@ -195,12 +195,19 @@ Expose explicit additional team sessions under one agent.
 
 ### Scope
 
+Phase 7-A prepares the backend contract before changing the Web session picker UI:
+
 - Add agent-scoped team session list API with primary first.
 - Add create team session API.
 - On create, snapshot-copy the team primary session's projects into the new session.
-- Add Team sessions list UI.
-- Add New team session UI.
-- Explicit session write/history/live APIs continue to target the selected session.
+- Keep session naming/renaming, deletion, private sessions, and session-scoped project editing out of scope.
+- Keep explicit session write/history/live APIs targeting the selected session.
+
+The follow-up UI slice can then add:
+
+- Team sessions list UI.
+- New team session UI.
+- URL-backed session switching through the canonical session route.
 
 ### Exit Criteria
 
@@ -209,25 +216,16 @@ Expose explicit additional team sessions under one agent.
 - Creating a new team session copies primary projects once.
 - Writing to a non-primary session does not affect team primary.
 
-## Phase 8: External shared routing to team primary
+## Deferred Future Phases
 
-### Goal
+### External shared routing to team primary
 
-Make shared external inputs target the team primary session by default.
+Future work:
 
-### Scope
-
+- Add shared external inbound integrations when the product has a concrete shared external input path.
 - Shared external events resolve the target session through team primary lookup.
 - Do not expose arbitrary channel/session mapping UI.
 - Do not route private inputs yet.
-
-### Exit Criteria
-
-- Shared external channel inputs do not create hidden per-channel sessions by default.
-- Shared external inputs do not depend on runtime current-session state.
-- Team primary remains the continuity-preserving external workflow target.
-
-## Deferred Future Phases
 
 ### Private sessions
 
