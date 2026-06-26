@@ -7700,6 +7700,10 @@
             ],
             "description": "Primary session role"
           },
+          "run_state": {
+            "$ref": "#/components/schemas/AgentSessionRunState",
+            "description": "Session execution state"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -7718,6 +7722,7 @@
           "id",
           "agent_id",
           "status",
+          "run_state",
           "created_at",
           "updated_at"
         ],

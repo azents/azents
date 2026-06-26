@@ -61,9 +61,15 @@ export function AgentFocusedShell({
     [pathname, agent.id],
   );
 
-  const sessionsQuery = trpc.chat.listAgentSessions.useQuery({
-    agentId: agent.id,
-  });
+  const sessionsQuery = trpc.chat.listAgentSessions.useQuery(
+    {
+      agentId: agent.id,
+    },
+    {
+      refetchInterval: 5_000,
+      staleTime: 0,
+    },
+  );
   const createSessionMutation = trpc.chat.createTeamAgentSession.useMutation({
     onSuccess: (session) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });

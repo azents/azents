@@ -124,7 +124,8 @@ command, stop intent, or run heartbeat.
 Only one team primary session may exist per agent in the current product state. Additional active
 non-primary team sessions may exist under the same agent with `primary_kind = null`.
 `GET /chat/v1/agents/{agent_id}/sessions` lists active agent sessions with the team primary session
-first and the remaining sessions newest-updated first. `POST /chat/v1/agents/{agent_id}/sessions`
+first and the remaining sessions newest-updated first. Each session item includes `run_state` so
+azents-web can mark running sessions in the Agent rail session list. `POST /chat/v1/agents/{agent_id}/sessions`
 creates an active non-primary team session and snapshot-copies registered projects from the team
 primary session. Pending project registration requests are not copied. azents-web Agent detail routes
 surface this list in the Agent rail and navigate selected sessions through

@@ -540,7 +540,8 @@
           "empty": "まだセッションがありません。",
           "primary": "チームプライマリ",
           "session": "セッション",
-          "primaryBadge": "プライマリ"
+          "primaryBadge": "プライマリ",
+          "running": "実行中…"
         },
         "inheritModelBadge": "親のモデルを継承",
         "danger": {

@@ -240,6 +240,11 @@ export function AgentFocusedSidebar({
                         ? t("sessions.primary")
                         : t("sessions.session")}
                     </Text>
+                    {session.run_state === "running" && (
+                      <Tooltip label={t("sessions.running")}>
+                        <Loader size="xs" aria-label={t("sessions.running")} />
+                      </Tooltip>
+                    )}
                     {isPrimary && (
                       <Badge size="xs" variant="light">
                         {t("sessions.primaryBadge")}
