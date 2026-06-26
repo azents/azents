@@ -9,6 +9,7 @@ import {
   agentRuntimeV1StartAgentRuntime,
   agentRuntimeV1StopAgentRuntime,
   chatV1ApproveAgentProjectRegistrationRequest,
+  chatV1ArchiveAgentSession,
   chatV1CreateCommand,
   chatV1CreateMessage,
   chatV1CreateTeamAgentSession,
@@ -143,6 +144,29 @@ export const chatRouter = router({
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  archiveAgentSession: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await chatV1ArchiveAgentSession({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          throwOnError: true,
+        });
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

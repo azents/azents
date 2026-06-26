@@ -79,6 +79,15 @@ export function AgentFocusedShell({
     },
   });
   const updateTitleMutation = trpc.chat.updateAgentSessionTitle.useMutation();
+  const archiveSessionMutation = trpc.chat.archiveAgentSession.useMutation({
+    onSuccess: (_result, variables) => {
+      void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      closeDrawer();
+      if (activeSessionId === variables.sessionId) {
+        router.replace(`/w/${handle}/agents/${agent.id}/chat`);
+      }
+    },
+  });
 
   const handleCreateSession = useCallback((): void => {
     createSessionMutation.mutate({ agentId: agent.id });
@@ -103,6 +112,13 @@ export function AgentFocusedShell({
       utils.chat.getAgentSession,
       utils.chat.listAgentSessions,
     ],
+  );
+
+  const handleArchiveSession = useCallback(
+    (sessionId: string): void => {
+      archiveSessionMutation.mutate({ agentId: agent.id, sessionId });
+    },
+    [archiveSessionMutation, agent.id],
   );
 
   const mobileNavContext = useMemo(
@@ -133,8 +149,12 @@ export function AgentFocusedShell({
               ? updateTitleMutation.variables.sessionId
               : null
           }
+          archivingSessionId={
+            archiveSessionMutation.variables?.sessionId ?? null
+          }
           onCreateSession={handleCreateSession}
           onRenameSession={handleRenameSession}
+          onArchiveSession={handleArchiveSession}
           onNavigate={closeDrawer}
         />
       </Drawer>
@@ -161,8 +181,12 @@ export function AgentFocusedShell({
                 ? updateTitleMutation.variables.sessionId
                 : null
             }
+            archivingSessionId={
+              archiveSessionMutation.variables?.sessionId ?? null
+            }
             onCreateSession={handleCreateSession}
             onRenameSession={handleRenameSession}
+            onArchiveSession={handleArchiveSession}
           />
         </Box>
         <Box

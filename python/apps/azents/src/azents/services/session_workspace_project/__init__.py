@@ -11,6 +11,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionStatus,
     RuntimeRunnerState,
     SessionWorkspaceProjectRegistrationRequestStatus,
 )
@@ -563,7 +564,11 @@ class SessionWorkspaceProjectService:
             session,
             session_id,
         )
-        if agent_session is None or agent_session.agent_id != agent_id:
+        if (
+            agent_session is None
+            or agent_session.agent_id != agent_id
+            or agent_session.status != AgentSessionStatus.ACTIVE
+        ):
             return Failure(ProjectAccessDenied())
         workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
             session,

@@ -8,7 +8,12 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import EventKind
+from azents.core.enums import (
+    AgentSessionPrimaryKind,
+    AgentSessionRunState,
+    AgentSessionStatus,
+    EventKind,
+)
 from azents.engine.events.types import Event
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
@@ -28,6 +33,8 @@ from azents.services.input_buffer import InputBufferService
 
 from .data import (
     AgentNotFound,
+    ArchiveSessionError,
+    ArchiveSessionResult,
     ChatLiveRunState,
     ChatLiveStateSnapshot,
     DeleteInputBufferError,
@@ -37,6 +44,8 @@ from .data import (
     InvalidSessionTitle,
     NotWorkspaceMember,
     PaginatedEvents,
+    PrimarySessionArchiveBlocked,
+    RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionAccessError,
     SessionNotFound,
@@ -130,7 +139,10 @@ class ChatSessionService:
             agent_session = await self.agent_session_repository.get_by_id(
                 session, session_id
             )
-            if agent_session is None:
+            if (
+                agent_session is None
+                or agent_session.status != AgentSessionStatus.ACTIVE
+            ):
                 return Failure(SessionNotFound())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
@@ -156,7 +168,11 @@ class ChatSessionService:
                 session,
                 session_id,
             )
-            if agent_session is None or agent_session.agent_id != agent_id:
+            if (
+                agent_session is None
+                or agent_session.agent_id != agent_id
+                or agent_session.status != AgentSessionStatus.ACTIVE
+            ):
                 return Failure(SessionNotFound())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
@@ -251,6 +267,46 @@ class ChatSessionService:
             await session.commit()
             return Success(created)
 
+    async def archive_agent_session(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[ArchiveSessionResult, ArchiveSessionError]:
+        """Archive an active non-primary AgentSession after access validation."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if (
+                agent_session is None
+                or agent_session.agent_id != agent_id
+                or agent_session.status != AgentSessionStatus.ACTIVE
+            ):
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent_session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionAccessDenied())
+            if agent_session.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY:
+                return Failure(PrimarySessionArchiveBlocked())
+            if agent_session.run_state == AgentSessionRunState.RUNNING:
+                return Failure(RunningSessionArchiveBlocked())
+            await self.agent_session_repository.archive(
+                session,
+                session_id,
+                ended_at=datetime.datetime.now(datetime.UTC),
+            )
+            await session.commit()
+            return Success(ArchiveSessionResult(archived_session_id=session_id))
+
     async def update_session_title(
         self,
         *,
@@ -279,7 +335,10 @@ class ChatSessionService:
                 session,
                 session_id,
             )
-            if agent_session is None:
+            if (
+                agent_session is None
+                or agent_session.status != AgentSessionStatus.ACTIVE
+            ):
                 return Failure(SessionNotFound())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
@@ -337,7 +396,10 @@ class ChatSessionService:
             agent_session = await self.agent_session_repository.get_by_id(
                 session, session_id
             )
-            if agent_session is None:
+            if (
+                agent_session is None
+                or agent_session.status != AgentSessionStatus.ACTIVE
+            ):
                 return Failure(SessionNotFound())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
@@ -376,7 +438,10 @@ class ChatSessionService:
             agent_session = await self.agent_session_repository.get_by_id(
                 session, session_id
             )
-            if agent_session is None:
+            if (
+                agent_session is None
+                or agent_session.status != AgentSessionStatus.ACTIVE
+            ):
                 return Failure(SessionNotFound())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(

@@ -128,8 +128,9 @@ _14 documents_
 - [ADR-0076: Session-Owned Project Registry](adr/0076-session-owned-project-registry.md)
 - [ADR-0077: Session-Owned REST Write Idempotency](adr/0077-session-owned-rest-write-idempotency.md)
 - [ADR-0078: Agent-Focused Navigation Information Architecture](adr/0078-agent-focused-navigation-ia.md)
+- [ADR-0079: AgentSession Archive Policy](adr/0079-agent-session-archive-policy.md)
 
-_79 documents_
+_80 documents_
 
 ## Issues (Bug Tracking)
 
@@ -159,4 +160,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 307
+- Total documents: 308

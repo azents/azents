@@ -548,7 +548,11 @@
           "renameLabel": "Session title",
           "clearTitle": "Clear title",
           "cancel": "Cancel",
-          "save": "Save"
+          "save": "Save",
+          "archive": "Archiver",
+          "archiveConfirmTitle": "Archiver la session ?",
+          "archiveConfirmDescription": "Cette session sera retirée de la liste des sessions actives. Les données de conversation sont conservées.",
+          "archiveCancel": "Annuler"
         },
         "inheritModelBadge": "Hérite du parent",
         "danger": {

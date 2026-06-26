@@ -548,7 +548,11 @@
           "renameLabel": "Session title",
           "clearTitle": "Clear title",
           "cancel": "Cancel",
-          "save": "Save"
+          "save": "Save",
+          "archive": "アーカイブ",
+          "archiveConfirmTitle": "セッションをアーカイブしますか？",
+          "archiveConfirmDescription": "このセッションはアクティブなセッション一覧から削除されます。会話データは保持されます。",
+          "archiveCancel": "キャンセル"
         },
         "inheritModelBadge": "親のモデルを継承",
         "danger": {

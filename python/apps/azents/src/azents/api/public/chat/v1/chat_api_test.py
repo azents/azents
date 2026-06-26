@@ -6,7 +6,7 @@ from typing import cast
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
-from azcommon.result import Failure, Success
+from azcommon.result import Failure, Result, Success
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -15,6 +15,7 @@ from azents.api.public.chat.v1 import (
     _write_command_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_edit_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
+    archive_agent_session,
     create_team_agent_session,
     delete_input_buffer,
     get_agent_session,
@@ -65,10 +66,13 @@ from azents.repos.chat_write_request.data import ChatWriteRequest
 from azents.repos.input_buffer.data import InputBuffer
 from azents.services.agent_session_input import BufferedAgentSessionInputResult
 from azents.services.chat.data import (
+    ArchiveSessionResult,
     ChatLiveRunState,
     ChatLiveStateSnapshot,
     InvalidSessionTitle,
     PaginatedEvents,
+    PrimarySessionArchiveBlocked,
+    RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionNotFound,
     UpdateGoalResult,
@@ -571,8 +575,16 @@ class _AgentSessionRouteChatService:
             updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
         )
         self.title: str | None = None
-        self.result: Success[AgentSession] | Failure[SessionNotFound] = Success(
+        self.result: Result[AgentSession, SessionNotFound] = Success(
             self.primary_session
+        )
+        self.archive_result: Result[
+            ArchiveSessionResult,
+            SessionNotFound
+            | PrimarySessionArchiveBlocked
+            | RunningSessionArchiveBlocked,
+        ] = Success(
+            ArchiveSessionResult(archived_session_id="2123456789abcdef0123456789abcdef")
         )
 
     async def get_team_primary_session(
@@ -580,7 +592,7 @@ class _AgentSessionRouteChatService:
         *,
         agent_id: str,
         user_id: str,
-    ) -> Success[AgentSession] | Failure[SessionNotFound]:
+    ) -> Result[AgentSession, SessionNotFound]:
         """Return team primary session lookup result."""
         del user_id
         self.agent_id = agent_id
@@ -591,7 +603,7 @@ class _AgentSessionRouteChatService:
         *,
         agent_id: str,
         user_id: str,
-    ) -> Success[list[AgentSession]] | Failure[SessionNotFound]:
+    ) -> Result[list[AgentSession], SessionNotFound]:
         """Return agent session list result."""
         del user_id
         self.agent_id = agent_id
@@ -602,7 +614,7 @@ class _AgentSessionRouteChatService:
         *,
         agent_id: str,
         user_id: str,
-    ) -> Success[AgentSession] | Failure[SessionNotFound]:
+    ) -> Result[AgentSession, SessionNotFound]:
         """Return created team session result."""
         del user_id
         self.agent_id = agent_id
@@ -614,12 +626,28 @@ class _AgentSessionRouteChatService:
         agent_id: str,
         session_id: str,
         user_id: str,
-    ) -> Success[AgentSession] | Failure[SessionNotFound]:
+    ) -> Result[AgentSession, SessionNotFound]:
         """Return agent/session lookup result."""
         del user_id
         self.agent_id = agent_id
         self.session_id = session_id
         return self.result
+
+    async def archive_agent_session(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[
+        ArchiveSessionResult,
+        SessionNotFound | PrimarySessionArchiveBlocked | RunningSessionArchiveBlocked,
+    ]:
+        """Return archive operation result."""
+        del user_id
+        self.agent_id = agent_id
+        self.session_id = session_id
+        return self.archive_result
 
     async def update_session_title(
         self,
@@ -627,7 +655,7 @@ class _AgentSessionRouteChatService:
         session_id: str,
         user_id: str,
         title: str | None,
-    ) -> Success[AgentSession] | Failure[SessionNotFound | InvalidSessionTitle]:
+    ) -> Result[AgentSession, SessionNotFound | InvalidSessionTitle]:
         """Return title update result."""
         del user_id
         self.session_id = session_id
@@ -702,6 +730,59 @@ class TestAgentSessionRoutes:
         assert response.title == "Design review"
         assert chat_service.session_id == "1123456789abcdef0123456789abcdef"
         assert chat_service.title == "Design review"
+
+    async def test_archive_agent_session_returns_no_content(self) -> None:
+        """Archive route returns no content for an allowed non-primary session."""
+        chat_service = _AgentSessionRouteChatService()
+
+        response = await archive_agent_session(
+            agent_id="agent-1",
+            session_id="2123456789abcdef0123456789abcdef",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+        )
+
+        assert response is None
+        assert chat_service.agent_id == "agent-1"
+        assert chat_service.session_id == "2123456789abcdef0123456789abcdef"
+
+    async def test_archive_primary_session_returns_conflict(self) -> None:
+        """Team primary session archive attempts are blocked."""
+        chat_service = _AgentSessionRouteChatService()
+        chat_service.archive_result = Failure(PrimarySessionArchiveBlocked())
+
+        try:
+            await archive_agent_session(
+                agent_id="agent-1",
+                session_id="1123456789abcdef0123456789abcdef",
+                current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            )
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 409
+            assert getattr(exc, "detail", None) == (
+                "Team primary session cannot be archived."
+            )
+        else:
+            raise AssertionError("Expected HTTPException")
+
+    async def test_archive_running_session_returns_conflict(self) -> None:
+        """Running session archive attempts are blocked."""
+        chat_service = _AgentSessionRouteChatService()
+        chat_service.archive_result = Failure(RunningSessionArchiveBlocked())
+
+        try:
+            await archive_agent_session(
+                agent_id="agent-1",
+                session_id="2123456789abcdef0123456789abcdef",
+                current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            )
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 409
+            assert getattr(exc, "detail", None) == "Running session cannot be archived."
+        else:
+            raise AssertionError("Expected HTTPException")
 
     async def test_update_agent_session_title_rejects_invalid_title(self) -> None:
         """Session title update route maps service validation to HTTP 400."""

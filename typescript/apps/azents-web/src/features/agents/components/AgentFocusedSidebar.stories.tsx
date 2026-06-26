@@ -82,6 +82,7 @@ const meta = {
     activeSessionId: "sess_primary",
     onCreateSession: () => {},
     onRenameSession: async () => {},
+    onArchiveSession: () => {},
   },
 } satisfies Meta<typeof AgentFocusedSidebar>;
 

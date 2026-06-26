@@ -33,6 +33,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_archive_agent_session(self) -> None:
+        """Test case for chat_v1_archive_agent_session
+
+        Archive Agent Session
+        """
+        pass
+
     def test_chat_v1_create_command(self) -> None:
         """Test case for chat_v1_create_command
 

@@ -6,14 +6,14 @@ Conversation session response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Session ID | 
-**agent_id** | **str** | Agent ID | 
-**title** | **str** |  | 
-**status** | [**AgentSessionStatus**](AgentSessionStatus.md) | Session status | 
-**primary_kind** | [**AgentSessionPrimaryKind**](AgentSessionPrimaryKind.md) |  | [optional] 
-**run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Session execution state | 
-**created_at** | **datetime** | Created time | 
-**updated_at** | **datetime** | Updated time | 
+**id** | **str** | Session ID |
+**agent_id** | **str** | Agent ID |
+**title** | **str** |  |
+**status** | [**AgentSessionStatus**](AgentSessionStatus.md) | Session status |
+**primary_kind** | [**AgentSessionPrimaryKind**](AgentSessionPrimaryKind.md) |  | [optional]
+**run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Session execution state |
+**created_at** | **datetime** | Created time |
+**updated_at** | **datetime** | Updated time |
 
 ## Example
 

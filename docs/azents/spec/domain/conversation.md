@@ -58,6 +58,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/team-primary-session
   - /chat/v1/agents/{agent_id}/sessions
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/archive
   - /chat/v1/sessions/{session_id}/title
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/context
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects
@@ -143,6 +144,19 @@ string | null }`: non-null titles are trimmed and must be non-empty and at most 
 explicit `null` clears the custom title. The server does not generate automatic titles in this phase.
 Clients display the custom title when present and otherwise fall back to a contextual label such as
 "Team primary" or "Session".
+
+`POST /chat/v1/agents/{agent_id}/sessions/{session_id}/archive` archives an active non-primary
+AgentSession. Archive is a soft lifecycle transition: durable transcript data, run rows, exchange
+files, and project registry rows remain, while the session is removed from active session lists.
+Team-primary AgentSessions cannot be archived because they are the stable default conversation anchor
+for an Agent. Running sessions cannot be archived; users must stop the run before archiving. Archived
+sessions are not part of the current active session UI/API surface.
+
+The Agent rail shows session actions in a row action menu. Rename remains available from that menu
+when the title mutation is wired. Archive appears in the same menu only for non-primary sessions that
+are not running and opens a confirmation dialog before calling the archive API. If the archived
+session is currently selected, the UI returns to `/w/{handle}/agents/{agent_id}/chat`, which resolves
+to the team-primary session.
 
 Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
 projections, broker wake-up, and the REST response use that same session id. Runtime current/active
