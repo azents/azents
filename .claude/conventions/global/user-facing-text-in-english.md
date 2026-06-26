@@ -4,10 +4,10 @@ title: "All log lines, error messages, API response messages, and WebSocket text
 
 # User-Facing Text in English
 
-Korean is for the source code; English is for anything that crosses the runtime boundary. End users and operators may not read Korean.
+English is required for source code and for anything that crosses the runtime boundary. End users and operators may not read Korean.
 
 - ALWAYS write log messages (`logger.info/warning/error/exception`), API error responses, and WebSocket payload text in English
-- Korean stays inside comments and docstrings only — see `comments-and-docstrings-in-korean.md`
+- Comments and docstrings are also English — see `comments-and-docstrings-in-english.md`
 
 ## Bad
 
