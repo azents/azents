@@ -5,3 +5,17 @@
 .sessionItem :global(.mantine-NavLink-body) {
   min-width: 0;
 }
+
+.agentInfoLink {
+  border-radius: var(--mantine-radius-md);
+  padding: var(--mantine-spacing-xs);
+}
+
+.agentInfoLink:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.agentInfoLinkActive {
+  background: var(--mantine-primary-color-light);
+  color: var(--mantine-primary-color-light-color);
+}

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Agent detail Settings tab UI.
+ * Agent settings UI.
  *
  * First implementation: render existing `AgentForm` in embedded mode + Danger section at bottom.
  * Design 7-section subnav will be refined in follow-up PR.
@@ -21,7 +21,7 @@ import type { AgentFormValues } from "../schemas";
 import type { AdminListState, AgentFormState, MutationState } from "../types";
 import type { AgentAdminResponse, AgentResponse } from "@azents/public-client";
 
-interface AgentSettingsTabProps {
+interface AgentSettingsProps {
   handle: string;
   agent: AgentResponse;
   formState: AgentFormState;
@@ -38,9 +38,7 @@ interface AgentSettingsTabProps {
   onRemoveAdmin: (admin: AgentAdminResponse) => void;
 }
 
-export function AgentSettingsTab(
-  props: AgentSettingsTabProps,
-): React.ReactElement {
+export function AgentSettings(props: AgentSettingsProps): React.ReactElement {
   const { handle, agent, ...formProps } = props;
 
   return (
