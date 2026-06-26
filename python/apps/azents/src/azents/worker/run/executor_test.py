@@ -134,6 +134,14 @@ class _AgentSessionRepository:
         return False
 
 
+class _SessionTitleService:
+    """SessionTitleService test double."""
+
+    async def generate_after_first_run(self, session_id: str) -> None:
+        """Do not generate titles in executor tests."""
+        del session_id
+
+
 class _LiveEventProjector:
     """LiveEventProjector test double."""
 
@@ -218,7 +226,7 @@ def _executor(
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
         input_buffer_service=cast(InputBufferService, object()),
-        session_title_service=cast(SessionTitleService, object()),
+        session_title_service=cast(SessionTitleService, _SessionTitleService()),
         live_event_projector=cast(LiveEventProjector, _LiveEventProjector()),
         user_stop_finalizer=cast(UserStopFinalizer, object()),
         background_registry=cast(BackgroundTaskRegistry, object()),
