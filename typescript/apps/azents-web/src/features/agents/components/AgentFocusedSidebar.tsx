@@ -29,6 +29,7 @@ import {
 } from "@mantine/core";
 import {
   IconAlertCircle,
+  IconArchive,
   IconBrightnessAuto,
   IconCheck,
   IconChevronLeft,
@@ -65,8 +66,10 @@ interface AgentFocusedSidebarProps {
   activeSessionId?: string | null;
   creatingSession?: boolean;
   renamingSessionId?: string | null;
+  archivingSessionId?: string | null;
   onCreateSession?: () => void;
   onRenameSession?: (sessionId: string, title: string | null) => Promise<void>;
+  onArchiveSession?: (sessionId: string) => void;
   onNavigate?: () => void;
 }
 
@@ -117,8 +120,10 @@ export function AgentFocusedSidebar({
   activeSessionId = null,
   creatingSession = false,
   renamingSessionId = null,
+  archivingSessionId = null,
   onCreateSession,
   onRenameSession,
+  onArchiveSession,
   onNavigate,
 }: AgentFocusedSidebarProps): React.ReactElement {
   const t = useTranslations("workspace.agents.detail");
@@ -138,6 +143,8 @@ export function AgentFocusedSidebar({
   const [editingSession, setEditingSession] =
     useState<AgentSessionResponse | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [archiveTarget, setArchiveTarget] =
+    useState<AgentSessionResponse | null>(null);
 
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {
@@ -192,6 +199,14 @@ export function AgentFocusedSidebar({
     handleCloseRename();
   }, [editingSession, handleCloseRename, onRenameSession]);
 
+  const handleConfirmArchive = useCallback((): void => {
+    if (archiveTarget === null) {
+      return;
+    }
+    onArchiveSession?.(archiveTarget.id);
+    setArchiveTarget(null);
+  }, [archiveTarget, onArchiveSession]);
+
   const renameBusy =
     editingSession !== null && renamingSessionId === editingSession.id;
 
@@ -239,6 +254,32 @@ export function AgentFocusedSidebar({
                 {t("sessions.save")}
               </Button>
             </Group>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={archiveTarget !== null}
+        onClose={() => setArchiveTarget(null)}
+        title={t("sessions.archiveConfirmTitle")}
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm">{t("sessions.archiveConfirmDescription")}</Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setArchiveTarget(null)}>
+              {t("sessions.archiveCancel")}
+            </Button>
+            <Button
+              color="red"
+              loading={
+                archiveTarget !== null &&
+                archivingSessionId === archiveTarget.id
+              }
+              onClick={handleConfirmArchive}
+            >
+              {t("sessions.archive")}
+            </Button>
           </Group>
         </Stack>
       </Modal>
@@ -350,6 +391,11 @@ export function AgentFocusedSidebar({
             {sessions.map((session) => {
               const href = `${basePath}/sessions/${session.id}`;
               const isPrimary = session.primary_kind === "team_primary";
+              const running = session.run_state === "running";
+              const archiving = archivingSessionId === session.id;
+              const showActions =
+                onRenameSession != null ||
+                (!running && !isPrimary && onArchiveSession != null);
               return (
                 <NavLink
                   key={session.id}
@@ -361,7 +407,7 @@ export function AgentFocusedSidebar({
                       <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
                         {getSessionDisplayTitle(session, t)}
                       </Text>
-                      {session.run_state === "running" && (
+                      {running && (
                         <Tooltip label={t("sessions.running")}>
                           <Loader
                             size="xs"
@@ -374,7 +420,7 @@ export function AgentFocusedSidebar({
                           {t("sessions.primaryBadge")}
                         </Badge>
                       )}
-                      {onRenameSession && (
+                      {showActions && (
                         <Menu
                           shadow="md"
                           width={rem(160)}
@@ -387,7 +433,9 @@ export function AgentFocusedSidebar({
                               variant="subtle"
                               size="sm"
                               aria-label={t("sessions.actions")}
-                              loading={renamingSessionId === session.id}
+                              loading={
+                                renamingSessionId === session.id || archiving
+                              }
                               onClick={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
@@ -397,16 +445,31 @@ export function AgentFocusedSidebar({
                             </ActionIcon>
                           </Menu.Target>
                           <Menu.Dropdown>
-                            <Menu.Item
-                              leftSection={<IconPencil size={rem(16)} />}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                handleOpenRename(session);
-                              }}
-                            >
-                              {t("sessions.rename")}
-                            </Menu.Item>
+                            {onRenameSession && (
+                              <Menu.Item
+                                leftSection={<IconPencil size={rem(16)} />}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  handleOpenRename(session);
+                                }}
+                              >
+                                {t("sessions.rename")}
+                              </Menu.Item>
+                            )}
+                            {!running && !isPrimary && onArchiveSession && (
+                              <Menu.Item
+                                color="red"
+                                leftSection={<IconArchive size={rem(16)} />}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setArchiveTarget(session);
+                                }}
+                              >
+                                {t("sessions.archive")}
+                              </Menu.Item>
+                            )}
                           </Menu.Dropdown>
                         </Menu>
                       )}

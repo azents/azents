@@ -53,6 +53,13 @@ class UpdateGoalResult:
     event: Event | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class ArchiveSessionResult:
+    """AgentSession archive result."""
+
+    archived_session_id: str
+
+
 # ---------------------------------------------------------------------------
 # Input
 # ---------------------------------------------------------------------------
@@ -97,6 +104,16 @@ class InvalidGoalStatusTransition:
 
 
 @dataclasses.dataclass(frozen=True)
+class PrimarySessionArchiveBlocked:
+    """Team primary AgentSession archive is blocked."""
+
+
+@dataclasses.dataclass(frozen=True)
+class RunningSessionArchiveBlocked:
+    """Running AgentSession archive is blocked."""
+
+
+@dataclasses.dataclass(frozen=True)
 class InvalidSessionTitle:
     """Invalid AgentSession title."""
 
@@ -108,4 +125,10 @@ SessionAccessError = SessionNotFound | SessionAccessDenied
 DeleteSessionError = SessionAccessDenied
 DeleteInputBufferError = SessionNotFound | SessionAccessDenied
 UpdateGoalError = SessionNotFound | SessionAccessDenied | InvalidGoalStatusTransition
+ArchiveSessionError = (
+    SessionNotFound
+    | SessionAccessDenied
+    | PrimarySessionArchiveBlocked
+    | RunningSessionArchiveBlocked
+)
 UpdateSessionTitleError = SessionNotFound | SessionAccessDenied | InvalidSessionTitle

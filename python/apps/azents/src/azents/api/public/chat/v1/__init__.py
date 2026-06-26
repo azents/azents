@@ -71,6 +71,8 @@ from azents.services.chat.data import (
     InvalidGoalStatusTransition,
     InvalidSessionTitle,
     NotWorkspaceMember,
+    PrimarySessionArchiveBlocked,
+    RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionNotFound,
     UpdateGoalStatusInput,
@@ -1078,6 +1080,43 @@ async def create_team_agent_session(
             match error:
                 case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
                     raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/sessions/{session_id}/archive", status_code=204)
+async def archive_agent_session(
+    agent_id: str,
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> None:
+    """Archive a non-primary inactive AgentSession."""
+    _validate_session_id(session_id)
+    result = await chat_service.archive_agent_session(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success():
+            return
+        case Failure(error):
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case PrimarySessionArchiveBlocked():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Team primary session cannot be archived.",
+                    )
+                case RunningSessionArchiveBlocked():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Running session cannot be archived.",
+                    )
                 case _:
                     assert_never(error)
         case _:

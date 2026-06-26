@@ -548,7 +548,11 @@
           "renameLabel": "세션 제목",
           "clearTitle": "제목 지우기",
           "cancel": "취소",
-          "save": "저장"
+          "save": "저장",
+          "archive": "보관",
+          "archiveConfirmTitle": "세션을 보관할까요?",
+          "archiveConfirmDescription": "이 세션은 활성 세션 목록에서 제거됩니다. 대화 데이터는 보존됩니다.",
+          "archiveCancel": "취소"
         },
         "inheritModelBadge": "상위 모델 상속",
         "danger": {

@@ -5,10 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionPrimaryKind,
+    AgentSessionRunState,
+    AgentSessionStatus,
     LLMProvider,
     WorkspaceUserRole,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -31,6 +34,7 @@ from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import ChatSessionService
+from .data import PrimarySessionArchiveBlocked, RunningSessionArchiveBlocked
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -318,3 +322,122 @@ class TestChatSessionTeamSessions:
         ]
         assert sessions[0].primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
         assert sessions[1].primary_kind is None
+
+    async def test_archive_non_primary_session_removes_it_from_active_list(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Archiving a non-primary session hides it from active session lists."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-archive")
+        user_id = await _create_user(rdb_session, "team-session-archive@example.com")
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(rdb_session, workspace_id, "team-archive-agent")
+        primary = await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        assert isinstance(create_result, Success)
+
+        archive_result = await _service(rdb_session_manager).archive_agent_session(
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+            user_id=user_id,
+        )
+
+        assert isinstance(archive_result, Success)
+        assert archive_result.value.archived_session_id == create_result.value.id
+        list_result = await _service(rdb_session_manager).list_agent_sessions(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        assert isinstance(list_result, Success)
+        assert [session.id for session in list_result.value] == [primary.id]
+        async with rdb_session_manager() as verify_session:
+            archived = await AgentSessionRepository().get_by_id(
+                verify_session,
+                create_result.value.id,
+            )
+            assert archived is not None
+            assert archived.status == AgentSessionStatus.ARCHIVED
+            assert archived.ended_at is not None
+
+    async def test_archive_team_primary_session_is_blocked(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Team-primary sessions cannot be archived."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-primary")
+        user_id = await _create_user(rdb_session, "team-session-primary@example.com")
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(rdb_session, workspace_id, "team-primary-agent")
+        primary = await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+
+        archive_result = await _service(rdb_session_manager).archive_agent_session(
+            agent_id=agent_id,
+            session_id=primary.id,
+            user_id=user_id,
+        )
+
+        assert isinstance(archive_result, Failure)
+        assert isinstance(archive_result.error, PrimarySessionArchiveBlocked)
+
+    async def test_archive_running_session_is_blocked(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Running sessions cannot be archived until stopped."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-running")
+        user_id = await _create_user(rdb_session, "team-session-running@example.com")
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(rdb_session, workspace_id, "team-running-agent")
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        assert isinstance(create_result, Success)
+        async with rdb_session_manager() as update_session:
+            rdb = await update_session.get(RDBAgentSession, create_result.value.id)
+            assert rdb is not None
+            rdb.run_state = AgentSessionRunState.RUNNING
+            await update_session.commit()
+
+        archive_result = await _service(rdb_session_manager).archive_agent_session(
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+            user_id=user_id,
+        )
+
+        assert isinstance(archive_result, Failure)
+        assert isinstance(archive_result.error, RunningSessionArchiveBlocked)

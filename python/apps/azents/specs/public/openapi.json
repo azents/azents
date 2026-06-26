@@ -2538,6 +2538,56 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/archive": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Archive Agent Session",
+        "description": "Archive a non-primary inactive AgentSession.",
+        "operationId": "chat_v1_archive_agent_session",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}": {
       "get": {
         "tags": [
