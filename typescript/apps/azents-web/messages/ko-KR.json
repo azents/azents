@@ -531,6 +531,16 @@
           "public": "공개",
           "private": "비공개"
         },
+        "backToWorkspace": "워크스페이스로 돌아가기",
+        "openNavigation": "에이전트 탐색 열기",
+        "sessions": {
+          "title": "세션",
+          "new": "새 세션",
+          "empty": "아직 세션이 없습니다.",
+          "primary": "팀 기본",
+          "session": "세션",
+          "primaryBadge": "기본"
+        },
         "inheritModelBadge": "상위 모델 상속",
         "danger": {
           "title": "위험한 작업",

@@ -35,9 +35,13 @@ export function AppBar({ authStatus }: AppBarProps): React.ReactElement {
   const { opened: sidebarOpened, toggle: toggleSidebar } = useSidebar();
   const isAuthenticated = authStatus === "authenticated";
   const workspaceHandle = extractWorkspaceHandle(pathname);
-  /** Whether page has sidebar (workspace or account settings) */
+  const isAgentDetailRoute = /^\/w\/[^/]+\/agents\/(?!new(?:\/|$))[^/]+/.test(
+    pathname,
+  );
+  /** Whether page has workspace/account sidebar */
   const hasSidebar =
-    workspaceHandle !== null || pathname.startsWith("/account");
+    (workspaceHandle !== null && !isAgentDetailRoute) ||
+    pathname.startsWith("/account");
 
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {

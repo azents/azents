@@ -531,6 +531,16 @@
           "public": "Public",
           "private": "Privé"
         },
+        "backToWorkspace": "Retour à l’espace de travail",
+        "openNavigation": "Ouvrir la navigation de l’agent",
+        "sessions": {
+          "title": "Sessions",
+          "new": "Nouvelle session",
+          "empty": "Aucune session pour le moment.",
+          "primary": "Session principale de l’équipe",
+          "session": "Session",
+          "primaryBadge": "Principal"
+        },
         "inheritModelBadge": "Hérite du parent",
         "danger": {
           "title": "Zone dangereuse",

@@ -531,6 +531,16 @@
           "public": "公開",
           "private": "非公開"
         },
+        "backToWorkspace": "ワークスペースに戻る",
+        "openNavigation": "エージェントナビゲーションを開く",
+        "sessions": {
+          "title": "セッション",
+          "new": "新しいセッション",
+          "empty": "まだセッションがありません。",
+          "primary": "チームプライマリ",
+          "session": "セッション",
+          "primaryBadge": "プライマリ"
+        },
         "inheritModelBadge": "親のモデルを継承",
         "danger": {
           "title": "危険ゾーン",

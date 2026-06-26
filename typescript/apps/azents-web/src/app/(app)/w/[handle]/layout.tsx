@@ -1,13 +1,13 @@
 /**
- * Workspace layout
+ * Workspace route membership gate.
  *
- * Workspace shell with auth check + membership check + sidebar navigation.
- * Non-members are redirected server-side to /join/{handle}.
+ * The visual shell is selected by child route groups:
+ * - (workspace) keeps the workspace-wide navigation shell.
+ * - (agent) uses the Agent-focused shell.
  */
 import { TRPCError } from "@trpc/server";
 import { redirect } from "next/navigation";
 import { LoginRequired } from "@/features/auth/components/LoginRequired";
-import { WorkspaceShell } from "@/features/workspace/components/WorkspaceShell";
 import { getInitialAuthState } from "@/shared/lib/getInitialAuthState";
 import { trpc } from "@/trpc/server";
 
@@ -26,7 +26,6 @@ export default async function WorkspaceLayout({
 
   const { handle } = await params;
 
-  // Server-side membership check — non-member to join request, expired token to login
   try {
     await trpc.workspaceMember.me({ handle });
   } catch (e) {
@@ -41,5 +40,5 @@ export default async function WorkspaceLayout({
     throw e;
   }
 
-  return <WorkspaceShell handle={handle}>{children}</WorkspaceShell>;
+  return <>{children}</>;
 }
