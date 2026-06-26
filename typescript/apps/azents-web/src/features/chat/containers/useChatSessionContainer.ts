@@ -1205,11 +1205,8 @@ export function useChatSessionContainer(
   }, [queryClient]);
 
   useEffect(() => {
-    if (sessionId === null) {
-      return;
-    }
     void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
-  }, [agent.id, sessionId, sessionRunState, utils.chat.listAgentSessions]);
+  }, [agent.id, sessionRunState, utils.chat.listAgentSessions]);
 
   const batchReloadRef = useRef<() => boolean>(() => false);
   const compactionReloadRef = useRef<(continuing: boolean) => void>(() => {});
