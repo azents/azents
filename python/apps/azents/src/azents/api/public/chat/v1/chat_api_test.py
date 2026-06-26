@@ -554,6 +554,7 @@ class _AgentSessionRouteChatService:
             status=AgentSessionStatus.ACTIVE,
             primary_kind=None,
             start_reason=AgentSessionStartReason.INITIAL,
+            run_state=AgentSessionRunState.RUNNING,
             started_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
@@ -641,7 +642,9 @@ class TestAgentSessionRoutes:
             "2123456789abcdef0123456789abcdef",
         ]
         assert response.items[0].primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
+        assert response.items[0].run_state == AgentSessionRunState.IDLE
         assert response.items[1].primary_kind is None
+        assert response.items[1].run_state == AgentSessionRunState.RUNNING
 
     async def test_create_team_agent_session_returns_non_primary_session(self) -> None:
         """Team session creation route returns the created non-primary session."""

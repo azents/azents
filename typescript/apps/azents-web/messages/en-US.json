@@ -540,7 +540,8 @@
           "empty": "No sessions yet.",
           "primary": "Team primary",
           "session": "Session",
-          "primaryBadge": "Primary"
+          "primaryBadge": "Primary",
+          "running": "Running…"
         },
         "inheritModelBadge": "Inherits model from parent",
         "danger": {

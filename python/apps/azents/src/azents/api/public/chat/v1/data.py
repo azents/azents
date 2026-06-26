@@ -955,6 +955,9 @@ class AgentSessionResponse(BaseModel):
         default=None,
         description="Primary session role",
     )
+    run_state: AgentSessionRunState = Field(
+        description="Session execution state",
+    )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 
@@ -966,6 +969,7 @@ class AgentSessionResponse(BaseModel):
             agent_id=session.agent_id,
             status=session.status,
             primary_kind=session.primary_kind,
+            run_state=session.run_state,
             created_at=session.created_at,
             updated_at=session.updated_at,
         )

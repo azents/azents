@@ -540,7 +540,8 @@
           "empty": "Aucune session pour le moment.",
           "primary": "Session principale de l’équipe",
           "session": "Session",
-          "primaryBadge": "Principal"
+          "primaryBadge": "Principal",
+          "running": "En cours…"
         },
         "inheritModelBadge": "Hérite du parent",
         "danger": {
