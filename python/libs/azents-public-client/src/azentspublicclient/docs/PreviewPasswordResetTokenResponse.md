@@ -6,9 +6,9 @@ Password reset token preview response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**valid** | **bool** | Usability flag |
-**email** | **str** |  |
-**expires_at** | **datetime** |  |
+**valid** | **bool** | Usability flag | 
+**email** | **str** |  | 
+**expires_at** | **datetime** |  | 
 
 ## Example
 
@@ -28,3 +28,5 @@ preview_password_reset_token_response_dict = preview_password_reset_token_respon
 preview_password_reset_token_response_from_dict = PreviewPasswordResetTokenResponse.from_dict(preview_password_reset_token_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

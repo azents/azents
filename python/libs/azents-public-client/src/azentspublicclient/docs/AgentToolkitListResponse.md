@@ -6,7 +6,7 @@ AgentToolkit list response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[AgentToolkitResponse]**](AgentToolkitResponse.md) |  |
+**items** | [**List[AgentToolkitResponse]**](AgentToolkitResponse.md) |  | 
 
 ## Example
 
@@ -26,3 +26,5 @@ agent_toolkit_list_response_dict = agent_toolkit_list_response_instance.to_dict(
 agent_toolkit_list_response_from_dict = AgentToolkitListResponse.from_dict(agent_toolkit_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

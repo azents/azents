@@ -6,7 +6,7 @@ Toolkit tool definition list response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ToolkitResponse]**](ToolkitResponse.md) |  |
+**items** | [**List[ToolkitResponse]**](ToolkitResponse.md) |  | 
 
 ## Example
 
@@ -26,3 +26,5 @@ toolkit_list_response_dict = toolkit_list_response_instance.to_dict()
 toolkit_list_response_from_dict = ToolkitListResponse.from_dict(toolkit_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

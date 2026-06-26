@@ -6,7 +6,7 @@ PAT registration request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | **str** | GitHub Personal Access Token |
+**token** | **str** | GitHub Personal Access Token | 
 
 ## Example
 
@@ -26,3 +26,5 @@ register_pat_request_dict = register_pat_request_instance.to_dict()
 register_pat_request_from_dict = RegisterPATRequest.from_dict(register_pat_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

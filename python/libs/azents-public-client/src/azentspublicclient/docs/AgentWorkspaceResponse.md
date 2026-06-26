@@ -6,9 +6,9 @@ Agent Workspace panel bootstrap response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**runtime** | [**AgentWorkspaceRuntimeResponse**](AgentWorkspaceRuntimeResponse.md) | Provider runtime status |
-**workspace** | [**Workspace**](Workspace.md) |  |
-**actions** | [**AgentWorkspaceActionsResponse**](AgentWorkspaceActionsResponse.md) | Runtime lifecycle actions |
+**runtime** | [**AgentWorkspaceRuntimeResponse**](AgentWorkspaceRuntimeResponse.md) | Provider runtime status | 
+**workspace** | [**Workspace**](Workspace.md) |  | 
+**actions** | [**AgentWorkspaceActionsResponse**](AgentWorkspaceActionsResponse.md) | Runtime lifecycle actions | 
 
 ## Example
 
@@ -28,3 +28,5 @@ agent_workspace_response_dict = agent_workspace_response_instance.to_dict()
 agent_workspace_response_from_dict = AgentWorkspaceResponse.from_dict(agent_workspace_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

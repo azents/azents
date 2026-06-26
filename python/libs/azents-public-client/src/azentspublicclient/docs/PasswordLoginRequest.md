@@ -6,8 +6,8 @@ Password login request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Email address |
-**password** | **str** | Password |
+**email** | **str** | Email address | 
+**password** | **str** | Password | 
 
 ## Example
 
@@ -27,3 +27,5 @@ password_login_request_dict = password_login_request_instance.to_dict()
 password_login_request_from_dict = PasswordLoginRequest.from_dict(password_login_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

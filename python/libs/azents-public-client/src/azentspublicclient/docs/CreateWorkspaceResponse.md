@@ -6,7 +6,7 @@ Workspace creation response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**workspace_handle** | **str** | Created Workspace handle |
+**workspace_handle** | **str** | Created Workspace handle | 
 
 ## Example
 
@@ -26,3 +26,5 @@ create_workspace_response_dict = create_workspace_response_instance.to_dict()
 create_workspace_response_from_dict = CreateWorkspaceResponse.from_dict(create_workspace_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

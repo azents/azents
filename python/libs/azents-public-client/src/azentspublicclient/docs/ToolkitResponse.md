@@ -6,11 +6,11 @@ Toolkit tool definition response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**slug** | **str** | Tool slug |
-**name** | **str** | Tool name |
-**description** | **str** | Tool description |
-**config_schema** | **Dict[str, object]** | Configuration JSON Schema |
-**system_prompt** | **str** | Definition-level system prompt |
+**slug** | **str** | Tool slug | 
+**name** | **str** | Tool name | 
+**description** | **str** | Tool description | 
+**config_schema** | **Dict[str, object]** | Configuration JSON Schema | 
+**system_prompt** | **str** | Definition-level system prompt | 
 
 ## Example
 
@@ -30,3 +30,5 @@ toolkit_response_dict = toolkit_response_instance.to_dict()
 toolkit_response_from_dict = ToolkitResponse.from_dict(toolkit_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

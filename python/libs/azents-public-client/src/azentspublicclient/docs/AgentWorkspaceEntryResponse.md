@@ -6,12 +6,12 @@ Agent Workspace directory entry response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | File or directory name |
-**path** | **str** | Agent Workspace absolute path |
-**kind** | **str** | Entry kind |
-**size** | **int** |  | [optional]
-**media_type** | **str** |  | [optional]
-**modified_at** | **datetime** |  | [optional]
+**name** | **str** | File or directory name | 
+**path** | **str** | Agent Workspace absolute path | 
+**kind** | **str** | Entry kind | 
+**size** | **int** |  | [optional] 
+**media_type** | **str** |  | [optional] 
+**modified_at** | **datetime** |  | [optional] 
 
 ## Example
 
@@ -31,3 +31,5 @@ agent_workspace_entry_response_dict = agent_workspace_entry_response_instance.to
 agent_workspace_entry_response_from_dict = AgentWorkspaceEntryResponse.from_dict(agent_workspace_entry_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

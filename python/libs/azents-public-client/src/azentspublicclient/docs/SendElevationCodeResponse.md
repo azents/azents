@@ -6,7 +6,7 @@ Elevation OTP send response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**csrf_token** | **str** | CSRF token |
+**csrf_token** | **str** | CSRF token | 
 
 ## Example
 
@@ -26,3 +26,5 @@ send_elevation_code_response_dict = send_elevation_code_response_instance.to_dic
 send_elevation_code_response_from_dict = SendElevationCodeResponse.from_dict(send_elevation_code_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

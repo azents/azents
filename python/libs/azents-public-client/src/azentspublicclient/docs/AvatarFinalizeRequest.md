@@ -6,8 +6,8 @@ Finalize request after upload completion.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**upload_key** | **str** | Upload key from issue-ticket, subject to scope revalidation |
-**filename** | **str** | Original filename, kept in response metadata |
+**upload_key** | **str** | Upload key from issue-ticket, subject to scope revalidation | 
+**filename** | **str** | Original filename, kept in response metadata | 
 
 ## Example
 
@@ -27,3 +27,5 @@ avatar_finalize_request_dict = avatar_finalize_request_instance.to_dict()
 avatar_finalize_request_from_dict = AvatarFinalizeRequest.from_dict(avatar_finalize_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

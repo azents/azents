@@ -6,8 +6,8 @@ Catalog model selection input.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**llm_provider_integration_id** | **str** | LLM provider integration ID |
-**model_identifier** | **str** | Provider model identifier |
+**llm_provider_integration_id** | **str** | LLM provider integration ID | 
+**model_identifier** | **str** | Provider model identifier | 
 
 ## Example
 
@@ -27,3 +27,5 @@ agent_model_selection_input_dict = agent_model_selection_input_instance.to_dict(
 agent_model_selection_input_from_dict = AgentModelSelectionInput.from_dict(agent_model_selection_input_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

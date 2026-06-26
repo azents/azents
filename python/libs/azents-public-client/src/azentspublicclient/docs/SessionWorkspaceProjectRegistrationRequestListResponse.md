@@ -6,7 +6,7 @@ Agent Workspace Project registration request list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SessionWorkspaceProjectRegistrationRequestResponse]**](SessionWorkspaceProjectRegistrationRequestResponse.md) | Project registration request list |
+**items** | [**List[SessionWorkspaceProjectRegistrationRequestResponse]**](SessionWorkspaceProjectRegistrationRequestResponse.md) | Project registration request list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ session_workspace_project_registration_request_list_response_dict = session_work
 session_workspace_project_registration_request_list_response_from_dict = SessionWorkspaceProjectRegistrationRequestListResponse.from_dict(session_workspace_project_registration_request_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

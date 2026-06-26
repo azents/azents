@@ -6,7 +6,7 @@ Toolkit Config list response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ToolkitConfigResponse]**](ToolkitConfigResponse.md) |  |
+**items** | [**List[ToolkitConfigResponse]**](ToolkitConfigResponse.md) |  | 
 
 ## Example
 
@@ -26,3 +26,5 @@ toolkit_config_list_response_dict = toolkit_config_list_response_instance.to_dic
 toolkit_config_list_response_from_dict = ToolkitConfigListResponse.from_dict(toolkit_config_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

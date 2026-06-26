@@ -6,7 +6,7 @@ Authentication method lookup response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**methods** | [**List[AuthMethod]**](AuthMethod.md) | Auth method list |
+**methods** | [**List[AuthMethod]**](AuthMethod.md) | Auth method list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ get_auth_methods_response_dict = get_auth_methods_response_instance.to_dict()
 get_auth_methods_response_from_dict = GetAuthMethodsResponse.from_dict(get_auth_methods_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

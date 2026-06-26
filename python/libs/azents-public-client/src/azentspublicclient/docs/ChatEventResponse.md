@@ -6,18 +6,18 @@ Event chat event response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Event ID |
-**session_id** | **str** | AgentSession ID |
-**kind** | [**EventKind**](EventKind.md) | Event kind |
-**payload** | **Dict[str, object]** | Event payload |
-**model_order** | **int** | Model input logical order |
-**external_id** | **str** |  | [optional]
-**adapter** | **str** |  | [optional]
-**provider** | **str** |  | [optional]
-**model** | **str** |  | [optional]
-**native_format** | **str** |  | [optional]
-**schema_version** | **str** | Event schema version |
-**created_at** | **datetime** | Created at |
+**id** | **str** | Event ID | 
+**session_id** | **str** | AgentSession ID | 
+**kind** | [**EventKind**](EventKind.md) | Event kind | 
+**payload** | **Dict[str, object]** | Event payload | 
+**model_order** | **int** | Model input logical order | 
+**external_id** | **str** |  | [optional] 
+**adapter** | **str** |  | [optional] 
+**provider** | **str** |  | [optional] 
+**model** | **str** |  | [optional] 
+**native_format** | **str** |  | [optional] 
+**schema_version** | **str** | Event schema version | 
+**created_at** | **datetime** | Created at | 
 
 ## Example
 
@@ -37,3 +37,5 @@ chat_event_response_dict = chat_event_response_instance.to_dict()
 chat_event_response_from_dict = ChatEventResponse.from_dict(chat_event_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

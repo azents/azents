@@ -61,9 +61,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
-    agent_admin_add_request = azentspublicclient.AgentAdminAddRequest() # AgentAdminAddRequest |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    agent_admin_add_request = azentspublicclient.AgentAdminAddRequest() # AgentAdminAddRequest | 
 
     try:
         # Add Agent Admin
@@ -81,9 +81,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
- **agent_admin_add_request** | [**AgentAdminAddRequest**](AgentAdminAddRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **agent_admin_add_request** | [**AgentAdminAddRequest**](AgentAdminAddRequest.md)|  | 
 
 ### Return type
 
@@ -148,8 +148,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    handle = 'handle_example' # str |
-    agent_create_request = azentspublicclient.AgentCreateRequest() # AgentCreateRequest |
+    handle = 'handle_example' # str | 
+    agent_create_request = azentspublicclient.AgentCreateRequest() # AgentCreateRequest | 
 
     try:
         # Create Agent
@@ -167,8 +167,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **agent_create_request** | [**AgentCreateRequest**](AgentCreateRequest.md)|  |
+ **handle** | **str**|  | 
+ **agent_create_request** | [**AgentCreateRequest**](AgentCreateRequest.md)|  | 
 
 ### Return type
 
@@ -230,9 +230,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
-    agent_subagent_create_request = azentspublicclient.AgentSubagentCreateRequest() # AgentSubagentCreateRequest |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    agent_subagent_create_request = azentspublicclient.AgentSubagentCreateRequest() # AgentSubagentCreateRequest | 
 
     try:
         # Create Agent Subagent
@@ -250,9 +250,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
- **agent_subagent_create_request** | [**AgentSubagentCreateRequest**](AgentSubagentCreateRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **agent_subagent_create_request** | [**AgentSubagentCreateRequest**](AgentSubagentCreateRequest.md)|  | 
 
 ### Return type
 
@@ -314,8 +314,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Delete Agent
@@ -331,8 +331,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -392,9 +392,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    agent_subagent_id = 'agent_subagent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    agent_subagent_id = 'agent_subagent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Delete Agent Subagent
@@ -410,9 +410,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **agent_subagent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **agent_subagent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -478,9 +478,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
-    avatar_finalize_request = azentspublicclient.AvatarFinalizeRequest() # AvatarFinalizeRequest |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    avatar_finalize_request = azentspublicclient.AvatarFinalizeRequest() # AvatarFinalizeRequest | 
 
     try:
         # Finalize Avatar
@@ -498,9 +498,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
- **avatar_finalize_request** | [**AvatarFinalizeRequest**](AvatarFinalizeRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **avatar_finalize_request** | [**AvatarFinalizeRequest**](AvatarFinalizeRequest.md)|  | 
 
 ### Return type
 
@@ -564,8 +564,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Agent
@@ -583,8 +583,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -647,8 +647,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # List Agent Admins
@@ -666,8 +666,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -728,8 +728,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # List Agent Subagents
@@ -747,8 +747,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -813,7 +813,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # List Agents
@@ -831,7 +831,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -894,9 +894,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    admin_workspace_user_id = 'admin_workspace_user_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    admin_workspace_user_id = 'admin_workspace_user_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Remove Agent Admin
@@ -912,9 +912,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **admin_workspace_user_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **admin_workspace_user_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -978,8 +978,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Remove Avatar
@@ -997,8 +997,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -1064,9 +1064,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
-    avatar_upload_request = azentspublicclient.AvatarUploadRequest() # AvatarUploadRequest |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    avatar_upload_request = azentspublicclient.AvatarUploadRequest() # AvatarUploadRequest | 
 
     try:
         # Request Avatar Upload
@@ -1084,9 +1084,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
- **avatar_upload_request** | [**AvatarUploadRequest**](AvatarUploadRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **avatar_upload_request** | [**AvatarUploadRequest**](AvatarUploadRequest.md)|  | 
 
 ### Return type
 
@@ -1150,9 +1150,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
-    agent_update_request = azentspublicclient.AgentUpdateRequest() # AgentUpdateRequest |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    agent_update_request = azentspublicclient.AgentUpdateRequest() # AgentUpdateRequest | 
 
     try:
         # Update Agent
@@ -1170,9 +1170,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
- **agent_update_request** | [**AgentUpdateRequest**](AgentUpdateRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **agent_update_request** | [**AgentUpdateRequest**](AgentUpdateRequest.md)|  | 
 
 ### Return type
 
@@ -1234,10 +1234,10 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    agent_subagent_id = 'agent_subagent_id_example' # str |
-    handle = 'handle_example' # str |
-    agent_subagent_update_request = azentspublicclient.AgentSubagentUpdateRequest() # AgentSubagentUpdateRequest |
+    agent_id = 'agent_id_example' # str | 
+    agent_subagent_id = 'agent_subagent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    agent_subagent_update_request = azentspublicclient.AgentSubagentUpdateRequest() # AgentSubagentUpdateRequest | 
 
     try:
         # Update Agent Subagent
@@ -1255,10 +1255,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **agent_subagent_id** | **str**|  |
- **handle** | **str**|  |
- **agent_subagent_update_request** | [**AgentSubagentUpdateRequest**](AgentSubagentUpdateRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **agent_subagent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **agent_subagent_update_request** | [**AgentSubagentUpdateRequest**](AgentSubagentUpdateRequest.md)|  | 
 
 ### Return type
 
@@ -1281,3 +1281,4 @@ Name | Type | Description  | Notes
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

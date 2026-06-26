@@ -7,7 +7,7 @@ GCP service account based secrets for Google Vertex AI.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'gcp_service_account']
-**service_account_json** | **str** | Service account JSON |
+**service_account_json** | **str** | Service account JSON | 
 
 ## Example
 
@@ -27,3 +27,5 @@ gcp_secrets_dict = gcp_secrets_instance.to_dict()
 gcp_secrets_from_dict = GcpSecrets.from_dict(gcp_secrets_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

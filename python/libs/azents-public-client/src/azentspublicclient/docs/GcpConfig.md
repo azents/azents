@@ -7,8 +7,8 @@ Google Vertex AI settings, stored as plaintext.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'gcp_service_account']
-**project_id** | **str** | GCP project ID |
-**region** | **str** | GCP region |
+**project_id** | **str** | GCP project ID | 
+**region** | **str** | GCP region | 
 
 ## Example
 
@@ -28,3 +28,5 @@ gcp_config_dict = gcp_config_instance.to_dict()
 gcp_config_from_dict = GcpConfig.from_dict(gcp_config_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,11 +6,11 @@ Test connection response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**success** | **bool** | Connection success state |
-**message** | **str** | Result message |
-**discovered_auth_url** | **str** |  | [optional]
-**discovered_token_url** | **str** |  | [optional]
-**supports_dcr** | **bool** |  | [optional]
+**success** | **bool** | Connection success state | 
+**message** | **str** | Result message | 
+**discovered_auth_url** | **str** |  | [optional] 
+**discovered_token_url** | **str** |  | [optional] 
+**supports_dcr** | **bool** |  | [optional] 
 
 ## Example
 
@@ -30,3 +30,5 @@ test_connection_response_dict = test_connection_response_instance.to_dict()
 test_connection_response_from_dict = TestConnectionResponse.from_dict(test_connection_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

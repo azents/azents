@@ -6,7 +6,7 @@ WorkspaceUser role change request schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Role to change to (owner, manager, member) |
+**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Role to change to (owner, manager, member) | 
 
 ## Example
 
@@ -26,3 +26,5 @@ update_workspace_user_role_request_dict = update_workspace_user_role_request_ins
 update_workspace_user_role_request_from_dict = UpdateWorkspaceUserRoleRequest.from_dict(update_workspace_user_role_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

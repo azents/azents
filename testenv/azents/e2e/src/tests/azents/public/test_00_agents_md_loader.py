@@ -220,8 +220,20 @@ def _run_new_session(
 ) -> str:
     """t session t messaget REST write boundary t t session_id t returnt."""
     del public_api_client
+    session_response = requests.get(
+        f"{public_url}/chat/v1/agents/{agent_id}/team-primary-session",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    session_response.raise_for_status()
+    session_payload = session_response.json()
+    session_id = session_payload.get("id")
+    if not isinstance(session_id, str):
+        raise AssertionError(
+            f"Team primary response did not include id: {session_payload!r}"
+        )
     response = requests.post(
-        f"{public_url}/chat/v1/sessions/new/messages",
+        f"{public_url}/chat/v1/sessions/{session_id}/messages",
         headers={
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
@@ -234,12 +246,6 @@ def _run_new_session(
         timeout=10,
     )
     response.raise_for_status()
-    payload = response.json()
-    session_id = payload.get("session_id")
-    if not isinstance(session_id, str):
-        raise AssertionError(
-            f"REST write response did not include session_id: {payload!r}"
-        )
     _wait_for_turn_complete(
         public_url=public_url,
         access_token=access_token,

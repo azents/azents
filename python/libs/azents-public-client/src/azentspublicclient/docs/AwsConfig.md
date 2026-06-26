@@ -7,9 +7,9 @@ AWS Bedrock settings, stored as plaintext.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'aws_credentials']
-**access_key_id** | **str** | AWS Access Key ID |
-**region** | **str** | AWS region |
-**role_arn** | **str** |  | [optional]
+**access_key_id** | **str** | AWS Access Key ID | 
+**region** | **str** | AWS region | 
+**role_arn** | **str** |  | [optional] 
 
 ## Example
 
@@ -29,3 +29,5 @@ aws_config_dict = aws_config_instance.to_dict()
 aws_config_from_dict = AwsConfig.from_dict(aws_config_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

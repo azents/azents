@@ -6,9 +6,9 @@ Runner route/stream unavailable response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**detail** | **str** | Status description |
-**retry_after_ms** | **int** | Recommended retry delay |
+**type** | **str** | Response type | 
+**detail** | **str** | Status description | 
+**retry_after_ms** | **int** | Recommended retry delay | 
 
 ## Example
 
@@ -28,3 +28,5 @@ agent_workspace_control_unavailable_access_response_dict = agent_workspace_contr
 agent_workspace_control_unavailable_access_response_from_dict = AgentWorkspaceControlUnavailableAccessResponse.from_dict(agent_workspace_control_unavailable_access_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

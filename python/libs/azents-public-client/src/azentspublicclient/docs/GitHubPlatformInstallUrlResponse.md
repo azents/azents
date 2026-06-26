@@ -6,7 +6,7 @@ GitHub Platform App installation URL response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**install_url** | **str** | GitHub App installation page URL |
+**install_url** | **str** | GitHub App installation page URL | 
 
 ## Example
 
@@ -26,3 +26,5 @@ git_hub_platform_install_url_response_dict = git_hub_platform_install_url_respon
 git_hub_platform_install_url_response_from_dict = GitHubPlatformInstallUrlResponse.from_dict(git_hub_platform_install_url_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

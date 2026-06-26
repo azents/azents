@@ -6,10 +6,10 @@ Server-computed Agent Runtime status response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Provider runtime status |
-**runtime_id** | **str** |  |
-**workspace_path** | **str** |  | [optional]
-**detail** | **str** |  | [optional]
+**type** | **str** | Provider runtime status | 
+**runtime_id** | **str** |  | 
+**workspace_path** | **str** |  | [optional] 
+**detail** | **str** |  | [optional] 
 
 ## Example
 
@@ -29,3 +29,5 @@ agent_workspace_runtime_response_dict = agent_workspace_runtime_response_instanc
 agent_workspace_runtime_response_from_dict = AgentWorkspaceRuntimeResponse.from_dict(agent_workspace_runtime_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

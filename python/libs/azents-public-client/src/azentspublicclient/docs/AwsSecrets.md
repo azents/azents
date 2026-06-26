@@ -7,7 +7,7 @@ AWS IAM based secrets for AWS Bedrock.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'aws_credentials']
-**secret_access_key** | **str** | AWS Secret Access Key |
+**secret_access_key** | **str** | AWS Secret Access Key | 
 
 ## Example
 
@@ -27,3 +27,5 @@ aws_secrets_dict = aws_secrets_instance.to_dict()
 aws_secrets_from_dict = AwsSecrets.from_dict(aws_secrets_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

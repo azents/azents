@@ -282,9 +282,9 @@ class AuthV1Api:
         # process the path parameters
         # process the query parameters
         if email is not None:
-
+            
             _query_params.append(('email', email))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -3285,3 +3285,5 @@ class AuthV1Api:
             _host=_host,
             _request_auth=_request_auth
         )
+
+

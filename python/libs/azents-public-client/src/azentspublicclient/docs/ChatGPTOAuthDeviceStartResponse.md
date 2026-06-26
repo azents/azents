@@ -6,11 +6,11 @@ Device OAuth start response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**session_id** | **str** | OAuth session ID |
-**user_code** | **str** | Device user code |
-**verification_uri** | **str** | Device verification URI |
-**interval_seconds** | **int** | Provider polling interval |
-**expires_at** | **datetime** | Session expiry |
+**session_id** | **str** | OAuth session ID | 
+**user_code** | **str** | Device user code | 
+**verification_uri** | **str** | Device verification URI | 
+**interval_seconds** | **int** | Provider polling interval | 
+**expires_at** | **datetime** | Session expiry | 
 
 ## Example
 
@@ -30,3 +30,5 @@ chat_gpto_auth_device_start_response_dict = chat_gpto_auth_device_start_response
 chat_gpto_auth_device_start_response_from_dict = ChatGPTOAuthDeviceStartResponse.from_dict(chat_gpto_auth_device_start_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

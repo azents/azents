@@ -173,7 +173,10 @@ Make Web selected session route state.
 ```
 
 - Make the agent chat entry route resolve the team primary session and navigate to the canonical route.
+- Remove `/sessions/new/messages`; Web writes must target `/sessions/{session_id}/messages` after session resolution.
+- Remove `active-session` API and frontend naming; use team primary session terminology.
 - Load chat history/live state from the session ID in the route.
+- Return 404 for session missing, agent/session mismatch, and access denied.
 - Preserve selected session across refresh/share/back-forward navigation.
 
 ### Exit Criteria
@@ -181,6 +184,8 @@ Make Web selected session route state.
 - Reloading the canonical route loads the same session.
 - Agent chat no longer depends on local-only selected session state.
 - Runtime state is not involved in Web session selection.
+- No public API path or new frontend code uses active-session terminology.
+- Session-less chat message writes are removed from the public contract.
 
 ## Phase 7: Multiple team sessions
 

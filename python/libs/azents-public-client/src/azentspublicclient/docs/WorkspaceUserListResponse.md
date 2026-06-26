@@ -6,7 +6,7 @@ WorkspaceUser list response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[WorkspaceUserResponse]**](WorkspaceUserResponse.md) | WorkspaceUser list |
+**items** | [**List[WorkspaceUserResponse]**](WorkspaceUserResponse.md) | WorkspaceUser list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ workspace_user_list_response_dict = workspace_user_list_response_instance.to_dic
 workspace_user_list_response_from_dict = WorkspaceUserListResponse.from_dict(workspace_user_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

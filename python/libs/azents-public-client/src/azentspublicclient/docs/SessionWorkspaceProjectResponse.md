@@ -6,10 +6,10 @@ Agent Workspace Project response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Project ID |
-**path** | **str** | Agent Workspace absolute path |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | Project ID | 
+**path** | **str** | Agent Workspace absolute path | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 
@@ -29,3 +29,5 @@ session_workspace_project_response_dict = session_workspace_project_response_ins
 session_workspace_project_response_from_dict = SessionWorkspaceProjectResponse.from_dict(session_workspace_project_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

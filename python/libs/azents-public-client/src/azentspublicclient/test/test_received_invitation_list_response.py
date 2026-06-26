@@ -37,13 +37,13 @@ class TestReceivedInvitationListResponse(unittest.TestCase):
             return ReceivedInvitationListResponse(
                 items = [
                     azentspublicclient.models.received_invitation_response.ReceivedInvitationResponse(
-                        id = '',
-                        workspace_id = '',
-                        workspace_name = '',
-                        workspace_handle = '',
-                        email = '',
-                        role = 'owner',
-                        status = 'pending',
+                        id = '', 
+                        workspace_id = '', 
+                        workspace_name = '', 
+                        workspace_handle = '', 
+                        email = '', 
+                        role = 'owner', 
+                        status = 'pending', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -51,13 +51,13 @@ class TestReceivedInvitationListResponse(unittest.TestCase):
             return ReceivedInvitationListResponse(
                 items = [
                     azentspublicclient.models.received_invitation_response.ReceivedInvitationResponse(
-                        id = '',
-                        workspace_id = '',
-                        workspace_name = '',
-                        workspace_handle = '',
-                        email = '',
-                        role = 'owner',
-                        status = 'pending',
+                        id = '', 
+                        workspace_id = '', 
+                        workspace_name = '', 
+                        workspace_handle = '', 
+                        email = '', 
+                        role = 'owner', 
+                        status = 'pending', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

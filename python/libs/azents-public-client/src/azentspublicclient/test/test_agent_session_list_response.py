@@ -37,9 +37,9 @@ class TestAgentSessionListResponse(unittest.TestCase):
             return AgentSessionListResponse(
                 items = [
                     azentspublicclient.models.agent_session_response.AgentSessionResponse(
-                        id = '',
-                        agent_id = '',
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        agent_id = '', 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -47,9 +47,9 @@ class TestAgentSessionListResponse(unittest.TestCase):
             return AgentSessionListResponse(
                 items = [
                     azentspublicclient.models.agent_session_response.AgentSessionResponse(
-                        id = '',
-                        agent_id = '',
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        agent_id = '', 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

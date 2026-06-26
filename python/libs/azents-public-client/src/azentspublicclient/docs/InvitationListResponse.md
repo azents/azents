@@ -6,7 +6,7 @@ Invitation list response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[InvitationResponse]**](InvitationResponse.md) | Invitation list |
+**items** | [**List[InvitationResponse]**](InvitationResponse.md) | Invitation list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ invitation_list_response_dict = invitation_list_response_instance.to_dict()
 invitation_list_response_from_dict = InvitationListResponse.from_dict(invitation_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

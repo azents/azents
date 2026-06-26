@@ -6,7 +6,7 @@ Workspace connecting response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
+**type** | **str** | Response type | 
 
 ## Example
 
@@ -26,3 +26,5 @@ agent_workspace_connecting_access_response_dict = agent_workspace_connecting_acc
 agent_workspace_connecting_access_response_from_dict = AgentWorkspaceConnectingAccessResponse.from_dict(agent_workspace_connecting_access_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

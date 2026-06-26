@@ -6,8 +6,8 @@ Workspace unavailable response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**reason** | **str** | Unavailable reason |
+**type** | **str** | Response type | 
+**reason** | **str** | Unavailable reason | 
 
 ## Example
 
@@ -27,3 +27,5 @@ agent_workspace_unavailable_access_response_dict = agent_workspace_unavailable_a
 agent_workspace_unavailable_access_response_from_dict = AgentWorkspaceUnavailableAccessResponse.from_dict(agent_workspace_unavailable_access_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -37,17 +37,23 @@ class TestToolkitConfigListResponse(unittest.TestCase):
             return ToolkitConfigListResponse(
                 items = [
                     azentspublicclient.models.toolkit_config_response.ToolkitConfigResponse(
-                        id = '',
-                        workspace_id = '',
-                        toolkit_type = '',
-                        slug = '',
-                        name = '',
-                        description = '',
-                        config = { },
-                        prompt = '',
-                        has_credentials = True,
-                        enabled = True,
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        workspace_id = '', 
+                        toolkit_type = '', 
+                        slug = '', 
+                        name = '', 
+                        description = '', 
+                        config = { }, 
+                        prompt = '', 
+                        has_credentials = True, 
+                        enabled = True, 
+                        oauth_connection = azentspublicclient.models.mcpo_auth_connection_summary_response.MCPOAuthConnectionSummaryResponse(
+                            status = 'connected', 
+                            issuer = '', 
+                            resource = '', 
+                            scope = '', 
+                            expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -55,17 +61,23 @@ class TestToolkitConfigListResponse(unittest.TestCase):
             return ToolkitConfigListResponse(
                 items = [
                     azentspublicclient.models.toolkit_config_response.ToolkitConfigResponse(
-                        id = '',
-                        workspace_id = '',
-                        toolkit_type = '',
-                        slug = '',
-                        name = '',
-                        description = '',
-                        config = { },
-                        prompt = '',
-                        has_credentials = True,
-                        enabled = True,
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        workspace_id = '', 
+                        toolkit_type = '', 
+                        slug = '', 
+                        name = '', 
+                        description = '', 
+                        config = { }, 
+                        prompt = '', 
+                        has_credentials = True, 
+                        enabled = True, 
+                        oauth_connection = azentspublicclient.models.mcpo_auth_connection_summary_response.MCPOAuthConnectionSummaryResponse(
+                            status = 'connected', 
+                            issuer = '', 
+                            resource = '', 
+                            scope = '', 
+                            expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

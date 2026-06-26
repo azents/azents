@@ -6,12 +6,12 @@ Authoritative live snapshot after REST write.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**partial_history_events** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Partial history projection list to compose into Chat timeline |
-**input_buffer_events** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Pending input buffer projection list |
-**run** | [**ChatLiveRunStateResponse**](ChatLiveRunStateResponse.md) |  | [optional]
-**session_run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Authoritative run_state for the current session |
-**todo** | [**TodoStateResponse**](TodoStateResponse.md) |  | [optional]
-**goal** | [**GoalStateResponse**](GoalStateResponse.md) |  | [optional]
+**partial_history_events** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Partial history projection list to compose into Chat timeline | 
+**input_buffer_events** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Pending input buffer projection list | 
+**run** | [**ChatLiveRunStateResponse**](ChatLiveRunStateResponse.md) |  | [optional] 
+**session_run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Authoritative run_state for the current session | 
+**todo** | [**TodoStateResponse**](TodoStateResponse.md) |  | [optional] 
+**goal** | [**GoalStateResponse**](GoalStateResponse.md) |  | [optional] 
 
 ## Example
 
@@ -31,3 +31,5 @@ chat_write_snapshot_response_dict = chat_write_snapshot_response_instance.to_dic
 chat_write_snapshot_response_from_dict = ChatWriteSnapshotResponse.from_dict(chat_write_snapshot_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

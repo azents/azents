@@ -7,8 +7,8 @@ Represents tool calling capability.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **supported** | **bool** |  | [optional] [default to False]
-**parallel_tool_calls** | **bool** |  | [optional]
-**strict_json_schema** | **bool** |  | [optional]
+**parallel_tool_calls** | **bool** |  | [optional] 
+**strict_json_schema** | **bool** |  | [optional] 
 
 ## Example
 
@@ -28,3 +28,5 @@ model_tool_calling_capabilities_dict = model_tool_calling_capabilities_instance.
 model_tool_calling_capabilities_from_dict = ModelToolCallingCapabilities.from_dict(model_tool_calling_capabilities_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

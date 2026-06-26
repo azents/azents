@@ -6,13 +6,13 @@ AgentSubagent link response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**agent_id** | **str** |  |
-**subagent_id** | **str** |  |
-**description** | **str** |  |
-**enabled** | **bool** |  |
-**created_at** | **datetime** |  |
-**updated_at** | **datetime** |  |
+**id** | **str** |  | 
+**agent_id** | **str** |  | 
+**subagent_id** | **str** |  | 
+**description** | **str** |  | 
+**enabled** | **bool** |  | 
+**created_at** | **datetime** |  | 
+**updated_at** | **datetime** |  | 
 
 ## Example
 
@@ -32,3 +32,5 @@ agent_subagent_response_dict = agent_subagent_response_instance.to_dict()
 agent_subagent_response_from_dict = AgentSubagentResponse.from_dict(agent_subagent_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

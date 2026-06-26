@@ -6,10 +6,10 @@ AgentAdmin response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**agent_id** | **str** |  |
-**workspace_user_id** | **str** |  |
-**created_at** | **datetime** |  |
+**id** | **str** |  | 
+**agent_id** | **str** |  | 
+**workspace_user_id** | **str** |  | 
+**created_at** | **datetime** |  | 
 
 ## Example
 
@@ -29,3 +29,5 @@ agent_admin_response_dict = agent_admin_response_instance.to_dict()
 agent_admin_response_from_dict = AgentAdminResponse.from_dict(agent_admin_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

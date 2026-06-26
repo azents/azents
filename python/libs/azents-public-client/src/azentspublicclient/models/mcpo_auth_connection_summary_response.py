@@ -17,19 +17,24 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.mcpo_auth_connection_status import MCPOAuthConnectionStatus
 from typing import Optional, Set
 from typing_extensions import Self
 
-class OAuthAuthorizeRequest(BaseModel):
+class MCPOAuthConnectionSummaryResponse(BaseModel):
     """
-    OAuth authorization request for temporary form data storage.  When credentials/config are provided, stores them in the DB before starting auth flow. Used to run OAuth tests with unsaved form values.
+    MCP OAuth connection summary response model.
     """ # noqa: E501
-    credentials: Optional[Dict[str, Any]] = None
-    config: Optional[Dict[str, Any]] = None
+    status: MCPOAuthConnectionStatus
+    issuer: Optional[StrictStr] = None
+    resource: Optional[StrictStr] = None
+    scope: Optional[StrictStr] = None
+    expires_at: Optional[datetime] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["credentials", "config"]
+    __properties: ClassVar[List[str]] = ["status", "issuer", "resource", "scope", "expires_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -49,7 +54,7 @@ class OAuthAuthorizeRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of OAuthAuthorizeRequest from a JSON string"""
+        """Create an instance of MCPOAuthConnectionSummaryResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -77,21 +82,31 @@ class OAuthAuthorizeRequest(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if credentials (nullable) is None
+        # set to None if issuer (nullable) is None
         # and model_fields_set contains the field
-        if self.credentials is None and "credentials" in self.model_fields_set:
-            _dict['credentials'] = None
+        if self.issuer is None and "issuer" in self.model_fields_set:
+            _dict['issuer'] = None
 
-        # set to None if config (nullable) is None
+        # set to None if resource (nullable) is None
         # and model_fields_set contains the field
-        if self.config is None and "config" in self.model_fields_set:
-            _dict['config'] = None
+        if self.resource is None and "resource" in self.model_fields_set:
+            _dict['resource'] = None
+
+        # set to None if scope (nullable) is None
+        # and model_fields_set contains the field
+        if self.scope is None and "scope" in self.model_fields_set:
+            _dict['scope'] = None
+
+        # set to None if expires_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.expires_at is None and "expires_at" in self.model_fields_set:
+            _dict['expires_at'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of OAuthAuthorizeRequest from a dict"""
+        """Create an instance of MCPOAuthConnectionSummaryResponse from a dict"""
         if obj is None:
             return None
 
@@ -99,8 +114,11 @@ class OAuthAuthorizeRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "credentials": obj.get("credentials"),
-            "config": obj.get("config")
+            "status": obj.get("status"),
+            "issuer": obj.get("issuer"),
+            "resource": obj.get("resource"),
+            "scope": obj.get("scope"),
+            "expires_at": obj.get("expires_at")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
@@ -108,3 +126,5 @@ class OAuthAuthorizeRequest(BaseModel):
                 _obj.additional_properties[_key] = obj.get(_key)
 
         return _obj
+
+

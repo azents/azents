@@ -6,10 +6,10 @@ Agent Runtime lifecycle command response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  |
-**state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  |
-**command_type** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  |
-**desired_generation** | **int** |  |
+**runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  | 
+**state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  | 
+**command_type** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  | 
+**desired_generation** | **int** |  | 
 
 ## Example
 
@@ -29,3 +29,5 @@ agent_runtime_lifecycle_response_dict = agent_runtime_lifecycle_response_instanc
 agent_runtime_lifecycle_response_from_dict = AgentRuntimeLifecycleResponse.from_dict(agent_runtime_lifecycle_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

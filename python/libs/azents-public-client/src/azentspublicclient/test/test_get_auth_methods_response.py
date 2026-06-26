@@ -37,13 +37,13 @@ class TestGetAuthMethodsResponse(unittest.TestCase):
             return GetAuthMethodsResponse(
                 methods = [
                     azentspublicclient.models.auth_method.AuthMethod(
-                        type = '',
-                        enabled = True,
-                        configured = True,
-                        valid = True,
-                        can_login = True,
-                        can_elevate = True,
-                        can_remove = True,
+                        type = '', 
+                        enabled = True, 
+                        configured = True, 
+                        valid = True, 
+                        can_login = True, 
+                        can_elevate = True, 
+                        can_remove = True, 
                         unavailable_reason = '', )
                     ]
             )
@@ -51,13 +51,13 @@ class TestGetAuthMethodsResponse(unittest.TestCase):
             return GetAuthMethodsResponse(
                 methods = [
                     azentspublicclient.models.auth_method.AuthMethod(
-                        type = '',
-                        enabled = True,
-                        configured = True,
-                        valid = True,
-                        can_login = True,
-                        can_elevate = True,
-                        can_remove = True,
+                        type = '', 
+                        enabled = True, 
+                        configured = True, 
+                        valid = True, 
+                        can_login = True, 
+                        can_elevate = True, 
+                        can_remove = True, 
                         unavailable_reason = '', )
                     ],
         )

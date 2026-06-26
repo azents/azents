@@ -6,7 +6,7 @@ Represents provider built-in tool capability.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**supported** | **List[str]** |  | [optional]
+**supported** | **List[str]** |  | [optional] 
 
 ## Example
 
@@ -26,3 +26,5 @@ model_built_in_tool_capabilities_dict = model_built_in_tool_capabilities_instanc
 model_built_in_tool_capabilities_from_dict = ModelBuiltInToolCapabilities.from_dict(model_built_in_tool_capabilities_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,8 +6,8 @@ AgentSubagent creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**subagent_id** | **str** | Subagent ID to link |
-**description** | **str** | Description exposed to the LLM |
+**subagent_id** | **str** | Subagent ID to link | 
+**description** | **str** | Description exposed to the LLM | 
 **enabled** | **bool** | Enabled state | [optional] [default to True]
 
 ## Example
@@ -28,3 +28,5 @@ agent_subagent_create_request_dict = agent_subagent_create_request_instance.to_d
 agent_subagent_create_request_from_dict = AgentSubagentCreateRequest.from_dict(agent_subagent_create_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

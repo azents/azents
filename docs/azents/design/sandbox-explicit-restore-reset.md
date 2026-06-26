@@ -90,7 +90,7 @@ Session Workspace actions expose separate action types:
 
 Agent settings exposes the same reset operation by active session lookup:
 
-- nointern-web calls `getActiveAgentSession(agentId)` then `resetSessionWorkspaceSandbox(sessionId)`.
+- Web resolves the team primary session for the agent, then calls `resetSessionWorkspaceSandbox(sessionId)`.
 - This keeps backend authorization/session ownership checks centralized in the Session Workspace API.
 
 ## Backend Design

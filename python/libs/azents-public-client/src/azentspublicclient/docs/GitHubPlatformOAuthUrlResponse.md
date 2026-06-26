@@ -6,7 +6,7 @@ GitHub Platform App OAuth URL response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**oauth_url** | **str** | GitHub OAuth authorization URL |
+**oauth_url** | **str** | GitHub OAuth authorization URL | 
 
 ## Example
 
@@ -26,3 +26,5 @@ git_hub_platform_o_auth_url_response_dict = git_hub_platform_o_auth_url_response
 git_hub_platform_o_auth_url_response_from_dict = GitHubPlatformOAuthUrlResponse.from_dict(git_hub_platform_o_auth_url_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

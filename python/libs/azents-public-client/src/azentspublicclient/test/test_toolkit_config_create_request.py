@@ -36,7 +36,7 @@ class TestToolkitConfigCreateRequest(unittest.TestCase):
         if include_optional:
             return ToolkitConfigCreateRequest(
                 toolkit_type = '',
-                slug = '',
+                slug = 'p0',
                 name = '',
                 description = '',
                 config = { },

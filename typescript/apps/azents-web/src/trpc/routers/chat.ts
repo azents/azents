@@ -11,13 +11,13 @@ import {
   chatV1ApproveAgentProjectRegistrationRequest,
   chatV1CreateCommand,
   chatV1CreateMessage,
-  chatV1CreateSessionMessage,
   chatV1DeleteAgentProject,
   chatV1DeleteInputBuffer,
   chatV1EditMessage,
-  chatV1GetActiveAgentSession,
+  chatV1GetAgentSession,
   chatV1GetAgentSessionContext,
   chatV1GetAgentWorkspace,
+  chatV1GetTeamPrimaryAgentSession,
   chatV1IssueWsTicket,
   chatV1ListAgentProjectRegistrationRequests,
   chatV1ListAgentProjects,
@@ -38,13 +38,13 @@ import { publicProcedure, router } from "../init";
 
 export const chatRouter = router({
   /**
-   * Agent of active session fetch. if absent backend createdoes..
+   * Team primary session fetch. If absent, backend creates it.
    */
-  getActiveAgentSession: publicProcedure
+  getTeamPrimaryAgentSession: publicProcedure
     .input(z.object({ agentId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await chatV1GetActiveAgentSession({
+        const { data } = await chatV1GetTeamPrimaryAgentSession({
           client: ctx.apiClient,
           path: { agent_id: input.agentId },
           throwOnError: true,
@@ -53,7 +53,29 @@ export const chatRouter = router({
       } catch (e) {
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  getAgentSession: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1GetAgentSession({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
           404: "NOT_FOUND",
         });
       }
@@ -300,12 +322,7 @@ export const chatRouter = router({
           attachments: input.attachments,
         };
         if (input.sessionId === null) {
-          const { data } = await chatV1CreateSessionMessage({
-            client: ctx.apiClient,
-            body,
-            throwOnError: true,
-          });
-          return data;
+          throw new Error("Session ID is required for chat messages.");
         }
         const { data } = await chatV1CreateMessage({
           client: ctx.apiClient,
@@ -470,7 +487,7 @@ export const chatRouter = router({
     }),
 
   /**
-   * Agent active session context inspector fetch
+   * Agent team primary session context inspector fetch
    */
   getAgentSessionContext: publicProcedure
     .input(

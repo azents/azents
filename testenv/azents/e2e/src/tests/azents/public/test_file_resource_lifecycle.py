@@ -105,8 +105,25 @@ def _run_new_session_until_complete(
 ) -> str:
     """t sessiont init turn t REST write boundary t t session_id t returnt."""
     del public_api_client
+    session_response = requests.get(
+        f"{public_url}/chat/v1/agents/{agent_id}/team-primary-session",
+        headers=_headers(access_token),
+        timeout=10,
+    )
+    session_response.raise_for_status()
+    raw_session_payload: object = session_response.json()
+    if not isinstance(raw_session_payload, dict):
+        raise AssertionError(
+            f"Team primary response is not an object: {raw_session_payload!r}"
+        )
+    session_payload = cast("dict[str, object]", raw_session_payload)
+    session_id = session_payload.get("id")
+    if not isinstance(session_id, str):
+        raise AssertionError(
+            f"Team primary response did not include id: {session_payload!r}"
+        )
     response = requests.post(
-        f"{public_url}/chat/v1/sessions/new/messages",
+        f"{public_url}/chat/v1/sessions/{session_id}/messages",
         headers={**_headers(access_token), "Content-Type": "application/json"},
         json={
             "agent_id": agent_id,
@@ -116,15 +133,6 @@ def _run_new_session_until_complete(
         timeout=10,
     )
     response.raise_for_status()
-    raw_payload: object = response.json()
-    if not isinstance(raw_payload, dict):
-        raise AssertionError(f"REST write response is not an object: {raw_payload!r}")
-    payload = cast("dict[str, object]", raw_payload)
-    session_id = payload.get("session_id")
-    if not isinstance(session_id, str):
-        raise AssertionError(
-            f"REST write response did not include session_id: {payload!r}"
-        )
     return session_id
 
 

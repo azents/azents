@@ -6,7 +6,7 @@ Authentication code send response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**csrf_token** | **str** | CSRF token (used on verification) |
+**csrf_token** | **str** | CSRF token (used on verification) | 
 
 ## Example
 
@@ -26,3 +26,5 @@ send_code_response_dict = send_code_response_instance.to_dict()
 send_code_response_from_dict = SendCodeResponse.from_dict(send_code_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

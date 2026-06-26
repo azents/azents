@@ -6,10 +6,10 @@ Session context session response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**agent_id** | **str** | Agent ID |
-**created_at** | **datetime** |  | [optional]
-**updated_at** | **datetime** |  | [optional]
+**id** | **str** |  | 
+**agent_id** | **str** | Agent ID | 
+**created_at** | **datetime** |  | [optional] 
+**updated_at** | **datetime** |  | [optional] 
 
 ## Example
 
@@ -29,3 +29,5 @@ session_context_session_response_dict = session_context_session_response_instanc
 session_context_session_response_from_dict = SessionContextSessionResponse.from_dict(session_context_session_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

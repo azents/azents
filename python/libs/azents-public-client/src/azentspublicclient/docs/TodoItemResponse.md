@@ -6,8 +6,8 @@ Chat live todo item response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**content** | **str** | Todo text |
-**status** | **str** | Todo status |
+**content** | **str** | Todo text | 
+**status** | **str** | Todo status | 
 
 ## Example
 
@@ -27,3 +27,5 @@ todo_item_response_dict = todo_item_response_instance.to_dict()
 todo_item_response_from_dict = TodoItemResponse.from_dict(todo_item_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -208,10 +208,25 @@ def _write_new_session_message(
     client_request_id: str,
 ) -> dict[str, object]:
     """t session t messaget REST write boundary t t."""
+    session_response = requests.get(
+        f"{server_url}/chat/v1/agents/{agent_id}/team-primary-session",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    session_response.raise_for_status()
+    session_payload = _response_object(
+        session_response,
+        label="GET team primary session response",
+    )
+    session_id = session_payload.get("id")
+    if not isinstance(session_id, str):
+        raise AssertionError(
+            f"Team primary response did not include id: {session_payload!r}"
+        )
     return _post_json(
         server_url=server_url,
         token=token,
-        path="/chat/v1/sessions/new/messages",
+        path=f"/chat/v1/sessions/{session_id}/messages",
         payload={
             "agent_id": agent_id,
             "client_request_id": client_request_id,

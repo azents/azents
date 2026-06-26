@@ -6,9 +6,9 @@ Settings status response for the settings page.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**platform_linked** | **bool** | Whether platform account is linked |
-**pat_registered** | **bool** | Whether PAT is registered |
-**github_username** | **str** |  | [optional]
+**platform_linked** | **bool** | Whether platform account is linked | 
+**pat_registered** | **bool** | Whether PAT is registered | 
+**github_username** | **str** |  | [optional] 
 
 ## Example
 
@@ -28,3 +28,5 @@ setup_status_response_dict = setup_status_response_instance.to_dict()
 setup_status_response_from_dict = SetupStatusResponse.from_dict(setup_status_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

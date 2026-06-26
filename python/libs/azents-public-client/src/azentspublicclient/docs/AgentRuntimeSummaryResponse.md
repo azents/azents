@@ -6,9 +6,9 @@ Agent Runtime summary response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**summary** | [**RuntimeSummary**](RuntimeSummary.md) |  |
-**actions** | [**AgentRuntimeActionsResponse**](AgentRuntimeActionsResponse.md) |  |
-**failure** | [**AgentRuntimeFailureResponse**](AgentRuntimeFailureResponse.md) |  |
+**summary** | [**RuntimeSummary**](RuntimeSummary.md) |  | 
+**actions** | [**AgentRuntimeActionsResponse**](AgentRuntimeActionsResponse.md) |  | 
+**failure** | [**AgentRuntimeFailureResponse**](AgentRuntimeFailureResponse.md) |  | 
 
 ## Example
 
@@ -28,3 +28,5 @@ agent_runtime_summary_response_dict = agent_runtime_summary_response_instance.to
 agent_runtime_summary_response_from_dict = AgentRuntimeSummaryResponse.from_dict(agent_runtime_summary_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

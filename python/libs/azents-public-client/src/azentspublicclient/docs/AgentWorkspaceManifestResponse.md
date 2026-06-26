@@ -6,10 +6,10 @@ Agent Workspace manifest response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**root** | **str** | Agent Workspace root |
-**cwd** | **str** | Initial working directory |
-**entries** | [**List[AgentWorkspaceEntryResponse]**](AgentWorkspaceEntryResponse.md) | Root entry list |
-**git** | **Dict[str, object]** |  | [optional]
+**root** | **str** | Agent Workspace root | 
+**cwd** | **str** | Initial working directory | 
+**entries** | [**List[AgentWorkspaceEntryResponse]**](AgentWorkspaceEntryResponse.md) | Root entry list | 
+**git** | **Dict[str, object]** |  | [optional] 
 
 ## Example
 
@@ -29,3 +29,5 @@ agent_workspace_manifest_response_dict = agent_workspace_manifest_response_insta
 agent_workspace_manifest_response_from_dict = AgentWorkspaceManifestResponse.from_dict(agent_workspace_manifest_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

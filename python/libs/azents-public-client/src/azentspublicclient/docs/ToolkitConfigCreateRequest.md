@@ -6,13 +6,13 @@ Toolkit Config creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**toolkit_type** | **str** | Tool slug |
-**slug** | **str** |  | [optional]
-**name** | **str** | Display name |
-**description** | **str** |  | [optional]
-**config** | **Dict[str, object]** | Tool configuration |
-**prompt** | **str** |  | [optional]
-**credentials** | **Dict[str, object]** |  | [optional]
+**toolkit_type** | **str** | Tool slug | 
+**slug** | **str** | Workspace-unique slug. Use lowercase letters, numbers, and underscores only. | [optional] 
+**name** | **str** | Display name | 
+**description** | **str** |  | [optional] 
+**config** | **Dict[str, object]** | Tool configuration | 
+**prompt** | **str** |  | [optional] 
+**credentials** | **Dict[str, object]** |  | [optional] 
 **enabled** | **bool** | Enabled state | [optional] [default to True]
 
 ## Example
@@ -33,3 +33,5 @@ toolkit_config_create_request_dict = toolkit_config_create_request_instance.to_d
 toolkit_config_create_request_from_dict = ToolkitConfigCreateRequest.from_dict(toolkit_config_create_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

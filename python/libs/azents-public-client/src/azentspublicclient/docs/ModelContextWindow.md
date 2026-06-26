@@ -6,8 +6,8 @@ Model context window capability.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**max_input_tokens** | **int** |  | [optional]
-**max_output_tokens** | **int** |  | [optional]
+**max_input_tokens** | **int** |  | [optional] 
+**max_output_tokens** | **int** |  | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ model_context_window_dict = model_context_window_instance.to_dict()
 model_context_window_from_dict = ModelContextWindow.from_dict(model_context_window_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

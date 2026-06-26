@@ -6,7 +6,7 @@ Signup email request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Signup email |
+**email** | **str** | Signup email | 
 
 ## Example
 
@@ -26,3 +26,5 @@ request_signup_email_request_dict = request_signup_email_request_instance.to_dic
 request_signup_email_request_from_dict = RequestSignupEmailRequest.from_dict(request_signup_email_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

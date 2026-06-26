@@ -6,8 +6,8 @@ AgentSubagent update request, for partial updates.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**description** | **str** | Description exposed to LLM | [optional]
-**enabled** | **bool** | Enabled flag | [optional]
+**description** | **str** | Description exposed to LLM | [optional] 
+**enabled** | **bool** | Enabled flag | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ agent_subagent_update_request_dict = agent_subagent_update_request_instance.to_d
 agent_subagent_update_request_from_dict = AgentSubagentUpdateRequest.from_dict(agent_subagent_update_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

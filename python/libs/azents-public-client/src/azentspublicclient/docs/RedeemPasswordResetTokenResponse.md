@@ -6,7 +6,7 @@ Password reset token redeem response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**success** | **bool** | Success state |
+**success** | **bool** | Success state | 
 
 ## Example
 
@@ -26,3 +26,5 @@ redeem_password_reset_token_response_dict = redeem_password_reset_token_response
 redeem_password_reset_token_response_from_dict = RedeemPasswordResetTokenResponse.from_dict(redeem_password_reset_token_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

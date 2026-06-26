@@ -36,46 +36,46 @@ class TestSessionContextSystemPromptResponse(unittest.TestCase):
         if include_optional:
             return SessionContextSystemPromptResponse(
                 agent_prompt = azentspublicclient.models.session_context_system_prompt_fragment_response.SessionContextSystemPromptFragmentResponse(
-                    id = '',
-                    source = 'agent',
-                    label = '',
-                    content = '',
-                    preview = '',
-                    length = 56,
+                    id = '', 
+                    source = 'agent', 
+                    label = '', 
+                    content = '', 
+                    preview = '', 
+                    length = 56, 
                     metadata = {
                         'key' : ''
                         }, ),
                 toolkit_prompts = [
                     azentspublicclient.models.session_context_system_prompt_fragment_response.SessionContextSystemPromptFragmentResponse(
-                        id = '',
-                        source = 'agent',
-                        label = '',
-                        content = '',
-                        preview = '',
-                        length = 56,
+                        id = '', 
+                        source = 'agent', 
+                        label = '', 
+                        content = '', 
+                        preview = '', 
+                        length = 56, 
                         metadata = {
                             'key' : ''
                             }, )
                     ],
                 injected_prompts = [
                     azentspublicclient.models.session_context_system_prompt_fragment_response.SessionContextSystemPromptFragmentResponse(
-                        id = '',
-                        source = 'agent',
-                        label = '',
-                        content = '',
-                        preview = '',
-                        length = 56,
+                        id = '', 
+                        source = 'agent', 
+                        label = '', 
+                        content = '', 
+                        preview = '', 
+                        length = 56, 
                         metadata = {
                             'key' : ''
                             }, )
                     ],
                 final_prompt = azentspublicclient.models.session_context_system_prompt_fragment_response.SessionContextSystemPromptFragmentResponse(
-                    id = '',
-                    source = 'agent',
-                    label = '',
-                    content = '',
-                    preview = '',
-                    length = 56,
+                    id = '', 
+                    source = 'agent', 
+                    label = '', 
+                    content = '', 
+                    preview = '', 
+                    length = 56, 
                     metadata = {
                         'key' : ''
                         }, )
@@ -84,24 +84,24 @@ class TestSessionContextSystemPromptResponse(unittest.TestCase):
             return SessionContextSystemPromptResponse(
                 toolkit_prompts = [
                     azentspublicclient.models.session_context_system_prompt_fragment_response.SessionContextSystemPromptFragmentResponse(
-                        id = '',
-                        source = 'agent',
-                        label = '',
-                        content = '',
-                        preview = '',
-                        length = 56,
+                        id = '', 
+                        source = 'agent', 
+                        label = '', 
+                        content = '', 
+                        preview = '', 
+                        length = 56, 
                         metadata = {
                             'key' : ''
                             }, )
                     ],
                 injected_prompts = [
                     azentspublicclient.models.session_context_system_prompt_fragment_response.SessionContextSystemPromptFragmentResponse(
-                        id = '',
-                        source = 'agent',
-                        label = '',
-                        content = '',
-                        preview = '',
-                        length = 56,
+                        id = '', 
+                        source = 'agent', 
+                        label = '', 
+                        content = '', 
+                        preview = '', 
+                        length = 56, 
                         metadata = {
                             'key' : ''
                             }, )

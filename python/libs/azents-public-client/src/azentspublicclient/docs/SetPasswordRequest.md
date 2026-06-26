@@ -6,7 +6,7 @@ Password set request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**password** | **str** | New password |
+**password** | **str** | New password | 
 
 ## Example
 
@@ -26,3 +26,5 @@ set_password_request_dict = set_password_request_instance.to_dict()
 set_password_request_from_dict = SetPasswordRequest.from_dict(set_password_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

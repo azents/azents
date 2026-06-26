@@ -6,8 +6,8 @@ Password reset token redeem request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | **str** | Password reset token |
-**password** | **str** | New password |
+**token** | **str** | Password reset token | 
+**password** | **str** | New password | 
 
 ## Example
 
@@ -27,3 +27,5 @@ redeem_password_reset_token_request_dict = redeem_password_reset_token_request_i
 redeem_password_reset_token_request_from_dict = RedeemPasswordResetTokenRequest.from_dict(redeem_password_reset_token_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

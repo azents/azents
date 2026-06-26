@@ -6,7 +6,7 @@ Agent Workspace Project list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SessionWorkspaceProjectResponse]**](SessionWorkspaceProjectResponse.md) | Project list |
+**items** | [**List[SessionWorkspaceProjectResponse]**](SessionWorkspaceProjectResponse.md) | Project list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ session_workspace_project_list_response_dict = session_workspace_project_list_re
 session_workspace_project_list_response_from_dict = SessionWorkspaceProjectListResponse.from_dict(session_workspace_project_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

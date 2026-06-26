@@ -6,7 +6,7 @@ Conversation session list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[AgentSessionResponse]**](AgentSessionResponse.md) | Session list |
+**items** | [**List[AgentSessionResponse]**](AgentSessionResponse.md) | Session list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ agent_session_list_response_dict = agent_session_list_response_instance.to_dict(
 agent_session_list_response_from_dict = AgentSessionListResponse.from_dict(agent_session_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,8 +6,8 @@ Input/output modalities supported by the model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**input** | [**List[ModelModality]**](ModelModality.md) |  | [optional]
-**output** | [**List[ModelModality]**](ModelModality.md) |  | [optional]
+**input** | [**List[ModelModality]**](ModelModality.md) |  | [optional] 
+**output** | [**List[ModelModality]**](ModelModality.md) |  | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ model_modalities_dict = model_modalities_instance.to_dict()
 model_modalities_from_dict = ModelModalities.from_dict(model_modalities_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

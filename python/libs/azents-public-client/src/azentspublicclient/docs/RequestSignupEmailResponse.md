@@ -6,7 +6,7 @@ Signup email response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**sent** | **bool** | Whether email was sent |
+**sent** | **bool** | Whether email was sent | 
 
 ## Example
 
@@ -26,3 +26,5 @@ request_signup_email_response_dict = request_signup_email_response_instance.to_d
 request_signup_email_response_from_dict = RequestSignupEmailResponse.from_dict(request_signup_email_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

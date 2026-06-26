@@ -6,9 +6,9 @@ Device OAuth status response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**session_id** | **str** | OAuth session ID |
-**status** | [**ChatGPTOAuthSessionStatus**](ChatGPTOAuthSessionStatus.md) | Session status |
-**integration** | [**LLMProviderIntegrationResponse**](LLMProviderIntegrationResponse.md) |  | [optional]
+**session_id** | **str** | OAuth session ID | 
+**status** | [**ChatGPTOAuthSessionStatus**](ChatGPTOAuthSessionStatus.md) | Session status | 
+**integration** | [**LLMProviderIntegrationResponse**](LLMProviderIntegrationResponse.md) |  | [optional] 
 
 ## Example
 
@@ -28,3 +28,5 @@ chat_gpto_auth_device_status_response_dict = chat_gpto_auth_device_status_respon
 chat_gpto_auth_device_status_response_from_dict = ChatGPTOAuthDeviceStatusResponse.from_dict(chat_gpto_auth_device_status_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

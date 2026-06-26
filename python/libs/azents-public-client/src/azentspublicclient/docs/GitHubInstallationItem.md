@@ -6,10 +6,10 @@ GitHub App installation item.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **int** | Installation ID |
-**account_login** | **str** | Installed account/organization name |
-**account_type** | **str** | Account type (User/Organization) |
-**account_avatar_url** | **str** | Account avatar URL |
+**id** | **int** | Installation ID | 
+**account_login** | **str** | Installed account/organization name | 
+**account_type** | **str** | Account type (User/Organization) | 
+**account_avatar_url** | **str** | Account avatar URL | 
 
 ## Example
 
@@ -29,3 +29,5 @@ git_hub_installation_item_dict = git_hub_installation_item_instance.to_dict()
 git_hub_installation_item_from_dict = GitHubInstallationItem.from_dict(git_hub_installation_item_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

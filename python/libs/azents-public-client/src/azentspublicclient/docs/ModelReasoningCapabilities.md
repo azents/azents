@@ -7,8 +7,8 @@ Represents reasoning capability.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **supported** | **bool** |  | [optional] [default to False]
-**effort_levels** | [**List[ModelReasoningEffort]**](ModelReasoningEffort.md) |  | [optional]
-**summaries** | **bool** |  | [optional]
+**effort_levels** | [**List[ModelReasoningEffort]**](ModelReasoningEffort.md) |  | [optional] 
+**summaries** | **bool** |  | [optional] 
 
 ## Example
 
@@ -28,3 +28,5 @@ model_reasoning_capabilities_dict = model_reasoning_capabilities_instance.to_dic
 model_reasoning_capabilities_from_dict = ModelReasoningCapabilities.from_dict(model_reasoning_capabilities_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

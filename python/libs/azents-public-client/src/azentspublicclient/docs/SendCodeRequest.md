@@ -6,7 +6,7 @@ Authentication code send request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Email address |
+**email** | **str** | Email address | 
 
 ## Example
 
@@ -26,3 +26,5 @@ send_code_request_dict = send_code_request_instance.to_dict()
 send_code_request_from_dict = SendCodeRequest.from_dict(send_code_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,7 +6,7 @@ GitHub Platform App installation list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**installations** | [**List[GitHubInstallationItem]**](GitHubInstallationItem.md) | Installation list |
+**installations** | [**List[GitHubInstallationItem]**](GitHubInstallationItem.md) | Installation list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ git_hub_platform_installations_response_dict = git_hub_platform_installations_re
 git_hub_platform_installations_response_from_dict = GitHubPlatformInstallationsResponse.from_dict(git_hub_platform_installations_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

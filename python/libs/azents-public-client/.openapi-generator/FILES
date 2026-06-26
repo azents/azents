@@ -37,11 +37,11 @@ azentspublicclient/docs/AgentRuntimeFailureResponse.md
 azentspublicclient/docs/AgentRuntimeLifecycleResponse.md
 azentspublicclient/docs/AgentRuntimeRawStateResponse.md
 azentspublicclient/docs/AgentRuntimeResponse.md
-azentspublicclient/docs/AgentSessionRunState.md
 azentspublicclient/docs/AgentRuntimeSummaryResponse.md
 azentspublicclient/docs/AgentRuntimeV1Api.md
 azentspublicclient/docs/AgentSessionListResponse.md
 azentspublicclient/docs/AgentSessionResponse.md
+azentspublicclient/docs/AgentSessionRunState.md
 azentspublicclient/docs/AgentSubagentCreateRequest.md
 azentspublicclient/docs/AgentSubagentListResponse.md
 azentspublicclient/docs/AgentSubagentResponse.md
@@ -135,6 +135,8 @@ azentspublicclient/docs/LLMProviderIntegrationUpdateRequest.md
 azentspublicclient/docs/LLMProviderIntegrationV1Api.md
 azentspublicclient/docs/LiveEventListResponse.md
 azentspublicclient/docs/LoginMethodsResponse.md
+azentspublicclient/docs/MCPOAuthConnectionStatus.md
+azentspublicclient/docs/MCPOAuthConnectionSummaryResponse.md
 azentspublicclient/docs/MeResponse.md
 azentspublicclient/docs/ModelBuiltInToolCapabilities.md
 azentspublicclient/docs/ModelCapabilities.md
@@ -152,7 +154,6 @@ azentspublicclient/docs/ModelReasoningCapabilities.md
 azentspublicclient/docs/ModelReasoningEffort.md
 azentspublicclient/docs/ModelToolCallingCapabilities.md
 azentspublicclient/docs/MyJoinRequestResponse.md
-azentspublicclient/docs/OAuthAuthorizeRequest.md
 azentspublicclient/docs/OAuthAuthorizeResponse.md
 azentspublicclient/docs/OAuthExchangeRequest.md
 azentspublicclient/docs/PATStatusResponse.md
@@ -263,10 +264,10 @@ azentspublicclient/models/agent_runtime_failure_response.py
 azentspublicclient/models/agent_runtime_lifecycle_response.py
 azentspublicclient/models/agent_runtime_raw_state_response.py
 azentspublicclient/models/agent_runtime_response.py
-azentspublicclient/models/agent_session_run_state.py
 azentspublicclient/models/agent_runtime_summary_response.py
 azentspublicclient/models/agent_session_list_response.py
 azentspublicclient/models/agent_session_response.py
+azentspublicclient/models/agent_session_run_state.py
 azentspublicclient/models/agent_subagent_create_request.py
 azentspublicclient/models/agent_subagent_list_response.py
 azentspublicclient/models/agent_subagent_response.py
@@ -351,6 +352,8 @@ azentspublicclient/models/llm_provider_integration_list_response.py
 azentspublicclient/models/llm_provider_integration_response.py
 azentspublicclient/models/llm_provider_integration_update_request.py
 azentspublicclient/models/login_methods_response.py
+azentspublicclient/models/mcpo_auth_connection_status.py
+azentspublicclient/models/mcpo_auth_connection_summary_response.py
 azentspublicclient/models/me_response.py
 azentspublicclient/models/model_built_in_tool_capabilities.py
 azentspublicclient/models/model_capabilities.py
@@ -368,7 +371,6 @@ azentspublicclient/models/model_reasoning_capabilities.py
 azentspublicclient/models/model_reasoning_effort.py
 azentspublicclient/models/model_tool_calling_capabilities.py
 azentspublicclient/models/my_join_request_response.py
-azentspublicclient/models/o_auth_authorize_request.py
 azentspublicclient/models/o_auth_authorize_response.py
 azentspublicclient/models/o_auth_exchange_request.py
 azentspublicclient/models/partial_history_response.py
@@ -472,11 +474,11 @@ azentspublicclient/test/test_agent_runtime_failure_response.py
 azentspublicclient/test/test_agent_runtime_lifecycle_response.py
 azentspublicclient/test/test_agent_runtime_raw_state_response.py
 azentspublicclient/test/test_agent_runtime_response.py
-azentspublicclient/test/test_agent_session_run_state.py
 azentspublicclient/test/test_agent_runtime_summary_response.py
 azentspublicclient/test/test_agent_runtime_v1_api.py
 azentspublicclient/test/test_agent_session_list_response.py
 azentspublicclient/test/test_agent_session_response.py
+azentspublicclient/test/test_agent_session_run_state.py
 azentspublicclient/test/test_agent_subagent_create_request.py
 azentspublicclient/test/test_agent_subagent_list_response.py
 azentspublicclient/test/test_agent_subagent_response.py
@@ -570,6 +572,8 @@ azentspublicclient/test/test_llm_provider_integration_response.py
 azentspublicclient/test/test_llm_provider_integration_update_request.py
 azentspublicclient/test/test_llm_provider_integration_v1_api.py
 azentspublicclient/test/test_login_methods_response.py
+azentspublicclient/test/test_mcpo_auth_connection_status.py
+azentspublicclient/test/test_mcpo_auth_connection_summary_response.py
 azentspublicclient/test/test_me_response.py
 azentspublicclient/test/test_model_built_in_tool_capabilities.py
 azentspublicclient/test/test_model_capabilities.py
@@ -587,7 +591,6 @@ azentspublicclient/test/test_model_reasoning_capabilities.py
 azentspublicclient/test/test_model_reasoning_effort.py
 azentspublicclient/test/test_model_tool_calling_capabilities.py
 azentspublicclient/test/test_my_join_request_response.py
-azentspublicclient/test/test_o_auth_authorize_request.py
 azentspublicclient/test/test_o_auth_authorize_response.py
 azentspublicclient/test/test_o_auth_exchange_request.py
 azentspublicclient/test/test_partial_history_response.py

@@ -6,12 +6,12 @@ Agent session context inspector response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**session** | [**SessionContextSessionResponse**](SessionContextSessionResponse.md) | Session summary |
-**usage** | **Dict[str, object]** |  | [optional]
-**stats** | [**SessionContextStatsResponse**](SessionContextStatsResponse.md) | Aggregate stats |
-**breakdown** | [**List[SessionContextBreakdownSegmentResponse]**](SessionContextBreakdownSegmentResponse.md) | Prompt character breakdown |
-**system_prompt** | [**SessionContextSystemPromptResponse**](SessionContextSystemPromptResponse.md) |  | [optional]
-**raw_events** | [**List[SessionContextRawEventResponse]**](SessionContextRawEventResponse.md) | Raw events |
+**session** | [**SessionContextSessionResponse**](SessionContextSessionResponse.md) | Session summary | 
+**usage** | **Dict[str, object]** |  | [optional] 
+**stats** | [**SessionContextStatsResponse**](SessionContextStatsResponse.md) | Aggregate stats | 
+**breakdown** | [**List[SessionContextBreakdownSegmentResponse]**](SessionContextBreakdownSegmentResponse.md) | Prompt character breakdown | 
+**system_prompt** | [**SessionContextSystemPromptResponse**](SessionContextSystemPromptResponse.md) |  | [optional] 
+**raw_events** | [**List[SessionContextRawEventResponse]**](SessionContextRawEventResponse.md) | Raw events | 
 
 ## Example
 
@@ -31,3 +31,5 @@ session_context_response_dict = session_context_response_instance.to_dict()
 session_context_response_from_dict = SessionContextResponse.from_dict(session_context_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

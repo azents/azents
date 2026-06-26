@@ -6,8 +6,8 @@ Current user workspace member info response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**workspace_user_id** | **str** | Current user WorkspaceUser ID |
-**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Current user role |
+**workspace_user_id** | **str** | Current user WorkspaceUser ID | 
+**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Current user role | 
 
 ## Example
 
@@ -27,3 +27,5 @@ current_member_response_dict = current_member_response_instance.to_dict()
 current_member_response_from_dict = CurrentMemberResponse.from_dict(current_member_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

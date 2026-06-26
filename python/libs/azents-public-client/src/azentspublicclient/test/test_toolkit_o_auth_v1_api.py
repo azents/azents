@@ -26,10 +26,24 @@ class TestToolkitOAuthV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
-    def test_toolkit_oauth_v1_authorize(self) -> None:
-        """Test case for toolkit_oauth_v1_authorize
+    def test_toolkit_oauth_v1_connect_oauth(self) -> None:
+        """Test case for toolkit_oauth_v1_connect_oauth
 
-        Authorize
+        Connect Oauth
+        """
+        pass
+
+    def test_toolkit_oauth_v1_disconnect_oauth_connection(self) -> None:
+        """Test case for toolkit_oauth_v1_disconnect_oauth_connection
+
+        Disconnect Oauth Connection
+        """
+        pass
+
+    def test_toolkit_oauth_v1_exchange_oauth_connection(self) -> None:
+        """Test case for toolkit_oauth_v1_exchange_oauth_connection
+
+        Exchange Oauth Connection
         """
         pass
 
@@ -54,13 +68,6 @@ class TestToolkitOAuthV1Api(unittest.TestCase):
         """
         pass
 
-    def test_toolkit_oauth_v1_oauth_exchange(self) -> None:
-        """Test case for toolkit_oauth_v1_oauth_exchange
-
-        Oauth Exchange
-        """
-        pass
-
     def test_toolkit_oauth_v1_test_connection_saved(self) -> None:
         """Test case for toolkit_oauth_v1_test_connection_saved
 
@@ -72,13 +79,6 @@ class TestToolkitOAuthV1Api(unittest.TestCase):
         """Test case for toolkit_oauth_v1_test_connection_unsaved
 
         Test Connection Unsaved
-        """
-        pass
-
-    def test_toolkit_oauth_v1_user_authorize(self) -> None:
-        """Test case for toolkit_oauth_v1_user_authorize
-
-        User Authorize
         """
         pass
 

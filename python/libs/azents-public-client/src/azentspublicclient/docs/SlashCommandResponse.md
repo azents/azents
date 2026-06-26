@@ -6,8 +6,8 @@ Slash command response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Command name without leading slash |
-**description** | **str** | Command description |
+**name** | **str** | Command name without leading slash | 
+**description** | **str** | Command description | 
 
 ## Example
 
@@ -27,3 +27,5 @@ slash_command_response_dict = slash_command_response_instance.to_dict()
 slash_command_response_from_dict = SlashCommandResponse.from_dict(slash_command_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

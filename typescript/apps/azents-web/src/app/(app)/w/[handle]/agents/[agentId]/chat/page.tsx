@@ -1,22 +1,21 @@
 import { TRPCError } from "@trpc/server";
-import { notFound } from "next/navigation";
-import { AgentChatTabPage } from "@/features/agents/AgentChatTabPage";
+import { notFound, redirect } from "next/navigation";
 import { trpc } from "@/trpc/server";
 
-export default async function AgentChatRoot({
+export default async function Page({
   params,
 }: {
   params: Promise<{ handle: string; agentId: string }>;
-}): Promise<React.ReactElement> {
+}): Promise<never> {
   const { handle, agentId } = await params;
-  let agent;
   try {
-    agent = await trpc.agent.get({ handle, agentId });
+    await trpc.agent.get({ handle, agentId });
+    const session = await trpc.chat.getTeamPrimaryAgentSession({ agentId });
+    redirect(`/w/${handle}/agents/${agentId}/sessions/${session.id}`);
   } catch (e) {
     if (e instanceof TRPCError && e.code === "NOT_FOUND") {
       notFound();
     }
     throw e;
   }
-  return <AgentChatTabPage handle={handle} agent={agent} />;
 }

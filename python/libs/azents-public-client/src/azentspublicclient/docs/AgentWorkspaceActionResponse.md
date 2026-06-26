@@ -6,9 +6,9 @@ Agent Workspace state transition action response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Action type |
-**method** | **str** | HTTP method |
-**path** | **str** | API path to call |
+**type** | **str** | Action type | 
+**method** | **str** | HTTP method | 
+**path** | **str** | API path to call | 
 
 ## Example
 
@@ -28,3 +28,5 @@ agent_workspace_action_response_dict = agent_workspace_action_response_instance.
 agent_workspace_action_response_from_dict = AgentWorkspaceActionResponse.from_dict(agent_workspace_action_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

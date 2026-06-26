@@ -6,13 +6,13 @@ LLM Provider Integration response without secrets.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**provider** | [**LLMProvider**](LLMProvider.md) |  |
-**name** | **str** |  |
-**config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  |
-**enabled** | **bool** |  |
-**created_at** | **datetime** |  |
-**updated_at** | **datetime** |  |
+**id** | **str** |  | 
+**provider** | [**LLMProvider**](LLMProvider.md) |  | 
+**name** | **str** |  | 
+**config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  | 
+**enabled** | **bool** |  | 
+**created_at** | **datetime** |  | 
+**updated_at** | **datetime** |  | 
 
 ## Example
 
@@ -32,3 +32,5 @@ llm_provider_integration_response_dict = llm_provider_integration_response_insta
 llm_provider_integration_response_from_dict = LLMProviderIntegrationResponse.from_dict(llm_provider_integration_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,13 +6,13 @@ Agent Workspace Project registration request response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Request ID |
-**path** | **str** | Requested Project path |
-**reason** | **str** | Request reason provided by the Agent |
-**status** | **str** | Request status |
-**project_id** | **str** |  | [optional]
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | Request ID | 
+**path** | **str** | Requested Project path | 
+**reason** | **str** | Request reason provided by the Agent | 
+**status** | **str** | Request status | 
+**project_id** | **str** |  | [optional] 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 
@@ -32,3 +32,5 @@ session_workspace_project_registration_request_response_dict = session_workspace
 session_workspace_project_registration_request_response_from_dict = SessionWorkspaceProjectRegistrationRequestResponse.from_dict(session_workspace_project_registration_request_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

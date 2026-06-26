@@ -52,14 +52,27 @@ class Chat:
     config: TestenvConfig
 
     def start_session(self, user: User, agent: Agent) -> Session:
-        """Return a `Session` value object.
-
-        The id is a client-side placeholder. The actual server session_id is
-        obtained from the REST write response. `start_session` does not call the
-        devserver.
-        """
+        """Return a `Session` value object for the agent's team primary session."""
+        try:
+            response = requests.get(
+                f"{self.config.public_url}/chat/v1/agents/{agent.id}/team-primary-session",
+                headers={"Authorization": f"Bearer {user.access_token}"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise ChatConnectionError(
+                "failed to resolve team primary session. Is devserver up?\n"
+                "  uv run devserver.py status",
+            ) from exc
+        session_id = payload.get("id")
+        if not isinstance(session_id, str):
+            raise ChatConnectionError(
+                f"team primary session response did not include id: {payload!r}"
+            )
         return Session(
-            id=uuid.uuid4().hex,
+            id=session_id,
             user=user,
             agent=agent,
             public_url=self.config.public_url,
@@ -96,7 +109,7 @@ class Chat:
         """
         try:
             response = requests.post(
-                f"{session.public_url}/chat/v1/sessions/new/messages",
+                f"{session.public_url}/chat/v1/sessions/{session.id}/messages",
                 headers={
                     "Authorization": f"Bearer {session.user.access_token}",
                     "Content-Type": "application/json",

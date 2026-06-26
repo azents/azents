@@ -6,7 +6,7 @@ Session goal update request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**objective** | **str** |  | [optional]
+**objective** | **str** |  | [optional] 
 
 ## Example
 
@@ -26,3 +26,5 @@ goal_update_request_dict = goal_update_request_instance.to_dict()
 goal_update_request_from_dict = GoalUpdateRequest.from_dict(goal_update_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

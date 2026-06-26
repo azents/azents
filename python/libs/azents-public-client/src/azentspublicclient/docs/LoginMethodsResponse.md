@@ -6,8 +6,8 @@ Login method lookup response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**has_password** | **bool** | Whether password is set |
-**email_available** | **bool** | Whether email OTP login is available |
+**has_password** | **bool** | Whether password is set | 
+**email_available** | **bool** | Whether email OTP login is available | 
 
 ## Example
 
@@ -27,3 +27,5 @@ login_methods_response_dict = login_methods_response_instance.to_dict()
 login_methods_response_from_dict = LoginMethodsResponse.from_dict(login_methods_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

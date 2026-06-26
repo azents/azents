@@ -6,7 +6,7 @@ Received invitation list response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ReceivedInvitationResponse]**](ReceivedInvitationResponse.md) | Received invitation list |
+**items** | [**List[ReceivedInvitationResponse]**](ReceivedInvitationResponse.md) | Received invitation list | 
 
 ## Example
 
@@ -26,3 +26,5 @@ received_invitation_list_response_dict = received_invitation_list_response_insta
 received_invitation_list_response_from_dict = ReceivedInvitationListResponse.from_dict(received_invitation_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

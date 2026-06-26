@@ -37,10 +37,10 @@ class TestAgentToolkitListResponse(unittest.TestCase):
             return AgentToolkitListResponse(
                 items = [
                     azentspublicclient.models.agent_toolkit_response.AgentToolkitResponse(
-                        id = '',
-                        agent_id = '',
-                        toolkit_id = '',
-                        toolkit_type = '',
+                        id = '', 
+                        agent_id = '', 
+                        toolkit_id = '', 
+                        toolkit_type = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -48,10 +48,10 @@ class TestAgentToolkitListResponse(unittest.TestCase):
             return AgentToolkitListResponse(
                 items = [
                     azentspublicclient.models.agent_toolkit_response.AgentToolkitResponse(
-                        id = '',
-                        agent_id = '',
-                        toolkit_id = '',
-                        toolkit_type = '',
+                        id = '', 
+                        agent_id = '', 
+                        toolkit_id = '', 
+                        toolkit_type = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

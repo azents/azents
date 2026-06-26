@@ -6,9 +6,9 @@ Workspace model settings response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**default_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | [optional]
-**default_lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | [optional]
-**effective_default_lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | [optional]
+**default_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | [optional] 
+**default_lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | [optional] 
+**effective_default_lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | [optional] 
 
 ## Example
 
@@ -28,3 +28,5 @@ workspace_model_settings_response_dict = workspace_model_settings_response_insta
 workspace_model_settings_response_from_dict = WorkspaceModelSettingsResponse.from_dict(workspace_model_settings_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

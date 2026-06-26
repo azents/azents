@@ -6,7 +6,7 @@ OAuth authorization URL response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**authorization_url** | **str** | OAuth2 authorization URL |
+**authorization_url** | **str** | OAuth2 authorization URL | 
 
 ## Example
 
@@ -26,3 +26,5 @@ o_auth_authorize_response_dict = o_auth_authorize_response_instance.to_dict()
 o_auth_authorize_response_from_dict = OAuthAuthorizeResponse.from_dict(o_auth_authorize_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

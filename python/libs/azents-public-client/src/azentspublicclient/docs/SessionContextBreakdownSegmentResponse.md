@@ -6,9 +6,9 @@ Session context breakdown segment response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**key** | **str** | Breakdown key |
-**tokens** | **int** | Prompt character count |
-**percent** | **float** | Known prompt character percentage |
+**key** | **str** | Breakdown key | 
+**tokens** | **int** | Prompt character count | 
+**percent** | **float** | Known prompt character percentage | 
 
 ## Example
 
@@ -28,3 +28,5 @@ session_context_breakdown_segment_response_dict = session_context_breakdown_segm
 session_context_breakdown_segment_response_from_dict = SessionContextBreakdownSegmentResponse.from_dict(session_context_breakdown_segment_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

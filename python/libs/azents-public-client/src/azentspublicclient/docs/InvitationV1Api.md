@@ -50,7 +50,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.InvitationV1Api(api_client)
-    invitation_id = 'invitation_id_example' # str |
+    invitation_id = 'invitation_id_example' # str | 
 
     try:
         # Accept Invitation
@@ -68,7 +68,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **invitation_id** | **str**|  |
+ **invitation_id** | **str**|  | 
 
 ### Return type
 
@@ -130,8 +130,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.InvitationV1Api(api_client)
-    invitation_id = 'invitation_id_example' # str |
-    handle = 'handle_example' # str |
+    invitation_id = 'invitation_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Cancel Invitation
@@ -147,8 +147,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **invitation_id** | **str**|  |
- **handle** | **str**|  |
+ **invitation_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -213,8 +213,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.InvitationV1Api(api_client)
-    handle = 'handle_example' # str |
-    create_invitation_request = azentspublicclient.CreateInvitationRequest() # CreateInvitationRequest |
+    handle = 'handle_example' # str | 
+    create_invitation_request = azentspublicclient.CreateInvitationRequest() # CreateInvitationRequest | 
 
     try:
         # Create Invitation
@@ -232,8 +232,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **create_invitation_request** | [**CreateInvitationRequest**](CreateInvitationRequest.md)|  |
+ **handle** | **str**|  | 
+ **create_invitation_request** | [**CreateInvitationRequest**](CreateInvitationRequest.md)|  | 
 
 ### Return type
 
@@ -294,7 +294,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.InvitationV1Api(api_client)
-    invitation_id = 'invitation_id_example' # str |
+    invitation_id = 'invitation_id_example' # str | 
 
     try:
         # Decline Invitation
@@ -312,7 +312,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **invitation_id** | **str**|  |
+ **invitation_id** | **str**|  | 
 
 ### Return type
 
@@ -375,7 +375,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.InvitationV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # Get My Invitation
@@ -393,7 +393,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -530,7 +530,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.InvitationV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # List Workspace Invitations
@@ -548,7 +548,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -571,3 +571,4 @@ Name | Type | Description  | Notes
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

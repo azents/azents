@@ -6,16 +6,16 @@ Session context raw event response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Event ID |
-**kind** | **str** | Event kind |
-**payload** | **Dict[str, object]** | Event payload |
-**external_id** | **str** |  | [optional]
-**adapter** | **str** |  | [optional]
-**provider** | **str** |  | [optional]
-**model** | **str** |  | [optional]
-**native_format** | **str** |  | [optional]
-**schema_version** | **str** | Schema version |
-**created_at** | **datetime** | Created time |
+**id** | **str** | Event ID | 
+**kind** | **str** | Event kind | 
+**payload** | **Dict[str, object]** | Event payload | 
+**external_id** | **str** |  | [optional] 
+**adapter** | **str** |  | [optional] 
+**provider** | **str** |  | [optional] 
+**model** | **str** |  | [optional] 
+**native_format** | **str** |  | [optional] 
+**schema_version** | **str** | Schema version | 
+**created_at** | **datetime** | Created time | 
 
 ## Example
 
@@ -35,3 +35,5 @@ session_context_raw_event_response_dict = session_context_raw_event_response_ins
 session_context_raw_event_response_from_dict = SessionContextRawEventResponse.from_dict(session_context_raw_event_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,7 +6,7 @@ ToolkitScope list response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ToolkitScopeResponse]**](ToolkitScopeResponse.md) |  |
+**items** | [**List[ToolkitScopeResponse]**](ToolkitScopeResponse.md) |  | 
 
 ## Example
 
@@ -26,3 +26,5 @@ toolkit_scope_list_response_dict = toolkit_scope_list_response_instance.to_dict(
 toolkit_scope_list_response_from_dict = ToolkitScopeListResponse.from_dict(toolkit_scope_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

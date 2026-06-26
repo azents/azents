@@ -6,9 +6,9 @@ Authentication code verification request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Email address |
-**code** | **str** | 6-digit authentication code |
-**csrf_token** | **str** | CSRF token |
+**email** | **str** | Email address | 
+**code** | **str** | 6-digit authentication code | 
+**csrf_token** | **str** | CSRF token | 
 
 ## Example
 
@@ -28,3 +28,5 @@ verify_code_request_dict = verify_code_request_instance.to_dict()
 verify_code_request_from_dict = VerifyCodeRequest.from_dict(verify_code_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

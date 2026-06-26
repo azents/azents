@@ -47,3 +47,5 @@ Event transcript event kind.
 * `UNKNOWN_ADAPTER_OUTPUT` (value: `'unknown_adapter_output'`)
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

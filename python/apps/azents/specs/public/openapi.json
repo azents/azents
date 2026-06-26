@@ -1957,71 +1957,6 @@
         }
       }
     },
-    "/chat/v1/sessions/new/messages": {
-      "post": {
-        "tags": [
-          "Chat v1"
-        ],
-        "summary": "Create Session Message",
-        "description": "Accept the first message of a new session at the REST input buffer boundary.",
-        "operationId": "chat_v1_create_session_message",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "timezone",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Timezone"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChatMessageWriteRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChatWriteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/chat/v1/sessions/{session_id}/goal": {
       "patch": {
         "tags": [
@@ -2398,7 +2333,7 @@
           "Chat v1"
         ],
         "summary": "Get Agent Session Context",
-        "description": "Return Agent active session context inspector information.",
+        "description": "Return Agent team primary session context inspector information.",
         "operationId": "chat_v1_get_agent_session_context",
         "security": [
           {
@@ -2452,14 +2387,14 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/active-session": {
+    "/chat/v1/agents/{agent_id}/team-primary-session": {
       "get": {
         "tags": [
           "Chat v1"
         ],
-        "summary": "Get Active Agent Session",
-        "description": "Get an Agent's active AgentSession, creating one if absent.",
-        "operationId": "chat_v1_get_active_agent_session",
+        "summary": "Get Team Primary Agent Session",
+        "description": "Get an Agent's team primary AgentSession, creating one if absent.",
+        "operationId": "chat_v1_get_team_primary_agent_session",
         "security": [
           {
             "HTTPBearer": []
@@ -2473,6 +2408,63 @@
             "schema": {
               "type": "string",
               "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Get Agent Session",
+        "description": "Get a URL-selected AgentSession by agent/session pair.",
+        "operationId": "chat_v1_get_agent_session",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
             }
           }
         ],

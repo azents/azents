@@ -6,12 +6,12 @@ Join request response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Join request ID |
-**workspace_id** | **str** | Workspace ID |
-**user_id** | **str** | Requesting user ID |
-**message** | **str** |  |
-**status** | [**JoinRequestStatus**](JoinRequestStatus.md) | Request status |
-**created_at** | **datetime** | Created time |
+**id** | **str** | Join request ID | 
+**workspace_id** | **str** | Workspace ID | 
+**user_id** | **str** | Requesting user ID | 
+**message** | **str** |  | 
+**status** | [**JoinRequestStatus**](JoinRequestStatus.md) | Request status | 
+**created_at** | **datetime** | Created time | 
 
 ## Example
 
@@ -31,3 +31,5 @@ join_request_response_dict = join_request_response_instance.to_dict()
 join_request_response_from_dict = JoinRequestResponse.from_dict(join_request_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

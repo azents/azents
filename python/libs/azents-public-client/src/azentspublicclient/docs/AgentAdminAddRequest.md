@@ -6,7 +6,7 @@ AgentAdmin add request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**workspace_user_id** | **str** | Workspace member ID to add |
+**workspace_user_id** | **str** | Workspace member ID to add | 
 
 ## Example
 
@@ -26,3 +26,5 @@ agent_admin_add_request_dict = agent_admin_add_request_instance.to_dict()
 agent_admin_add_request_from_dict = AgentAdminAddRequest.from_dict(agent_admin_add_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+
