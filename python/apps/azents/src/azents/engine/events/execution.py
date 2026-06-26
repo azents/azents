@@ -301,12 +301,7 @@ class AgentRunExecution:
                     for event in appended
                     if isinstance(event.payload, ClientToolCallPayload)
                 ]
-                provider_tool_calls = [
-                    event.payload
-                    for event in appended
-                    if isinstance(event.payload, ProviderToolCallPayload)
-                ]
-                if not client_tool_calls and not provider_tool_calls:
+                if not client_tool_calls:
                     run_marker = await self._append_run_marker(
                         session,
                         request.session_id,
@@ -329,8 +324,6 @@ class AgentRunExecution:
                 await session.commit()
                 if self._output_sink is not None:
                     await self._output_sink(normalized, [*appended, *turn_events])
-                if not client_tool_calls:
-                    continue
                 try:
                     await self._execute_tools(
                         session,
