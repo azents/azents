@@ -195,6 +195,13 @@ class LiteLLMResponsesLowerer:
         for event in transcript:
             native_item = self._compatible_native_item(event)
             if native_item is not None:
+                if kwargs.get("store") is False:
+                    # With store=False, provider response items are not persisted;
+                    # replaying ids like rs_... can resolve missing items.
+                    # Keep call_id for tool continuity.
+                    native_item = _drop_provider_item_id_for_unstored_request(
+                        native_item
+                    )
                 input_items.append(native_item)
                 continue
 
@@ -594,6 +601,17 @@ def _drop_orphan_tool_outputs(
             continue
         filtered.append(item)
     return filtered
+
+
+def _drop_provider_item_id_for_unstored_request(
+    item: dict[str, object],
+) -> dict[str, object]:
+    """Remove provider item id from native replay when response items are unstored."""
+    if "id" not in item:
+        return item
+    normalized = dict(item)
+    normalized.pop("id", None)
+    return normalized
 
 
 def _optional_bool(kwargs: dict[str, object], key: str) -> bool | None:

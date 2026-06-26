@@ -741,6 +741,72 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.input == [raw_item]
 
+    def test_drops_native_provider_item_id_when_store_is_false(self) -> None:
+        """Do not replay unstored provider response item ids."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            provider_id=LLMProvider.CHATGPT_OAUTH,
+        )
+        transcript = [
+            _event(
+                EventKind.REASONING,
+                ReasoningPayload(
+                    text=None,
+                    summary="summary",
+                    native_artifact=_artifact(
+                        {"type": "reasoning", "id": "rs-1", "summary": []}
+                    ),
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [{"type": "reasoning", "summary": []}]
+        assert request.kwargs["store"] is False
+
+    def test_drops_native_item_id_but_keeps_call_id_when_store_is_false(
+        self,
+    ) -> None:
+        """Preserve tool continuity while avoiding unstored provider item ids."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            provider_id=LLMProvider.CHATGPT_OAUTH,
+        )
+        transcript = [
+            _event(
+                EventKind.CLIENT_TOOL_CALL,
+                ClientToolCallPayload(
+                    call_id="call-1",
+                    name="read_text",
+                    arguments="{}",
+                    native_artifact=_artifact(
+                        {
+                            "type": "function_call",
+                            "id": "fc-1",
+                            "call_id": "call-1",
+                            "name": "read_text",
+                            "arguments": "{}",
+                        }
+                    ),
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [
+            {
+                "type": "function_call",
+                "call_id": "call-1",
+                "name": "read_text",
+                "arguments": "{}",
+            }
+        ]
+        assert request.kwargs["store"] is False
+
     def test_pass_through_preserves_null_native_fields(self) -> None:
         """Use native replay item as-is including null fields."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
