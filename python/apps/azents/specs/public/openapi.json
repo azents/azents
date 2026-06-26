@@ -7868,6 +7868,17 @@
             "title": "Title",
             "description": "User-facing session title"
           },
+          "title_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentSessionTitleSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source of the current session title"
+          },
           "status": {
             "$ref": "#/components/schemas/AgentSessionStatus",
             "description": "Session status"
@@ -7905,6 +7916,7 @@
           "id",
           "agent_id",
           "title",
+          "title_source",
           "status",
           "run_state",
           "created_at",
@@ -7930,6 +7942,16 @@
         ],
         "title": "AgentSessionStatus",
         "description": "AgentSession lifecycle status."
+      },
+      "AgentSessionTitleSource": {
+        "type": "string",
+        "enum": [
+          "manual",
+          "auto_initial",
+          "auto_generated"
+        ],
+        "title": "AgentSessionTitleSource",
+        "description": "Source of the current AgentSession title."
       },
       "AgentSessionTitleUpdateRequest": {
         "properties": {

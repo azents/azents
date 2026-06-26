@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from azents.core.enums import (
     AgentSessionPrimaryKind,
     AgentSessionStatus,
+    AgentSessionTitleSource,
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
@@ -103,11 +104,13 @@ class TestAgentSessionRepository:
             rdb_session,
             session_id=agent_session.id,
             title="Design review",
+            title_source=AgentSessionTitleSource.MANUAL,
         )
         cleared = await repo.update_title(
             rdb_session,
             session_id=agent_session.id,
             title=None,
+            title_source=None,
         )
 
         assert titled is not None

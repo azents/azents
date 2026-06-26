@@ -7,6 +7,8 @@ from azents.core.enums import (
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStatus,
+    AgentSessionTitleSource,
+    EventKind,
     LLMProvider,
     WorkspaceUserRole,
 )
@@ -16,6 +18,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.message import MessageRepository
@@ -246,8 +249,163 @@ class TestChatSessionTeamSessions:
 
         assert isinstance(titled, Success)
         assert titled.value.title == "Design review"
+        assert titled.value.title_source == AgentSessionTitleSource.MANUAL
         assert isinstance(cleared, Success)
         assert cleared.value.title is None
+        assert cleared.value.title_source is None
+
+    async def test_initial_auto_title_only_applies_when_unset(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Initial automatic titles do not overwrite manual titles."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-auto-title")
+        agent_id = await _create_agent(rdb_session, workspace_id, "team-auto-title")
+        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=agent_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload={
+                    "content": "Plan a family trip to Kyoto next month",
+                    "attachments": [],
+                    "metadata": {},
+                },
+            ),
+        )
+
+        initial = await AgentSessionRepository().set_initial_auto_title_if_unset(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Plan a family trip to Kyoto next month",
+            event_id=event.id,
+        )
+        manual = await AgentSessionRepository().update_title(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Manual title",
+            title_source=AgentSessionTitleSource.MANUAL,
+        )
+        skipped = await AgentSessionRepository().set_initial_auto_title_if_unset(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Automatic overwrite",
+            event_id=event.id,
+        )
+
+        assert initial is not None
+        assert initial.title_source == AgentSessionTitleSource.AUTO_INITIAL
+        assert manual is not None
+        assert manual.title == "Manual title"
+        assert skipped is None
+
+    async def test_generated_auto_title_only_replaces_initial_auto_title(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """LLM-generated titles only replace the initial automatic title state."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-gen-title")
+        agent_id = await _create_agent(rdb_session, workspace_id, "team-gen-title")
+        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=agent_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload={
+                    "content": "Compare two insurance options",
+                    "attachments": [],
+                    "metadata": {},
+                },
+            ),
+        )
+        initial = await AgentSessionRepository().set_initial_auto_title_if_unset(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Compare two insurance options",
+            event_id=event.id,
+        )
+        assert initial is not None
+
+        generated = await AgentSessionRepository().replace_initial_auto_title(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Insurance option comparison",
+            event_id=event.id,
+        )
+        skipped = await AgentSessionRepository().replace_initial_auto_title(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Second automatic title",
+            event_id=event.id,
+        )
+
+        assert generated is not None
+        assert generated.title == "Insurance option comparison"
+        assert generated.title_source == AgentSessionTitleSource.AUTO_GENERATED
+        assert skipped is None
+
+    async def test_generated_auto_title_skips_when_newer_event_exists(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """LLM-generated titles do not apply after newer transcript activity."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-stale-title")
+        agent_id = await _create_agent(rdb_session, workspace_id, "team-stale-title")
+        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        first_event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=agent_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload={
+                    "content": "Compare two insurance options",
+                    "attachments": [],
+                    "metadata": {},
+                },
+            ),
+        )
+        initial = await AgentSessionRepository().set_initial_auto_title_if_unset(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Compare two insurance options",
+            event_id=first_event.id,
+        )
+        await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=agent_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload={
+                    "content": "Actually compare retirement account options",
+                    "attachments": [],
+                    "metadata": {},
+                },
+            ),
+        )
+
+        skipped = await AgentSessionRepository().replace_initial_auto_title(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Insurance option comparison",
+            event_id=first_event.id,
+        )
+
+        assert initial is not None
+        assert skipped is None
 
     async def test_update_session_title_rejects_empty_title(
         self,

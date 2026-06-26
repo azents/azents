@@ -34,12 +34,14 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.deps import (
+    get_llm_provider_integration_repository,
+)
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.worker.deps import (
     get_command_registry,
     get_exchange_file_service,
-    get_llm_provider_integration_repository,
 )
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.helpers import (

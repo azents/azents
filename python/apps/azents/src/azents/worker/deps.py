@@ -30,7 +30,6 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.toolkit import ToolkitRepository
@@ -159,13 +158,6 @@ def get_health_server(
     """
     port = int(os.environ.get("AZ_WORKER_HEALTH_PORT", str(_DEFAULT_HEALTH_PORT)))
     return HealthServer(worker_redis, port=port)
-
-
-def get_llm_provider_integration_repository(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> LLMProviderIntegrationRepository:
-    """LLM provider integration repository dependency."""
-    return LLMProviderIntegrationRepository(cipher=cipher)
 
 
 def get_toolkit_repository(

@@ -44,6 +44,7 @@ azentspublicclient/docs/AgentSessionPrimaryKind.md
 azentspublicclient/docs/AgentSessionResponse.md
 azentspublicclient/docs/AgentSessionRunState.md
 azentspublicclient/docs/AgentSessionStatus.md
+azentspublicclient/docs/AgentSessionTitleSource.md
 azentspublicclient/docs/AgentSessionTitleUpdateRequest.md
 azentspublicclient/docs/AgentSubagentCreateRequest.md
 azentspublicclient/docs/AgentSubagentListResponse.md
@@ -273,6 +274,7 @@ azentspublicclient/models/agent_session_primary_kind.py
 azentspublicclient/models/agent_session_response.py
 azentspublicclient/models/agent_session_run_state.py
 azentspublicclient/models/agent_session_status.py
+azentspublicclient/models/agent_session_title_source.py
 azentspublicclient/models/agent_session_title_update_request.py
 azentspublicclient/models/agent_subagent_create_request.py
 azentspublicclient/models/agent_subagent_list_response.py
@@ -487,6 +489,7 @@ azentspublicclient/test/test_agent_session_primary_kind.py
 azentspublicclient/test/test_agent_session_response.py
 azentspublicclient/test/test_agent_session_run_state.py
 azentspublicclient/test/test_agent_session_status.py
+azentspublicclient/test/test_agent_session_title_source.py
 azentspublicclient/test/test_agent_session_title_update_request.py
 azentspublicclient/test/test_agent_subagent_create_request.py
 azentspublicclient/test/test_agent_subagent_list_response.py

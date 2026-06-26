@@ -39,6 +39,7 @@ from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
+from azents.services.session_title import SessionTitleService
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import (
@@ -133,6 +134,14 @@ class _AgentSessionRepository:
         return False
 
 
+class _SessionTitleService:
+    """SessionTitleService test double."""
+
+    async def generate_after_first_run(self, session_id: str) -> None:
+        """Do not generate titles in executor tests."""
+        del session_id
+
+
 class _LiveEventProjector:
     """LiveEventProjector test double."""
 
@@ -217,6 +226,7 @@ def _executor(
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
         input_buffer_service=cast(InputBufferService, object()),
+        session_title_service=cast(SessionTitleService, _SessionTitleService()),
         live_event_projector=cast(LiveEventProjector, _LiveEventProjector()),
         user_stop_finalizer=cast(UserStopFinalizer, object()),
         background_registry=cast(BackgroundTaskRegistry, object()),

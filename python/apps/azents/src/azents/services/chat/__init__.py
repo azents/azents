@@ -12,6 +12,7 @@ from azents.core.enums import (
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStatus,
+    AgentSessionTitleSource,
     EventKind,
 )
 from azents.engine.events.types import Event
@@ -353,6 +354,9 @@ class ChatSessionService:
                 session,
                 session_id=session_id,
                 title=normalized_title,
+                title_source=AgentSessionTitleSource.MANUAL
+                if normalized_title is not None
+                else None,
             )
             if updated is None:
                 return Failure(SessionNotFound())
