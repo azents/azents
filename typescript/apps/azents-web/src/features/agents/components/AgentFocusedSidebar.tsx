@@ -235,22 +235,24 @@ export function AgentFocusedSidebar({
                 active={activeSessionId === session.id}
                 label={
                   <Group gap="xs" wrap="nowrap">
-                    <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
+                    <Text size="sm" truncate style={{ minWidth: 0 }}>
                       {isPrimary
                         ? t("sessions.primary")
                         : t("sessions.session")}
                     </Text>
-                    {session.run_state === "running" && (
-                      <Tooltip label={t("sessions.running")}>
-                        <Loader size="xs" aria-label={t("sessions.running")} />
-                      </Tooltip>
-                    )}
                     {isPrimary && (
                       <Badge size="xs" variant="light">
                         {t("sessions.primaryBadge")}
                       </Badge>
                     )}
                   </Group>
+                }
+                rightSection={
+                  session.run_state === "running" ? (
+                    <Tooltip label={t("sessions.running")}>
+                      <Loader size="xs" aria-label={t("sessions.running")} />
+                    </Tooltip>
+                  ) : null
                 }
                 description={formatSessionTimestamp(session)}
                 onClick={onNavigate}
