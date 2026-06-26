@@ -39,16 +39,21 @@ import type {
 
 const DRAFT_STORAGE_KEY_PREFIX = "azents.chat.inputDraft";
 
-function getDraftStorageKey(agentId: string | null): string | null {
+function getDraftStorageKey(
+  agentId: string | null,
+  sessionId: string | null,
+): string | null {
   if (!agentId) {
     return null;
   }
-  return `${DRAFT_STORAGE_KEY_PREFIX}.${agentId}`;
+  return `${DRAFT_STORAGE_KEY_PREFIX}.${agentId}.${sessionId ?? "new"}`;
 }
 
 interface ChatInputProps {
   /** current agent ID */
   agentId: string | null;
+  /** current session ID */
+  sessionId: string | null;
   /** whether mobile */
   isMobile: boolean;
   /** file whether uploading */
@@ -126,6 +131,7 @@ function getSlashCommandQuery(inputValue: string): string | null {
 
 export const ChatInput = memo(function ChatInput({
   agentId,
+  sessionId,
   isMobile,
   isUploading,
   pendingFiles,
@@ -156,7 +162,10 @@ export const ChatInput = memo(function ChatInput({
   editSendDisabled = false,
 }: ChatInputProps): React.ReactElement {
   const t = useTranslations("chat");
-  const draftStorageKey = useMemo(() => getDraftStorageKey(agentId), [agentId]);
+  const draftStorageKey = useMemo(
+    () => getDraftStorageKey(agentId, sessionId),
+    [agentId, sessionId],
+  );
   const storageKey =
     draftStorageKey ?? `${DRAFT_STORAGE_KEY_PREFIX}.__disabled`;
   const [draftValue, setDraftValue, clearStoredDraft] = useLocalStorage<string>(
