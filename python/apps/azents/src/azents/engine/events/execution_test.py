@@ -765,8 +765,8 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     )
 
 
-async def test_provider_tool_call_continues_to_next_model_turn() -> None:
-    """Provider-hosted tool calls count as tool work before run completion."""
+async def test_provider_tool_call_completes_without_next_model_turn() -> None:
+    """Provider-hosted tool calls do not count as client tool work."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
@@ -776,7 +776,6 @@ async def test_provider_tool_call_continues_to_next_model_turn() -> None:
         output_normalizer=_SequenceNormalizer(
             [
                 [_provider_tool_call_event()],
-                [_assistant_event()],
             ]
         ),
         tool_executor=_ToolExecutor(),
@@ -795,10 +794,46 @@ async def test_provider_tool_call_continues_to_next_model_turn() -> None:
     )
 
     assert status == AgentRunStatus.COMPLETED
-    assert run_repo.phases.count(AgentRunPhase.STREAMING_MODEL) == 2
+    assert run_repo.phases.count(AgentRunPhase.STREAMING_MODEL) == 1
     assert [event.kind for event in transcript_repo.events] == [
         EventKind.PROVIDER_TOOL_CALL,
         EventKind.TURN_MARKER,
+        EventKind.RUN_MARKER,
+    ]
+
+
+async def test_provider_tool_call_with_message_completes_one_turn() -> None:
+    """Provider tool trace plus final message completes in one model turn."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_provider_tool_call_event(), _assistant_event()],
+            ]
+        ),
+        tool_executor=_ToolExecutor(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert run_repo.phases.count(AgentRunPhase.STREAMING_MODEL) == 1
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.PROVIDER_TOOL_CALL,
         EventKind.ASSISTANT_MESSAGE,
         EventKind.TURN_MARKER,
         EventKind.RUN_MARKER,

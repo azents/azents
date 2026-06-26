@@ -32,7 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-06-26
-spec_version: 43
+spec_version: 44
 ---
 
 # Agent Execution Loop
@@ -59,8 +59,8 @@ Main steps:
 7. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
 8. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
 9. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
-10. When no tool call or pending follow-up remains, the runner observes the terminal `RunComplete`
-    boundary and then transitions `AgentSession.run_state` to idle.
+10. When no foreground client tool call or pending follow-up remains, the runner observes the
+    terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
 Streaming deltas are UI projection only. Durable events are appended based on completed output items
 or completed responses.
@@ -152,7 +152,7 @@ selected model capability does not support the requested hosted tool.
 
 Generated image/file output and provider-hosted tool output from the model are normalized as
 provider tool call/result events with attachments or text payloads. These provider tool events do not
-enter the client tool execution loop.
+enter the client tool execution loop and do not by themselves continue the model turn.
 
 Synthetic model-visible reminders are durable events or control events whose model lowering role is
 `user`, even though they are not user-authored chat messages. The lowerer renders all
