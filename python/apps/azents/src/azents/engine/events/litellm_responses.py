@@ -14,7 +14,6 @@ from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
 from litellm.responses.main import aresponses
 from litellm.types.llms.openai import ResponseAPIUsage, ResponsesAPIResponse
 from openai import OpenAIError as OpenAIBaseError
-from openai.types.responses.response_input_param import ResponseInputParam
 from openai.types.responses.tool_param import ToolParam
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import TypeAdapter, ValidationError
@@ -76,9 +75,6 @@ from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import BuiltinToolSpec
 
 _DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
-_RESPONSE_INPUT_ADAPTER: TypeAdapter[ResponseInputParam] = TypeAdapter(
-    ResponseInputParam
-)
 _TOOLS_ADAPTER: TypeAdapter[list[ToolParam]] = TypeAdapter(list[ToolParam])
 _REASONING_ADAPTER: TypeAdapter[Reasoning] = TypeAdapter(Reasoning)
 
@@ -264,9 +260,7 @@ class LiteLLMResponsesLowerer:
                 | UnknownAdapterOutputPayload(native_artifact=artifact)
             ):
                 if artifact.compatible_with(self.compat_key):
-                    item = _drop_none_values(artifact.item)
-                    if _is_replayable_input_item(item):
-                        return item
+                    return artifact.item
             case _:
                 pass
         return None
@@ -507,8 +501,9 @@ async def _call_litellm_responses(
         else:
             tools = _TOOLS_ADAPTER.validate_python(request.tools)
     extra_kwargs = _extra_litellm_kwargs(kwargs)
+    input_items: Any = request.input
     return await aresponses(
-        input=_RESPONSE_INPUT_ADAPTER.validate_python(request.input),
+        input=input_items,
         model=request.model,
         tools=tools,
         stream=True,
@@ -580,25 +575,6 @@ def _optional_str(kwargs: dict[str, object], key: str) -> str | None:
     raise TypeError(f"LiteLLM kwarg {key} must be str")
 
 
-def _drop_none_values(item: dict[str, object]) -> dict[str, object]:
-    """Remove null fields from replay native item that provider schema rejects."""
-    normalized: dict[str, object] = {}
-    for key, value in item.items():
-        if value is None:
-            continue
-        normalized[key] = _drop_nested_none_values(value)
-    return normalized
-
-
-def _drop_nested_none_values(value: object) -> object:
-    """Remove null values inside dict/list."""
-    if isinstance(value, dict):
-        return _drop_none_values(value)
-    if isinstance(value, list):
-        return [_drop_nested_none_values(item) for item in value]
-    return value
-
-
 def _drop_orphan_tool_outputs(
     input_items: Sequence[dict[str, object]],
 ) -> list[dict[str, object]]:
@@ -618,11 +594,6 @@ def _drop_orphan_tool_outputs(
             continue
         filtered.append(item)
     return filtered
-
-
-def _is_replayable_input_item(item: dict[str, object]) -> bool:
-    """Check whether Responses output item can be replayed as input."""
-    return item.get("type") == "function_call"
 
 
 def _optional_bool(kwargs: dict[str, object], key: str) -> bool | None:

@@ -142,7 +142,7 @@ class TestLiteLLMResponsesLowerer:
         assert request.kwargs["instructions"] == "Be useful."
         assert request.input == [
             {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi"},
+            {"type": "message"},
         ]
 
     def test_skips_goal_briefing_for_model_input(self) -> None:
@@ -639,36 +639,110 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.input == [{"type": "function_call", "id": "raw"}]
 
-    def test_does_not_pass_through_output_message_artifact(self) -> None:
-        """Lower Responses output message raw item to text instead of input replay."""
+    def test_passes_through_same_native_assistant_message_artifact(self) -> None:
+        """Use assistant message native item as-is when compat key is same."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        raw_item: dict[str, object] = {
+            "type": "message",
+            "id": "msg-1",
+            "role": "assistant",
+            "status": "completed",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": "done",
+                    "annotations": [],
+                }
+            ],
+        }
         transcript = [
             _event(
                 EventKind.ASSISTANT_MESSAGE,
                 AssistantMessagePayload(
                     content="done",
-                    native_artifact=_artifact(
-                        {
-                            "type": "message",
-                            "role": "assistant",
-                            "content": [
-                                {
-                                    "type": "output_text",
-                                    "text": "done",
-                                }
-                            ],
-                        }
-                    ),
+                    native_artifact=_artifact(raw_item),
                 ),
             )
         ]
 
         request = lowerer.lower(transcript, model="gpt-5.1")
 
-        assert request.input == [{"role": "assistant", "content": "done"}]
+        assert request.input == [raw_item]
 
-    def test_pass_through_strips_null_native_fields(self) -> None:
-        """Remove null fields from LiteLLM fallback output in replay request."""
+    def test_passes_through_same_native_provider_tool_call_artifact(self) -> None:
+        """Use provider tool call native item as-is when compat key is same."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        raw_item: dict[str, object] = {
+            "type": "web_search_call",
+            "id": "ws-1",
+            "status": "completed",
+        }
+        transcript = [
+            _event(
+                EventKind.PROVIDER_TOOL_CALL,
+                ProviderToolCallPayload(
+                    call_id="ws-1",
+                    name="web_search",
+                    arguments=None,
+                    native_artifact=_artifact(raw_item),
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [raw_item]
+
+    def test_passes_through_same_native_provider_tool_result_artifact(self) -> None:
+        """Use provider tool result native item as-is when compat key is same."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        raw_item: dict[str, object] = {
+            "type": "image_generation_call",
+            "id": "img-1",
+            "status": "completed",
+        }
+        transcript = [
+            _event(
+                EventKind.PROVIDER_TOOL_RESULT,
+                ProviderToolResultPayload(
+                    call_id="img-1",
+                    name="image_generation",
+                    status="completed",
+                    output="Generated image",
+                    native_artifact=_artifact(raw_item),
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [raw_item]
+
+    def test_passes_through_same_native_reasoning_artifact(self) -> None:
+        """Use reasoning native item as-is when compat key is same."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        raw_item: dict[str, object] = {
+            "type": "reasoning",
+            "id": "rs-1",
+            "summary": [],
+        }
+        transcript = [
+            _event(
+                EventKind.REASONING,
+                ReasoningPayload(
+                    text=None,
+                    summary="summary",
+                    native_artifact=_artifact(raw_item),
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [raw_item]
+
+    def test_pass_through_preserves_null_native_fields(self) -> None:
+        """Use native replay item as-is including null fields."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
         transcript = [
             _event(
@@ -698,6 +772,7 @@ class TestLiteLLMResponsesLowerer:
                 "call_id": "call-1",
                 "name": "read_text",
                 "arguments": "{}",
+                "namespace": None,
             }
         ]
 
