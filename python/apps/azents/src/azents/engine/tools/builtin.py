@@ -1028,8 +1028,9 @@ class RuntimeRunnerFileStorage:
         agent_id: str,
         recursive: bool = False,
         exclude_patterns: list[str] | None = None,
+        include_directories: bool = False,
     ) -> list[RuntimeAttachment]:
-        """List file entries below a Runtime path."""
+        """List file entries under a Runtime path."""
         runtime = await self._ready_runtime(agent_id)
         entries = await self._list_entries(
             runtime,
@@ -1040,13 +1041,20 @@ class RuntimeRunnerFileStorage:
         return [
             RuntimeAttachment(
                 uri=entry.path,
-                media_type=guess_media_type(entry.path),
+                media_type=(
+                    "inode/directory"
+                    if entry.type == "directory"
+                    else guess_media_type(entry.path)
+                ),
                 size=entry.size_bytes or 0,
                 name=PurePosixPath(entry.path).name,
                 text_preview=None,
             )
             for entry in entries
-            if entry.type == "file"
+            if (
+                entry.type == "file"
+                or (include_directories and entry.type == "directory")
+            )
         ]
 
     async def list_dirs(self, path: str, *, agent_id: str) -> list[str]:
@@ -1069,6 +1077,8 @@ class RuntimeRunnerFileStorage:
         exclude_patterns: list[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
+        max_searched_files: int | None = None,
+        max_scanned_bytes: int | None = None,
     ) -> GrepResult:
         """Search Runtime files through a single Runner grep operation."""
         runtime = await self._ready_runtime(agent_id)
@@ -1082,6 +1092,8 @@ class RuntimeRunnerFileStorage:
                 exclude_patterns=exclude_patterns,
                 max_matching_files=max_matching_files,
                 max_lines_per_file=max_lines_per_file,
+                max_searched_files=max_searched_files,
+                max_scanned_bytes=max_scanned_bytes,
                 deadline_at=_runtime_file_operation_deadline(),
             )
         except RuntimeRunnerOperationFailedError as exc:
@@ -1096,6 +1108,7 @@ class RuntimeRunnerFileStorage:
             searched_file_count=result.searched_file_count,
             matched_file_count=result.matched_file_count,
             truncated=result.truncated,
+            stopped_reason=getattr(result, "stopped_reason", None),
         )
 
     async def _ready_runtime(self, agent_id: str) -> AgentRuntime:

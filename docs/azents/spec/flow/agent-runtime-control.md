@@ -21,8 +21,8 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-06-23
-spec_version: 3
+last_verified_at: 2026-06-26
+spec_version: 4
 ---
 
 # Agent Runtime Control
@@ -121,7 +121,7 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 
 `file.list` accepts either a workspace file path or directory path. File paths return that single file entry. Directory paths are direct-child listings by default, and callers can opt into recursive listing with exclude patterns so high-level file tools can skip heavy trees such as `.git` or `node_modules`.
 
-`file.grep` accepts a workspace file path or directory path plus a regex pattern. The Runner performs file discovery, text decoding, regex matching, line limiting, file limiting, and exclude filtering inside the Runtime workspace, then returns a structured final payload of matched files and line matches. Callers should not implement grep by issuing `file.list` plus one `file.read` operation per file.
+`file.grep` accepts a workspace file path or directory path plus a regex pattern. The Runner performs file discovery, text decoding, regex matching, line limiting, file limiting, exclude filtering, searched-file limiting, and scanned-byte limiting inside the Runtime workspace, then returns a structured final payload of matched files, line matches, truncation status, and truncation reason. Callers should not implement grep by issuing `file.list` plus one `file.read` operation per file.
 
 Runner registration and state reports include a mounted workspace path. Control compares it with the provider-reported path and records an explicit failure if they differ. Operation routing uses runner generation fencing so stale runner streams cannot complete newer operations.
 

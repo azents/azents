@@ -124,6 +124,7 @@ class RuntimeGrepResult:
     searched_file_count: int
     matched_file_count: int
     truncated: bool
+    stopped_reason: str | None
     final_cursor: str
 
 
@@ -366,6 +367,8 @@ class RuntimeRunnerOperationClient:
         exclude_patterns: list[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
+        max_searched_files: int | None = None,
+        max_scanned_bytes: int | None = None,
         deadline_at: datetime,
     ) -> RuntimeGrepResult:
         """Run a foreground file grep operation and wait for final result."""
@@ -378,6 +381,10 @@ class RuntimeRunnerOperationClient:
         }
         if exclude_patterns is not None:
             payload["exclude_patterns"] = list(exclude_patterns)
+        if max_searched_files is not None:
+            payload["max_searched_files"] = max_searched_files
+        if max_scanned_bytes is not None:
+            payload["max_scanned_bytes"] = max_scanned_bytes
         dispatch = await self._dispatch_runner_operation(
             RuntimeRunnerOperation(
                 runtime_id=runtime_id,
@@ -583,6 +590,7 @@ class RuntimeRunnerOperationClient:
                 default=0,
             ),
             truncated=_bool_payload(final.event.payload, "truncated", default=False),
+            stopped_reason=_optional_str_payload(final.event.payload, "stopped_reason"),
             final_cursor=final.cursor,
         )
 

@@ -33,8 +33,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-06-23
-spec_version: 35
+last_verified_at: 2026-06-26
+spec_version: 36
 ---
 
 # Toolkit
@@ -189,7 +189,8 @@ Shell is composed of `BuiltinToolkit` (`bash` / import_file / present_file / rea
 - Runtime reads allow/block lists from Runtime settings, builds `SandboxDomainConfig`, and Agent Runtime lifecycle path passes it to Provider allocation policy ([`services/agent_runtime`](../../../../python/apps/azents/src/azents/services/agent_runtime), [`runtime`](../../../../python/apps/azents/src/azents/runtime)).
 - If `allowed_domains` is empty, it runs in "allow all" mode (only denied_domains applied).
 - Shell file tools guide LLM-facing path surface for durable working files under Provider-reported Agent Workspace and temporary files under `/tmp/**`. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
-- `grep` file tool accepts both file path and directory path. Directory path searches recursively by default; if `exclude` is omitted, `.git`, `node_modules`, `.next`, and build/cache directories are excluded. Explicit `exclude: []` disables default excludes.
+- `grep` file tool accepts both file path and directory path. Directory path searches recursively by default. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip. Grep also enforces searched-file and scanned-byte safety caps so sparse matches across very large workspaces do not monopolize Runtime operation time.
+- `glob` file tool accepts absolute path patterns. Recursive patterns such as `**` search below the non-glob prefix and may return matching directories as well as files so directory-oriented patterns like `/workspace/agent/.claude/skills/*` are visible to agents. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip.
 - Shell prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `bash` for command execution, package installation, or when dedicated tool does not fit.
 
 ### Runtime Hook Provider Contract
@@ -455,6 +456,8 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 - **2026-05-14** (spec_version 11) — Reflected Toolkit tool-call observation hook and builtin AGENTS.md instruction loading contract. Added root `/home/sandbox/AGENTS.md`, loaded Project boundary, active Toolkit hook dispatch rules.
 - **2026-05-25** (spec_version 15) — Updated Shell/file tool path surface to Provider-reported Agent Workspace path and reflected Runtime Runner operation path plus explicit no-fallback workspace path contract.
 - **2026-06-11** (spec_version 21) — Corrected Project-scoped `AGENTS.md` boundary from loaded Project to registered Project after Project Source/load-state removal.
+
+- **2026-06-26** (spec_version 36) — Updated Shell `glob` recursive/directory matching contract and changed `glob`/`grep` exclude semantics to additive defaults with explicit `disable_default_excludes`. Added grep searched-file and scanned-byte safety cap behavior.
 
 ## Session Goal Toolkit
 

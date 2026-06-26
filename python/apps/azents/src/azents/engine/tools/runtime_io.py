@@ -93,6 +93,7 @@ class RuntimeGrepResult:
     searched_file_count: int
     matched_file_count: int
     truncated: bool
+    stopped_reason: str | None
     final_cursor: str
 
 
@@ -181,6 +182,8 @@ class RuntimeRunnerOperationClient(Protocol):
         exclude_patterns: list[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
+        max_searched_files: int | None = None,
+        max_scanned_bytes: int | None = None,
         deadline_at: datetime,
     ) -> RuntimeGrepResult:
         """Run file grep operation and return result."""

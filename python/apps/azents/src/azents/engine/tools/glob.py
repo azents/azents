@@ -1,6 +1,6 @@
 """glob tool.
 
-Search file list using absolute path pattern.
+Search Runtime file entries using an absolute path pattern.
 """
 
 import fnmatch
@@ -17,6 +17,22 @@ from azents.services.runtime_storage_error import RuntimeStorageError
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_EXCLUDE_PATTERNS = (
+    ".git",
+    "node_modules",
+    ".next",
+    "dist",
+    "build",
+    ".turbo",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "coverage",
+)
+
 
 class GlobInput(BaseModel):
     """glob tool input."""
@@ -26,6 +42,18 @@ class GlobInput(BaseModel):
             "Glob pattern with absolute path prefix "
             "(e.g. /workspace/agent/*.txt, /tmp/data/*.csv)"
         ),
+    )
+    exclude: list[str] | None = Field(
+        default=None,
+        description=(
+            "Additional directory or glob patterns to exclude during search. "
+            "Default excludes such as .git and node_modules still apply unless "
+            "disable_default_excludes is true."
+        ),
+    )
+    disable_default_excludes: bool = Field(
+        default=False,
+        description="Disable built-in heavy-directory excludes for this search.",
     )
 
 
@@ -55,6 +83,9 @@ def make_glob_tool(
             attachments = await session_storage.list(
                 dir_prefix,
                 agent_id=agent_id,
+                recursive=_requires_recursive_list(raw_pattern),
+                exclude_patterns=_glob_exclude_patterns(input),
+                include_directories=True,
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 400:
@@ -79,10 +110,9 @@ def make_glob_tool(
                 f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
             ) from None
 
-        # Match pattern with fnmatch (attachment.uri is absolute path)
         matched_paths: list[str] = []
         for att in attachments:
-            if fnmatch.fnmatch(att.uri, raw_pattern):
+            if _match_path(att.uri, raw_pattern):
                 matched_paths.append(att.uri)
 
         if not matched_paths:
@@ -98,20 +128,70 @@ def make_glob_tool(
         description=(
             "Search for files matching a glob pattern in storage. "
             "Provide an absolute runtime path pattern. "
+            "Default heavy-directory excludes such as .git and node_modules apply; "
+            "pass disable_default_excludes=true to scan those paths. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
         ),
     )
 
 
+def _glob_exclude_patterns(input: GlobInput) -> list[str]:
+    """Build the final exclude pattern list from glob input."""
+    patterns: list[str] = []
+    if not input.disable_default_excludes:
+        patterns.extend(_DEFAULT_EXCLUDE_PATTERNS)
+    if input.exclude:
+        patterns.extend(input.exclude)
+    return patterns
+
+
 def _extract_dir_prefix(pattern: str) -> str:
-    """Extract directory prefix before glob character from absolute path pattern.
+    """Extract the directory prefix before the first glob segment.
 
     :param pattern: Absolute path glob pattern
     :return: Directory prefix without glob characters
     """
     parts: list[str] = []
     for segment in pattern.split("/"):
-        if any(c in segment for c in ("*", "?", "[")):
+        if _has_glob_meta(segment):
             break
         parts.append(segment)
     return "/".join(parts)
+
+
+def _requires_recursive_list(pattern: str) -> bool:
+    """Return whether the pattern needs nested paths below the prefix."""
+    prefix = _extract_dir_prefix(pattern).rstrip("/")
+    suffix = pattern[len(prefix) :].strip("/")
+    return "/" in suffix or "**" in suffix
+
+
+def _match_path(path: str, pattern: str) -> bool:
+    """Match a glob pattern while preserving path separators as boundaries."""
+    path_segments = path.strip("/").split("/") if path != "/" else []
+    pattern_segments = pattern.strip("/").split("/") if pattern != "/" else []
+    return _match_segments(path_segments, pattern_segments)
+
+
+def _match_segments(path_segments: list[str], pattern_segments: list[str]) -> bool:
+    """Match path segments with support for the recursive `**` segment."""
+    if not pattern_segments:
+        return not path_segments
+    pattern_head = pattern_segments[0]
+    pattern_tail = pattern_segments[1:]
+    if pattern_head == "**":
+        if _match_segments(path_segments, pattern_tail):
+            return True
+        return bool(path_segments) and _match_segments(
+            path_segments[1:], pattern_segments
+        )
+    if not path_segments:
+        return False
+    if not fnmatch.fnmatchcase(path_segments[0], pattern_head):
+        return False
+    return _match_segments(path_segments[1:], pattern_tail)
+
+
+def _has_glob_meta(segment: str) -> bool:
+    """Return whether a path segment contains glob metacharacters."""
+    return any(char in segment for char in ("*", "?", "["))

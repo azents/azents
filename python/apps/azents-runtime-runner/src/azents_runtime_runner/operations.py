@@ -6,7 +6,8 @@ import fnmatch
 import os
 import re
 import stat as stat_module
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -22,6 +23,17 @@ from azents_runtime_runner.workspace import Workspace
 
 _DEFAULT_BASH_TIMEOUT_SECONDS = 120
 _MAX_FILE_READ_BYTES = 8 * 1024 * 1024
+_DEFAULT_MAX_GREP_SEARCHED_FILES = 10_000
+_DEFAULT_MAX_GREP_SCANNED_BYTES = 128 * 1024 * 1024
+
+
+@dataclass
+class _GrepScanState:
+    """Track scan budget consumed while iterating grep targets."""
+
+    searched_file_count: int = 0
+    scanned_bytes: int = 0
+    stopped_reason: str | None = None
 
 
 class RunnerEventSink(Protocol):
@@ -216,33 +228,50 @@ class RunnerOperations:
             "max_lines_per_file",
             default=10,
         )
-        files = _iter_grep_files(
+        max_searched_files = _positive_int_payload(
+            operation.payload,
+            "max_searched_files",
+            default=_DEFAULT_MAX_GREP_SEARCHED_FILES,
+        )
+        max_scanned_bytes = _positive_int_payload(
+            operation.payload,
+            "max_scanned_bytes",
+            default=_DEFAULT_MAX_GREP_SCANNED_BYTES,
+        )
+        state = _GrepScanState()
+        matches: list[JsonValue] = []
+        for file_path in _iter_grep_files(
             path,
             workspace=self._workspace,
             recursive=recursive,
             exclude_patterns=exclude_patterns,
-        )
-        matches: list[JsonValue] = []
-        truncated = False
-        for file_path in files:
+        ):
             if len(matches) >= max_matching_files:
-                truncated = True
+                state.stopped_reason = "matching_file_limit"
+                break
+            if state.searched_file_count >= max_searched_files:
+                state.stopped_reason = "searched_file_limit"
                 break
             match = _grep_file(
                 file_path,
                 workspace=self._workspace,
                 regex=regex,
                 max_lines_per_file=max_lines_per_file,
+                max_scanned_bytes=max_scanned_bytes,
+                state=state,
             )
             if match is not None:
                 matches.append(match)
+            if state.stopped_reason is not None:
+                break
         await self._final_success(
             operation,
             {
                 "files": matches,
-                "searched_file_count": len(files),
+                "searched_file_count": state.searched_file_count,
                 "matched_file_count": len(matches),
-                "truncated": truncated,
+                "truncated": state.stopped_reason is not None,
+                "stopped_reason": state.stopped_reason,
             },
         )
 
@@ -351,15 +380,16 @@ def _iter_grep_files(
     workspace: Workspace,
     recursive: bool,
     exclude_patterns: list[str],
-) -> list[Path]:
-    """file.grep 이 검색할 regular file 경로를 정렬된 순서로 반환합니다."""
-    entries = _iter_list_entries(
+) -> Iterator[Path]:
+    """Yield regular file paths searched by file.grep in sorted order."""
+    for entry in _iter_list_entries(
         path,
         workspace=workspace,
         recursive=recursive,
         exclude_patterns=exclude_patterns,
-    )
-    return [entry for entry in entries if entry.is_file() and not entry.is_symlink()]
+    ):
+        if entry.is_file() and not entry.is_symlink():
+            yield entry
 
 
 def _grep_file(
@@ -368,14 +398,24 @@ def _grep_file(
     workspace: Workspace,
     regex: re.Pattern[str],
     max_lines_per_file: int,
+    max_scanned_bytes: int,
+    state: _GrepScanState,
 ) -> dict[str, JsonValue] | None:
-    """한 파일에서 regex match line을 찾습니다."""
+    """Find regex-matching lines in one file."""
+    state.searched_file_count += 1
     lines: list[JsonValue] = []
     truncated = False
     try:
-        with path.open("r", encoding="utf-8") as file:
+        with path.open("rb") as file:
             for line_number, raw_line in enumerate(file, start=1):
-                line = raw_line.rstrip("\r\n")
+                state.scanned_bytes += len(raw_line)
+                if state.scanned_bytes > max_scanned_bytes:
+                    state.stopped_reason = "scanned_byte_limit"
+                    break
+                try:
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                except UnicodeDecodeError:
+                    return None
                 if not regex.search(line):
                     continue
                 if len(lines) >= max_lines_per_file:
@@ -386,7 +426,7 @@ def _grep_file(
                     "text": line,
                 }
                 lines.append(line_match)
-    except UnicodeDecodeError:
+    except OSError:
         return None
     if not lines:
         return None
@@ -404,31 +444,26 @@ def _iter_list_entries(
     workspace: Workspace,
     recursive: bool,
     exclude_patterns: list[str],
-) -> list[Path]:
-    """file.list 응답에 포함할 경로를 정렬된 순서로 반환합니다."""
+) -> Iterator[Path]:
+    """Yield paths included in file.list responses in sorted order."""
     if path.is_file() or path.is_symlink():
-        return [path]
+        yield path
+        return
     try:
         children = sorted(path.iterdir(), key=lambda item: item.name)
     except OSError:
-        return []
-    if not recursive:
-        return children
-    entries: list[Path] = []
+        return
     for child in children:
         if _excluded(child, base=path, workspace=workspace, patterns=exclude_patterns):
             continue
-        entries.append(child)
-        if child.is_dir() and not child.is_symlink():
-            entries.extend(
-                _iter_list_entries(
-                    child,
-                    workspace=workspace,
-                    recursive=True,
-                    exclude_patterns=exclude_patterns,
-                )
+        yield child
+        if recursive and child.is_dir() and not child.is_symlink():
+            yield from _iter_list_entries(
+                child,
+                workspace=workspace,
+                recursive=True,
+                exclude_patterns=exclude_patterns,
             )
-    return entries
 
 
 def _excluded(
@@ -438,7 +473,7 @@ def _excluded(
     workspace: Workspace,
     patterns: list[str],
 ) -> bool:
-    """경로가 exclude 패턴에 매칭되는지 확인합니다."""
+    """Return whether the path matches an exclude pattern."""
     del workspace
     relative_path = _lexical_relative_path(path, base)
     parts = relative_path.split("/")
@@ -451,7 +486,7 @@ def _excluded(
 
 
 def _resolve_lexical_path(raw_path: object, *, workspace: Workspace) -> Path:
-    """Symlink target을 따라가지 않는 absolute path를 생성합니다."""
+    """Build an absolute path without following symlink targets."""
     if not isinstance(raw_path, str) or not raw_path.strip():
         raise ValueError("path is required")
     path = Path(raw_path)
@@ -461,7 +496,7 @@ def _resolve_lexical_path(raw_path: object, *, workspace: Workspace) -> Path:
 
 
 def _lexical_relative_path(path: Path, base: Path) -> str:
-    """Symlink target을 따라가지 않고 base 기준 lexical relative path를 반환합니다."""
+    """Return a lexical path relative to base without following symlink targets."""
     try:
         return path.relative_to(base).as_posix()
     except ValueError:
@@ -469,7 +504,7 @@ def _lexical_relative_path(path: Path, base: Path) -> str:
 
 
 def _stat_payload(path: Path, workspace: Workspace) -> dict[str, JsonValue]:
-    """lstat 기반 file.stat payload를 생성합니다."""
+    """Build a file.stat payload from lstat."""
     stat_result = path.lstat()
     del workspace
     size_bytes: int | None = None
@@ -492,7 +527,7 @@ def _stat_payload(path: Path, workspace: Workspace) -> dict[str, JsonValue]:
 
 
 def _mode_kind(mode: int) -> str:
-    """stat mode를 Runtime file kind 문자열로 변환합니다."""
+    """Convert stat mode to a Runtime file kind string."""
     if stat_module.S_ISLNK(mode):
         return "symlink"
     if stat_module.S_ISDIR(mode):
@@ -503,7 +538,7 @@ def _mode_kind(mode: int) -> str:
 
 
 def _file_size(path: Path) -> int | None:
-    """파일 크기를 읽되 stat 실패는 None으로 처리합니다."""
+    """Read file size and return None when stat fails."""
     if not path.is_file() or path.is_symlink():
         return None
     try:

@@ -1,6 +1,6 @@
 """grep tool.
 
-Search regex pattern in text files under absolute path.
+Search regex patterns in text files under an absolute path.
 """
 
 import logging
@@ -17,11 +17,17 @@ from azents.services.runtime_storage_error import RuntimeStorageError
 
 logger = logging.getLogger(__name__)
 
-# Maximum file count included in search result
+# Maximum matching file count included in search results.
 _MAX_MATCHING_FILES = 50
 
-# Maximum matching lines per file
+# Maximum matching line count included for one file.
 _MAX_LINES_PER_FILE = 10
+
+# Maximum file count grep can visit in one operation.
+_MAX_SEARCHED_FILES = 10_000
+
+# Maximum byte count grep can read in one operation.
+_MAX_SCANNED_BYTES = 128 * 1024 * 1024
 
 _DEFAULT_EXCLUDE_PATTERNS = (
     ".git",
@@ -61,10 +67,14 @@ class GrepInput(BaseModel):
     exclude: list[str] | None = Field(
         default=None,
         description=(
-            "Directory or glob patterns to exclude during recursive search. "
-            "Omit to use default excludes such as .git and node_modules; "
-            "pass an empty list to disable excludes."
+            "Additional directory or glob patterns to exclude during recursive search. "
+            "Default excludes such as .git and node_modules still apply unless "
+            "disable_default_excludes is true."
         ),
+    )
+    disable_default_excludes: bool = Field(
+        default=False,
+        description="Disable built-in heavy-directory excludes for this search.",
     )
 
 
@@ -98,11 +108,9 @@ def make_grep_tool(
                 agent_id=agent_id,
                 pattern=input.pattern,
                 recursive=input.recursive,
-                exclude_patterns=(
-                    list(input.default_exclude_patterns)
-                    if input.exclude is None
-                    else input.exclude
-                ),
+                exclude_patterns=_grep_exclude_patterns(input),
+                max_searched_files=_MAX_SEARCHED_FILES,
+                max_scanned_bytes=_MAX_SCANNED_BYTES,
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 400:
@@ -133,9 +141,7 @@ def make_grep_tool(
             if file_match.truncated:
                 results.append("  ... (more matches truncated)")
         if grep_result.truncated:
-            results.append(
-                f"\n... (truncated, {_MAX_MATCHING_FILES} file limit reached)"
-            )
+            results.append(_truncation_message(grep_result.stopped_reason))
 
         if not results:
             return f"No matches found for pattern '{input.pattern}' in {abs_path}"
@@ -150,8 +156,30 @@ def make_grep_tool(
             "Search for a regex pattern in text files "
             "under a storage file or directory. "
             "Directories are searched recursively by default and common heavy "
-            "directories such as .git and node_modules are excluded unless "
-            "exclude is provided explicitly. "
+            "directories such as .git and node_modules are excluded by default. "
+            "Use exclude to add patterns, or disable_default_excludes "
+            "to scan them. "
             "Provide a regex pattern and an absolute runtime file or directory path. "
         ),
     )
+
+
+def _grep_exclude_patterns(input: GrepInput) -> list[str]:
+    """Build the final exclude pattern list from grep input."""
+    patterns: list[str] = []
+    if not input.disable_default_excludes:
+        patterns.extend(input.default_exclude_patterns)
+    if input.exclude:
+        patterns.extend(input.exclude)
+    return patterns
+
+
+def _truncation_message(stopped_reason: str | None) -> str:
+    """Convert a truncation reason into a user-facing message."""
+    if stopped_reason == "searched_file_limit":
+        detail = f"{_MAX_SEARCHED_FILES} searched-file limit reached"
+    elif stopped_reason == "scanned_byte_limit":
+        detail = f"{_MAX_SCANNED_BYTES // (1024 * 1024)} MiB scanned-byte limit reached"
+    else:
+        detail = f"{_MAX_MATCHING_FILES} matching-file limit reached"
+    return f"\n... (truncated, {detail})"

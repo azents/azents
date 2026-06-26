@@ -170,8 +170,8 @@ class TestGrep:
         assert "app.ts" in result
         assert "node_modules" not in result
 
-    async def test_explicit_empty_exclude_disables_default_exclude(self) -> None:
-        """Explicit empty exclude disables default exclude."""
+    async def test_explicit_empty_exclude_keeps_default_exclude(self) -> None:
+        """An empty exclude list does not disable default excludes."""
         # Given
         tool, _ = _make_tool(
             files={
@@ -192,6 +192,56 @@ class TestGrep:
         )
 
         # Then
+        assert isinstance(result, str)
+        assert "1 file(s)" in result
+        assert "app.ts" in result
+        assert "node_modules" not in result
+
+    async def test_exclude_adds_to_default_excludes(self) -> None:
+        """exclude adds patterns while preserving default excludes."""
+        tool, _ = _make_tool(
+            files={
+                "/workspace/agent/src/app.ts": b"target",
+                "/workspace/agent/.next/cache.js": b"target",
+                "/workspace/agent/generated/output.ts": b"target",
+            },
+        )
+
+        result = await tool.handler(
+            json.dumps(
+                {
+                    "pattern": "target",
+                    "path": "/workspace/agent",
+                    "exclude": ["generated"],
+                }
+            )
+        )
+
+        assert isinstance(result, str)
+        assert "1 file(s)" in result
+        assert "app.ts" in result
+        assert ".next" not in result
+        assert "generated" not in result
+
+    async def test_disable_default_excludes_allows_heavy_directories(self) -> None:
+        """disable_default_excludes=true skips default excludes."""
+        tool, _ = _make_tool(
+            files={
+                "/workspace/agent/src/app.ts": b"target",
+                "/workspace/agent/node_modules/pkg/index.ts": b"target",
+            },
+        )
+
+        result = await tool.handler(
+            json.dumps(
+                {
+                    "pattern": "target",
+                    "path": "/workspace/agent",
+                    "disable_default_excludes": True,
+                }
+            )
+        )
+
         assert isinstance(result, str)
         assert "2 file(s)" in result
         assert "app.ts" in result
@@ -379,8 +429,9 @@ class TestGrepErrors:
                 user_id: str = "",
                 recursive: bool = False,
                 exclude_patterns: list[str] | None = None,
+                include_directories: bool = False,
             ) -> list[RuntimeAttachment]:
-                _ = agent_id, user_id, recursive, exclude_patterns
+                _ = agent_id, user_id, recursive, exclude_patterns, include_directories
                 raise FileNotFoundError(f"Directory not found: {path}")
 
         storage = _RaisingStorage()
