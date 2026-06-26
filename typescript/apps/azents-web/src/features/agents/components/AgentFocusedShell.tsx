@@ -124,7 +124,17 @@ export function AgentFocusedShell({
             onCreateSession={handleCreateSession}
           />
         </Box>
-        <Box h="100%" mih={0} miw={0} flex={1} style={{ overflow: "hidden" }}>
+        <Box
+          h="100%"
+          mih={0}
+          miw={0}
+          flex={1}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
           {children}
         </Box>
       </Group>
