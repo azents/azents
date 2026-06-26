@@ -187,7 +187,8 @@
     "light": "라이트",
     "dark": "다크",
     "system": "시스템",
-    "unknownError": "알 수 없는 오류"
+    "unknownError": "알 수 없는 오류",
+    "colorMode": "색상 모드"
   },
   "auth": {
     "loginStep": {

@@ -62,10 +62,7 @@ export function ChatSessionView({
       <AgentHeader
         handle={handle}
         agent={agent}
-        runtimeControls={{
-          connectionStatus: output.connectionStatus,
-          onOpenRuntime: () => setRuntimeDrawerOpened(true),
-        }}
+        onOpenRuntime={() => setRuntimeDrawerOpened(true)}
         chatControls={
           <TokenUsageIndicator
             usage={output.tokenUsage}

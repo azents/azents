@@ -3,7 +3,7 @@
 /**
  * Global app layout component.
  *
- * Applies Mantine AppShell + 60px top app bar to all (app) pages.
+ * Applies Mantine AppShell and hides the global top app bar on Agent-focused pages.
  */
 import { AppShell } from "@mantine/core";
 import { usePathname } from "next/navigation";
@@ -21,17 +21,24 @@ export function AppLayout({
   children,
 }: AppLayoutProps): React.ReactElement {
   const pathname = usePathname();
+  const isAgentDetailRoute = /^\/w\/[^/]+\/agents\/(?!new(?:\/|$))[^/]+/.test(
+    pathname,
+  );
+  const headerHeight = isAgentDetailRoute ? 0 : 60;
 
   // Show header bottom border on sidebar pages (workspace, account settings)
   const withBorder =
-    pathname.startsWith("/w/") || pathname.startsWith("/account");
+    (pathname.startsWith("/w/") && !isAgentDetailRoute) ||
+    pathname.startsWith("/account");
 
   return (
     <SidebarProvider>
-      <AppShell header={{ height: 60 }} withBorder={withBorder}>
-        <AppShell.Header>
-          <AppBar authStatus={authStatus} />
-        </AppShell.Header>
+      <AppShell header={{ height: headerHeight }} withBorder={withBorder}>
+        {!isAgentDetailRoute && (
+          <AppShell.Header>
+            <AppBar authStatus={authStatus} />
+          </AppShell.Header>
+        )}
         <AppShell.Main>{children}</AppShell.Main>
       </AppShell>
     </SidebarProvider>

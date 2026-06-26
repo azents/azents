@@ -127,8 +127,9 @@ _14 documents_
 - [ADR-0075: Remove AgentSession Runtime Ownership](adr/0075-agent-session-runtime-ownership-removal.md)
 - [ADR-0076: Session-Owned Project Registry](adr/0076-session-owned-project-registry.md)
 - [ADR-0077: Session-Owned REST Write Idempotency](adr/0077-session-owned-rest-write-idempotency.md)
+- [ADR-0078: Agent-Focused Navigation Information Architecture](adr/0078-agent-focused-navigation-ia.md)
 
-_78 documents_
+_79 documents_
 
 ## Issues (Bug Tracking)
 
@@ -158,4 +159,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 306
+- Total documents: 307
