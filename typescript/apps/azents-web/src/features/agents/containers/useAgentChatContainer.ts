@@ -15,10 +15,17 @@ import type {
   AgentSessionResponse,
 } from "@azents/public-client";
 
+export type AgentChatInnerView =
+  | "chat"
+  | "context"
+  | "system-prompt"
+  | "raw-events";
+
 export interface AgentChatContainerProps {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
+  view: AgentChatInnerView;
 }
 
 export type AgentChatSessionState =
@@ -30,6 +37,7 @@ export interface AgentChatContainerOutput {
   handle: string;
   agent: AgentResponse;
   sessionId: string;
+  view: AgentChatInnerView;
   sessionState: AgentChatSessionState;
   /** ChatSessionView mount identifier */
   mountKey: string;
@@ -41,7 +49,7 @@ export interface AgentChatContainerOutput {
 export function useAgentChatContainer(
   props: AgentChatContainerProps,
 ): AgentChatContainerOutput {
-  const { handle, agent, sessionId } = props;
+  const { handle, agent, sessionId, view } = props;
   const sessionQuery = trpc.chat.getAgentSession.useQuery({
     agentId: agent.id,
     sessionId,
@@ -69,6 +77,7 @@ export function useAgentChatContainer(
     handle,
     agent,
     sessionId,
+    view,
     sessionState,
     mountKey,
     mountSessionId: sessionId,
