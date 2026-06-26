@@ -540,7 +540,7 @@
           "empty": "아직 세션이 없습니다.",
           "primary": "메인 세션",
           "session": "세션",
-          "primaryBadge": "기본",
+          "primaryBadge": "메인",
           "running": "실행 중…"
         },
         "inheritModelBadge": "상위 모델 상속",
