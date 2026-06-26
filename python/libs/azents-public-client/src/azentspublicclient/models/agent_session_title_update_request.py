@@ -17,29 +17,18 @@ import pprint
 import re  # noqa: F401
 import json
 
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind
-from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
-from azentspublicclient.models.agent_session_status import AgentSessionStatus
 from typing import Optional, Set
 from typing_extensions import Self
 
-class AgentSessionResponse(BaseModel):
+class AgentSessionTitleUpdateRequest(BaseModel):
     """
-    Conversation session response.
+    AgentSession title update request.
     """ # noqa: E501
-    id: StrictStr = Field(description="Session ID")
-    agent_id: StrictStr = Field(description="Agent ID")
     title: Optional[StrictStr]
-    status: AgentSessionStatus = Field(description="Session status")
-    primary_kind: Optional[AgentSessionPrimaryKind] = None
-    run_state: AgentSessionRunState = Field(description="Session execution state")
-    created_at: datetime = Field(description="Created time")
-    updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "title", "status", "primary_kind", "run_state", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["title"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -59,7 +48,7 @@ class AgentSessionResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of AgentSessionResponse from a JSON string"""
+        """Create an instance of AgentSessionTitleUpdateRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -92,16 +81,11 @@ class AgentSessionResponse(BaseModel):
         if self.title is None and "title" in self.model_fields_set:
             _dict['title'] = None
 
-        # set to None if primary_kind (nullable) is None
-        # and model_fields_set contains the field
-        if self.primary_kind is None and "primary_kind" in self.model_fields_set:
-            _dict['primary_kind'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of AgentSessionResponse from a dict"""
+        """Create an instance of AgentSessionTitleUpdateRequest from a dict"""
         if obj is None:
             return None
 
@@ -109,14 +93,7 @@ class AgentSessionResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "id": obj.get("id"),
-            "agent_id": obj.get("agent_id"),
-            "title": obj.get("title"),
-            "status": obj.get("status"),
-            "primary_kind": obj.get("primary_kind"),
-            "run_state": obj.get("run_state"),
-            "created_at": obj.get("created_at"),
-            "updated_at": obj.get("updated_at")
+            "title": obj.get("title")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

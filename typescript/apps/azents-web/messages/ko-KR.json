@@ -541,7 +541,14 @@
           "primary": "메인 세션",
           "session": "세션",
           "primaryBadge": "메인",
-          "running": "실행 중…"
+          "running": "실행 중…",
+          "actions": "세션 작업",
+          "rename": "이름 변경",
+          "renameTitle": "세션 이름 변경",
+          "renameLabel": "세션 제목",
+          "clearTitle": "제목 지우기",
+          "cancel": "취소",
+          "save": "저장"
         },
         "inheritModelBadge": "상위 모델 상속",
         "danger": {

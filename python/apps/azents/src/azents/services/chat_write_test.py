@@ -321,6 +321,7 @@ class TestChatWriteService:
                 AgentSessionCreate(
                     workspace_id=workspace_id,
                     agent_id=agent_id,
+                    title=None,
                     primary_kind=None,
                 ),
             )

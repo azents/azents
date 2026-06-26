@@ -58,6 +58,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/team-primary-session
   - /chat/v1/agents/{agent_id}/sessions
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
+  - /chat/v1/sessions/{session_id}/title
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/context
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register
@@ -118,6 +119,7 @@ command, stop intent, or run heartbeat.
 | `status` | enum | `active` or `archived` |
 | `primary_kind` | enum \| null | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind. |
 | `start_reason` | enum | `initial`, `system_recovery` |
+| `title` | string \| null | Optional user-facing title. `null` means no custom title and clients should render a contextual fallback. |
 | `end_reason` | enum \| null | Archive reason |
 | `model_input_head_event_id` | `str(32)` \| null | Event model-input head after append-only compaction |
 | `run_state` / `run_heartbeat_at` | enum / timestamptz | Session execution recovery state |
@@ -134,6 +136,13 @@ primary session. Pending project registration requests are not copied. azents-we
 surface this list in the Agent rail and navigate selected sessions through
 `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. Creating a session invalidates the Agent
 session list cache and navigates to the newly created session URL.
+
+Each session may have a manual user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
+sets or clears this title after workspace membership validation. The request body uses `{ "title":
+string | null }`: non-null titles are trimmed and must be non-empty and at most 200 characters; an
+explicit `null` clears the custom title. The server does not generate automatic titles in this phase.
+Clients display the custom title when present and otherwise fall back to a contextual label such as
+"Team primary" or "Session".
 
 Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
 projections, broker wake-up, and the REST response use that same session id. Runtime current/active

@@ -137,6 +137,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
 *ChatV1Api* | [**chat_v1_reject_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reject_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject | Reject Agent Project Registration Request
 *ChatV1Api* | [**chat_v1_stop_session_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
+*ChatV1Api* | [**chat_v1_update_agent_session_title**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_agent_session_title) | **PATCH** /chat/v1/sessions/{session_id}/title | Update Agent Session Title
 *ChatV1Api* | [**chat_v1_update_session_goal**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal) | **PATCH** /chat/v1/sessions/{session_id}/goal | Update Session Goal
 *ChatV1Api* | [**chat_v1_update_session_goal_status**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal_status) | **PATCH** /chat/v1/sessions/{session_id}/goal/status | Update Session Goal Status
 *ChatV1Api* | [**chat_v1_upload_file_for_agent**](azentspublicclient/docs/ChatV1Api.md#chat_v1_upload_file_for_agent) | **POST** /chat/v1/agents/{agent_id}/upload | Upload File For Agent
@@ -234,6 +235,7 @@ Class | Method | HTTP request | Description
  - [AgentSessionResponse](azentspublicclient/docs/AgentSessionResponse.md)
  - [AgentSessionRunState](azentspublicclient/docs/AgentSessionRunState.md)
  - [AgentSessionStatus](azentspublicclient/docs/AgentSessionStatus.md)
+ - [AgentSessionTitleUpdateRequest](azentspublicclient/docs/AgentSessionTitleUpdateRequest.md)
  - [AgentSubagentCreateRequest](azentspublicclient/docs/AgentSubagentCreateRequest.md)
  - [AgentSubagentListResponse](azentspublicclient/docs/AgentSubagentListResponse.md)
  - [AgentSubagentResponse](azentspublicclient/docs/AgentSubagentResponse.md)

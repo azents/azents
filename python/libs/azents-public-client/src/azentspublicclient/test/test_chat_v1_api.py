@@ -215,6 +215,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_update_agent_session_title(self) -> None:
+        """Test case for chat_v1_update_agent_session_title
+
+        Update Agent Session Title
+        """
+        pass
+
     def test_chat_v1_update_session_goal(self) -> None:
         """Test case for chat_v1_update_session_goal
 

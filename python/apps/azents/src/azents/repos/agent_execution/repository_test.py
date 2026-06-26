@@ -100,6 +100,7 @@ class TestEventExecutionRepositories:
             AgentSessionCreate(
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+                title=None,
             ),
         )
 
@@ -161,6 +162,7 @@ class TestEventExecutionRepositories:
             AgentSessionCreate(
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+                title=None,
             ),
         )
         transcript_repo = EventTranscriptRepository()
@@ -213,6 +215,7 @@ class TestEventExecutionRepositories:
                 AgentSessionCreate(
                     workspace_id=workspace_id,
                     agent_id=agent_id,
+                    title=None,
                 ),
             )
             await setup_session.commit()
@@ -270,6 +273,7 @@ class TestEventExecutionRepositories:
             AgentSessionCreate(
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+                title=None,
             ),
         )
         transcript_repo = EventTranscriptRepository()
@@ -327,6 +331,7 @@ class TestEventExecutionRepositories:
             AgentSessionCreate(
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+                title=None,
             ),
         )
         repo = AgentRunRepository()
@@ -387,6 +392,7 @@ class TestEventExecutionRepositories:
             AgentSessionCreate(
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+                title=None,
             ),
         )
         repo = AgentRunRepository()
@@ -424,6 +430,7 @@ class TestEventExecutionRepositories:
             AgentSessionCreate(
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+                title=None,
             ),
         )
         repo = AgentRunRepository()
@@ -459,6 +466,7 @@ class TestEventExecutionRepositories:
             AgentSessionCreate(
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+                title=None,
             ),
         )
         second_session = await _agent_session_repository().create(
@@ -466,6 +474,7 @@ class TestEventExecutionRepositories:
             AgentSessionCreate(
                 workspace_id=workspace_id,
                 agent_id=agent_id,
+                title=None,
                 primary_kind=None,
             ),
         )

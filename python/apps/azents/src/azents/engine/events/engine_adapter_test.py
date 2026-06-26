@@ -1141,6 +1141,7 @@ def _agent_session() -> AgentSession:
         agent_id="agent-1",
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
+        title=None,
         created_at=now,
         updated_at=now,
         started_at=now,

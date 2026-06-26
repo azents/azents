@@ -69,6 +69,7 @@ from azents.services.chat.data import (
     DeleteInputBufferError,
     DeleteSessionError,
     InvalidGoalStatusTransition,
+    InvalidSessionTitle,
     NotWorkspaceMember,
     SessionAccessDenied,
     SessionNotFound,
@@ -132,6 +133,7 @@ from azents.utils.fastapi.route import RouteMounter
 from .data import (
     AgentSessionListResponse,
     AgentSessionResponse,
+    AgentSessionTitleUpdateRequest,
     AgentWorkspaceActionResponse,
     AgentWorkspaceDirectoryResponse,
     AgentWorkspaceFileResponse,
@@ -1103,6 +1105,40 @@ async def get_agent_session(
             match error:
                 case SessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.patch("/sessions/{session_id}/title")
+async def update_agent_session_title(
+    session_id: str,
+    request: AgentSessionTitleUpdateRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentSessionResponse:
+    """Update or clear a user-facing AgentSession title."""
+    _validate_session_id(session_id)
+    result = await chat_service.update_session_title(
+        session_id=session_id,
+        user_id=current_user.user_id,
+        title=request.title,
+    )
+    match result:
+        case Success(session):
+            return AgentSessionResponse.from_domain(session)
+        case Failure(error):
+            match error:
+                case InvalidSessionTitle():
+                    raise HTTPException(status_code=400, detail=error.reason)
+                case SessionNotFound():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case SessionAccessDenied():
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Session access denied.",
+                    )
                 case _:
                     assert_never(error)
         case _:

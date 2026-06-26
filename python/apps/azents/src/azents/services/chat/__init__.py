@@ -34,6 +34,7 @@ from .data import (
     DeleteSessionError,
     EnsureSessionError,
     InvalidGoalStatusTransition,
+    InvalidSessionTitle,
     NotWorkspaceMember,
     PaginatedEvents,
     SessionAccessDenied,
@@ -42,12 +43,16 @@ from .data import (
     UpdateGoalError,
     UpdateGoalResult,
     UpdateGoalStatusInput,
+    UpdateSessionTitleError,
 )
 from .live_events import LiveEventStore, input_buffer_to_live_event
 
 
 class _InvalidGoalStatusTransitionError(Exception):
     """Service-internal Goal status transition error."""
+
+
+_SESSION_TITLE_MAX_LENGTH = 200
 
 
 @dataclasses.dataclass
@@ -225,6 +230,7 @@ class ChatSessionService:
                 AgentSessionCreate(
                     workspace_id=agent.workspace_id,
                     agent_id=agent_id,
+                    title=None,
                     primary_kind=None,
                 ),
             )
@@ -244,6 +250,55 @@ class ChatSessionService:
                 )
             await session.commit()
             return Success(created)
+
+    async def update_session_title(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        title: str | None,
+    ) -> Result[AgentSession, UpdateSessionTitleError]:
+        """Update a user-facing AgentSession title after access validation."""
+        normalized_title = title.strip() if title is not None else None
+        if normalized_title == "":
+            return Failure(
+                InvalidSessionTitle(reason="Session title must not be empty.")
+            )
+        if (
+            normalized_title is not None
+            and len(normalized_title) > _SESSION_TITLE_MAX_LENGTH
+        ):
+            return Failure(
+                InvalidSessionTitle(
+                    reason="Session title must be 200 characters or fewer."
+                )
+            )
+
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None:
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent_session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionAccessDenied())
+            updated = await self.agent_session_repository.update_title(
+                session,
+                session_id=session_id,
+                title=normalized_title,
+            )
+            if updated is None:
+                return Failure(SessionNotFound())
+            await session.commit()
+            return Success(updated)
 
     async def list_sessions(
         self, user_id: str, workspace_id: str

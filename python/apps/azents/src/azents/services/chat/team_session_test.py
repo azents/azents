@@ -1,6 +1,6 @@
 """ChatSessionService team session tests."""
 
-from azcommon.result import Success
+from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -24,6 +24,7 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
+from azents.services.chat.data import InvalidSessionTitle
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
@@ -206,6 +207,77 @@ class TestChatSessionTeamSessions:
             assert [project.path for project in copied_projects] == [
                 "/workspace/agent/project-a"
             ]
+
+    async def test_update_session_title_trims_and_clears_title(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Session title updates normalize whitespace and explicit null clears it."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-title")
+        user_id = await _create_user(rdb_session, "team-session-title@example.com")
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(rdb_session, workspace_id, "team-title-agent")
+        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+
+        titled = await _service(rdb_session_manager).update_session_title(
+            session_id=agent_session.id,
+            user_id=user_id,
+            title="  Design review  ",
+        )
+        cleared = await _service(rdb_session_manager).update_session_title(
+            session_id=agent_session.id,
+            user_id=user_id,
+            title=None,
+        )
+
+        assert isinstance(titled, Success)
+        assert titled.value.title == "Design review"
+        assert isinstance(cleared, Success)
+        assert cleared.value.title is None
+
+    async def test_update_session_title_rejects_empty_title(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Whitespace-only session titles are rejected instead of cleared."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-empty-title")
+        user_id = await _create_user(
+            rdb_session, "team-session-empty-title@example.com"
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(rdb_session, workspace_id, "team-title-empty")
+        agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+
+        result = await _service(rdb_session_manager).update_session_title(
+            session_id=agent_session.id,
+            user_id=user_id,
+            title="   ",
+        )
+
+        assert isinstance(result, Failure)
+        assert result.error == InvalidSessionTitle(
+            reason="Session title must not be empty."
+        )
 
     async def test_list_agent_sessions_returns_primary_first(
         self,

@@ -37,8 +37,10 @@ class TestAgentSessionResponse(unittest.TestCase):
             return AgentSessionResponse(
                 id = '',
                 agent_id = '',
+                title = '',
                 status = 'active',
                 primary_kind = 'team_primary',
+                run_state = 'idle',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
@@ -46,7 +48,9 @@ class TestAgentSessionResponse(unittest.TestCase):
             return AgentSessionResponse(
                 id = '',
                 agent_id = '',
+                title = '',
                 status = 'active',
+                run_state = 'idle',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )

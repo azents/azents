@@ -69,6 +69,7 @@ async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str]:
         AgentSessionCreate(
             workspace_id=workspace_id,
             agent_id=agent.id,
+            title=None,
             start_reason=AgentSessionStartReason.INITIAL,
         ),
     )
