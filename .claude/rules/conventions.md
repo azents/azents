@@ -14,7 +14,7 @@ How to add a new convention: use the `add-convention` skill.
 
 | Convention | File |
 | --- | --- |
-| Write all comments and docstrings in Korean (technical terms in English) — applies to module/class/function docstrings and inline comments across every language. | [comments-and-docstrings-in-korean](../conventions/global/comments-and-docstrings-in-korean.md) |
+| Write source-code comments and docstrings in English — applies to module/class/function docstrings and inline comments across every language. | [comments-and-docstrings-in-english](../conventions/global/comments-and-docstrings-in-english.md) |
 | Use Mermaid code blocks for all diagrams in markdown documents (architecture, flow, sequence) — never ASCII art. | [diagrams-in-mermaid](../conventions/global/diagrams-in-mermaid.md) |
 | In patch/partial-update APIs, treat explicit `null` as "set this field to null" — use field omission for "leave unchanged" and separate actions for clearing overrides. | [patch-null-means-set-null](../conventions/global/patch-null-means-set-null.md) |
 | prefer replacement over modification | [prefer-replacement-over-modification](../conventions/global/prefer-replacement-over-modification.md) |
