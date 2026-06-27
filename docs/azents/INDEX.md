@@ -130,8 +130,9 @@ _14 documents_
 - [ADR-0078: Agent-Focused Navigation Information Architecture](adr/0078-agent-focused-navigation-ia.md)
 - [ADR-0079: AgentSession Archive Policy](adr/0079-agent-session-archive-policy.md)
 - [ADR-0080: Simplified File Lifecycle Policy](adr/0080-simplified-file-lifecycle-policy.md)
+- [ADR-0081: Runtime Exec Process Tools](adr/0081-runtime-exec-process.md)
 
-_81 documents_
+_82 documents_
 
 ## Issues (Bug Tracking)
 
@@ -161,4 +162,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 310
+- Total documents: 312
