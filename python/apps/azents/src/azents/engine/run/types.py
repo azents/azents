@@ -8,9 +8,11 @@ import dataclasses
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Protocol, TypeAlias
 
+from azcommon.types import JSONObject
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     SkipValidation,
 )
 
@@ -84,6 +86,7 @@ class FunctionToolResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     output: str | list[RawDict]
+    metadata: JSONObject = Field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True)

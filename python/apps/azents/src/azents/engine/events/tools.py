@@ -258,6 +258,7 @@ def _tool_result_payload(
         name=call.name,
         status="completed",
         output=enforce_tool_output_text_hard_cap(output),
+        metadata=dict(result.metadata),
     )
 
 

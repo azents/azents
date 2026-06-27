@@ -3,6 +3,7 @@
 import datetime
 from typing import Annotated, Literal, TypeAlias
 
+from azcommon.types import JSONObject
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation, model_validator
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
@@ -246,6 +247,7 @@ class ClientToolResultPayload(BaseModel):
     status: Literal["completed", "failed", "cancelled", "interrupted"]
     output: ToolOutput = Field(default_factory=list)
     attachments: list[Attachment] = Field(default_factory=list)
+    metadata: JSONObject = Field(default_factory=dict)
 
 
 class ProviderToolResultPayload(BaseModel):
