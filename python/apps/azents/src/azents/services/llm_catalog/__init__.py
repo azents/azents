@@ -224,6 +224,19 @@ class ModelCatalogSyncAttemptOutput(BaseModel):
         )
 
 
+class SystemCatalogListItem(BaseModel):
+    """System catalog list item."""
+
+    provider: LLMProvider
+    catalog_id: str | None = Field(description="Catalog ID")
+    snapshot_id: str | None = Field(description="Current snapshot ID")
+    visible_count: int = Field(description="Current visible entry count")
+    hidden_count: int = Field(description="Current hidden entry count")
+    latest_attempt: ModelCatalogSyncAttemptOutput | None = Field(
+        description="Latest sync attempt"
+    )
+
+
 class ModelCatalogEntryListOutput(BaseModel):
     """Catalog entry list output."""
 
@@ -381,6 +394,52 @@ class SystemCatalogProjectionService:
         LiteLLMSourceSyncService, Depends(LiteLLMSourceSyncService)
     ]
 
+    async def list_system_catalogs(self) -> list[SystemCatalogListItem]:
+        """List supported system catalog states."""
+        items: list[SystemCatalogListItem] = []
+        async with self.session_manager() as session:
+            for provider in _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER:
+                catalog = await self.catalog_repository.get_system_catalog(
+                    session,
+                    provider=provider,
+                    lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                )
+                if catalog is None:
+                    items.append(
+                        SystemCatalogListItem(
+                            provider=provider,
+                            catalog_id=None,
+                            snapshot_id=None,
+                            visible_count=0,
+                            hidden_count=0,
+                            latest_attempt=None,
+                        )
+                    )
+                    continue
+                counts = await self.catalog_repository.get_current_snapshot_counts(
+                    session,
+                    catalog=catalog,
+                )
+                latest_attempt = await self.catalog_repository.get_latest_attempt(
+                    session,
+                    catalog=catalog,
+                )
+                items.append(
+                    SystemCatalogListItem(
+                        provider=provider,
+                        catalog_id=catalog.id,
+                        snapshot_id=catalog.current_snapshot_id,
+                        visible_count=counts.visible_count if counts else 0,
+                        hidden_count=counts.hidden_count if counts else 0,
+                        latest_attempt=(
+                            ModelCatalogSyncAttemptOutput.convert_from(latest_attempt)
+                            if latest_attempt is not None
+                            else None
+                        ),
+                    )
+                )
+        return items
+
     async def sync_system_catalogs(self) -> list[SystemCatalogProjectionSummary]:
         """Refresh all system catalog projections from current LiteLLM metadata."""
         source_snapshot = await self.source_sync_service.sync_current_source()
@@ -393,6 +452,20 @@ class SystemCatalogProjectionService:
                 )
             )
         return summaries
+
+    async def sync_system_catalog(
+        self,
+        *,
+        provider: LLMProvider,
+    ) -> SystemCatalogProjectionSummary:
+        """Refresh one system catalog projection from current LiteLLM metadata."""
+        if provider not in _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER:
+            raise ValueError("Unsupported system catalog provider.")
+        source_snapshot = await self.source_sync_service.sync_current_source()
+        return await self._sync_system_catalog(
+            provider=provider,
+            source_snapshot=source_snapshot,
+        )
 
     async def _sync_system_catalog(
         self,

@@ -31,6 +31,7 @@ from .data import (
     LLMCatalogEntry,
     LLMCatalogEntryCreate,
     LLMCatalogEntryList,
+    LLMCatalogSnapshotCounts,
     LLMCatalogSyncAttempt,
 )
 
@@ -471,6 +472,29 @@ class LLMCatalogRepository:
         if rdb is None:
             return None
         return self._build_catalog(rdb)
+
+    async def get_current_snapshot_counts(
+        self,
+        session: AsyncSession,
+        *,
+        catalog: LLMCatalog,
+    ) -> LLMCatalogSnapshotCounts | None:
+        """Fetch current snapshot counts for a catalog."""
+        if catalog.current_snapshot_id is None:
+            return None
+        result = await session.execute(
+            sa.select(
+                RDBLLMCatalogSnapshot.visible_count,
+                RDBLLMCatalogSnapshot.hidden_count,
+            ).where(RDBLLMCatalogSnapshot.id == catalog.current_snapshot_id)
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        return LLMCatalogSnapshotCounts(
+            visible_count=row.visible_count,
+            hidden_count=row.hidden_count,
+        )
 
     async def get_by_integration(
         self,

@@ -714,6 +714,92 @@
         }
       }
     },
+    "/model-catalog/v1/system-catalogs": {
+      "get": {
+        "tags": [
+          "Model Catalog v1"
+        ],
+        "summary": "List System Model Catalogs",
+        "description": "List supported system model catalogs.",
+        "operationId": "model_catalog_v1_list_system_model_catalogs",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemModelCatalogListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/model-catalog/v1/system-catalogs/refresh": {
+      "post": {
+        "tags": [
+          "Model Catalog v1"
+        ],
+        "summary": "Refresh System Model Catalogs",
+        "description": "Refresh all system model catalog projections.",
+        "operationId": "model_catalog_v1_refresh_system_model_catalogs",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemModelCatalogRefreshListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/model-catalog/v1/system-catalogs/{provider}/refresh": {
+      "post": {
+        "tags": [
+          "Model Catalog v1"
+        ],
+        "summary": "Refresh System Model Catalog",
+        "description": "Refresh one system model catalog projection by provider.",
+        "operationId": "model_catalog_v1_refresh_system_model_catalog",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/LLMProvider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemModelCatalogRefreshResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/user/v1/users": {
       "get": {
         "tags": [
@@ -1990,6 +2076,19 @@
         "title": "InvitationStatus",
         "description": "Workspace invitation status."
       },
+      "LLMProvider": {
+        "type": "string",
+        "enum": [
+          "openai",
+          "chatgpt_oauth",
+          "anthropic",
+          "google_gemini",
+          "aws_bedrock",
+          "google_vertex_ai"
+        ],
+        "title": "LLMProvider",
+        "description": "LLM hosting provider."
+      },
       "PasswordResetTokenListResponse": {
         "properties": {
           "items": {
@@ -2234,6 +2333,273 @@
         ],
         "title": "SignupTokenResponse",
         "description": "Signup token metadata response."
+      },
+      "SystemModelCatalogListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SystemModelCatalogResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SystemModelCatalogListResponse",
+        "description": "System model catalog list response."
+      },
+      "SystemModelCatalogRefreshListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SystemModelCatalogRefreshResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SystemModelCatalogRefreshListResponse",
+        "description": "System model catalog refresh list response."
+      },
+      "SystemModelCatalogRefreshResponse": {
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/LLMProvider"
+          },
+          "catalog_id": {
+            "type": "string",
+            "title": "Catalog Id"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "visible_count": {
+            "type": "integer",
+            "title": "Visible Count"
+          },
+          "hidden_count": {
+            "type": "integer",
+            "title": "Hidden Count"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "catalog_id",
+          "snapshot_id",
+          "visible_count",
+          "hidden_count",
+          "status",
+          "failure_code",
+          "failure_message",
+          "action_hint"
+        ],
+        "title": "SystemModelCatalogRefreshResponse",
+        "description": "System model catalog refresh response."
+      },
+      "SystemModelCatalogResponse": {
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/LLMProvider"
+          },
+          "catalog_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Id"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "visible_count": {
+            "type": "integer",
+            "title": "Visible Count"
+          },
+          "hidden_count": {
+            "type": "integer",
+            "title": "Hidden Count"
+          },
+          "latest_attempt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemModelCatalogSyncAttemptResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "catalog_id",
+          "snapshot_id",
+          "visible_count",
+          "hidden_count",
+          "latest_attempt"
+        ],
+        "title": "SystemModelCatalogResponse",
+        "description": "System model catalog response."
+      },
+      "SystemModelCatalogSyncAttemptResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint"
+          },
+          "fetched_count": {
+            "type": "integer",
+            "title": "Fetched Count"
+          },
+          "matched_count": {
+            "type": "integer",
+            "title": "Matched Count"
+          },
+          "skipped_count": {
+            "type": "integer",
+            "title": "Skipped Count"
+          },
+          "hidden_count": {
+            "type": "integer",
+            "title": "Hidden Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "started_at",
+          "finished_at",
+          "failure_code",
+          "failure_message",
+          "action_hint",
+          "fetched_count",
+          "matched_count",
+          "skipped_count",
+          "hidden_count"
+        ],
+        "title": "SystemModelCatalogSyncAttemptResponse",
+        "description": "Latest model catalog sync attempt response."
       },
       "TransferOwnershipRequest": {
         "properties": {
@@ -2700,6 +3066,10 @@
     {
       "name": "Invitation v1",
       "description": "\nWorkspace Invitation API (Admin)\n\nWorkspace invitation lookup/delete endpoints.\n"
+    },
+    {
+      "name": "Model Catalog v1",
+      "description": "\nModel Catalog API (Admin)\n\nOperational controls for system-owned model catalog refresh.\n"
     },
     {
       "name": "User v1",

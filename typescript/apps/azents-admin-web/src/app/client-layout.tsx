@@ -31,6 +31,7 @@ import {
   IconLogout,
   IconMail,
   IconMoon,
+  IconRefresh,
   IconSun,
   IconUser,
   IconUsersGroup,
@@ -90,6 +91,12 @@ const RESOURCES: ResourceItem[] = [
     list: "/signup-tokens",
     icon: <IconLinkPlus size={20} />,
     label: "Signup Links",
+  },
+  {
+    name: "model-catalog",
+    list: "/model-catalog",
+    icon: <IconRefresh size={20} />,
+    label: "Model Catalog",
   },
   {
     name: "debug",
