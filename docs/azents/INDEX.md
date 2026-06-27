@@ -129,8 +129,9 @@ _14 documents_
 - [ADR-0077: Session-Owned REST Write Idempotency](adr/0077-session-owned-rest-write-idempotency.md)
 - [ADR-0078: Agent-Focused Navigation Information Architecture](adr/0078-agent-focused-navigation-ia.md)
 - [ADR-0079: AgentSession Archive Policy](adr/0079-agent-session-archive-policy.md)
+- [ADR-0080: Simplified File Lifecycle Policy](adr/0080-simplified-file-lifecycle-policy.md)
 
-_80 documents_
+_81 documents_
 
 ## Issues (Bug Tracking)
 
@@ -160,4 +161,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 308
+- Total documents: 310
