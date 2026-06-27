@@ -19,7 +19,6 @@ import {
   chatV1GetAgentSession,
   chatV1GetAgentSessionContext,
   chatV1GetAgentWorkspace,
-  chatV1GetTeamPrimaryAgentSession,
   chatV1IssueWsTicket,
   chatV1ListAgentProjectRegistrationRequests,
   chatV1ListAgentProjects,
@@ -41,27 +40,6 @@ import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
 export const chatRouter = router({
-  /**
-   * Team primary session fetch. If absent, backend creates it.
-   */
-  getTeamPrimaryAgentSession: publicProcedure
-    .input(z.object({ agentId: z.string().min(1) }))
-    .query(async ({ ctx, input }) => {
-      try {
-        const { data } = await chatV1GetTeamPrimaryAgentSession({
-          client: ctx.apiClient,
-          path: { agent_id: input.agentId },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          404: "NOT_FOUND",
-        });
-      }
-    }),
-
   getAgentSession: publicProcedure
     .input(
       z.object({
@@ -602,7 +580,7 @@ export const chatRouter = router({
     }),
 
   /**
-   * Agent team primary session context inspector fetch
+   * Agent session context inspector fetch.
    */
   getAgentSessionContext: publicProcedure
     .input(

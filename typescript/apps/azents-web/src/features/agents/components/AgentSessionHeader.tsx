@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * Agent detail header + tab navigation.
+ * Agent session header + tab navigation.
  *
- * Shows Agent context for the focused shell. The desktop Agent navigation lives
- * in the Agent rail; mobile uses this header as the drawer entry point.
+ * The Chat/Context tabs are session-scoped controls, so this header is rendered
+ * only from concrete Agent session routes.
  */
 
 import {
@@ -24,7 +24,7 @@ import {
   IconMessageCircle,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useCallback, useMemo } from "react";
 import { formatModelSelectionSummary } from "../model-selection";
 import { AgentAvatar } from "./AgentAvatar";
@@ -37,75 +37,48 @@ function isContextPage(value: string | null): boolean {
   );
 }
 
-/** Extract active tab from current path and query. */
-function resolveActiveTab(
-  pathname: string,
-  basePath: string,
-  page: string | null,
-): "chat" | "context" | null {
-  if (pathname.startsWith(`${basePath}/settings`)) {
-    return null;
-  }
-  if (pathname.startsWith(`${basePath}/sessions/`) && isContextPage(page)) {
+function resolveActiveTab(page: string | null): "chat" | "context" {
+  if (isContextPage(page)) {
     return "context";
   }
   return "chat";
 }
 
-function extractSessionId(pathname: string, basePath: string): string | null {
-  const marker = `${basePath}/sessions/`;
-  if (!pathname.startsWith(marker)) {
-    return null;
-  }
-  return pathname.slice(marker.length).split("/")[0] ?? null;
-}
-
-interface AgentHeaderProps {
+interface AgentSessionHeaderProps {
   handle: string;
   agent: AgentResponse;
+  sessionId: string;
   onOpenRuntime?: () => void;
   chatControls?: ReactNode;
 }
 
-export function AgentHeader({
+export function AgentSessionHeader({
   handle,
   agent,
+  sessionId,
   onOpenRuntime,
   chatControls,
-}: AgentHeaderProps): React.ReactElement {
+}: AgentSessionHeaderProps): React.ReactElement {
   const t = useTranslations("workspace.agents.detail");
   const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const mobileNav = useAgentFocusedShellMobileNav();
   const basePath = `/w/${handle}/agents/${agent.id}`;
   const activeTab = useMemo(
-    () => resolveActiveTab(pathname, basePath, searchParams.get("page")),
-    [pathname, searchParams, basePath],
-  );
-  const activeSessionId = useMemo(
-    () => extractSessionId(pathname, basePath) ?? searchParams.get("sessionId"),
-    [pathname, searchParams, basePath],
+    () => resolveActiveTab(searchParams.get("page")),
+    [searchParams],
   );
   const modelSummary = formatModelSelectionSummary(agent.model_selection);
 
   const handleTabChange = useCallback(
     (value: string | null): void => {
       if (value === "chat") {
-        router.push(
-          activeSessionId
-            ? `${basePath}/sessions/${activeSessionId}`
-            : `${basePath}/chat`,
-        );
+        router.push(`${basePath}/sessions/${sessionId}`);
       } else if (value === "context") {
-        router.push(
-          activeSessionId
-            ? `${basePath}/sessions/${activeSessionId}?page=context`
-            : `${basePath}/chat`,
-        );
+        router.push(`${basePath}/sessions/${sessionId}?page=context`);
       }
     },
-    [activeSessionId, router, basePath],
+    [router, basePath, sessionId],
   );
 
   return (

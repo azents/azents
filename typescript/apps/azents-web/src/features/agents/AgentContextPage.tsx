@@ -20,7 +20,7 @@ import {
   SessionSystemPromptView,
 } from "@/features/chat/context/SessionContextView";
 import { trpc } from "@/trpc/client";
-import { AgentHeader } from "./components/AgentHeader";
+import { AgentSessionHeader } from "./components/AgentSessionHeader";
 import type { AgentResponse } from "@azents/public-client";
 
 export type AgentContextPageView = "context" | "system-prompt" | "raw-events";
@@ -51,7 +51,7 @@ export function AgentContextPage({
 
   return (
     <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
-      <AgentHeader handle={handle} agent={agent} />
+      <AgentSessionHeader handle={handle} agent={agent} sessionId={sessionId} />
       <Box p="lg" style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <Stack gap="md">
           {view === "system-prompt" && (
