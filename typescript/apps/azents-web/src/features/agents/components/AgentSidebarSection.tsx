@@ -46,7 +46,7 @@ function resolveActive(
   }
   const rest = pathname.slice(basePath.length + 1); // after basePath + "/"
   const parts = rest.split("/");
-  // rest is like "agents/{agentId}/chat/{sessionId?}"
+  // rest is like "agents/{agentId}/settings" or "agents/{agentId}/sessions/{sessionId}"
   if (parts[0] === "agents" && parts[1] && parts[1] !== "new") {
     const agentId = parts[1];
     return { agentId };

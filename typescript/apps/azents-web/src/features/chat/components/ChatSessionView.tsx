@@ -12,7 +12,7 @@
 import { Box, Drawer } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { AgentHeader } from "@/features/agents/components/AgentHeader";
+import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
 import { formatModelSelectionSummary } from "@/features/agents/model-selection";
 import { useChatSessionContainer } from "../containers/useChatSessionContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
@@ -56,9 +56,10 @@ export function ChatSessionView({
 
   return (
     <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
-      <AgentHeader
+      <AgentSessionHeader
         handle={handle}
         agent={agent}
+        sessionId={sessionId}
         onOpenRuntime={() => setRuntimeDrawerOpened(true)}
         chatControls={
           <TokenUsageIndicator

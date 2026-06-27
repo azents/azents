@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-06-26
-spec_version: 7
+last_verified_at: 2026-06-27
+spec_version: 8
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -14,7 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/__init__.py
   - python/apps/azents/src/azents/api/public/chat/v1/data.py
   - python/apps/azents/src/azents/repos/agent_execution/__init__.py
-  - typescript/apps/azents-web/src/features/agents/components/AgentHeader.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/features/agents/AgentContextPage.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
   - typescript/apps/azents-web/src/features/chat/components/TokenUsageIndicator.tsx
@@ -26,7 +26,7 @@ code_paths:
 
 ## Current Behavior
 
-Agent detail screen provides `Chat` and `Context` header tabs. `Context` is selected by the session URL query `?page=context`; it shows model context usage and event source based on the URL-selected AgentSession. `?page=system-prompt` and `?page=raw-events` expose detail views for the same selected session. These query-param routes preserve the same page layout as the former dedicated Context pages: Agent header, tab navigation, and a scrollable inspector content area.
+Concrete Agent session screens provide `Chat` and `Context` header tabs. `Context` is selected by the session URL query `?page=context`; it shows model context usage and event source based on the URL-selected AgentSession. `?page=system-prompt` and `?page=raw-events` expose detail views for the same selected session. These tabs are session-scoped and are not rendered on the independent Agent settings page. These query-param routes preserve the same page layout as the former dedicated Context pages: session header, tab navigation, and a scrollable inspector content area.
 
 ## Backend API
 

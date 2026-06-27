@@ -4,7 +4,7 @@
  * Agent-focused side navigation.
  *
  * Shows workspace escape hatch, Agent summary, Agent sessions, and global
- * actions. Agent section tabs stay in AgentHeader.
+ * actions. Session tabs stay in AgentSessionHeader.
  */
 import {
   ActionIcon,
@@ -134,9 +134,7 @@ export function AgentFocusedSidebar({
   const pathname = usePathname();
   const workspacePath = `/w/${handle}`;
   const basePath = `${workspacePath}/agents/${agent.id}`;
-  const settingsHref = activeSessionId
-    ? `${basePath}/settings?sessionId=${encodeURIComponent(activeSessionId)}`
-    : `${basePath}/settings`;
+  const settingsHref = `${basePath}/settings`;
   const isAgentSettingsActive = pathname.startsWith(`${basePath}/settings`);
   const { mode, preference, setColorMode } = useColorMode();
   const { setColorScheme } = useMantineColorScheme();
