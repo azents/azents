@@ -1,18 +1,41 @@
 """Session title helper tests."""
 
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any, cast
 
 import pytest
+from openai import OpenAIError
 
 import azents.services.session_title as session_title_module
-from azents.core.enums import EventKind, LLMProvider
+from azents.core.agent import AgentModelSelection
+from azents.core.credentials import ApiKeySecrets
+from azents.core.enums import (
+    AgentRole,
+    AgentSessionStartReason,
+    AgentSessionStatus,
+    AgentSessionTitleSource,
+    AgentType,
+    EventKind,
+    LLMModelDeveloper,
+    LLMProvider,
+)
+from azents.core.llm_catalog import ModelCapabilities
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
     NativeArtifact,
     UserMessagePayload,
 )
+from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSession
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.services.session_title import (
+    SessionTitleService,
     clean_generated_title,
     generate_session_title_with_model,
     initial_title_from_user_text,
@@ -81,12 +104,79 @@ class TestSessionTitleHelpers:
                     }
                 ],
                 "instructions": calls[0]["instructions"],
-                "stream": False,
+                "stream": True,
                 "max_output_tokens": 80,
             }
         ]
         assert isinstance(calls[0]["instructions"], str)
         assert "session title generator" in calls[0]["instructions"]
+
+    async def test_generate_title_logs_model_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Model call failures are logged by the title service and not re-raised."""
+        service = SessionTitleService(
+            agent_repository=cast(AgentRepository, _AgentRepository()),
+            agent_session_repository=cast(
+                AgentSessionRepository,
+                _AgentSessionRepository(),
+            ),
+            integration_repository=cast(
+                LLMProviderIntegrationRepository,
+                _IntegrationRepository(),
+            ),
+            session_manager=cast(Any, _session_manager),
+        )
+
+        async def raise_bad_request(**kwargs: object) -> str | None:
+            del kwargs
+            raise OpenAIError("Stream must be set to true")
+
+        monkeypatch.setattr(
+            session_title_module,
+            "generate_session_title_with_model",
+            raise_bad_request,
+        )
+
+        event = Event(
+            id="0" * 32,
+            session_id="session-001",
+            kind=EventKind.USER_MESSAGE,
+            payload=UserMessagePayload(
+                content="Compare two insurance options",
+                attachments=[],
+                metadata={},
+            ),
+            created_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        log_calls: list[tuple[str, dict[str, object]]] = []
+
+        def record_exception(message: str, **kwargs: object) -> None:
+            log_calls.append((message, kwargs))
+
+        monkeypatch.setattr(session_title_module.logger, "exception", record_exception)
+
+        result = await service.generate_from_initial_prompt(
+            session_id="session-001",
+            event=event,
+        )
+
+        assert result is None
+        assert log_calls == [
+            (
+                "Automatic session title generation failed",
+                {
+                    "extra": {
+                        "session_id": "session-001",
+                        "agent_id": "agent-001",
+                        "provider": "openai",
+                        "model": "gpt-test",
+                    }
+                },
+            )
+        ]
 
     def test_initial_prompt_context_uses_only_user_text(self) -> None:
         """Initial prompt context excludes later transcript content."""
@@ -144,3 +234,84 @@ class TestSessionTitleHelpers:
             "User: Compare two insurance options\n"
             "Assistant: I can compare coverage and cost."
         )
+
+
+def _model_selection() -> AgentModelSelection:
+    return AgentModelSelection(
+        llm_provider_integration_id="integration-001",
+        provider=LLMProvider.OPENAI,
+        model_identifier="gpt-test",
+        model_display_name="GPT Test",
+        model_developer=LLMModelDeveloper.OPENAI,
+        normalized_capabilities=ModelCapabilities(),
+        model_snapshot={},
+    )
+
+
+class _AgentRepository:
+    async def get_by_id(self, session: object, agent_id: str) -> Agent:
+        del session, agent_id
+        now = datetime.datetime.now(datetime.UTC)
+        selection = _model_selection()
+        return Agent(
+            id="agent-001",
+            workspace_id="workspace-001",
+            name="Test agent",
+            model_selection=selection,
+            lightweight_model_selection=selection,
+            enabled=True,
+            type=AgentType.PUBLIC,
+            role=AgentRole.AGENT,
+            created_at=now,
+            updated_at=now,
+        )
+
+
+class _IntegrationRepository:
+    async def get_by_id_with_secrets(
+        self,
+        session: object,
+        integration_id: str,
+    ) -> LLMProviderIntegrationWithSecrets:
+        del session, integration_id
+        now = datetime.datetime.now(datetime.UTC)
+        return LLMProviderIntegrationWithSecrets(
+            id="integration-001",
+            workspace_id="workspace-001",
+            provider=LLMProvider.OPENAI,
+            name="OpenAI test",
+            secrets=ApiKeySecrets(api_key="test-key"),
+            enabled=True,
+            created_at=now,
+            updated_at=now,
+        )
+
+
+@asynccontextmanager
+async def _session_manager() -> AsyncIterator[object]:
+    yield object()
+
+
+class _AgentSessionRepository:
+    async def get_by_id(self, session: object, session_id: str) -> AgentSession:
+        del session, session_id
+        now = datetime.datetime.now(datetime.UTC)
+        return AgentSession(
+            id="session-001",
+            workspace_id="workspace-001",
+            agent_id="agent-001",
+            status=AgentSessionStatus.ACTIVE,
+            start_reason=AgentSessionStartReason.INITIAL,
+            title="Compare two insurance options",
+            title_source=AgentSessionTitleSource.AUTO_INITIAL,
+            title_generated_at=now,
+            title_generation_event_id="0" * 32,
+            last_user_input_at=now,
+            started_at=now,
+            run_heartbeat_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def replace_initial_auto_title(self, *args: object, **kwargs: object) -> None:
+        raise AssertionError("replace should not be called when generation fails")
