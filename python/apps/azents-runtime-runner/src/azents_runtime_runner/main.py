@@ -28,6 +28,8 @@ _CAPABILITIES = (
     "file.download",
     "file.list",
     "file.grep",
+    "process.start",
+    "process.write",
 )
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _LOGGER = logging.getLogger(__name__)
@@ -74,9 +76,10 @@ async def _main() -> None:
     while True:
         client = GrpcRunnerControlClient.from_endpoint(endpoint)
         connection_id = _control_connection_id(base_connection_id)
+        operations = RunnerOperations(client=client, workspace=workspace)
         run_loop = RunnerRunLoop(
             client=client,
-            operations=RunnerOperations(client=client, workspace=workspace),
+            operations=operations,
             registration=registration,
             connection_id=connection_id,
             consumer_id=runner_id,
@@ -105,6 +108,7 @@ async def _main() -> None:
             )
             await asyncio.sleep(_CONTROL_RECONNECT_DELAY_SECONDS)
         finally:
+            await operations.close()
             await client.close()
 
 

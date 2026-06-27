@@ -392,6 +392,153 @@ async def test_file_grep_stops_at_scanned_byte_limit(tmp_path: Path) -> None:
     assert payload["stopped_reason"] == "scanned_byte_limit"
 
 
+@pytest.mark.asyncio
+async def test_process_start_quick_command_returns_exit_snapshot(
+    tmp_path: Path,
+) -> None:
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={"command": "printf hello", "yield_time_ms": 1000},
+        )
+    )
+
+    assert [event.event_type for event in client.events] == [
+        RuntimeRunnerEventType.ACCEPTED,
+        RuntimeRunnerEventType.PROCESS_OUTPUT,
+        RuntimeRunnerEventType.FINAL_SUCCESS,
+    ]
+    assert client.events[1].payload["stream"] == "stdout"
+    assert client.events[1].payload["text"] == "hello"
+    final = client.events[-1].payload
+    assert final["status"] == "exited"
+    assert final["exit_code"] == 0
+    assert final["stdout"] == "hello"
+    assert final["stderr"] == ""
+
+
+@pytest.mark.asyncio
+async def test_process_write_empty_stdin_polls_running_process(tmp_path: Path) -> None:
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={
+                "command": (
+                    "python -c 'import sys, time; "
+                    'print("ready", flush=True); '
+                    "line=sys.stdin.readline().strip(); "
+                    'print(f"echo:{line}", flush=True)\''
+                ),
+                "yield_time_ms": 100,
+            },
+        )
+    )
+    start_final = client.events[-1].payload
+    process_id = start_final["process_id"]
+    assert isinstance(process_id, str)
+    assert start_final["status"] == "running"
+    assert start_final["stdout"] == "ready\n"
+
+    await operations.handle(
+        _operation(
+            operation_type="process.write",
+            payload={
+                "process_id": process_id,
+                "stdin": "world\n",
+                "yield_time_ms": 1000,
+            },
+        )
+    )
+
+    write_final = client.events[-1].payload
+    assert write_final["process_id"] == process_id
+    assert write_final["status"] == "exited"
+    assert write_final["exit_code"] == 0
+    assert write_final["stdout"] == "echo:world\n"
+
+    await operations.handle(
+        _operation(
+            operation_type="process.write",
+            payload={"process_id": process_id, "stdin": "", "yield_time_ms": 0},
+        )
+    )
+
+    missing_final = client.events[-1].payload
+    assert missing_final["process_id"] == process_id
+    assert missing_final["status"] == "missing"
+    assert missing_final["missing_reason"] == "consumed"
+
+
+@pytest.mark.asyncio
+async def test_process_output_is_bounded_and_reports_truncation(tmp_path: Path) -> None:
+    client = _FakeClient()
+    operations = RunnerOperations(
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+        process_max_unread_bytes=10,
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={
+                "command": 'python -c \'print("0123456789abcdef", end="")\'',
+                "yield_time_ms": 1000,
+                "max_output_bytes": 4,
+            },
+        )
+    )
+
+    final = client.events[-1].payload
+    assert final["status"] == "exited"
+    assert final["stdout"] == "cdef"
+    assert final["stdout_truncated"] is True
+    assert final["stdout_omitted_bytes"] == 12
+
+
+@pytest.mark.asyncio
+async def test_process_quota_prunes_oldest_process(tmp_path: Path) -> None:
+    client = _FakeClient()
+    operations = RunnerOperations(
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+        max_process_count=1,
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={"command": "sleep 10", "yield_time_ms": 0},
+        )
+    )
+    process_id = client.events[-1].payload["process_id"]
+    assert isinstance(process_id, str)
+
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={"command": "printf second", "yield_time_ms": 1000},
+        )
+    )
+    await operations.handle(
+        _operation(
+            operation_type="process.write",
+            payload={"process_id": process_id, "stdin": "", "yield_time_ms": 0},
+        )
+    )
+
+    final = client.events[-1].payload
+    assert final["process_id"] == process_id
+    assert final["status"] == "terminated"
+    assert final["missing_reason"] == "quota_pruned"
+
+
 def _operation(
     *,
     operation_type: str,
