@@ -118,6 +118,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
@@ -199,6 +200,9 @@ class AgentEngineAdapter:
     ]
     session_head_repo: Annotated[SessionHeadRepository, Depends(AgentSessionRepository)]
     transcript_repo: Annotated[TranscriptRepository, Depends(EventTranscriptRepository)]
+    model_file_pin_repo: Annotated[
+        ModelFilePinRepository, Depends(ModelFilePinRepository)
+    ]
     compactor: Annotated[ManualCompactor, Depends(EventCompactor)]
     summary_model_call: Annotated[SummaryModelCall, Depends(_summary_model_call)]
 
@@ -403,10 +407,8 @@ class AgentEngineAdapter:
                 phase=phase,
                 pre_lower_filter=pre_lower_filter,
             ),
-            artifact_expirer=self.artifact_service.expire_for_run_boundary,
-            exchange_file_expirer=self.exchange_file_service.expire_due_files,
-            model_file_expirer=self.model_file_service.expire_for_run_boundary,
             pre_model_lower_hook=model_file_materializer.materialize,
+            model_file_pin_repo=self.model_file_pin_repo,
             run_repo=self.run_repo,
             transcript_repo=self.transcript_repo,
             session_repo=self.session_head_repo,

@@ -65,9 +65,7 @@ from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE, CheckStop
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.artifact.data import Artifact
-from azents.repos.exchange_file.data import ExchangeFile
-from azents.repos.model_file.data import ModelFile
+from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
@@ -101,26 +99,12 @@ class _ArtifactService(ArtifactService):
     def __init__(self) -> None:
         """Bypass base dataclass initialization."""
 
-    async def expire_for_run_boundary(
-        self,
-        *,
-        session_id: str,
-        current_run_index: int,
-    ) -> list[Artifact]:
-        """Treat as having no expiry targets."""
-        del session_id, current_run_index
-        return []
-
 
 class _ExchangeFileService(ExchangeFileService):
     """ExchangeFileService for tests."""
 
     def __init__(self) -> None:
         """Bypass base dataclass initialization."""
-
-    async def expire_due_files(self) -> list[ExchangeFile]:
-        """Treat as having no expiry targets."""
-        return []
 
 
 class _ModelFileService(ModelFileService):
@@ -129,15 +113,12 @@ class _ModelFileService(ModelFileService):
     def __init__(self) -> None:
         """Bypass base dataclass initialization."""
 
-    async def expire_for_run_boundary(
-        self,
-        *,
-        session_id: str,
-        current_run_index: int,
-    ) -> list[ModelFile]:
-        """Treat as having no expiry targets."""
-        del session_id, current_run_index
-        return []
+
+class _ModelFilePinRepo(ModelFilePinRepository):
+    """ModelFile pin repo for tests."""
+
+    def __init__(self) -> None:
+        """Bypass base dataclass initialization."""
 
 
 class _RunRepo:
@@ -199,6 +180,8 @@ class _EventSessionHeadState:
 
     def __init__(self, head_event_id: str | None) -> None:
         self.model_input_head_event_id = head_event_id
+        self.model_input_head_model_order = 1 if head_event_id is not None else None
+        self.model_input_head_model_order = 1 if head_event_id is not None else None
 
 
 class _EventSessionHeadRepo:
@@ -1188,6 +1171,7 @@ def _agent_engine_adapter(
         agent_session_repo=agent_session_repo or _AgentSessionRepo(),
         session_head_repo=session_head_repo or _EventSessionHeadRepo(None),
         transcript_repo=transcript_repo or _TranscriptRepo([]),
+        model_file_pin_repo=_ModelFilePinRepo(),
         compactor=compactor or _Compactor(),
         summary_model_call=summary_model_call or summarize_text_with_model,
     )

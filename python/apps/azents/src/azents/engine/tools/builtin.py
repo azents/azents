@@ -662,6 +662,17 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
                 "Use `import_file` for user uploads and `present_file` to share "
                 "new or edited files back to the user."
             )
+            if "import_file" not in self._excluded_tools:
+                scope_lines.extend(
+                    [
+                        "Files shared through `exchange://` or `artifact://` URIs "
+                        "are temporary and may expire.",
+                        "Do not rely on those URIs for long-term storage across "
+                        "future turns. If a file is needed for later work, use "
+                        "`import_file` and continue from the returned local path "
+                        "inside the runtime workspace.",
+                    ]
+                )
         if projects:
             scope_lines.extend(
                 [
@@ -719,7 +730,9 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         # Then use present_file with the full path
         ```
 
-        When the user attaches an `exchange://...` file-location URI, use `import_file` to copy it into the runtime workspace before reading or editing it.
+        Files shared through `exchange://` or `artifact://` URIs are temporary and may expire. Do not rely on those URIs for long-term storage across future turns. If a file should be kept for later work, use `import_file` and continue from the returned local path inside the runtime workspace.
+
+        When the user attaches an `exchange://...` or `artifact://...` file-location URI, use `import_file` to copy it into the runtime workspace before reading or editing it.
 
         After creating files, use `present_file` to export them as `exchange://...` attachments for the user.""")  # noqa: E501
     config_model = ShellToolkitConfig

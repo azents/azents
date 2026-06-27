@@ -40,6 +40,7 @@ def _make_artifact_file() -> ExchangeFile:
         preview_generated_at=None,
         expires_at=_NOW + datetime.timedelta(days=30),
         expired_at=None,
+        blob_deleted_at=None,
         created_at=_NOW,
     )
 

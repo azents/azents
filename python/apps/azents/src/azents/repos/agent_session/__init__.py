@@ -1,6 +1,7 @@
 """AgentSession repository."""
 
 import datetime
+from dataclasses import dataclass
 from typing import Any, cast
 
 import sqlalchemy as sa
@@ -21,6 +22,16 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 
 from .data import AgentSession, AgentSessionCreate, PendingSessionCommand
+
+
+@dataclass(frozen=True)
+class ModelFileGCLaggingSession:
+    """AgentSession with ModelFile GC cursor lag."""
+
+    session_id: str
+    head_event_id: str
+    head_model_order: int
+    cursor_model_order: int
 
 
 class AgentSessionRepository:
@@ -356,22 +367,83 @@ class AgentSessionRepository:
         event_id: str,
     ) -> AgentSession:
         """Move Model input head to specified event."""
-        event_exists = await session.scalar(
-            sa.select(RDBEvent.id).where(
+        event_row = await session.execute(
+            sa.select(RDBEvent.id, RDBEvent.model_order).where(
                 RDBEvent.session_id == session_id,
                 RDBEvent.id == event_id,
             )
         )
-        if event_exists is None:
+        event = event_row.one_or_none()
+        if event is None:
             raise ValueError("Model input head event not found in session")
 
         rdb = await session.get(RDBAgentSession, session_id)
         if rdb is None:
             raise ValueError("AgentSession not found")
         rdb.model_input_head_event_id = event_id
+        rdb.model_input_head_model_order = int(event.model_order)
         await session.flush()
         await session.refresh(rdb)
         return self._build(rdb)
+
+    async def list_model_file_gc_lagging(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[ModelFileGCLaggingSession]:
+        """List sessions whose ModelFile GC cursor is behind the input head."""
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBAgentSession.id,
+                    RDBAgentSession.model_input_head_event_id,
+                    RDBAgentSession.model_input_head_model_order,
+                    RDBAgentSession.model_file_gc_cursor_model_order,
+                )
+                .where(
+                    RDBAgentSession.model_input_head_event_id.is_not(None),
+                    RDBAgentSession.model_input_head_model_order.is_not(None),
+                    RDBAgentSession.model_file_gc_cursor_model_order
+                    < RDBAgentSession.model_input_head_model_order,
+                )
+                .order_by(RDBAgentSession.model_file_gc_cursor_model_order)
+                .limit(limit)
+            )
+        ).all()
+        return [
+            ModelFileGCLaggingSession(
+                session_id=row.id,
+                head_event_id=row.model_input_head_event_id,
+                head_model_order=int(row.model_input_head_model_order),
+                cursor_model_order=int(row.model_file_gc_cursor_model_order),
+            )
+            for row in rows
+        ]
+
+    async def advance_model_file_gc_cursor(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        cursor_event_id: str | None,
+        cursor_model_order: int,
+        updated_at: datetime.datetime,
+    ) -> None:
+        """Advance the ModelFile GC cursor for a session."""
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == session_id,
+                RDBAgentSession.model_file_gc_cursor_model_order <= cursor_model_order,
+            )
+            .values(
+                model_file_gc_cursor_event_id=cursor_event_id,
+                model_file_gc_cursor_model_order=cursor_model_order,
+                model_file_gc_updated_at=updated_at,
+            )
+        )
+        await session.flush()
 
     async def mark_running(self, session: AsyncSession, session_id: str) -> None:
         """Transition AgentSession run state to RUNNING."""
@@ -614,6 +686,9 @@ class AgentSessionRepository:
             last_user_input_at=rdb.last_user_input_at,
             end_reason=rdb.end_reason,
             model_input_head_event_id=rdb.model_input_head_event_id,
+            model_input_head_model_order=rdb.model_input_head_model_order,
+            model_file_gc_cursor_event_id=rdb.model_file_gc_cursor_event_id,
+            model_file_gc_cursor_model_order=rdb.model_file_gc_cursor_model_order,
             started_at=rdb.started_at,
             lifecycle_started_at=rdb.lifecycle_started_at,
             run_state=rdb.run_state,

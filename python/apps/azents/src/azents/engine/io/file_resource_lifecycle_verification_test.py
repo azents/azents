@@ -61,7 +61,7 @@ class _FakeArtifactRepository:
             agent_id=create.agent_id,
             created_run_id=create.created_run_id,
             created_run_index=create.created_run_index,
-            expires_after_run_index=create.expires_after_run_index,
+            expires_at=create.expires_at,
             name=create.name,
             media_type=create.media_type,
             size_bytes=create.size_bytes,
@@ -78,6 +78,7 @@ class _FakeArtifactRepository:
             metadata=create.metadata,
             created_at=_NOW,
             expired_at=None,
+            blob_deleted_at=None,
         )
         self.artifacts[artifact.id] = artifact
         return artifact
@@ -103,29 +104,40 @@ class _FakeArtifactRepository:
                 return artifact
         return None
 
-    async def expire_for_run_boundary(
+    async def expire_due(
         self,
         session: AsyncSession,
         *,
-        session_id: str,
-        current_run_index: int,
-        expired_at: datetime.datetime,
+        now: datetime.datetime,
+        limit: int,
     ) -> list[Artifact]:
-        """Expire Artifact by run boundary."""
-        del session
+        """Expire due Artifact rows."""
+        del session, limit
         expired: list[Artifact] = []
         for artifact in list(self.artifacts.values()):
             if (
-                artifact.session_id == session_id
-                and artifact.status == ArtifactStatus.AVAILABLE
-                and artifact.expires_after_run_index < current_run_index
+                artifact.status == ArtifactStatus.AVAILABLE
+                and artifact.expires_at <= now
             ):
                 updated = artifact.model_copy(
-                    update={"status": ArtifactStatus.EXPIRED, "expired_at": expired_at}
+                    update={"status": ArtifactStatus.EXPIRED, "expired_at": now}
                 )
                 self.artifacts[artifact.id] = updated
                 expired.append(updated)
         return expired
+
+    async def mark_blob_deleted(
+        self,
+        session: AsyncSession,
+        *,
+        artifact_id: str,
+        blob_deleted_at: datetime.datetime,
+    ) -> None:
+        """Record blob deletion."""
+        del session
+        self.artifacts[artifact_id] = self.artifacts[artifact_id].model_copy(
+            update={"blob_deleted_at": blob_deleted_at}
+        )
 
 
 class _FakeAgentSessionRepository:
@@ -222,10 +234,17 @@ class _WorkspaceS3Config:
     bucket = "test-bucket"
 
 
+class _FileLifecycleConfig:
+    """File lifecycle config for tests."""
+
+    artifact_ttl = datetime.timedelta(days=7)
+
+
 class _Config:
     """Config for tests."""
 
     workspace_s3 = _WorkspaceS3Config()
+    file_lifecycle = _FileLifecycleConfig()
 
 
 class _StaticModelFileResolver:
@@ -343,7 +362,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
                             name=artifact.name,
                             media_type=artifact.media_type,
                             size=artifact.size_bytes,
-                            expires_after_run_index=artifact.expires_after_run_index,
+                            expires_at=artifact.expires_at,
                         )
                     ],
                 ),
@@ -370,11 +389,9 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
         ("/tmp/agent/imports/report.txt", b"full artifact body")
     ]
 
-    assert await service.expire_for_run_boundary(
-        session_id="session-1",
-        current_run_index=4,
+    artifact_repo.artifacts[artifact.id] = artifact.model_copy(
+        update={"status": ArtifactStatus.EXPIRED}
     )
-    assert artifact_repo.artifacts[artifact.id].status == ArtifactStatus.EXPIRED
     with pytest.raises(FunctionToolError, match="no longer available"):
         await import_tool.handler(json.dumps({"uri": artifact.uri}))
 

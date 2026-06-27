@@ -38,18 +38,6 @@ class RDBModelFile(RDBModel):
         "session_id",
         "status",
     )
-    IX_EXPIRATION = sa.Index(
-        "ix_model_files_expiration",
-        "session_id",
-        "status",
-        "expires_after_run_index",
-    )
-    IX_UNREACHABLE_GC = sa.Index(
-        "ix_model_files_unreachable_gc",
-        "session_id",
-        "status",
-        "unreachable_run_index",
-    )
     UQ_STORAGE_KEY = sa.UniqueConstraint(
         "storage_key",
         name="uq_model_files_storage_key",
@@ -80,7 +68,6 @@ class RDBModelFile(RDBModel):
     kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     size_bytes: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     created_run_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    expires_after_run_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     storage_key: Mapped[str] = mapped_column(
         sa.String(1024), nullable=False, init=False
     )
@@ -110,24 +97,13 @@ class RDBModelFile(RDBModel):
         server_default=sa.func.now(),
         nullable=False,
     )
-    degraded_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    unreachable_run_index: Mapped[int | None] = mapped_column(
-        sa.Integer,
-        nullable=True,
-        default=None,
-    )
-    unreachable_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=True,
-        default=None,
-    )
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    blob_deleted_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
         init=False,
         nullable=True,
@@ -137,7 +113,5 @@ class RDBModelFile(RDBModel):
     __table_args__ = (
         IX_WORKSPACE_ID,
         IX_SESSION_STATUS,
-        IX_EXPIRATION,
-        IX_UNREACHABLE_GC,
         UQ_STORAGE_KEY,
     )

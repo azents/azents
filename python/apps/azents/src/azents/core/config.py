@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     # Avatar serving CDN; uses `{cdn_base_url}/{key}` when set, else 1h presigned GET
     avatar_cdn_base_url: str | None = None
 
+    # File lifecycle retention
+    artifact_retention_days: int = 7
+    exchange_file_retention_days: int = 30
+
 
 class PostgreSQLConfig(BaseModel):
     """PostgreSQL settings."""
@@ -286,6 +290,23 @@ class RuntimeConfig(BaseModel):
     default_provider_id: str | None = None
 
 
+class FileLifecycleConfig(BaseModel):
+    """File lifecycle retention settings."""
+
+    artifact_retention_days: int = 7
+    exchange_file_retention_days: int = 30
+
+    @property
+    def artifact_ttl(self) -> datetime.timedelta:
+        """Artifact retention duration."""
+        return datetime.timedelta(days=self.artifact_retention_days)
+
+    @property
+    def exchange_file_ttl(self) -> datetime.timedelta:
+        """ExchangeFile retention duration."""
+        return datetime.timedelta(days=self.exchange_file_retention_days)
+
+
 class WorkspaceS3Credentials(BaseModel):
     """Explicit credentials for Workspace S3 access.
 
@@ -329,6 +350,7 @@ class Config(BaseModel):
     oauth_secret_key: str = ""
     mcp_proxy_url: str | None = None
     workspace_s3: WorkspaceS3Config
+    file_lifecycle: FileLifecycleConfig = FileLifecycleConfig()
     avatar_cdn_base_url: str | None = None
     # Testenv-only flags
     testenv_api_enabled: bool = False
@@ -417,6 +439,10 @@ class Config(BaseModel):
                     and settings.workspace_s3_secret_access_key is not None
                     else None
                 ),
+            ),
+            file_lifecycle=FileLifecycleConfig(
+                artifact_retention_days=settings.artifact_retention_days,
+                exchange_file_retention_days=settings.exchange_file_retention_days,
             ),
             avatar_cdn_base_url=settings.avatar_cdn_base_url,
             testenv_api_enabled=settings.testenv_api_enabled,

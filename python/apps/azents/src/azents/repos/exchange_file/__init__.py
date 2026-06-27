@@ -176,6 +176,41 @@ class ExchangeFileRepository:
         await session.flush()
         return [self._build(row) for row in rows]
 
+    async def list_expired_pending_blob_deletion(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[ExchangeFile]:
+        """List expired ExchangeFiles whose blob deletion has not been recorded."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBExchangeFile)
+                .where(
+                    RDBExchangeFile.status == ExchangeFileStatus.EXPIRED,
+                    RDBExchangeFile.blob_deleted_at.is_(None),
+                )
+                .order_by(RDBExchangeFile.expired_at, RDBExchangeFile.id)
+                .limit(limit)
+            )
+        ).all()
+        return [self._build(row) for row in rows]
+
+    async def mark_blob_deleted(
+        self,
+        session: AsyncSession,
+        *,
+        file_id: str,
+        blob_deleted_at: datetime.datetime,
+    ) -> None:
+        """Record ExchangeFile blob deletion success."""
+        await session.execute(
+            sa.update(RDBExchangeFile)
+            .where(RDBExchangeFile.id == file_id)
+            .values(blob_deleted_at=blob_deleted_at)
+        )
+        await session.flush()
+
     async def expire_file_family(
         self,
         session: AsyncSession,
@@ -251,5 +286,6 @@ class ExchangeFileRepository:
             preview_generated_at=rdb.preview_generated_at,
             expires_at=rdb.expires_at,
             expired_at=rdb.expired_at,
+            blob_deleted_at=rdb.blob_deleted_at,
             created_at=rdb.created_at,
         )

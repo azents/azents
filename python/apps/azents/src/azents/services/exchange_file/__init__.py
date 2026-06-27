@@ -26,6 +26,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.file_lifecycle_policy import exchange_file_expires_at
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +75,6 @@ class ExchangeFileWithPreview:
 ExchangeFileError = (
     SessionNotFound | FileNotFound | FileAccessDenied | FileExpired | FileUnavailable
 )
-_EXCHANGE_FILE_RETENTION_DAYS = 30
-_EXCHANGE_FILE_EXPIRATION_CLEANUP_LIMIT = 100
 _PREVIEW_THUMBNAIL_MAX_SIZE = 512
 _PREVIEW_THUMBNAIL_MEDIA_TYPE = "image/jpeg"
 
@@ -145,11 +144,6 @@ def _make_preview_thumbnail(body: bytes, media_type: str) -> _PreviewThumbnail |
         height=img.height,
         generated_at=datetime.datetime.now(datetime.UTC),
     )
-
-
-def _exchange_file_expires_at(now: datetime.datetime) -> datetime.datetime:
-    """Return default expiration time for Exchange file."""
-    return now + datetime.timedelta(days=_EXCHANGE_FILE_RETENTION_DAYS)
 
 
 @dataclasses.dataclass
@@ -379,7 +373,7 @@ class ExchangeFileService:
         safe_filename = _sanitize_display_filename(filename)
         sha256 = hashlib.sha256(body).hexdigest()
         now = datetime.datetime.now(datetime.UTC)
-        expires_at = _exchange_file_expires_at(now)
+        expires_at = exchange_file_expires_at(now=now, config=self.config)
         uploaded_object_keys: list[str] = []
         created = await self.exchange_file_repository.create(
             session,
@@ -561,31 +555,6 @@ class ExchangeFileService:
         if isinstance(file, Failure):
             return Failure(file.error)
         return Success(file.value)
-
-    async def expire_due_files(self) -> list[ExchangeFile]:
-        """Mark expired ExchangeFile as expired and try blob deletion."""
-        now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            expired = await self.exchange_file_repository.expire_due(
-                session,
-                now=now,
-                limit=_EXCHANGE_FILE_EXPIRATION_CLEANUP_LIMIT,
-            )
-        for file in expired:
-            try:
-                await self.s3_service.delete(
-                    bucket=self.config.workspace_s3.bucket,
-                    key=file.object_key,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to delete expired exchange file blob",
-                    extra={
-                        "file_id": file.id,
-                        "object_key": file.object_key,
-                    },
-                )
-        return expired
 
     async def _download_by_object_key(
         self,

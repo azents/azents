@@ -20,9 +20,6 @@ class ModelFile(BaseModel):
     kind: str = Field(description="Broad file kind")
     size_bytes: int = Field(description="Normalized blob size")
     created_run_index: int = Field(ge=1, description="Created run index")
-    expires_after_run_index: int = Field(
-        ge=1, description="Expiration reference run index"
-    )
     storage_key: str = Field(description="Object storage key")
     status: ModelFileStatus = Field(description="ModelFile status")
     normalized_format: str = Field(description="Normalized blob format")
@@ -31,19 +28,11 @@ class ModelFile(BaseModel):
         default_factory=dict, description="Additional metadata"
     )
     created_at: datetime.datetime = Field(description="Created time")
-    degraded_at: datetime.datetime | None = Field(
-        default=None, description="Degraded time"
-    )
-    unreachable_run_index: int | None = Field(
-        default=None,
-        description="Run index transitioned to unreachable",
-    )
-    unreachable_at: datetime.datetime | None = Field(
-        default=None,
-        description="Unreachable transition time",
-    )
     deleted_at: datetime.datetime | None = Field(
         default=None, description="Deletion time"
+    )
+    blob_deleted_at: datetime.datetime | None = Field(
+        default=None, description="Blob deletion time"
     )
 
 
@@ -58,9 +47,6 @@ class ModelFileCreate(BaseModel):
     kind: str = Field(description="Broad file kind")
     size_bytes: int = Field(description="Normalized blob size")
     created_run_index: int = Field(ge=1, description="Created run index")
-    expires_after_run_index: int = Field(
-        ge=1, description="Expiration reference run index"
-    )
     normalized_format: str = Field(description="Normalized blob format")
     sha256: str = Field(description="normalized blob SHA-256 digest")
     metadata: dict[str, JSONValue] = Field(

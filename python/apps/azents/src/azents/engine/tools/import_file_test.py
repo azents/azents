@@ -28,7 +28,7 @@ def _make_artifact() -> Artifact:
         agent_id="agent-1",
         created_run_id="run-1",
         created_run_index=10,
-        expires_after_run_index=12,
+        expires_at=_NOW + datetime.timedelta(days=7),
         name="artifact.txt",
         media_type="text/plain",
         size_bytes=11,
@@ -68,6 +68,7 @@ def _make_exchange_file() -> ExchangeFile:
         preview_generated_at=None,
         expires_at=_NOW + datetime.timedelta(days=30),
         expired_at=None,
+        blob_deleted_at=None,
         created_at=_NOW,
     )
 

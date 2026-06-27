@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ModelFileStatus
 from azents.rdb.models.model_file import RDBModelFile
+from azents.rdb.models.model_file_pin import RDBModelFilePin
 
 from .data import ModelFile, ModelFileCreate
 
@@ -35,7 +36,6 @@ class ModelFileRepository:
             kind=create.kind,
             size_bytes=create.size_bytes,
             created_run_index=create.created_run_index,
-            expires_after_run_index=create.expires_after_run_index,
             status=ModelFileStatus.AVAILABLE,
             normalized_format=create.normalized_format,
             sha256=create.sha256,
@@ -75,33 +75,6 @@ class ModelFileRepository:
             return None
         return self._build(rdb)
 
-    async def list_for_run_boundary(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        current_run_index: int,
-    ) -> list[ModelFile]:
-        """Fetch ModelFiles subject to run boundary lifecycle."""
-        rows = (
-            await session.scalars(
-                sa.select(RDBModelFile)
-                .where(
-                    RDBModelFile.session_id == session_id,
-                    RDBModelFile.status.in_(
-                        [
-                            ModelFileStatus.AVAILABLE,
-                            ModelFileStatus.DEGRADED,
-                            ModelFileStatus.UNREACHABLE,
-                        ]
-                    ),
-                    RDBModelFile.created_run_index < current_run_index,
-                )
-                .order_by(RDBModelFile.created_run_index, RDBModelFile.id)
-            )
-        ).all()
-        return [self._build(row) for row in rows]
-
     async def list_statuses_for_session(
         self,
         session: AsyncSession,
@@ -122,25 +95,37 @@ class ModelFileRepository:
         ).all()
         return {row.id: row.status for row in rows}
 
-    async def mark_degraded(
+    async def mark_deleted_if_unpinned(
         self,
         session: AsyncSession,
         *,
-        model_file_id: str,
-        size_bytes: int,
-        normalized_format: str,
-        sha256: str,
-        degraded_at: datetime.datetime,
-    ) -> ModelFile:
-        """Update ModelFile metadata with degraded blob info."""
-        row = await session.get_one(RDBModelFile, model_file_id)
-        row.status = ModelFileStatus.DEGRADED
-        row.size_bytes = size_bytes
-        row.normalized_format = normalized_format
-        row.sha256 = sha256
-        row.degraded_at = degraded_at
+        model_file_ids: Sequence[str],
+        deleted_at: datetime.datetime,
+    ) -> list[ModelFile]:
+        """Mark available ModelFiles deleted when no active pin exists."""
+        if not model_file_ids:
+            return []
+
+        rows = (
+            await session.scalars(
+                sa.select(RDBModelFile)
+                .where(
+                    RDBModelFile.id.in_(model_file_ids),
+                    RDBModelFile.status == ModelFileStatus.AVAILABLE,
+                    ~sa.exists(
+                        sa.select(RDBModelFilePin.model_file_id).where(
+                            RDBModelFilePin.model_file_id == RDBModelFile.id
+                        )
+                    ),
+                )
+                .order_by(RDBModelFile.id)
+            )
+        ).all()
+        for row in rows:
+            row.status = ModelFileStatus.DELETED
+            row.deleted_at = deleted_at
         await session.flush()
-        return self._build(row)
+        return [self._build(row) for row in rows]
 
     async def mark_deleted(
         self,
@@ -156,21 +141,40 @@ class ModelFileRepository:
         await session.flush()
         return self._build(row)
 
-    async def mark_unreachable(
+    async def list_deleted_pending_blob_deletion(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[ModelFile]:
+        """List deleted ModelFiles whose blob deletion has not been recorded."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBModelFile)
+                .where(
+                    RDBModelFile.status == ModelFileStatus.DELETED,
+                    RDBModelFile.blob_deleted_at.is_(None),
+                )
+                .order_by(RDBModelFile.deleted_at, RDBModelFile.id)
+                .limit(limit)
+            )
+        ).all()
+        return [self._build(row) for row in rows]
+
+    async def mark_blob_deleted(
         self,
         session: AsyncSession,
         *,
         model_file_id: str,
-        unreachable_run_index: int,
-        unreachable_at: datetime.datetime,
-    ) -> ModelFile:
-        """Update ModelFile metadata as unreachable."""
-        row = await session.get_one(RDBModelFile, model_file_id)
-        row.status = ModelFileStatus.UNREACHABLE
-        row.unreachable_run_index = unreachable_run_index
-        row.unreachable_at = unreachable_at
+        blob_deleted_at: datetime.datetime,
+    ) -> None:
+        """Record ModelFile blob deletion success."""
+        await session.execute(
+            sa.update(RDBModelFile)
+            .where(RDBModelFile.id == model_file_id)
+            .values(blob_deleted_at=blob_deleted_at)
+        )
         await session.flush()
-        return self._build(row)
 
     def _build(self, rdb: RDBModelFile) -> ModelFile:
         """Convert RDB model to domain model."""
@@ -184,15 +188,12 @@ class ModelFileRepository:
             kind=rdb.kind,
             size_bytes=rdb.size_bytes,
             created_run_index=rdb.created_run_index,
-            expires_after_run_index=rdb.expires_after_run_index,
             storage_key=rdb.storage_key,
             status=rdb.status,
             normalized_format=rdb.normalized_format,
             sha256=rdb.sha256,
             metadata=rdb.metadata_,
             created_at=rdb.created_at,
-            degraded_at=rdb.degraded_at,
-            unreachable_run_index=rdb.unreachable_run_index,
-            unreachable_at=rdb.unreachable_at,
             deleted_at=rdb.deleted_at,
+            blob_deleted_at=rdb.blob_deleted_at,
         )

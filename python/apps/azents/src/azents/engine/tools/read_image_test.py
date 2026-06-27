@@ -31,14 +31,12 @@ _MODEL_FILE = ModelFile(
     kind="image",
     size_bytes=10,
     created_run_index=7,
-    expires_after_run_index=9,
     storage_key="model-files/workspace-1/session-1/m",
     status=ModelFileStatus.AVAILABLE,
     normalized_format="jpeg",
     sha256="2" * 64,
     metadata={},
     created_at=datetime.datetime.now(datetime.UTC),
-    degraded_at=None,
     deleted_at=None,
 )
 

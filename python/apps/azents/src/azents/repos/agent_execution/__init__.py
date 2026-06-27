@@ -234,6 +234,29 @@ class EventTranscriptRepository:
         result = await session.execute(stmt)
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def list_model_file_gc_range(
+        self,
+        session: AsyncSession,
+        session_id: str,
+        *,
+        after_order: int,
+        to_order: int,
+        limit: int,
+    ) -> list[Event]:
+        """Fetch a bounded event range for ModelFile GC cursor processing."""
+        result = await session.execute(
+            sa.select(RDBEvent)
+            .where(
+                RDBEvent.session_id == session_id,
+                RDBEvent.reverted.is_(False),
+                RDBEvent.model_order > after_order,
+                RDBEvent.model_order <= to_order,
+            )
+            .order_by(RDBEvent.model_order.asc(), RDBEvent.id.asc())
+            .limit(limit)
+        )
+        return [self._build(rdb) for rdb in result.scalars()]
+
     async def list_recent_by_session_id(
         self,
         session: AsyncSession,

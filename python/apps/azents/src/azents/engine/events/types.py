@@ -130,7 +130,7 @@ class ArtifactOutputPart(BaseModel):
     media_type: str = Field(min_length=1, description="MIME type")
     size: int = Field(ge=0, description="Size in bytes")
     status: Literal["available", "expired"] = "available"
-    expires_after_run_index: int | None = Field(default=None)
+    expires_at: datetime.datetime | None = Field(default=None)
 
 
 class FileOutputPart(BaseModel):

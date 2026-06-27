@@ -8,6 +8,7 @@ from azents.scheduler.types import (
     TaskContext,
     TaskResult,
 )
+from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.llm_catalog import SystemCatalogProjectionService
 
 
@@ -45,6 +46,20 @@ async def system_catalog_projection_handler(context: TaskContext) -> TaskResult:
     )
 
 
+async def file_lifecycle_cleanup_handler(context: TaskContext) -> TaskResult:
+    """Run bounded scheduler-owned file lifecycle cleanup."""
+    service = await context.container.solve(FileLifecycleCleanupService)
+    summary = await service.cleanup_once()
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **summary.to_dict(),
+        }
+    )
+
+
 HEARTBEAT_TASK = ScheduledTaskDefinition(
     key="scheduler_heartbeat",
     description="No-op scheduler heartbeat used to verify periodic execution wiring.",
@@ -69,9 +84,24 @@ SYSTEM_CATALOG_PROJECTION_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+FILE_LIFECYCLE_CLEANUP_TASK = ScheduledTaskDefinition(
+    key="file_lifecycle_cleanup",
+    description="Expire TTL-owned files and collect head-pruned ModelFiles.",
+    interval=datetime.timedelta(minutes=5),
+    timeout=datetime.timedelta(minutes=2),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=5),
+        max_delay=datetime.timedelta(hours=1),
+    ),
+    handler=file_lifecycle_cleanup_handler,
+    enabled_by_default=True,
+)
+
 SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     HEARTBEAT_TASK,
     SYSTEM_CATALOG_PROJECTION_TASK,
+    FILE_LIFECYCLE_CLEANUP_TASK,
 )
 
 

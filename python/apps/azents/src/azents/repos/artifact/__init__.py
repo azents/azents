@@ -34,7 +34,7 @@ class ArtifactRepository:
             agent_id=create.agent_id,
             created_run_id=create.created_run_id,
             created_run_index=create.created_run_index,
-            expires_after_run_index=create.expires_after_run_index,
+            expires_at=create.expires_at,
             name=create.name,
             media_type=create.media_type,
             size_bytes=create.size_bytes,
@@ -75,29 +75,65 @@ class ArtifactRepository:
             return None
         return self._build(rdb)
 
-    async def expire_for_run_boundary(
+    async def expire_due(
         self,
         session: AsyncSession,
         *,
-        session_id: str,
-        current_run_index: int,
-        expired_at: datetime.datetime,
+        now: datetime.datetime,
+        limit: int,
     ) -> list[Artifact]:
-        """Mark Artifacts expired when they expire by run boundary."""
+        """Mark Artifacts past expiration time as expired."""
         rows = (
             await session.scalars(
-                sa.select(RDBArtifact).where(
-                    RDBArtifact.session_id == session_id,
+                sa.select(RDBArtifact)
+                .where(
                     RDBArtifact.status == ArtifactStatus.AVAILABLE,
-                    RDBArtifact.expires_after_run_index < current_run_index,
+                    RDBArtifact.expires_at <= now,
                 )
+                .order_by(RDBArtifact.expires_at, RDBArtifact.id)
+                .limit(limit)
             )
         ).all()
         for row in rows:
             row.status = ArtifactStatus.EXPIRED
-            row.expired_at = expired_at
+            row.expired_at = now
         await session.flush()
         return [self._build(row) for row in rows]
+
+    async def list_expired_pending_blob_deletion(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[Artifact]:
+        """List expired Artifacts whose blob deletion has not been recorded."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBArtifact)
+                .where(
+                    RDBArtifact.status == ArtifactStatus.EXPIRED,
+                    RDBArtifact.blob_deleted_at.is_(None),
+                )
+                .order_by(RDBArtifact.expired_at, RDBArtifact.id)
+                .limit(limit)
+            )
+        ).all()
+        return [self._build(row) for row in rows]
+
+    async def mark_blob_deleted(
+        self,
+        session: AsyncSession,
+        *,
+        artifact_id: str,
+        blob_deleted_at: datetime.datetime,
+    ) -> None:
+        """Record Artifact blob deletion success."""
+        await session.execute(
+            sa.update(RDBArtifact)
+            .where(RDBArtifact.id == artifact_id)
+            .values(blob_deleted_at=blob_deleted_at)
+        )
+        await session.flush()
 
     def _build(self, rdb: RDBArtifact) -> Artifact:
         """Convert RDB model to domain model."""
@@ -108,7 +144,7 @@ class ArtifactRepository:
             agent_id=rdb.agent_id,
             created_run_id=rdb.created_run_id,
             created_run_index=rdb.created_run_index,
-            expires_after_run_index=rdb.expires_after_run_index,
+            expires_at=rdb.expires_at,
             name=rdb.name,
             media_type=rdb.media_type,
             size_bytes=rdb.size_bytes,
@@ -122,4 +158,5 @@ class ArtifactRepository:
             metadata=rdb.metadata_,
             created_at=rdb.created_at,
             expired_at=rdb.expired_at,
+            blob_deleted_at=rdb.blob_deleted_at,
         )

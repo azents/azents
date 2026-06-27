@@ -239,6 +239,7 @@ class _SessionState:
 
     def __init__(self, head_event_id: str | None) -> None:
         self.model_input_head_event_id = head_event_id
+        self.model_input_head_model_order = 1 if head_event_id is not None else None
 
 
 class _SessionRepo:
@@ -1261,13 +1262,8 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     assert "Tool execution failed" in output.text
 
 
-async def test_artifact_expirer_runs_during_input_preparation() -> None:
-    """Run Artifact expiry hook during new run input preparation."""
-    calls: list[tuple[str, int]] = []
-
-    async def expire(*, session_id: str, current_run_index: int) -> None:
-        calls.append((session_id, current_run_index))
-
+async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
+    """File lifecycle cleanup is scheduler-owned, not run-loop-owned."""
     execution = AgentRunExecution(
         lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
@@ -1277,7 +1273,6 @@ async def test_artifact_expirer_runs_during_input_preparation() -> None:
         run_repo=_RunRepo(),
         transcript_repo=_TranscriptRepo(),
         session_repo=_SessionRepo(None),
-        artifact_expirer=expire,
     )
 
     status = await execution.run(
@@ -1292,76 +1287,6 @@ async def test_artifact_expirer_runs_during_input_preparation() -> None:
     )
 
     assert status == AgentRunStatus.COMPLETED
-    assert calls == [("session-1", 7)]
-
-
-async def test_model_file_expirer_runs_during_input_preparation() -> None:
-    """Run ModelFile expiry hook during new run input preparation."""
-    calls: list[tuple[str, int]] = []
-
-    async def expire(*, session_id: str, current_run_index: int) -> None:
-        calls.append((session_id, current_run_index))
-
-    execution = AgentRunExecution(
-        lowerer=_Lowerer(),
-        post_lower_filter=_PostFilter(),
-        model_adapter=_ModelAdapter(),
-        output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
-        run_repo=_RunRepo(),
-        transcript_repo=_TranscriptRepo(),
-        session_repo=_SessionRepo(None),
-        model_file_expirer=expire,
-    )
-
-    status = await execution.run(
-        _Session(),
-        AgentRunExecutionRequest(
-            run_id="run-1",
-            session_id="session-1",
-            model="gpt-5.1",
-            run_index=7,
-            max_turns=1,
-        ),
-    )
-
-    assert status == AgentRunStatus.COMPLETED
-    assert calls == [("session-1", 7)]
-
-
-async def test_exchange_file_expirer_runs_during_input_preparation() -> None:
-    """Run ExchangeFile expiry hook during new run input preparation."""
-    calls = 0
-
-    async def expire() -> None:
-        nonlocal calls
-        calls += 1
-
-    execution = AgentRunExecution(
-        lowerer=_Lowerer(),
-        post_lower_filter=_PostFilter(),
-        model_adapter=_ModelAdapter(),
-        output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
-        run_repo=_RunRepo(),
-        transcript_repo=_TranscriptRepo(),
-        session_repo=_SessionRepo(None),
-        exchange_file_expirer=expire,
-    )
-
-    status = await execution.run(
-        _Session(),
-        AgentRunExecutionRequest(
-            run_id="run-1",
-            session_id="session-1",
-            model="gpt-5.1",
-            run_index=7,
-            max_turns=1,
-        ),
-    )
-
-    assert status == AgentRunStatus.COMPLETED
-    assert calls == 1
 
 
 async def test_pre_model_lower_hook_runs_before_lowerer() -> None:

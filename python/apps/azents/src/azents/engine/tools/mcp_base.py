@@ -293,7 +293,7 @@ async def _create_artifact_output_part_from_body(
         "media_type": artifact.media_type,
         "size": artifact.size_bytes,
         "status": artifact.status.value,
-        "expires_after_run_index": artifact.expires_after_run_index,
+        "expires_at": artifact.expires_at.isoformat(),
     }
 
 
