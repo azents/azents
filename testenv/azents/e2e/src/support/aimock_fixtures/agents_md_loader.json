@@ -30,10 +30,11 @@
         "toolCalls": [
           {
             "id": "call_file_resource_lifecycle_write",
-            "name": "bash",
+            "name": "exec_command",
             "arguments": {
               "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
-              "timeout": 10
+              "yield_time_ms": 10000,
+              "max_output_tokens": 1000
             }
           }
         ]
@@ -57,10 +58,11 @@
         "toolCalls": [
           {
             "id": "call_file_resource_lifecycle_write_retry_1",
-            "name": "bash",
+            "name": "exec_command",
             "arguments": {
               "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
-              "timeout": 10
+              "yield_time_ms": 10000,
+              "max_output_tokens": 1000
             }
           }
         ]
@@ -75,10 +77,11 @@
         "toolCalls": [
           {
             "id": "call_file_resource_lifecycle_write_retry_2",
-            "name": "bash",
+            "name": "exec_command",
             "arguments": {
               "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
-              "timeout": 10
+              "yield_time_ms": 10000,
+              "max_output_tokens": 1000
             }
           }
         ]
@@ -93,10 +96,11 @@
         "toolCalls": [
           {
             "id": "call_file_resource_lifecycle_write_retry_3",
-            "name": "bash",
+            "name": "exec_command",
             "arguments": {
               "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
-              "timeout": 10
+              "yield_time_ms": 10000,
+              "max_output_tokens": 1000
             }
           }
         ]
@@ -239,6 +243,65 @@
       },
       "response": {
         "content": "File resource lifecycle attachment metadata was observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Runtime exec quick command",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_runtime_exec_quick",
+            "name": "exec_command",
+            "arguments": {
+              "command": "printf '%s' 'RUNTIME_EXEC_QUICK_MARKER'",
+              "yield_time_ms": 10000,
+              "max_output_tokens": 1000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_runtime_exec_quick"
+      },
+      "response": {
+        "content": "Runtime exec quick completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Runtime exec missing process",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_runtime_exec_missing",
+            "name": "write_stdin",
+            "arguments": {
+              "session_id": "proc-does-not-exist",
+              "chars": "",
+              "yield_time_ms": 0,
+              "max_output_tokens": 1000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_runtime_exec_missing"
+      },
+      "response": {
+        "content": "Runtime exec missing process observed."
       }
     },
     {
