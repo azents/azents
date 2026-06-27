@@ -283,7 +283,7 @@ export function AgentFocusedSidebar({
       </Modal>
 
       <Stack h="100%" gap={0} style={{ overflow: "hidden" }}>
-        <Box p="md">
+        <Stack px="md" pt="lg" pb="md" gap="lg">
           <Button
             component={Link}
             href={workspacePath}
@@ -292,13 +292,13 @@ export function AgentFocusedSidebar({
             size="compact-sm"
             leftSection={<IconChevronLeft size={rem(16)} />}
             onClick={onNavigate}
+            className={styles.backToWorkspaceButton}
           >
             {t("backToWorkspace")}
           </Button>
           <UnstyledButton
             component={Link}
             href={settingsHref}
-            mt="md"
             w="100%"
             onClick={onNavigate}
             className={`${styles.agentInfoLink} ${
@@ -345,7 +345,7 @@ export function AgentFocusedSidebar({
                 : t("visibility.private")}
             </Badge>
           </Group>
-        </Box>
+        </Stack>
 
         <Divider />
 
