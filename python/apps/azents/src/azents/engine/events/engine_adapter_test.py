@@ -336,6 +336,7 @@ class _Execution:
 
     def __init__(self) -> None:
         self.request: AgentRunExecutionRequest | None = None
+        self.lowerer: LiteLLMResponsesLowerer | None = None
 
     async def run(
         self,
@@ -503,7 +504,9 @@ async def test_event_engine_adapter_runs_execution() -> None:
         model_file_service=_ModelFileService(),
         run_repo=run_repo,
         agent_session_repo=_AgentSessionRepo(),
-        execution_factory=lambda **kwargs: execution,
+        execution_factory=lambda **kwargs: (
+            setattr(execution, "lowerer", kwargs["lowerer"]) or execution
+        ),
     )
 
     emits = [
@@ -531,6 +534,9 @@ async def test_event_engine_adapter_runs_execution() -> None:
     assert run_repo.created.id == "0" * 32
     assert execution.request is not None
     assert execution.request.system_prompt == "## Agent prompt\n\nagent prompt"
+    assert execution.lowerer is not None
+    lowered = execution.lowerer.lower([], model="gpt-5.1")
+    assert isinstance(lowered.kwargs.get("prompt_cache_key"), str)
     assert isinstance(_events(emits)[0], RunComplete)
 
 

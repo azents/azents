@@ -327,6 +327,7 @@ class AgentEngineAdapter:
             stop=request.stop,
             reasoning_effort=request.reasoning_effort,
             hosted_tools=request.builtin_tools,
+            prompt_cache_scope=request.session_id,
             model_developer=request.model_developer,
             model_capabilities=request.model_capabilities,
             model_file_resolver=model_file_resolver,

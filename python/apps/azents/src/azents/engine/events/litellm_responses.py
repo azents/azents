@@ -5,6 +5,7 @@ import base64
 import contextlib
 import dataclasses
 import datetime
+import hashlib
 import os
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Sequence
 from typing import Any, Protocol, cast, runtime_checkable
@@ -75,6 +76,8 @@ from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import BuiltinToolSpec
 
 _DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
+_PROMPT_CACHE_KEY_PREFIX = "azs"
+_OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
 _TOOLS_ADAPTER: TypeAdapter[list[ToolParam]] = TypeAdapter(list[ToolParam])
 _REASONING_ADAPTER: TypeAdapter[Reasoning] = TypeAdapter(Reasoning)
 
@@ -146,6 +149,7 @@ class LiteLLMResponsesLowerer:
         stop: list[str] | None = None,
         reasoning_effort: str | None = None,
         hosted_tools: Sequence[BuiltinToolSpec] | None = None,
+        prompt_cache_scope: str | None = None,
         model_developer: LLMModelDeveloper | None = None,
         model_capabilities: ModelCapabilities | None = None,
         model_file_resolver: ModelFileResolver | None = None,
@@ -163,6 +167,7 @@ class LiteLLMResponsesLowerer:
         self._stop = list(stop) if stop is not None else None
         self._reasoning_effort = reasoning_effort
         self._hosted_tools = list(hosted_tools or [])
+        self._prompt_cache_scope = prompt_cache_scope
         self._model_developer = model_developer
         self._model_capabilities = model_capabilities or ModelCapabilities()
         self._file_part_capabilities = (
@@ -217,6 +222,12 @@ class LiteLLMResponsesLowerer:
             model_capabilities=self._model_capabilities,
         )
         tools = [*self._tools, *hosted.tools]
+        input_items, tools = _apply_provider_prompt_cache_hints(
+            input_items,
+            tools,
+            provider_id=self._provider_id,
+            model_developer=self._model_developer,
+        )
         kwargs.update(hosted.kwargs)
         return NativeModelRequest(
             model=model,
@@ -236,6 +247,10 @@ class LiteLLMResponsesLowerer:
             if base_url is not None:
                 kwargs.setdefault("base_url", base_url)
                 kwargs.setdefault("api_base", base_url)
+        if self._provider_id in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
+            prompt_cache_key = _openai_prompt_cache_key(self._prompt_cache_scope)
+            if prompt_cache_key is not None:
+                kwargs.setdefault("prompt_cache_key", prompt_cache_key)
         if self._provider_id == LLMProvider.CHATGPT_OAUTH:
             kwargs.setdefault("store", False)
         if self._temperature is not None:
@@ -366,6 +381,113 @@ class _HostedToolLowering:
 
     tools: list[dict[str, object]]
     kwargs: dict[str, object]
+
+
+def _openai_prompt_cache_key(scope: str | None) -> str | None:
+    """Build a stable OpenAI prompt cache routing key for one conversation."""
+    if scope is None:
+        return None
+    normalized = scope.strip()
+    if not normalized:
+        return None
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+    return f"{_PROMPT_CACHE_KEY_PREFIX}:{digest}"[:_OPENAI_PROMPT_CACHE_KEY_MAX_CHARS]
+
+
+def _apply_provider_prompt_cache_hints(
+    input_items: Sequence[dict[str, object]],
+    tools: Sequence[dict[str, object]],
+    *,
+    provider_id: LLMProvider | None,
+    model_developer: LLMModelDeveloper | None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Apply provider-native prompt caching hints without overriding defaults."""
+    if not _uses_anthropic_cache_control(
+        provider_id=provider_id,
+        model_developer=model_developer,
+    ):
+        return list(input_items), list(tools)
+    return _apply_anthropic_cache_control(input_items, tools)
+
+
+def _uses_anthropic_cache_control(
+    *,
+    provider_id: LLMProvider | None,
+    model_developer: LLMModelDeveloper | None,
+) -> bool:
+    """Return whether LiteLLM can translate cache_control for this target."""
+    if provider_id == LLMProvider.ANTHROPIC:
+        return True
+    if provider_id in {LLMProvider.AWS_BEDROCK, LLMProvider.GOOGLE_VERTEX_AI}:
+        return model_developer == LLMModelDeveloper.ANTHROPIC
+    if provider_id in {
+        LLMProvider.OPENAI,
+        LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.GOOGLE_GEMINI,
+    }:
+        return False
+    return model_developer == LLMModelDeveloper.ANTHROPIC
+
+
+def _apply_anthropic_cache_control(
+    input_items: Sequence[dict[str, object]],
+    tools: Sequence[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Mark stable prefix blocks for Anthropic/Claude prompt caching."""
+    input_with_cache = [_copy_item(item) for item in input_items]
+    tools_with_cache = [_copy_item(tool) for tool in tools]
+    remaining = 4
+    cacheable_tools = [
+        tool for tool in tools_with_cache if tool.get("type") == "function"
+    ]
+    if cacheable_tools and _set_cache_control_if_absent(cacheable_tools[-1]):
+        remaining -= 1
+    for item in input_with_cache:
+        if remaining <= 0:
+            break
+        if _set_item_cache_control_if_absent(item):
+            remaining -= 1
+    return input_with_cache, tools_with_cache
+
+
+def _copy_item(item: dict[str, object]) -> dict[str, object]:
+    """Shallow-copy a native item before adding cache metadata."""
+    copied = dict(item)
+    content = copied.get("content")
+    if isinstance(content, list):
+        copied["content"] = [
+            dict(part) if isinstance(part, dict) else part for part in content
+        ]
+    return copied
+
+
+def _set_item_cache_control_if_absent(item: dict[str, object]) -> bool:
+    """Set cache_control on a cacheable input item when absent."""
+    if item.get("type") in {"function_call", "function_call_output"}:
+        return False
+    content = item.get("content")
+    if isinstance(content, str):
+        item["content"] = [
+            {
+                "type": "input_text",
+                "text": content,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        return True
+    if isinstance(content, list) and content:
+        last_part = content[-1]
+        if isinstance(last_part, dict):
+            return _set_cache_control_if_absent(last_part)
+    return False
+
+
+def _set_cache_control_if_absent(item: dict[str, object]) -> bool:
+    """Attach Anthropic cache control only when no default exists."""
+    if "cache_control" in item:
+        return False
+    item["cache_control"] = {"type": "ephemeral"}
+    return True
 
 
 def _lower_hosted_tools(
@@ -501,7 +623,9 @@ async def _call_litellm_responses(
     """Call LiteLLM Responses API."""
     tools: Any | None = None
     if request.tools:
-        if _contains_provider_hosted_tool(request.tools):
+        if _contains_provider_hosted_tool(
+            request.tools
+        ) or _contains_cache_control_tool(request.tools):
             _validate_non_hosted_tools(request.tools)
             tools = request.tools
         else:
@@ -533,6 +657,11 @@ def _contains_provider_hosted_tool(tools: Sequence[dict[str, object]]) -> bool:
     return any(_is_provider_hosted_tool(tool) for tool in tools)
 
 
+def _contains_cache_control_tool(tools: Sequence[dict[str, object]]) -> bool:
+    """Check whether tool cache_control must survive Pydantic validation."""
+    return any("cache_control" in tool for tool in tools)
+
+
 def _is_provider_hosted_tool(tool: dict[str, object]) -> bool:
     """Check whether shape is provider-hosted tool native shape."""
     tool_type = tool.get("type")
@@ -544,9 +673,22 @@ def _is_provider_hosted_tool(tool: dict[str, object]) -> bool:
 
 def _validate_non_hosted_tools(tools: Sequence[dict[str, object]]) -> None:
     """Continue validating normal tool shapes passed with hosted tools."""
-    non_hosted_tools = [tool for tool in tools if not _is_provider_hosted_tool(tool)]
+    non_hosted_tools = [
+        _tool_without_cache_control(tool)
+        for tool in tools
+        if not _is_provider_hosted_tool(tool)
+    ]
     if non_hosted_tools:
         _TOOLS_ADAPTER.validate_python(non_hosted_tools)
+
+
+def _tool_without_cache_control(tool: dict[str, object]) -> dict[str, object]:
+    """Return a validation copy without provider-specific cache metadata."""
+    if "cache_control" not in tool:
+        return tool
+    sanitized = dict(tool)
+    sanitized.pop("cache_control", None)
+    return sanitized
 
 
 def _extra_litellm_kwargs(kwargs: dict[str, object]) -> dict[str, Any]:

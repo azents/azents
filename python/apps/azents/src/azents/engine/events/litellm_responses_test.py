@@ -145,6 +145,188 @@ class TestLiteLLMResponsesLowerer:
             {"type": "message"},
         ]
 
+    def test_openai_prompt_cache_key_uses_session_scope(self) -> None:
+        """OpenAI prompt cache key is stable and scoped to the session."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            provider_id=LLMProvider.OPENAI,
+            prompt_cache_scope="session-1",
+        )
+
+        request = lowerer.lower([], model="gpt-5.1")
+
+        key = request.kwargs.get("prompt_cache_key")
+        assert isinstance(key, str)
+        assert key.startswith("azs:")
+        assert len(key) <= 64
+        assert (
+            key
+            == LiteLLMResponsesLowerer(
+                provider="openai",
+                model="gpt-5.1",
+                provider_id=LLMProvider.OPENAI,
+                prompt_cache_scope="session-1",
+            )
+            .lower([], model="gpt-5.1")
+            .kwargs["prompt_cache_key"]
+        )
+        assert (
+            key
+            != LiteLLMResponsesLowerer(
+                provider="openai",
+                model="gpt-5.1",
+                provider_id=LLMProvider.OPENAI,
+                prompt_cache_scope="session-2",
+            )
+            .lower([], model="gpt-5.1")
+            .kwargs["prompt_cache_key"]
+        )
+
+    def test_openai_prompt_cache_key_respects_explicit_kwargs(self) -> None:
+        """Explicit provider kwargs keep their default/overridden cache behavior."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            provider_id=LLMProvider.OPENAI,
+            kwargs={"prompt_cache_key": "custom-key"},
+            prompt_cache_scope="session-1",
+        )
+
+        request = lowerer.lower([], model="gpt-5.1")
+
+        assert request.kwargs["prompt_cache_key"] == "custom-key"
+
+    def test_non_openai_does_not_force_prompt_cache_key(self) -> None:
+        """Providers without request-level cache key support keep defaults."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="anthropic",
+            model="claude-sonnet-4-5",
+            provider_id=LLMProvider.ANTHROPIC,
+            prompt_cache_scope="session-1",
+        )
+
+        request = lowerer.lower([], model="claude-sonnet-4-5")
+
+        assert "prompt_cache_key" not in request.kwargs
+
+    def test_anthropic_adds_cache_control_hints_to_prefix(self) -> None:
+        """Claude targets receive cache_control hints on stable prefix blocks."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="anthropic",
+            model="claude-sonnet-4-5",
+            provider_id=LLMProvider.ANTHROPIC,
+            tools=[
+                {
+                    "type": "function",
+                    "name": "read",
+                    "description": "Read a file",
+                    "parameters": {"type": "object"},
+                }
+            ],
+        )
+        transcript = [
+            _event(EventKind.USER_MESSAGE, UserMessagePayload(content="one")),
+            _event(EventKind.USER_MESSAGE, UserMessagePayload(content="two")),
+        ]
+
+        request = lowerer.lower(transcript, model="claude-sonnet-4-5")
+
+        assert request.tools[-1]["cache_control"] == {"type": "ephemeral"}
+        assert request.input[0]["content"] == [
+            {
+                "type": "input_text",
+                "text": "one",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        assert request.input[1]["content"] == [
+            {
+                "type": "input_text",
+                "text": "two",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+    def test_anthropic_cache_control_preserves_existing_hints(self) -> None:
+        """Do not overwrite explicit cache_control provided by callers/providers."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="anthropic",
+            model="claude-sonnet-4-5",
+            provider_id=LLMProvider.ANTHROPIC,
+            tools=[
+                {
+                    "type": "function",
+                    "name": "read",
+                    "description": "Read a file",
+                    "parameters": {"type": "object"},
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                }
+            ],
+        )
+
+        request = lowerer.lower(
+            [_event(EventKind.USER_MESSAGE, UserMessagePayload(content="hello"))],
+            model="claude-sonnet-4-5",
+        )
+
+        assert request.tools[-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+        assert request.input[0]["content"] == [
+            {
+                "type": "input_text",
+                "text": "hello",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+    def test_anthropic_skips_tool_call_items_for_cache_control(self) -> None:
+        """Tool call/result items are not cache_control breakpoints."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="anthropic",
+            model="claude-sonnet-4-5",
+            provider_id=LLMProvider.ANTHROPIC,
+        )
+        transcript = [
+            _event(
+                EventKind.CLIENT_TOOL_CALL,
+                ClientToolCallPayload(
+                    call_id="call-1",
+                    name="read",
+                    arguments="{}",
+                    native_artifact=_artifact(
+                        {
+                            "type": "function_call",
+                            "call_id": "call-1",
+                            "name": "read",
+                            "arguments": "{}",
+                        }
+                    ),
+                ),
+            ),
+            _event(
+                EventKind.CLIENT_TOOL_RESULT,
+                ClientToolResultPayload(
+                    call_id="call-1",
+                    name="read",
+                    status="completed",
+                    output=[OutputTextPart(text="ok")],
+                ),
+            ),
+            _event(EventKind.USER_MESSAGE, UserMessagePayload(content="next")),
+        ]
+
+        request = lowerer.lower(transcript, model="claude-sonnet-4-5")
+
+        assert "cache_control" not in request.input[0]
+        assert "cache_control" not in request.input[1]
+        assert request.input[2]["content"] == [
+            {
+                "type": "input_text",
+                "text": "next",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
     def test_skips_goal_briefing_for_model_input(self) -> None:
         """goal_briefing is UI-only durable event, so exclude it from model input."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
