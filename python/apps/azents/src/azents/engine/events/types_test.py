@@ -19,6 +19,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
+from azents.engine.run.types import FunctionToolResult
 
 
 def _artifact() -> NativeArtifact:
@@ -159,6 +160,40 @@ def test_provider_tool_result_is_not_client_tool_result_subclass() -> None:
 
     assert type(payload) is ProviderToolResultPayload
     assert not isinstance(payload, ClientToolResultPayload)
+
+
+def test_function_tool_result_metadata_defaults_to_isolated_dicts() -> None:
+    first = FunctionToolResult(output="one")
+    second = FunctionToolResult(output="two")
+
+    assert first.metadata == {}
+    assert second.metadata == {}
+    assert first.metadata is not second.metadata
+
+
+def test_function_tool_result_metadata_requires_json_object() -> None:
+    with pytest.raises(ValidationError):
+        FunctionToolResult.model_validate({"output": "ok", "metadata": ["bad"]})
+
+
+def test_client_tool_result_metadata_requires_json_object() -> None:
+    payload = ClientToolResultPayload(
+        call_id="call-1",
+        status="completed",
+        output="ok",
+        metadata={"nested": {"items": ["stdout", None]}},
+    )
+
+    assert payload.metadata == {"nested": {"items": ["stdout", None]}}
+    with pytest.raises(ValidationError):
+        ClientToolResultPayload.model_validate(
+            {
+                "call_id": "call-1",
+                "status": "completed",
+                "output": "ok",
+                "metadata": "bad",
+            }
+        )
 
 
 def test_event_token_usage_requires_raw_payload() -> None:

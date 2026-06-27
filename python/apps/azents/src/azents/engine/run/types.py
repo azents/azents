@@ -11,9 +11,11 @@ from typing import Annotated, Protocol, TypeAlias
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     SkipValidation,
 )
 
+from azents.core.json_types import JSONObject
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
 
@@ -84,6 +86,7 @@ class FunctionToolResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     output: str | list[RawDict]
+    metadata: JSONObject = Field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True)

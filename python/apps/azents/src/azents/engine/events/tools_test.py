@@ -178,6 +178,7 @@ async def test_client_tool_executor_returns_event_result() -> None:
     assert result.status == "completed"
     assert result.name == "echo"
     assert result.output == '{"text":"hello"}'
+    assert result.metadata == {}
     parts = list(iter_output_parts(result.output))
     assert isinstance(parts[0], OutputTextPart)
     assert parts[0].text == '{"text":"hello"}'
@@ -289,6 +290,68 @@ async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
     assert isinstance(parts[0], AttachmentOutputPart)
     assert isinstance(parts[1], OutputTextPart)
     assert parts[1].text == "... (truncated)\n" + "b" * TOOL_OUTPUT_TEXT_HARD_CAP_CHARS
+
+
+async def test_client_tool_executor_preserves_function_tool_result_metadata() -> None:
+    """FunctionToolResult metadata is preserved without changing output."""
+
+    async def handler(arguments: str) -> FunctionToolResult:
+        del arguments
+        return FunctionToolResult(
+            output="process output",
+            metadata={
+                "kind": "exec_command_result",
+                "process_id": "proc_123",
+                "status": "running",
+                "nested": {"count": 1},
+                "items": ["stdout", None],
+            },
+        )
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="metadata_result",
+                            description="Return result metadata.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=handler,
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    result = await ToolCatalogClientToolExecutor(catalog).execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="metadata_result",
+            arguments="{}",
+            native_artifact=_artifact(),
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.output == "process output"
+    assert result.metadata == {
+        "kind": "exec_command_result",
+        "process_id": "proc_123",
+        "status": "running",
+        "nested": {"count": 1},
+        "items": ["stdout", None],
+    }
 
 
 async def test_client_tool_executor_dispatches_cancel_handler() -> None:
