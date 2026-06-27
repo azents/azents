@@ -73,7 +73,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-27
-spec_version: 73
+spec_version: 74
 ---
 
 # Conversation & Events
@@ -153,13 +153,14 @@ titles set `title_source = manual` and automatic generation must never overwrite
 
 Automatic title generation has two phases. When the first user message is promoted into the durable
 transcript and the session has no title source, the server stores a deterministic `auto_initial` title
-from the beginning of that message. After the first terminal run, the worker uses the Agent's
-lightweight model to generate a concise `auto_generated` title from the session transcript. This
-replacement is race-safe and only applies while `title_source = auto_initial` and no newer transcript
-event has been appended; if a user renames the session or continues the conversation before generation
-completes, the automatic update is skipped. Title generation is best-effort and failures must not
-affect run completion. Clients display `title` when present and otherwise fall back to a contextual
-label such as "Team primary" or "Session".
+from the beginning of that message. The worker then immediately schedules best-effort lightweight
+model title generation from that initial user prompt without waiting for the first run to complete.
+The resulting concise `auto_generated` title only replaces the deterministic title while
+`title_source = auto_initial` and `title_generation_event_id` still points at the same initial prompt
+event. Manual title updates or clears therefore remain authoritative, while long-running first turns
+do not delay automatic title generation. Title generation failures must not affect run execution.
+Clients display `title` when present and otherwise fall back to a contextual label such as "Team
+primary" or "Session".
 
 `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/archive` archives an active non-primary
 AgentSession. Archive is a soft lifecycle transition: durable transcript data, run rows, exchange

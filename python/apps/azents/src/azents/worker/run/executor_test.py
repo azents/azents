@@ -137,9 +137,13 @@ class _AgentSessionRepository:
 class _SessionTitleService:
     """SessionTitleService test double."""
 
-    async def generate_after_first_run(self, session_id: str) -> None:
+    async def generate_from_initial_prompt(
+        self,
+        session_id: str,
+        event: Event,
+    ) -> None:
         """Do not generate titles in executor tests."""
-        del session_id
+        del session_id, event
 
 
 class _LiveEventProjector:

@@ -1034,6 +1034,16 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
     broadcast = _Broadcast()
     executor = object.__new__(RunExecutor)
     executor.broadcast = cast(WebSocketBroadcast, broadcast)
+    scheduled_title_events: list[str] = []
+
+    def schedule_title(session_id: str, event: Event) -> None:
+        scheduled_title_events.append(f"{session_id}:{event.id}")
+
+    monkeypatch.setattr(
+        executor,
+        "_schedule_initial_prompt_title_generation",
+        schedule_title,
+    )
     user_message = make_run_user_message(
         content="buffered input",
         metadata={"source": "chat"},
@@ -1084,6 +1094,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
 
     assert messages == [user_message]
     assert promotion.calls == [("session-1", "gpt-test")]
+    assert scheduled_title_events == ["session-1:1123456789abcdef0123456789abcdeb"]
     event_types = [event.get("type") for _, event in broadcast.events]
     assert event_types == ["history_event_appended", "live_event_removed"]
     appended = cast(dict[str, object], broadcast.events[0][1]["event"])

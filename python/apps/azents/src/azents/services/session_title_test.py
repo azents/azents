@@ -18,6 +18,7 @@ from azents.services.session_title import (
     generate_session_title_with_model,
     initial_title_from_user_text,
     title_context_from_events,
+    title_context_from_initial_prompt,
 )
 
 
@@ -69,10 +70,28 @@ class TestSessionTitleHelpers:
         title = await generate_session_title_with_model(
             model="openai/test",
             credential_kwargs={},
-            context="User: Compare two insurance options",
+            context="Compare two insurance options",
         )
 
         assert title == "Insurance option comparison"
+
+    def test_initial_prompt_context_uses_only_user_text(self) -> None:
+        """Initial prompt context excludes later transcript content."""
+        event = Event(
+            id="0" * 32,
+            session_id="session-001",
+            kind=EventKind.USER_MESSAGE,
+            payload=UserMessagePayload(
+                content="Compare two insurance options",
+                attachments=[],
+                metadata={},
+            ),
+            created_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        assert title_context_from_initial_prompt(event) == (
+            "Compare two insurance options"
+        )
 
     def test_title_context_uses_user_and_assistant_text(self) -> None:
         """Title context includes user and assistant transcript text."""

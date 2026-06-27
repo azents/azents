@@ -801,7 +801,6 @@ class RunExecutor:
                 )
             else:
                 await self.session_lifecycle.clear_session_activity(message.session_id)
-                self._schedule_session_title_generation(message.session_id)
 
         return RunExecutionResult(
             toolkits=run_request.toolkits,
@@ -810,11 +809,15 @@ class RunExecutor:
             run_id=run_id,
         )
 
-    def _schedule_session_title_generation(self, session_id: str) -> None:
-        """Start best-effort automatic title generation after terminal runs."""
+    def _schedule_initial_prompt_title_generation(
+        self,
+        session_id: str,
+        event: Event,
+    ) -> None:
+        """Start best-effort automatic title generation from the first prompt."""
         task = asyncio.create_task(
-            self.session_title_service.generate_after_first_run(session_id),
-            name=f"session_title_{session_id}",
+            self.session_title_service.generate_from_initial_prompt(session_id, event),
+            name=f"session_title_{session_id}_{event.id}",
         )
         self._session_title_tasks.add(task)
 
@@ -826,7 +829,7 @@ class RunExecutor:
             except Exception:
                 logger.warning(
                     "Automatic session title task failed",
-                    extra={"session_id": session_id},
+                    extra={"session_id": session_id, "event_id": event.id},
                     exc_info=True,
                 )
 
@@ -920,6 +923,8 @@ class RunExecutor:
                 "deleted_buffer_count": len(promoted.deleted_buffer_ids),
             },
         )
+        for event in promoted.events:
+            self._schedule_initial_prompt_title_generation(session_id, event)
         try:
             for event in promoted.events:
                 await self.broadcast.publish(
