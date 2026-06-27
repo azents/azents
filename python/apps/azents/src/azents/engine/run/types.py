@@ -8,6 +8,7 @@ import dataclasses
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Protocol, TypeAlias
 
+from azcommon.types import JSONObject
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -15,7 +16,6 @@ from pydantic import (
     SkipValidation,
 )
 
-from azents.core.json_types import JSONObject
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
 

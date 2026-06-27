@@ -22,15 +22,9 @@ Phase 1 adds the generic metadata foundation required by later exec process tool
 
 ## Implementation plan
 
-### 1. Shared JSON object type
+### 1. Reuse shared JSON object type
 
-Add a shared JSON type module under `azents.core`:
-
-- `JsonScalar = str | int | float | bool | None`
-- `JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]`
-- `JSONObject = dict[str, JsonValue]`
-
-Use this type for generic tool metadata rather than exec-specific payload classes.
+Use the existing shared `azcommon.types.JSONObject` type for generic tool metadata rather than adding exec-specific payload classes or a duplicate JSON alias.
 
 ### 2. Function tool result metadata
 
@@ -80,7 +74,6 @@ Add or update tests for:
 
 ## Files expected to change
 
-- `python/apps/azents/src/azents/core/json_types.py`
 - `python/apps/azents/src/azents/engine/run/types.py`
 - `python/apps/azents/src/azents/engine/events/types.py`
 - `python/apps/azents/src/azents/engine/events/tools.py`
@@ -94,7 +87,7 @@ Run:
 ```bash
 cd python/apps/azents
 uv run pytest src/azents/engine/events/tools_test.py src/azents/engine/events/types_test.py
-uv run ruff check src/azents/core/json_types.py src/azents/engine/run/types.py src/azents/engine/events/types.py src/azents/engine/events/tools.py src/azents/engine/events/tools_test.py src/azents/engine/events/types_test.py
+uv run ruff check src/azents/engine/run/types.py src/azents/engine/events/types.py src/azents/engine/events/tools.py src/azents/engine/events/tools_test.py src/azents/engine/events/types_test.py
 uv run pyright
 ```
 

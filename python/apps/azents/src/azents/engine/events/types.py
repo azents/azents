@@ -3,10 +3,10 @@
 import datetime
 from typing import Annotated, Literal, TypeAlias
 
+from azcommon.types import JSONObject
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation, model_validator
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
-from azents.core.json_types import JSONObject
 
 RawDict: TypeAlias = Annotated[dict[str, object], SkipValidation]
 
