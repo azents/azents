@@ -37,7 +37,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-27
-spec_version: 20
+spec_version: 21
 ---
 
 # Workspace & Membership
@@ -153,13 +153,13 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, nested Project forbidden, direct child directory required.
 - Registration request is flow where Agent asks user approval to include a folder it created into the current session's Projects. Approve validates active Runtime path and creates registered Project in the selected AgentSession; reject does not create Project.
 
-Projects tab in azents-web Workspace panel exposes only registered Project list, existing folder registration form, and registration request approve/reject. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
+Projects tab in azents-web concrete session header exposes only the selected session's registered Project list, existing folder registration form, and registration request approve/reject. The Runtime/Workspace panel remains limited to Agent Runtime file browsing and runtime settings because Project registry ownership is session-scoped. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
 
 ### Workspace Home / Membership UI
 
 azents-web `/w/[handle]` home is an agent-centered entry point inside Workspace. Current UI shows Agent list and subagent rows, and sidebar renders workspace navigation and agent section together for workspace-scoped pages. `WorkspaceHome`, `WorkspaceSidebar`, `AgentSidebarSection`, `AgentTeamCard`, and `SubagentTeamRow` compose this IA. The `AgentTeam*` names are frontend IA names and do not represent a Workspace Team domain entity.
 
-Agent detail routes under `/w/[handle]/agents/[agentId]` use a separate Agent-focused shell. The outer `/w/[handle]` layout remains the membership/auth boundary, but visual layout is split by route groups: workspace pages use the workspace sidebar shell, while Agent detail pages use an Agent rail. The Agent rail contains workspace escape, linked Agent identity, session list, session creation, and global account/workspace actions. The linked Agent identity opens the independent Agent settings page under the same Agent-focused shell. Agent settings is an independent page and does not render session Chat/Context tabs. Concrete session routes under `/w/[handle]/agents/[agentId]/sessions/[sessionId]` own Chat/Context navigation through the session header. Mobile Agent detail pages keep a single-column content area and expose the rail through a drawer opened from the Agent settings or session header. The existing chat runtime/workspace panel remains a desktop right-side panel and a mobile secondary drawer.
+Agent detail routes under `/w/[handle]/agents/[agentId]` use a separate Agent-focused shell. The outer `/w/[handle]` layout remains the membership/auth boundary, but visual layout is split by route groups: workspace pages use the workspace sidebar shell, while Agent detail pages use an Agent rail. The Agent rail contains workspace escape, linked Agent identity, session list, session creation, and global account/workspace actions. The linked Agent identity opens the independent Agent settings page under the same Agent-focused shell. Agent settings is an independent page and does not render session Chat/Projects/Context tabs. Concrete session routes under `/w/[handle]/agents/[agentId]/sessions/[sessionId]` own Chat/Projects/Context navigation through the session header. Mobile Agent detail pages keep a single-column content area and expose the rail through a drawer opened from the Agent settings or session header. The existing chat runtime/workspace panel remains a desktop right-side panel and a mobile secondary drawer for Runtime file browsing and settings only.
 
 Membership UI has these routes:
 

@@ -22,7 +22,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-06-26 | 36 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-18 | 4 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-06-27 | 20 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-06-27 | 21 |
 
 _8 documents_
 
@@ -32,7 +32,7 @@ _8 documents_
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-06-27 | 45 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-06-26 | 4 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-06-13 | 1 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-06-27 | 2 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-06-13 | 6 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
@@ -41,7 +41,7 @@ _8 documents_
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-23 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-06-25 | 7 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-06-27 | 8 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-06-27 | 9 |
 | [Subagent Delegation Flow](spec/flow/subagent-delegation.md) | @Hardtack | 2026-06-16 | 12 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |
 

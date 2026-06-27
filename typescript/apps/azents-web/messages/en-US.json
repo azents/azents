@@ -522,6 +522,7 @@
         "tabs": {
           "chat": "Chat",
           "settings": "Settings",
+          "projects": "Projects",
           "context": "Context"
         },
         "status": {
@@ -966,7 +967,6 @@
       "subtitle": "Agent Runtime files and projects",
       "openPanel": "Open agent workspace",
       "workspaceTab": "Agent Runtime",
-      "projectsTab": "Projects",
       "settingsTab": "Settings",
       "settingsTitle": "Runtime settings",
       "settingsSubtitle": "Manage the current agent runtime lifecycle.",

@@ -22,6 +22,7 @@ import {
   IconFolderOpen,
   IconMenu2,
   IconMessageCircle,
+  IconPackages,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -37,7 +38,12 @@ function isContextPage(value: string | null): boolean {
   );
 }
 
-function resolveActiveTab(page: string | null): "chat" | "context" {
+function resolveActiveTab(
+  page: string | null,
+): "chat" | "projects" | "context" {
+  if (page === "projects") {
+    return "projects";
+  }
   if (isContextPage(page)) {
     return "context";
   }
@@ -74,6 +80,8 @@ export function AgentSessionHeader({
     (value: string | null): void => {
       if (value === "chat") {
         router.push(`${basePath}/sessions/${sessionId}`);
+      } else if (value === "projects") {
+        router.push(`${basePath}/sessions/${sessionId}?page=projects`);
       } else if (value === "context") {
         router.push(`${basePath}/sessions/${sessionId}?page=context`);
       }
@@ -181,6 +189,9 @@ export function AgentSessionHeader({
         <Tabs.List>
           <Tabs.Tab value="chat" leftSection={<IconMessageCircle size={14} />}>
             {t("tabs.chat")}
+          </Tabs.Tab>
+          <Tabs.Tab value="projects" leftSection={<IconPackages size={14} />}>
+            {t("tabs.projects")}
           </Tabs.Tab>
           <Tabs.Tab value="context" leftSection={<IconChartBar size={14} />}>
             {t("tabs.context")}

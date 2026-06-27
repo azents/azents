@@ -14,12 +14,10 @@ import {
   Stack,
   Tabs,
   Text,
-  TextInput,
 } from "@mantine/core";
 import {
   IconAlertCircle,
   IconFolderOpen,
-  IconPackages,
   IconPower,
   IconSettings,
 } from "@tabler/icons-react";
@@ -28,13 +26,12 @@ import { useState } from "react";
 import { FileBrowser } from "./FileBrowser";
 import { FileViewer } from "./FileViewer";
 import { RuntimeActivationView } from "./RuntimeActivationView";
-import type { WorkspacePanelState, WorkspaceProjectPanelState } from "../types";
+import type { WorkspacePanelState } from "../types";
 
-type WorkspacePanelTab = "workspace" | "projects" | "settings";
+type WorkspacePanelTab = "workspace" | "settings";
 
 interface WorkspacePanelProps {
   state: WorkspacePanelState;
-  projectState: WorkspaceProjectPanelState;
   defaultTab?: WorkspacePanelTab;
   onStartRuntime: () => void;
   onStopRuntime: () => void;
@@ -44,16 +41,10 @@ interface WorkspacePanelProps {
   onOpenFile: (path: string) => void;
   onRefresh: () => void;
   getDownloadHref: (path: string) => string;
-  onRegisterProjectPathChange: (path: string) => void;
-  onRegisterProject: () => void;
-  onApproveRegistrationRequest: (requestId: string) => void;
-  onRejectRegistrationRequest: (requestId: string) => void;
-  onDeleteProject: (projectId: string) => void;
 }
 
 export function WorkspacePanel({
   state,
-  projectState,
   defaultTab = "workspace",
   onStartRuntime,
   onStopRuntime,
@@ -63,226 +54,12 @@ export function WorkspacePanel({
   onOpenFile,
   onRefresh,
   getDownloadHref,
-  onRegisterProjectPathChange,
-  onRegisterProject,
-  onApproveRegistrationRequest,
-  onRejectRegistrationRequest,
-  onDeleteProject,
 }: WorkspacePanelProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
-  const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);
-
   const handleConfirmReset = (): void => {
     setResetConfirmOpen(false);
     onResetRuntime();
-  };
-
-  const handleConfirmDeleteProject = (): void => {
-    if (!deleteProjectId) {
-      return;
-    }
-    onDeleteProject(deleteProjectId);
-    setDeleteProjectId(null);
-  };
-
-  const renderProjectPanel = (): React.ReactElement => {
-    if (projectState.type === "LOADING") {
-      return (
-        <Paper withBorder p="sm" radius="md">
-          <Group gap="xs">
-            <Loader size="xs" />
-            <Text size="sm">{t("projectsLoading")}</Text>
-          </Group>
-        </Paper>
-      );
-    }
-
-    if (projectState.type === "ERROR") {
-      return (
-        <Alert color="red" icon={<IconAlertCircle size="1rem" />}>
-          {projectState.message}
-        </Alert>
-      );
-    }
-
-    const deleteProject =
-      projectState.projects.find((project) => project.id === deleteProjectId) ??
-      null;
-
-    return (
-      <>
-        <Stack gap="md">
-          <Paper withBorder p="md" radius="lg">
-            <Stack gap="md">
-              <Box>
-                <Text size="lg" fw={700}>
-                  {t("projectsTitle")}
-                </Text>
-                <Text size="sm" c="dimmed">
-                  {t("projectsSubtitle")}
-                </Text>
-              </Box>
-
-              <Stack gap="xs">
-                {projectState.projects.length === 0 ? (
-                  <Paper p="md" radius="md" bg="var(--mantine-color-default)">
-                    <Text size="sm" c="dimmed" ta="center">
-                      {t("projectsEmpty")}
-                    </Text>
-                  </Paper>
-                ) : (
-                  projectState.projects.map((project) => (
-                    <Paper key={project.id} withBorder p="sm" radius="md">
-                      <Group justify="space-between" align="center" gap="sm">
-                        <Group gap="xs" miw={0} wrap="nowrap">
-                          <Box c="blue" style={{ display: "inline-flex" }}>
-                            <IconFolderOpen size="1rem" />
-                          </Box>
-                          <Text size="sm" fw={600} truncate>
-                            {project.path}
-                          </Text>
-                        </Group>
-                        <Button
-                          size="xs"
-                          variant="light"
-                          color="red"
-                          loading={
-                            projectState.pendingDeleteProjectId === project.id
-                          }
-                          onClick={() => setDeleteProjectId(project.id)}
-                        >
-                          {t("deleteProject")}
-                        </Button>
-                      </Group>
-                    </Paper>
-                  ))
-                )}
-              </Stack>
-            </Stack>
-          </Paper>
-
-          <Paper withBorder p="md" radius="lg">
-            <Stack gap="sm">
-              <Box>
-                <Text size="lg" fw={700}>
-                  {t("registerProjectTitle")}
-                </Text>
-                <Text size="sm" c="dimmed">
-                  {t("registerProjectSubtitle")}
-                </Text>
-              </Box>
-              <TextInput
-                label={t("registerProjectPath")}
-                value={projectState.registerProjectPath}
-                onChange={(event) =>
-                  onRegisterProjectPathChange(event.currentTarget.value)
-                }
-              />
-              {projectState.registerProjectError && (
-                <Text size="xs" c="red">
-                  {projectState.registerProjectError}
-                </Text>
-              )}
-              <Button
-                loading={projectState.isRegisteringProject}
-                onClick={onRegisterProject}
-                fullWidth
-              >
-                {t("registerProjectSubmit")}
-              </Button>
-            </Stack>
-          </Paper>
-
-          <Paper withBorder p="md" radius="lg">
-            <Stack gap="sm">
-              <Text size="lg" fw={700}>
-                {t("requestsTitle")}
-              </Text>
-              {projectState.registrationRequests.length === 0 ? (
-                <Text size="sm" c="dimmed">
-                  {t("requestsEmpty")}
-                </Text>
-              ) : (
-                projectState.registrationRequests.map((request) => (
-                  <Paper key={request.id} withBorder p="sm" radius="md">
-                    <Stack gap="sm">
-                      <Box>
-                        <Text size="sm" fw={600} truncate>
-                          {request.path}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          {request.reason}
-                        </Text>
-                      </Box>
-                      <Group gap="xs">
-                        <Button
-                          size="xs"
-                          onClick={() =>
-                            onApproveRegistrationRequest(request.id)
-                          }
-                          loading={
-                            projectState.pendingApproveRequestId === request.id
-                          }
-                        >
-                          {t("approveRequest")}
-                        </Button>
-                        <Button
-                          size="xs"
-                          variant="light"
-                          color="gray"
-                          onClick={() =>
-                            onRejectRegistrationRequest(request.id)
-                          }
-                          loading={
-                            projectState.pendingRejectRequestId === request.id
-                          }
-                        >
-                          {t("rejectRequest")}
-                        </Button>
-                      </Group>
-                    </Stack>
-                  </Paper>
-                ))
-              )}
-            </Stack>
-          </Paper>
-        </Stack>
-
-        <Modal
-          opened={deleteProject !== null}
-          onClose={() => setDeleteProjectId(null)}
-          title={t("deleteProjectConfirmTitle")}
-          centered
-        >
-          <Stack gap="md">
-            <Text size="sm">
-              {t("deleteProjectConfirmDescription", {
-                path: deleteProject?.path ?? "",
-              })}
-            </Text>
-            <Group justify="flex-end">
-              <Button
-                variant="default"
-                onClick={() => setDeleteProjectId(null)}
-              >
-                {t("cancel")}
-              </Button>
-              <Button
-                color="red"
-                onClick={handleConfirmDeleteProject}
-                loading={
-                  deleteProject !== null &&
-                  projectState.pendingDeleteProjectId === deleteProject.id
-                }
-              >
-                {t("deleteProject")}
-              </Button>
-            </Group>
-          </Stack>
-        </Modal>
-      </>
-    );
   };
 
   const renderSettingsPanel = (): React.ReactElement => {
@@ -657,9 +434,6 @@ export function WorkspacePanel({
         >
           {t("workspaceTab")}
         </Tabs.Tab>
-        <Tabs.Tab value="projects" leftSection={<IconPackages size="1rem" />}>
-          {t("projectsTab")}
-        </Tabs.Tab>
         <Tabs.Tab value="settings" leftSection={<IconSettings size="1rem" />}>
           {t("settingsTab")}
         </Tabs.Tab>
@@ -675,13 +449,6 @@ export function WorkspacePanel({
         }}
       >
         {renderWorkspacePanel()}
-      </Tabs.Panel>
-      <Tabs.Panel
-        value="projects"
-        p="md"
-        style={{ flex: 1, minHeight: 0, overflow: "auto" }}
-      >
-        {renderProjectPanel()}
       </Tabs.Panel>
       <Tabs.Panel
         value="settings"
