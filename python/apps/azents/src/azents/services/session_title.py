@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from litellm.exceptions import OpenAIError
+from openai import OpenAIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionTitleSource, EventKind, LLMProvider
@@ -20,7 +20,11 @@ from azents.engine.events.types import (
     OutputTextPart,
     UserMessagePayload,
 )
-from azents.engine.responses import call_responses_model, extract_response_text
+from azents.engine.responses import (
+    ResponsesOutputError,
+    call_responses_model,
+    extract_response_text,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -229,11 +233,15 @@ class SessionTitleService:
                 context=context,
                 session_id=session_id,
             )
-        except OpenAIError:
-            logger.warning(
+        except OpenAIError, ResponsesOutputError:
+            logger.exception(
                 "Automatic session title generation failed",
-                extra={"session_id": session_id, "agent_id": agent_id},
-                exc_info=True,
+                extra={
+                    "session_id": session_id,
+                    "agent_id": agent_id,
+                    "provider": selection.provider.value,
+                    "model": model,
+                },
             )
             return None
 
@@ -258,7 +266,7 @@ async def generate_session_title_with_model(
             }
         ],
         instructions=_TITLE_PROMPT,
-        stream=False,
+        stream=True,
         max_output_tokens=_TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
     )
     del session_id
