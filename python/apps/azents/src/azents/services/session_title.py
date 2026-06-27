@@ -7,13 +7,11 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from litellm import acompletion
-from litellm.types.utils import ModelResponse
-from openai import OpenAIError
+from litellm.exceptions import OpenAIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentSessionTitleSource, EventKind
-from azents.core.llm_mapping import build_credential_kwargs, to_litellm_model
+from azents.core.enums import AgentSessionTitleSource, EventKind, LLMProvider
+from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
@@ -22,6 +20,7 @@ from azents.engine.events.types import (
     OutputTextPart,
     UserMessagePayload,
 )
+from azents.engine.responses import call_responses_model, extract_response_text
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -221,9 +220,10 @@ class SessionTitleService:
                 return None
             integration = refreshed.value
 
-        model = to_litellm_model(selection.provider, selection.model_identifier)
+        model = to_runtime_model(selection.provider, selection.model_identifier)
         try:
             return await generate_session_title_with_model(
+                provider=selection.provider,
                 model=model,
                 credential_kwargs=build_credential_kwargs(integration),
                 context=context,
@@ -240,31 +240,30 @@ class SessionTitleService:
 
 async def generate_session_title_with_model(
     *,
+    provider: LLMProvider,
     model: str,
     credential_kwargs: dict[str, object],
     context: str,
     session_id: str | None = None,
 ) -> str | None:
-    """Generate a session title with LiteLLM chat completion."""
-    response = await acompletion(
+    """Generate a session title with the standard LiteLLM Responses API path."""
+    response = await call_responses_model(
+        provider=provider,
         model=model,
-        messages=[
-            {"role": "system", "content": _TITLE_PROMPT},
+        credential_kwargs=credential_kwargs,
+        input_items=[
             {
                 "role": "user",
                 "content": "Generate a title for this initial user prompt:\n" + context,
-            },
+            }
         ],
+        instructions=_TITLE_PROMPT,
         stream=False,
-        max_tokens=_TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
-        temperature=0.5,
-        **credential_kwargs,  # pyright: ignore[reportArgumentType] # LiteLLM accepts provider-specific credential kwargs through **kwargs.
+        max_output_tokens=_TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
     )
     del session_id
-    if not isinstance(response, ModelResponse):
-        return None
-    text = _response_text(response)
-    if text is None:
+    text = await extract_response_text(response)
+    if not text:
         return None
     return clean_generated_title(text)
 
@@ -304,9 +303,3 @@ def _truncate_title(title: str) -> str:
     if len(normalized) <= _TITLE_MAX_CHARS:
         return normalized
     return normalized[: _TITLE_MAX_CHARS - 1].rstrip() + "…"
-
-
-def _response_text(response: ModelResponse) -> str | None:
-    if not response.choices:
-        return None
-    return response.choices[0].message.content

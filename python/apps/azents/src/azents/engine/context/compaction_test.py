@@ -145,7 +145,7 @@ class TestSummarizeTextWithModel:
             return _ResponsesOutputText()
 
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
 
@@ -186,7 +186,7 @@ class TestSummarizeTextWithModel:
             return _ResponsesOutputText()
 
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
 
@@ -223,11 +223,11 @@ class TestSummarizeTextWithModel:
 
         calls: list[dict[str, object]] = []
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
         monkeypatch.setattr(
-            "azents.engine.context.compaction.guard_litellm_streaming_logging",
+            "azents.engine.responses.guard_litellm_streaming_logging",
             guarded_streams.append,
         )
 
@@ -269,7 +269,7 @@ class TestSummarizeTextWithModel:
 
         calls: list[dict[str, object]] = []
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
 
@@ -317,7 +317,7 @@ class TestSummarizeTextWithModel:
 
         calls: list[dict[str, object]] = []
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
 
@@ -356,7 +356,7 @@ class TestSummarizeTextWithModel:
 
         calls: list[dict[str, object]] = []
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
 
@@ -398,7 +398,7 @@ class TestSummarizeTextWithModel:
 
         calls: list[dict[str, object]] = []
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
 
@@ -428,7 +428,7 @@ class TestSummarizeTextWithModel:
 
         calls: list[dict[str, object]] = []
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
 
@@ -480,7 +480,7 @@ class TestSummarizeTextWithModel:
 
         calls: list[dict[str, object]] = []
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
         conversation_text = "\n".join(
@@ -541,7 +541,7 @@ class TestSummarizeTextWithModel:
 
         calls: list[dict[str, object]] = []
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
 
@@ -583,7 +583,7 @@ class TestSummarizeTextWithModel:
 
         calls: list[dict[str, object]] = []
         monkeypatch.setattr(
-            "azents.engine.context.compaction.aresponses",
+            "azents.engine.responses.aresponses",
             fake_aresponses,
         )
         conversation_text = "\n".join(

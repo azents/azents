@@ -5,20 +5,18 @@ Converts event history into a structured summary through an LLM call.
 
 import dataclasses
 import logging
-import os
-from collections.abc import AsyncIterable, Awaitable
-from typing import Protocol, runtime_checkable
+from collections.abc import Awaitable
+from typing import Protocol
 
 from azcommon.logging import bind_extra
 from litellm.exceptions import ContextWindowExceededError, OpenAIError
-from litellm.responses.main import aresponses
-from openai.types.responses.response_input_param import ResponseInputParam
-from openai.types.responses.response_text_config_param import ResponseTextConfigParam
-from pydantic import TypeAdapter
 
 from azents.core.enums import LLMProvider
-from azents.engine.events.litellm_responses import (
-    guard_litellm_streaming_logging,
+from azents.engine.responses import (
+    ResponsesOutputError,
+    call_responses_model,
+    extract_response_text,
+    responses_max_output_tokens,
 )
 from azents.engine.run.errors import (
     CompactionContextWindowExceededError,
@@ -26,16 +24,6 @@ from azents.engine.run.errors import (
 )
 
 logger = logging.getLogger(__name__)
-_RESPONSE_INPUT_ADAPTER: TypeAdapter[ResponseInputParam] = TypeAdapter(
-    ResponseInputParam
-)
-_RESPONSE_TEXT_ADAPTER: TypeAdapter[ResponseTextConfigParam] = TypeAdapter(
-    ResponseTextConfigParam
-)
-_SUMMARY_TEXT_CONFIG: ResponseTextConfigParam = _RESPONSE_TEXT_ADAPTER.validate_python(
-    {"format": {"type": "text"}, "verbosity": "low"}
-)
-
 _SUMMARY_CHARS_PER_TOKEN = 4
 _SUMMARY_DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000
 _SUMMARY_TARGET_CONTEXT_RATIO = 0.03
@@ -68,17 +56,6 @@ class CompactionSummaryBudget:
     max_output_tokens: int
 
 
-@dataclasses.dataclass(frozen=True)
-class _ResponsesEndpointKwargs:
-    """Endpoint kwargs to pass to Responses call."""
-
-    api_key: str | None = None
-    api_base: str | None = None
-    base_url: str | None = None
-    custom_llm_provider: str | None = None
-    store: bool | None = None
-
-
 class SummaryModelCall(Protocol):
     """Summary model call function interface."""
 
@@ -96,29 +73,6 @@ class SummaryModelCall(Protocol):
     ) -> Awaitable[str]:
         """Call the summary model."""
 
-        ...
-
-
-@runtime_checkable
-class _ResponseWithOutputText(Protocol):
-    """Response with Responses output_text attribute."""
-
-    output_text: str
-
-
-@runtime_checkable
-class _ResponseWithOutput(Protocol):
-    """Response with Responses output list attribute."""
-
-    output: list[object]
-
-
-@runtime_checkable
-class _ModelDumpable(Protocol):
-    """Object supporting Pydantic-style model_dump."""
-
-    def model_dump(self, *, mode: str = "python") -> dict[str, object]:
-        """Convert object to dict."""
         ...
 
 
@@ -180,10 +134,6 @@ Here is the compacted transcript to checkpoint:
 
 SUMMARY_SYSTEM_PROMPT = _SUMMARY_SYSTEM_PROMPT
 SUMMARY_USER_TEMPLATE = _SUMMARY_USER_TEMPLATE
-
-_RESPONSES_API_PROVIDERS: frozenset[LLMProvider] = frozenset(
-    {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}
-)
 
 
 def compute_summary_budget(
@@ -274,11 +224,7 @@ async def summarize_text_with_model(
     session_id: str | None = None,
 ) -> str:
     """Create compaction summary with LiteLLM Responses API."""
-    endpoint_kwargs = _responses_endpoint_kwargs(
-        credential_kwargs,
-        provider=provider,
-    )
-    endpoint_max_tokens = _responses_max_output_tokens(provider, max_tokens)
+    endpoint_max_tokens = responses_max_output_tokens(provider, max_tokens)
 
     L = bind_extra(
         logger,
@@ -308,8 +254,9 @@ async def summarize_text_with_model(
                 },
             )
             summary = await _summarize_text_attempt(
+                provider=provider,
                 model=model,
-                endpoint_kwargs=endpoint_kwargs,
+                credential_kwargs=credential_kwargs,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 conversation_text=current_conversation_text,
@@ -353,217 +300,50 @@ async def summarize_text_with_model(
 
 async def _summarize_text_attempt(
     *,
+    provider: LLMProvider,
     model: str,
-    endpoint_kwargs: _ResponsesEndpointKwargs,
+    credential_kwargs: dict[str, object],
     system_prompt: str,
     user_prompt: str,
     conversation_text: str,
     endpoint_max_tokens: int | None,
 ) -> str:
     """Try creating summary once with LiteLLM Responses API."""
-    input_payload = _RESPONSE_INPUT_ADAPTER.validate_python(
-        [
-            {"role": "user", "content": user_prompt + conversation_text},
-        ]
-    )
     try:
-        response = await aresponses(
+        response = await call_responses_model(
+            provider=provider,
             model=model,
-            input=input_payload,
+            credential_kwargs=credential_kwargs,
+            input_items=[{"role": "user", "content": user_prompt + conversation_text}],
             instructions=system_prompt,
             stream=True,
             max_output_tokens=endpoint_max_tokens,
-            text=_SUMMARY_TEXT_CONFIG,
-            custom_llm_provider=endpoint_kwargs.custom_llm_provider,
-            store=endpoint_kwargs.store,
-            api_key=endpoint_kwargs.api_key,
-            api_base=endpoint_kwargs.api_base,
-            base_url=endpoint_kwargs.base_url,
         )
-        if isinstance(response, AsyncIterable):
-            guard_litellm_streaming_logging(response)
-        return await _extract_response_text(response)
+        return await extract_response_text(response)
+    except ResponsesOutputError as exc:
+        raise _compaction_error_from_responses_output(exc) from exc
     except ContextWindowExceededError as exc:
         raise _compaction_error_from_litellm_exception(exc) from exc
     except OpenAIError as exc:
         raise _compaction_error_from_litellm_exception(exc) from exc
 
 
-def _responses_endpoint_kwargs(
-    credential_kwargs: dict[str, object],
-    *,
-    provider: LLMProvider,
-) -> _ResponsesEndpointKwargs:
-    """Normalize credential kwargs to Responses endpoint kwargs."""
-    api_key = _optional_string(credential_kwargs.get("api_key"), "api_key")
-    api_base = _optional_string(credential_kwargs.get("api_base"), "api_base")
-    base_url = _optional_string(credential_kwargs.get("base_url"), "base_url")
-    custom_llm_provider = _optional_string(
-        credential_kwargs.get("custom_llm_provider"),
-        "custom_llm_provider",
-    )
-    store = _optional_bool(credential_kwargs.get("store"), "store")
-
-    if provider not in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
-        return _ResponsesEndpointKwargs(
-            api_key=api_key,
-            api_base=api_base,
-            base_url=base_url,
-            custom_llm_provider=custom_llm_provider,
-            store=store,
-        )
-
-    custom_llm_provider = custom_llm_provider or "openai"
-    base_url = base_url or api_base
-    if base_url is None and provider == LLMProvider.OPENAI:
-        base_url = os.environ.get("AZ_OPENAI_BASE_URL")
-    api_base = api_base or base_url
-    if provider == LLMProvider.CHATGPT_OAUTH:
-        store = False if store is None else store
-    return _ResponsesEndpointKwargs(
-        api_key=api_key,
-        api_base=api_base,
-        base_url=base_url,
-        custom_llm_provider=custom_llm_provider,
-        store=store,
-    )
-
-
-def _responses_max_output_tokens(provider: LLMProvider, max_tokens: int) -> int | None:
-    """Return output token limit to pass to Responses endpoint."""
-    if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
-        # Codex-compatible Responses endpoints reject max_output_tokens on
-        # compaction-style calls; enforce our summary budget after generation.
-        return None
-    if max_tokens <= 0:
-        return None
-    return max_tokens
-
-
-def _optional_string(value: object, name: str) -> str | None:
-    """Validate credential string option."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    msg = f"{name} must be a string"
-    raise TypeError(msg)
-
-
-def _optional_bool(value: object, name: str) -> bool | None:
-    """Validate credential bool option."""
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    msg = f"{name} must be a bool"
-    raise TypeError(msg)
-
-
-async def _extract_response_text(response: object) -> str:
-    """Extract assistant text from LiteLLM/OpenAI Responses response."""
-    if isinstance(response, AsyncIterable):
-        return await _extract_stream_response_text(response)
-
-    if isinstance(response, _ResponseWithOutputText) and response.output_text:
-        return response.output_text
-
-    raw_response = _model_dump(response)
-    raw_texts = _extract_response_output_text(raw_response)
-    if raw_texts:
-        return "\n".join(raw_texts)
-
-    if not isinstance(response, _ResponseWithOutput):
-        return ""
-
-    parts: list[str] = []
-    for item in response.output:
-        raw = _model_dump(item)
-        if raw.get("type") != "message":
-            continue
-        content = raw.get("content")
-        if not isinstance(content, list):
-            continue
-        for part in content:
-            if not isinstance(part, dict):
-                continue
-            text = part.get("text")
-            if isinstance(text, str):
-                parts.append(text)
-    return "\n".join(parts)
-
-
-async def _extract_stream_response_text(response: AsyncIterable[object]) -> str:
-    """Extract assistant text from Streaming Responses event."""
-    deltas: list[str] = []
-    completed_texts: list[str] = []
-    async for event in response:
-        raw = _model_dump(event)
-        stream_error = _stream_error(raw)
-        if stream_error is not None:
-            raise stream_error
-        delta = _text_delta(raw)
-        if delta:
-            deltas.append(delta)
-        text = _event_text(raw)
-        if text:
-            completed_texts.append(text)
-        raw_item = raw.get("item")
-        item = _model_dump(raw_item)
-        if item.get("type") == "message":
-            text = _extract_message_item_text(item)
-            if text:
-                completed_texts.append(text)
-        nested_item = _model_dump(item.get("item"))
-        if nested_item.get("type") == "message":
-            text = _extract_message_item_text(nested_item)
-            if text:
-                completed_texts.append(text)
-        response_dict = _model_dump(raw.get("response"))
-        completed_texts.extend(_extract_response_output_text(response_dict))
-        item_response_dict = _model_dump(item.get("response"))
-        completed_texts.extend(_extract_response_output_text(item_response_dict))
-    if completed_texts:
-        return "\n".join(_dedupe_adjacent(completed_texts))
-    if deltas:
-        return "".join(deltas)
-    return ""
-
-
-def _stream_error(event: dict[str, object]) -> CompactionFailedError | None:
-    """Convert Responses stream error event to compaction failure exception."""
-    event_type = _event_type(event)
-    if event_type not in {"error", "response.failed", "response.incomplete"}:
-        return None
-
-    error = _model_dump(event.get("error"))
-    response = _model_dump(event.get("response"))
-    response_error = _model_dump(response.get("error"))
-    details = error or response_error
-    if details:
-        message = details.get("message")
-        code = details.get("code")
-        if isinstance(message, str) and message:
-            if _is_context_window_exceeded(code=code, message=message):
-                return CompactionContextWindowExceededError(
-                    _format_summary_model_error(code=code, message=message)
-                )
-            if isinstance(code, str) and code:
-                return CompactionFailedError(
-                    f"Compaction summary model failed: {code}: {message}"
-                )
-            return CompactionFailedError(f"Compaction summary model failed: {message}")
-
-    incomplete_details = _model_dump(response.get("incomplete_details"))
-    reason = incomplete_details.get("reason")
-    if isinstance(reason, str) and reason:
-        if _is_context_window_exceeded(code=reason, message=reason):
+def _compaction_error_from_responses_output(
+    exc: ResponsesOutputError,
+) -> CompactionFailedError:
+    """Convert shared Responses output error to compaction exception hierarchy."""
+    message = exc.message
+    if message:
+        if _is_context_window_exceeded(code=exc.code, message=message):
             return CompactionContextWindowExceededError(
-                f"Compaction summary model incomplete: {reason}"
+                _format_summary_model_error(code=exc.code, message=message)
             )
-        return CompactionFailedError(f"Compaction summary model incomplete: {reason}")
-
-    return CompactionFailedError(f"Compaction summary model failed: {event_type}")
+        if isinstance(exc.code, str) and exc.code:
+            return CompactionFailedError(
+                f"Compaction summary model failed: {exc.code}: {message}"
+            )
+        return CompactionFailedError(f"Compaction summary model failed: {message}")
+    return CompactionFailedError(f"Compaction summary model failed: {exc.event_type}")
 
 
 def _compaction_error_from_litellm_exception(
@@ -601,17 +381,6 @@ def _is_context_window_exceeded(*, code: object, message: object) -> bool:
     return "context window" in normalized and (
         "exceed" in normalized or "too long" in normalized
     )
-
-
-def _event_type(event: dict[str, object]) -> str:
-    """Return Responses stream event type as string."""
-    event_type = event.get("type")
-    if isinstance(event_type, str):
-        return event_type
-    value = getattr(event_type, "value", None)
-    if isinstance(value, str):
-        return value
-    return str(event_type)
 
 
 def _truncate_context_retry_text(text: str, *, keep_chars: int) -> str:
@@ -655,88 +424,6 @@ def _truncate_context_retry_line(line: str, *, keep_chars: int) -> str:
         + _SUMMARY_CONTEXT_LINE_TRUNCATION_MARKER
         + line[-suffix_chars:].lstrip()
     )
-
-
-def _text_delta(event: dict[str, object]) -> str:
-    """Extract text delta from Responses stream event."""
-    delta = event.get("delta")
-    if isinstance(delta, str) and delta:
-        return delta
-    item = _model_dump(event.get("item"))
-    item_delta = item.get("delta")
-    if isinstance(item_delta, str) and item_delta:
-        return item_delta
-    return ""
-
-
-def _event_text(event: dict[str, object]) -> str:
-    """Extract completed text field from Responses done event."""
-    text = event.get("text")
-    if isinstance(text, str) and text:
-        return text
-    item = _model_dump(event.get("item"))
-    item_text = item.get("text")
-    if isinstance(item_text, str) and item_text:
-        return item_text
-    part = _model_dump(event.get("part"))
-    part_text = part.get("text")
-    if isinstance(part_text, str) and part_text:
-        return part_text
-    return ""
-
-
-def _extract_response_output_text(response: dict[str, object]) -> list[str]:
-    """Extract message text from completed response output."""
-    output_text = response.get("output_text")
-    if isinstance(output_text, str) and output_text:
-        return [output_text]
-    output = response.get("output")
-    if not isinstance(output, list):
-        return []
-    messages: list[str] = []
-    for item in output:
-        raw_item = _model_dump(item)
-        if raw_item.get("type") != "message":
-            continue
-        text = _extract_message_item_text(raw_item)
-        if text:
-            messages.append(text)
-    return messages
-
-
-def _extract_message_item_text(item: dict[str, object]) -> str:
-    """Extract text part from Responses message output item."""
-    content = item.get("content")
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    parts: list[str] = []
-    for part in content:
-        raw_part = _model_dump(part)
-        text = raw_part.get("text")
-        if isinstance(text, str) and text:
-            parts.append(text)
-    return "\n".join(parts)
-
-
-def _dedupe_adjacent(texts: list[str]) -> list[str]:
-    """Keep identical adjacent completed text only once."""
-    deduped: list[str] = []
-    for text in texts:
-        if deduped and deduped[-1] == text:
-            continue
-        deduped.append(text)
-    return deduped
-
-
-def _model_dump(item: object) -> dict[str, object]:
-    """Convert Pydantic/dict response item to dict."""
-    if isinstance(item, dict):
-        return item
-    if isinstance(item, _ModelDumpable):
-        return item.model_dump(mode="python")
-    return {}
 
 
 def _estimated_tokens(text: str) -> int:
