@@ -18,6 +18,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileReadResult,
     RuntimeFileStatResult,
     RuntimeGrepResult,
+    RuntimeProcessResult,
     RuntimeRunnerOperationCanceledError,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
@@ -495,6 +496,185 @@ async def test_grep_files_returns_final_matches() -> None:
     assert result.files[0].path == "/workspace/agent/a.txt"
     assert result.files[0].lines[0].line_number == 3
     assert result.files[0].lines[0].text == "needle here"
+
+
+@pytest.mark.asyncio
+async def test_start_process_dispatches_and_folds_protocol_events() -> None:
+    """Process start protocol returns a folded process snapshot."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.start_process(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            command="python -m http.server",
+            workdir="/workspace/agent",
+            yield_time_ms=1000,
+            max_output_bytes=4096,
+            env={"PYTHONUNBUFFERED": "1"},
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "process.start"
+    assert request.payload["payload"] == {
+        "command": "python -m http.server",
+        "workdir": "/workspace/agent",
+        "yield_time_ms": 1000,
+        "max_output_bytes": 4096,
+        "env": {"PYTHONUNBUFFERED": "1"},
+    }
+
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.PROCESS_OUTPUT,
+        {
+            "process_id": "proc_123",
+            "stream": "stdout",
+            "chunk_id": 1,
+            "text": "Serving ",
+            "truncated": False,
+            "omitted_bytes": 0,
+        },
+    )
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "process_id": "proc_123",
+            "status": "running",
+            "stdout": "HTTP on :8000",
+            "stderr": "",
+            "stdout_truncated": False,
+            "stderr_truncated": False,
+            "stdout_omitted_bytes": 0,
+            "stderr_omitted_bytes": 0,
+        },
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result == RuntimeProcessResult(
+        process_id="proc_123",
+        status="running",
+        exit_code=None,
+        stdout="HTTP on :8000",
+        stderr="",
+        stdout_truncated=False,
+        stderr_truncated=False,
+        stdout_omitted_bytes=0,
+        stderr_omitted_bytes=0,
+        missing_reason=None,
+        final_cursor="2",
+    )
+
+
+@pytest.mark.asyncio
+async def test_write_process_stdin_dispatches_empty_poll_and_missing_result() -> None:
+    """Empty process stdin is a poll request and missing is a normal result."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.write_process_stdin(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            process_id="proc_missing",
+            stdin="",
+            yield_time_ms=0,
+            max_output_bytes=2048,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "process.write"
+    assert request.payload["payload"] == {
+        "process_id": "proc_missing",
+        "stdin": "",
+        "yield_time_ms": 0,
+        "max_output_bytes": 2048,
+    }
+
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "process_id": "proc_missing",
+            "status": "missing",
+            "missing_reason": "runner_generation_changed",
+        },
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result.status == "missing"
+    assert result.missing_reason == "runner_generation_changed"
+    assert result.exit_code is None
+
+
+@pytest.mark.asyncio
+async def test_resume_process_uses_output_deltas_when_final_snapshot_is_empty() -> None:
+    """Process output deltas can be folded when final payload omits text."""
+    harness = await _make_harness()
+    await harness.control.append_reply_event(
+        _event(
+            request_id="req-1",
+            generation=harness.runner_generation,
+            event_type=RuntimeReplyEventType.PROCESS_OUTPUT,
+            payload={"process_id": "proc_1", "stream": "stdout", "text": "hello"},
+        ),
+        reply_stream_id="reply:req-1",
+        operation_id=None,
+        expected_target=runner_reply_target(),
+        expected_subject_id="runtime-1",
+    )
+    await harness.control.append_reply_event(
+        _event(
+            request_id="req-1",
+            generation=harness.runner_generation,
+            event_type=RuntimeReplyEventType.PROCESS_OUTPUT,
+            payload={"process_id": "proc_1", "stream": "stderr", "text": "warn"},
+        ),
+        reply_stream_id="reply:req-1",
+        operation_id=None,
+        expected_target=runner_reply_target(),
+        expected_subject_id="runtime-1",
+    )
+    await harness.control.append_reply_event(
+        _event(
+            request_id="req-1",
+            generation=harness.runner_generation,
+            event_type=RuntimeReplyEventType.FINAL_SUCCESS,
+            payload={"process_id": "proc_1", "status": "exited", "exit_code": 0},
+            final=True,
+        ),
+        reply_stream_id="reply:req-1",
+        operation_id=None,
+        expected_target=runner_reply_target(),
+        expected_subject_id="runtime-1",
+    )
+
+    result = await harness.client.resume_process(
+        reply_stream_id="reply:req-1",
+        after_cursor=None,
+        deadline_at=_now() + timedelta(seconds=30),
+    )
+
+    assert result.stdout == "hello"
+    assert result.stderr == "warn"
+    assert result.exit_code == 0
+    assert result.status == "exited"
 
 
 @pytest.mark.asyncio

@@ -511,11 +511,43 @@ def _copy_operation_payload(
         return
     if operation_type == "file.stat":
         message.file_stat.path = _str_payload(payload, "path")
+        return
+    if operation_type == "process.start":
+        message.process_start.command = _str_payload(payload, "command")
+        workdir = _optional_str_payload(payload, "workdir")
+        if workdir is not None:
+            message.process_start.workdir = workdir
+        message.process_start.yield_time_ms = _int_payload(payload, "yield_time_ms")
+        message.process_start.max_output_bytes = _int_payload(
+            payload, "max_output_bytes"
+        )
+        env = payload.get("env")
+        if isinstance(env, dict):
+            message.process_start.env.update(
+                {
+                    str(key): value
+                    for key, value in env.items()
+                    if isinstance(value, str)
+                }
+            )
+        return
+    if operation_type == "process.write":
+        message.process_write.process_id = _str_payload(payload, "process_id")
+        message.process_write.stdin = _str_payload(payload, "stdin")
+        message.process_write.yield_time_ms = _int_payload(payload, "yield_time_ms")
+        message.process_write.max_output_bytes = _int_payload(
+            payload, "max_output_bytes"
+        )
 
 
 def _str_payload(payload: dict[str, JsonValue], key: str) -> str:
     value = payload.get(key)
     return value if isinstance(value, str) else ""
+
+
+def _optional_str_payload(payload: dict[str, JsonValue], key: str) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) else None
 
 
 def _int_payload(payload: dict[str, JsonValue], key: str) -> int:

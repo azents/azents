@@ -46,13 +46,13 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
             operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
                 runtime_id="runtime-1",
                 runner_generation=7,
-                operation_type="file.grep",
-                file_grep=runtime_runner_control_pb2.FileGrepOperationPayload(
-                    path="/workspace/agent",
-                    pattern="needle",
-                    exclude_patterns=["node_modules"],
-                    max_matching_files=50,
-                    max_lines_per_file=10,
+                operation_type="process.start",
+                process_start=runtime_runner_control_pb2.ProcessStartOperationPayload(
+                    command="python -m http.server",
+                    workdir="/workspace/agent",
+                    yield_time_ms=1000,
+                    max_output_bytes=4096,
+                    env={"PYTHONUNBUFFERED": "1"},
                 ),
                 reply_stream_id="reply:req-1",
             ),
@@ -84,13 +84,13 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
     assert accepted.generation == 7
     assert operation is not None
     assert operation.request_id == "req-1"
-    assert operation.operation_type == "file.grep"
+    assert operation.operation_type == "process.start"
     assert operation.payload == {
-        "path": "/workspace/agent",
-        "pattern": "needle",
-        "exclude_patterns": ["node_modules"],
-        "max_matching_files": 50,
-        "max_lines_per_file": 10,
+        "command": "python -m http.server",
+        "workdir": "/workspace/agent",
+        "yield_time_ms": 1000,
+        "max_output_bytes": 4096,
+        "env": {"PYTHONUNBUFFERED": "1"},
     }
     assert await client.heartbeat_runner(
         runtime_id="runtime-1",
@@ -105,16 +105,14 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
             generation=accepted.generation,
             event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
             payload={
-                "files": [
-                    {
-                        "path": "/workspace/agent/a.txt",
-                        "lines": [{"line_number": 3, "text": "needle here"}],
-                        "truncated": False,
-                    }
-                ],
-                "searched_file_count": 1,
-                "matched_file_count": 1,
-                "truncated": False,
+                "process_id": "proc_123",
+                "status": "running",
+                "stdout": "Serving HTTP",
+                "stderr": "",
+                "stdout_truncated": False,
+                "stderr_truncated": False,
+                "stdout_omitted_bytes": 0,
+                "stderr_omitted_bytes": 0,
             },
             created_at=_now(),
             final=True,
@@ -131,9 +129,10 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
     event = sent[2].operation_event
     assert event.event_type == "final_success"
     assert event.WhichOneof("payload") == "final_success"
-    assert event.final_success.WhichOneof("result") == "file_grep"
-    assert event.final_success.file_grep.searched_file_count == 1
-    assert event.final_success.file_grep.files[0].lines[0].line_number == 3
+    assert event.final_success.WhichOneof("result") == "process"
+    assert event.final_success.process.process_id == "proc_123"
+    assert event.final_success.process.status == "running"
+    assert not event.final_success.process.HasField("exit_code")
     await client.close()
 
 
