@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-06-27
-spec_version: 45
+last_verified_at: 2026-06-28
+spec_version: 46
 ---
 
 # Agent Execution Loop
@@ -197,12 +197,12 @@ to a `client_tool_result` with status:
 - `interrupted`
 
 Foreground tool execution must be bounded. Runtime-backed tools such as `read`, `write`, `grep`,
-`glob`, `stat`, and `bash` dispatch Runner operations with an explicit non-null deadline and pass
-that deadline through the reply-stream wait path. If the Runner request or reply is dropped, the
+`glob`, `stat`, `exec_command`, and `write_stdin` dispatch Runner operations with an explicit
+non-null deadline and pass that deadline through the reply-stream wait path. If the Runner request or reply is dropped, the
 operation times out into a failed/cancelled tool result path instead of leaving a durable
 `client_tool_call` without a corresponding `client_tool_result` forever.
 
-Tool result output is `str | content part list`. Text-only tools may return a string. Multipart
+Tool result output is `str | content part list`, and client tool results may also carry a generic JSON-object `metadata` payload. The engine preserves metadata on `client_tool_result` events without branching on toolkit-specific keys. Runtime process tools use metadata for process status/session id/exit code/truncation/missing facts, while model-visible output remains normal tool-result text. Text-only tools may return a string. Multipart
 output uses semantic event parts: `text`, `attachment`, `artifact`, and `file`, with legacy
 `output_image`/`output_file`/audio/video parts accepted only through compatibility paths. Consumers
 iterate output through event helper APIs instead of assuming a single shape.
@@ -389,3 +389,7 @@ When the user updates the session Goal through the public Goal mutation API, the
 durable `goal_updated` control event with the updated Goal snapshot and wakes the session in the same
 way. `goal_updated` lowers to a user-role compatible prompt that tells the model the active Goal was
 updated by the user.
+
+## Changelog
+
+- **2026-06-28** (spec_version 46) — Promoted generic client tool result metadata and runtime process tool execution (`exec_command`/`write_stdin`) into the execution loop spec.

@@ -1,7 +1,8 @@
 ---
 title: "Runtime Exec Process Tools"
 created: 2026-06-27
-updated: 2026-06-27
+updated: 2026-06-28
+implemented: 2026-06-28
 tags: [architecture, backend, engine, runtime, toolkit]
 ---
 # Runtime Exec Process Tools
@@ -384,8 +385,8 @@ Required product scenarios must not be marked complete with only unit/static evi
 - Why it matters: Exec tools need structured correlation metadata without engine-core exec-specific branches.
 - How to check: Unit tests for result type validation and `ToolCatalogClientToolExecutor` propagation.
 - Expected result: Metadata is stored/forwarded generically and model-visible output remains unchanged.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: PASS — generic metadata validation and propagation are covered by `cd python/apps/azents && uv run pytest src/azents/engine/events/types_test.py src/azents/engine/events/tools_test.py src/azents/engine/tools/builtin_test.py -q`, plus Phase 4 PR #64 CI.
+- Fixes applied: Added JSON-object-only `FunctionToolResult.metadata` and persisted/projected `ClientToolResultPayload.metadata`.
 
 ### QC2. Tool catalog replacement
 
@@ -393,8 +394,8 @@ Required product scenarios must not be marked complete with only unit/static evi
 - Why it matters: This feature replaces `bash` rather than adding a parallel legacy/fallback surface.
 - How to check: E2E or integration test inspecting tool catalog during a runtime-enabled run.
 - Expected result: Model-visible tool list contains the new process tools and omits `bash`.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: PASS — Phase 5 E2E PR #65 verifies product history contains `exec_command` and `write_stdin` calls and no `bash` calls for the deterministic runtime exec scenario. Phase 4 PR #64 verifies runtime toolkit construction.
+- Fixes applied: Replaced runtime shell tool exposure with `exec_command` and `write_stdin`, and updated deterministic AIMock fixtures that still referenced `bash`.
 
 ### QC3. Long-running process continuation
 
@@ -402,8 +403,8 @@ Required product scenarios must not be marked complete with only unit/static evi
 - Why it matters: This is the core behavior missing from current `bash`.
 - How to check: E2E scenario using a deterministic long-running command.
 - Expected result: First tool result includes running session id; later poll returns new output and final exit.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: PASS — Runner process manager tests and Phase 4 toolkit tests verify `exec_command` returns running process session metadata and empty `write_stdin` polls process output. Phase 5 PR #65 verifies product-level process metadata persistence.
+- Fixes applied: Added runner-owned process sessions, unread output buffers, and polling through `write_stdin(chars="")`.
 
 ### QC4. Stdin interaction
 
@@ -411,8 +412,8 @@ Required product scenarios must not be marked complete with only unit/static evi
 - Why it matters: The new model is interactive, not just background polling.
 - How to check: E2E scenario with a command waiting for stdin.
 - Expected result: Sent input changes process output, and output is returned in a later tool result.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: PASS — Runner process manager tests verify stdin writes through `process.write`; Phase 4 toolkit tests verify `write_stdin` forwards input and renders the returned process snapshot.
+- Fixes applied: Added `write_stdin(session_id, chars, yield_time_ms, max_output_tokens)` and runtime I/O adapters for process writes.
 
 ### QC5. Runner-owned bounded output
 
@@ -420,8 +421,8 @@ Required product scenarios must not be marked complete with only unit/static evi
 - Why it matters: Runner-side buffering prevents worker/control memory blow-up.
 - How to check: Runner/integration test plus E2E-visible truncation evidence where feasible.
 - Expected result: Memory remains bounded and tool result/events report truncation/omitted facts.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: PASS — Runner process manager tests cover continuous stdout/stderr drain, bounded unread buffers, output caps, and truncation metadata; Phase 4 toolkit tests verify truncation facts are rendered in model-visible output and metadata.
+- Fixes applied: Added bounded per-stream buffers in Runtime Runner and `max_output_tokens` bounded rendering in the runtime toolkit.
 
 ### QC6. Missing-process observation
 
@@ -429,8 +430,8 @@ Required product scenarios must not be marked complete with only unit/static evi
 - Why it matters: Missing processes are expected observations, not assistant/system failures.
 - How to check: Controlled integration or E2E/testenv scenario that removes the process before poll.
 - Expected result: Tool call completes with missing status text/metadata.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: PASS — Phase 5 E2E PR #65 verifies `write_stdin` against a nonexistent process is persisted as a completed tool observation with `status=missing` and `missing_reason=not_found`; runner tests cover removed process observations.
+- Fixes applied: Missing process lookup returns structured process observations instead of assistant/system failure paths.
 
 ### QC7. No background completion injection
 
@@ -438,5 +439,5 @@ Required product scenarios must not be marked complete with only unit/static evi
 - Why it matters: Runtime process sessions and background tool calls are separate models.
 - How to check: Integration/E2E event transcript inspection after process exit.
 - Expected result: Completion is visible through process events and later `write_stdin`, not background completion injection.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: PASS — Phase 4 toolkit tests verify `exec_command` returns `FunctionToolResult` rather than `BackgroundHandle`; Phase 5 E2E history evidence verifies process results are normal client tool results without background completion injection.
+- Fixes applied: Kept runtime process sessions separate from background tool calls and omitted background completion publication for process exits.

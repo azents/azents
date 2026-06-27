@@ -21,8 +21,8 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-06-26
-spec_version: 4
+last_verified_at: 2026-06-28
+spec_version: 5
 ---
 
 # Agent Runtime Control
@@ -112,7 +112,7 @@ Kubernetes and Docker Providers are external components. They must not import Az
 
 Runner is operation-only. It handles operations inside an already provisioned Runtime:
 
-- `bash`
+- process start/write operations used by model-visible `exec_command` and `write_stdin`
 - file stat/list/read/write/grep
 - file upload/download body streams
 - operation heartbeat/progress/final events
@@ -126,6 +126,10 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 Runner registration and state reports include a mounted workspace path. Control compares it with the provider-reported path and records an explicit failure if they differ. Operation routing uses runner generation fencing so stale runner streams cannot complete newer operations.
 
 Runner may process multiple operations concurrently up to its configured bounded concurrency. A long-running operation must not block unrelated operation requests from being scheduled while capacity remains available.
+
+Runner owns runtime exec process handles, stdin writers, stdout/stderr drains, unread output buffers, process exit state, and process cleanup. Control and Worker store only routing/projection metadata. Process sessions are scoped to AgentSession and current Runner generation; runner restart, generation mismatch, cleanup, or missing ids produce model-visible missing/terminated/expired observations through `write_stdin` rather than server-side assistant/system failures.
+
+Process output is continuously drained into bounded Runner-owned buffers. Tool calls drain unread buffers into one model-visible client tool result and preserve structured process metadata. Running exec processes do not use background operation completion publication and do not inject `background_completion` messages when they exit; callers observe completion through process events or later `write_stdin` polling.
 
 Runner operations are deadline-bounded end to end. Every `RuntimeRunnerOperation` carries a non-null `deadline_at`, including foreground and background operations. Foreground callers pass the same deadline to the reply-stream fold/resume path; waiting for a final reply without a deadline is invalid. If the reply stream does not produce a final event before the deadline, Control appends a local final error event with `operation_timeout`, marks the operation final, and the caller receives a failed operation result instead of waiting indefinitely. Provider lifecycle commands and Coordination Store metadata may still model optional deadlines because they cover different request classes and storage TTL semantics.
 
@@ -165,8 +169,12 @@ Required deterministic coverage:
 - repository/service tests for desired/observed/runner state summary/actions
 - Coordination Store contract tests for in-memory and Redis implementations
 - provider/runner gRPC registration, generation fencing, request/reply/body stream tests
-- Runner operation tests for bash and file operations
+- Runner operation tests for process and file operations
 - Provider tests for Docker host bind mount persistence and Kubernetes PVC persistence
 - azents deterministic E2E for Agent Workspace bootstrap and lifecycle actions
 
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
+
+## Changelog
+
+- **2026-06-28** (spec_version 5) — Promoted Runtime Runner process operations and runner-owned process lifecycle/buffer semantics for `exec_command` and `write_stdin`.
