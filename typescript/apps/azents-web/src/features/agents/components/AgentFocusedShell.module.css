@@ -6,6 +6,10 @@
   min-width: 0;
 }
 
+.backToWorkspaceButton {
+  align-self: flex-start;
+}
+
 .agentInfoLink {
   border-radius: var(--mantine-radius-md);
   padding: var(--mantine-spacing-xs);
