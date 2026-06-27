@@ -1,10 +1,6 @@
 import { Box } from "@mantine/core";
 import { WorkspacePanel } from "./WorkspacePanel";
-import type {
-  AgentWorkspaceServerState,
-  WorkspacePanelState,
-  WorkspaceProjectPanelState,
-} from "../types";
+import type { AgentWorkspaceServerState, WorkspacePanelState } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const noop = (): void => {};
@@ -163,40 +159,6 @@ const fileState: WorkspacePanelState = {
   selectedFilePath: "/workspace/agent/project/README.md",
 };
 
-const projectState: WorkspaceProjectPanelState = {
-  type: "READY",
-  projects: [
-    {
-      id: "project-1",
-      path: "/workspace/agent/project",
-      created_at: "2026-05-09T00:00:00Z",
-      updated_at: "2026-05-09T00:00:00Z",
-    },
-    {
-      id: "project-2",
-      path: "/workspace/agent/reporting",
-      created_at: "2026-05-09T00:02:00Z",
-      updated_at: "2026-05-09T00:02:00Z",
-    },
-  ],
-  registrationRequests: [
-    {
-      id: "request-1",
-      path: "/workspace/agent/reporting",
-      reason: "Agent created this folder for a long-running analysis.",
-      status: "pending",
-      created_at: "2026-05-09T00:00:00Z",
-      updated_at: "2026-05-09T00:00:00Z",
-    },
-  ],
-  registerProjectPath: "/workspace/agent/new-project",
-  isRegisteringProject: false,
-  registerProjectError: null,
-  pendingApproveRequestId: null,
-  pendingRejectRequestId: null,
-  pendingDeleteProjectId: null,
-};
-
 const meta = {
   component: WorkspacePanel,
   decorators: [
@@ -215,12 +177,6 @@ const meta = {
     onOpenFile: noop,
     onRefresh: noop,
     getDownloadHref: (path: string): string => `/download?path=${path}`,
-    onRegisterProjectPathChange: noop,
-    onRegisterProject: noop,
-    onApproveRegistrationRequest: noop,
-    onRejectRegistrationRequest: noop,
-    onDeleteProject: noop,
-    projectState,
   },
 } satisfies Meta<typeof WorkspacePanel>;
 
@@ -231,13 +187,6 @@ type Story = StoryObj<typeof meta>;
 export const Browser = {
   args: {
     state: readyState,
-  },
-} satisfies Story;
-
-export const ProjectManagement = {
-  args: {
-    state: readyState,
-    defaultTab: "projects",
   },
 } satisfies Story;
 
@@ -278,25 +227,6 @@ export const SettingsRuntimeInactive = {
 export const Viewer = {
   args: {
     state: fileState,
-  },
-} satisfies Story;
-
-export const ProjectsLoading = {
-  args: {
-    state: readyState,
-    defaultTab: "projects",
-    projectState: { type: "LOADING" },
-  },
-} satisfies Story;
-
-export const ProjectsError = {
-  args: {
-    state: readyState,
-    defaultTab: "projects",
-    projectState: {
-      type: "ERROR",
-      message: "Project requests failed. Please try again in a moment.",
-    },
   },
 } satisfies Story;
 

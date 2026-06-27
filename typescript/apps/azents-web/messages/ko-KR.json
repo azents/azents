@@ -522,6 +522,7 @@
         "tabs": {
           "chat": "채팅",
           "settings": "설정",
+          "projects": "프로젝트",
           "context": "컨텍스트"
         },
         "status": {
@@ -966,7 +967,6 @@
       "subtitle": "Agent Workspace 파일과 Project",
       "openPanel": "Agent Workspace 열기",
       "workspaceTab": "Agent Runtime",
-      "projectsTab": "Projects",
       "settingsTab": "설정",
       "settingsTitle": "Runtime 설정",
       "settingsSubtitle": "현재 Agent Runtime lifecycle을 관리합니다.",

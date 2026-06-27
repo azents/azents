@@ -522,6 +522,7 @@
         "tabs": {
           "chat": "Discussion",
           "settings": "Paramètres",
+          "projects": "Projets",
           "context": "Contexte"
         },
         "status": {
@@ -966,7 +967,6 @@
       "subtitle": "Fichiers Agent Workspace et projets",
       "openPanel": "Ouvrir l'agent workspace",
       "workspaceTab": "Agent Runtime",
-      "projectsTab": "Projects",
       "settingsTab": "Paramètres",
       "settingsTitle": "Paramètres du runtime",
       "settingsSubtitle": "Gérez le cycle de vie du runtime de l’agent actuel.",

@@ -88,7 +88,7 @@ Active transcript FilePart referencing deleted or missing ModelFile is rewritten
 - `AttachmentPreviewBar` provides pre-send file list and removal behavior.
 - `FileAttachmentList` renders attachments of user/assistant messages.
 - Expired/unavailable attachment keeps metadata card but disables original download/preview action. If only preview asset is unavailable, fallback separately from original attachment download availability.
-- Project tab in Session Workspace panel provides only existing Agent Workspace folder registration. Project Source upload/delete/load implementation does not currently exist.
+- Project tab in concrete Agent session navigation provides only existing Agent Workspace folder registration. Project Source upload/delete/load implementation does not currently exist.
 
 ## Related Specs
 

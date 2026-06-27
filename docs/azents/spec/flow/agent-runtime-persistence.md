@@ -17,8 +17,8 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
-last_verified_at: 2026-06-13
-spec_version: 1
+last_verified_at: 2026-06-27
+spec_version: 2
 ---
 
 # Agent Runtime Persistence
@@ -95,12 +95,14 @@ delete or replace the host directory according to the reset command.
 
 ## Agent Workspace Projects
 
-Session Workspace Project registry rows are AgentRuntime-scoped DB state. They are not derived from
-filesystem snapshots. Runtime persistence preserves the bytes; the registry preserves which child
-paths are loaded, pending, failed, or awaiting registration approval.
+Session Workspace Project registry rows are AgentSession-scoped DB state. They are not derived from
+filesystem snapshots. Runtime persistence preserves the bytes; the session registry preserves which
+child paths are registered or awaiting registration approval for the selected conversation.
 
 Project paths are normalized as children of the provider-reported Agent Workspace root. The root
-itself is not a Project.
+itself is not a Project. Runtime persistence does not own Project membership; azents-web exposes
+Project management from concrete session tabs, while the Runtime/Workspace panel remains a file and
+runtime-control surface.
 
 ## Validation
 

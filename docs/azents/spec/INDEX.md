@@ -19,7 +19,7 @@ Details of all living specs. Synchronized from frontmatter.
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-06-26 | 36 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-06-18 | 4 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-06-27 | 20 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-06-27 | 21 |
 
 ## Flow Specs
 
@@ -27,7 +27,7 @@ Details of all living specs. Synchronized from frontmatter.
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-06-27 | 45 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-06-26 | 4 |
-| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-06-13 | 1 |
+| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-06-27 | 2 |
 | [Background Tool Call](flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-06-13 | 6 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
@@ -36,6 +36,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-23 | 3 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-06-25 | 7 |
-| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-06-27 | 8 |
+| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-06-27 | 9 |
 | [Subagent Delegation Flow](flow/subagent-delegation.md) | @Hardtack | 2026-06-16 | 12 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |
