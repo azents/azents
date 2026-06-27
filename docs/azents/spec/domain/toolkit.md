@@ -33,8 +33,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-06-26
-spec_version: 36
+last_verified_at: 2026-06-28
+spec_version: 37
 ---
 
 # Toolkit
@@ -107,7 +107,7 @@ ToolkitConfig `slug` is the DB-registered toolkit's model-visible namespace. It 
 {toolkit_slug}__{tool_name}
 ```
 
-Auto-bound single-instance toolkits use `use_prefix=False`; their tool names are exposed as-is. This applies to builtin/runtime shell tools and the session-bound goal/todo tools. For example, `bash`, `read`, `get_goal`, and `update_todo` are not prefixed.
+Auto-bound single-instance toolkits use `use_prefix=False`; their tool names are exposed as-is. This applies to builtin/runtime shell tools and the session-bound goal/todo tools. For example, `exec_command`, `write_stdin`, `read`, `get_goal`, and `update_todo` are not prefixed.
 
 Some toolkits may add their own internal segment before the outer ToolkitConfig slug is applied. GitHub multi-installation routing does this by prefixing each installation's MCP tools with a safe account-login segment. With ToolkitConfig slug `github`, installation `azents`, and MCP tool `get_file_contents`, the final model-visible name becomes:
 
@@ -183,7 +183,7 @@ Strong invariant: **raw credential is never exposed in agent prompt**.
 
 ### Shell Environment Execution
 
-Shell is composed of `BuiltinToolkit` (`bash` / import_file / present_file / read / write / grep / glob / ...) and is injected by default for all agents. ShellEnvironment is a profile determining **which domains are allowed for external network calls**.
+Shell is composed of the builtin/runtime toolkit (`exec_command` / `write_stdin` / import_file / present_file / read / write / grep / glob / ...) and is injected by default for all agents. ShellEnvironment is a profile determining **which domains are allowed for external network calls**.
 
 - ShellToolkitConfig has fields `allowed_domains`, `denied_domains`, `agent_data_root`, `memory_enabled` ([`core/tools.py` L331-356](../../../../python/apps/azents/src/azents/core/tools.py)).
 - Runtime reads allow/block lists from Runtime settings, builds `SandboxDomainConfig`, and Agent Runtime lifecycle path passes it to Provider allocation policy ([`services/agent_runtime`](../../../../python/apps/azents/src/azents/services/agent_runtime), [`runtime`](../../../../python/apps/azents/src/azents/runtime)).
@@ -191,7 +191,11 @@ Shell is composed of `BuiltinToolkit` (`bash` / import_file / present_file / rea
 - Shell file tools guide LLM-facing path surface for durable working files under Provider-reported Agent Workspace and temporary files under `/tmp/**`. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
 - `grep` file tool accepts both file path and directory path. Directory path searches recursively by default. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip. Grep also enforces searched-file and scanned-byte safety caps so sparse matches across very large workspaces do not monopolize Runtime operation time.
 - `glob` file tool accepts absolute path patterns. Recursive patterns such as `**` search below the non-glob prefix and may return matching directories as well as files so directory-oriented patterns like `/workspace/agent/.claude/skills/*` are visible to agents. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip.
-- Shell prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `bash` for command execution, package installation, or when dedicated tool does not fit.
+- Shell prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `exec_command` for command execution, package installation, or when dedicated tool does not fit. Use `write_stdin` with empty `chars` to poll a running process.
+- `exec_command(command, workdir?, yield_time_ms?, max_output_tokens?)` starts a pipe-based Runner-owned process. If the process exits within the yield window, the tool result includes final output and exit code. If it is still running, the result includes collected output plus a process `session_id` for later interaction.
+- `write_stdin(session_id, chars = "", yield_time_ms?, max_output_tokens?)` writes to an existing process. Empty `chars` is the poll primitive and only drains unread output. Missing/expired/terminated process ids are returned as normal tool observations with structured metadata rather than assistant/system failures.
+- Runtime process tool results are text for model visibility plus generic `metadata` on the client tool result payload. Metadata includes process status, process session id when present, exit code when exited, truncation facts, and missing reason when unavailable. The engine preserves this metadata generically and does not branch on exec-specific keys.
+- The legacy `bash` tool is no longer exposed as the model-visible runtime shell command tool. Existing file tools continue to use Runner file operations.
 
 ### Runtime Hook Provider Contract
 
@@ -443,6 +447,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-06-28** (spec_version 37) — Promoted Runtime Exec Process Tools behavior: runtime shell command execution is exposed as `exec_command`/`write_stdin`, `bash` is removed from model-visible runtime shell tools, and process tool results preserve generic metadata.
 - **2026-06-13** (spec_version 23) — Split TodoToolkit into separate always-on toolkit and reflected `update_todo` tool plus chat live state exposure contract.
 - **2026-06-15** (spec_version 24) — Removed deleted external chat platform toolkit provider and auto-binding description; updated to current ToolkitType surface.
 - **2026-05-19** (spec_version 13) — Changed LLM-facing name of Shell command execution tool from `shell_execute_code` to `bash`.
