@@ -16,6 +16,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeGrepLineMatch,
     RuntimeGrepResult,
     RuntimeOperationCancelCheck,
+    RuntimeProcessResult,
 )
 from azents.runtime.control_protocol import (
     runner_operations as control_runner_operations,
@@ -63,6 +64,58 @@ class RuntimeRunnerOperationAdapter:
             exit_code=result.exit_code,
             final_cursor=result.final_cursor,
         )
+
+    async def start_process(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        command: str,
+        workdir: str | None,
+        yield_time_ms: int,
+        max_output_bytes: int,
+        env: dict[str, str] | None,
+        deadline_at: datetime,
+    ) -> RuntimeProcessResult:
+        """Start process operation and convert to engine result."""
+        result = await _translate_runtime_errors(
+            self._client.start_process(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                command=command,
+                workdir=workdir,
+                yield_time_ms=yield_time_ms,
+                max_output_bytes=max_output_bytes,
+                env=env,
+                deadline_at=deadline_at,
+            )
+        )
+        return _process_result(result)
+
+    async def write_process_stdin(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        process_id: str,
+        stdin: str,
+        yield_time_ms: int,
+        max_output_bytes: int,
+        deadline_at: datetime,
+    ) -> RuntimeProcessResult:
+        """Write process stdin or poll, and convert to engine result."""
+        result = await _translate_runtime_errors(
+            self._client.write_process_stdin(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                process_id=process_id,
+                stdin=stdin,
+                yield_time_ms=yield_time_ms,
+                max_output_bytes=max_output_bytes,
+                deadline_at=deadline_at,
+            )
+        )
+        return _process_result(result)
 
     async def read_file(
         self,
@@ -235,6 +288,25 @@ async def _translate_runtime_errors(awaitable: Awaitable[_T]) -> _T:
         raise engine_runtime_io.RuntimeRunnerOperationGenerationError(str(exc)) from exc
     except control_runner_operations.RuntimeRunnerOperationFailedError as exc:
         raise engine_runtime_io.RuntimeRunnerOperationFailedError(str(exc)) from exc
+
+
+def _process_result(
+    result: control_runner_operations.RuntimeProcessResult,
+) -> RuntimeProcessResult:
+    """Convert control process result to engine process result."""
+    return RuntimeProcessResult(
+        process_id=result.process_id,
+        status=result.status,
+        exit_code=result.exit_code,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        stdout_truncated=result.stdout_truncated,
+        stderr_truncated=result.stderr_truncated,
+        stdout_omitted_bytes=result.stdout_omitted_bytes,
+        stderr_omitted_bytes=result.stderr_omitted_bytes,
+        missing_reason=result.missing_reason,
+        final_cursor=result.final_cursor,
+    )
 
 
 def adapt_runtime_runner_operations(

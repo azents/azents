@@ -27,6 +27,7 @@ from azents.engine.run.emit import PublishedEvent, durable, handle_engine_event
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
+    FunctionToolResult,
 )
 from azents.engine.tools import builtin as builtin_module
 from azents.engine.tools.builtin import BuiltinToolkit, RuntimeToolkit
@@ -47,6 +48,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeGrepFileMatch,
     RuntimeGrepLineMatch,
     RuntimeGrepResult,
+    RuntimeProcessResult,
     RuntimeRunnerOperationFailedError,
     RuntimeRunnerOperationUnavailable,
 )
@@ -205,10 +207,39 @@ class _FakeRunnerOperations:
     def __init__(self, files: dict[str, bytes] | None = None) -> None:
         self.files = dict(files or {})
         self.bash_calls: list[dict[str, object]] = []
+        self.process_start_calls: list[dict[str, object]] = []
+        self.process_write_calls: list[dict[str, object]] = []
         self.stat_calls: list[str] = []
         self.stat_started_event: asyncio.Event | None = None
         self.stat_continue_event: asyncio.Event | None = None
         self.bash_unavailable_message: str | None = None
+        self.process_unavailable_message: str | None = None
+        self.next_process_start_result = RuntimeProcessResult(
+            process_id="proc-1",
+            status="exited",
+            exit_code=0,
+            stdout="hello\n",
+            stderr="",
+            stdout_truncated=False,
+            stderr_truncated=False,
+            stdout_omitted_bytes=0,
+            stderr_omitted_bytes=0,
+            missing_reason=None,
+            final_cursor="0-1",
+        )
+        self.next_process_write_result = RuntimeProcessResult(
+            process_id="proc-1",
+            status="running",
+            exit_code=None,
+            stdout="tick\n",
+            stderr="",
+            stdout_truncated=False,
+            stderr_truncated=False,
+            stdout_omitted_bytes=0,
+            stderr_omitted_bytes=0,
+            missing_reason=None,
+            final_cursor="0-2",
+        )
 
     def add_file(self, path: str, data: bytes) -> None:
         self.files[path] = data
@@ -256,6 +287,56 @@ class _FakeRunnerOperations:
             exit_code=0,
             final_cursor="0-1",
         )
+
+    async def start_process(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        command: str,
+        workdir: str | None,
+        yield_time_ms: int,
+        max_output_bytes: int,
+        env: dict[str, str] | None,
+        deadline_at: datetime,
+    ) -> RuntimeProcessResult:
+        del runtime_id, runner_generation, deadline_at
+        self.process_start_calls.append(
+            {
+                "command": command,
+                "workdir": workdir,
+                "yield_time_ms": yield_time_ms,
+                "max_output_bytes": max_output_bytes,
+                "env": env,
+            }
+        )
+        if self.process_unavailable_message is not None:
+            raise RuntimeRunnerOperationUnavailable(self.process_unavailable_message)
+        return self.next_process_start_result
+
+    async def write_process_stdin(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        process_id: str,
+        stdin: str,
+        yield_time_ms: int,
+        max_output_bytes: int,
+        deadline_at: datetime,
+    ) -> RuntimeProcessResult:
+        del runtime_id, runner_generation, deadline_at
+        self.process_write_calls.append(
+            {
+                "process_id": process_id,
+                "stdin": stdin,
+                "yield_time_ms": yield_time_ms,
+                "max_output_bytes": max_output_bytes,
+            }
+        )
+        if self.process_unavailable_message is not None:
+            raise RuntimeRunnerOperationUnavailable(self.process_unavailable_message)
+        return self.next_process_write_result
 
     async def read_file(
         self,
@@ -545,7 +626,9 @@ class TestRuntimeToolkitUpdateContext:
         ctx = _make_context()
         state = await toolkit.update_context(ctx)
         names = {t.spec.name for t in state.tools}
-        assert "bash" in names
+        assert "exec_command" in names
+        assert "write_stdin" in names
+        assert "bash" not in names
         assert "read" in names
         assert "write" in names
         assert "edit" in names
@@ -1017,6 +1100,7 @@ class TestBuiltinToolkitMemoryPrompt:
         assert "save_memory" in tool_names
         assert "search_memories" in tool_names
         assert "bash" not in tool_names
+        assert "exec_command" not in tool_names
         assert "Runtime Files" not in state.prompt
 
     @pytest.mark.asyncio
@@ -1160,16 +1244,16 @@ def _find_tool(tools: list[FunctionTool], name: str) -> FunctionTool:
 
 
 # ---------------------------------------------------------------------------
-# execute_code handler tests
+# process tool handler tests
 # ---------------------------------------------------------------------------
 
 
-class TestExecuteCodeHandler:
-    """Test execute_code tool handler passes command to runtime runner."""
+class TestProcessToolHandler:
+    """Test process tools pass operations to runtime runner."""
 
     @pytest.mark.asyncio
-    async def test_execute_code_calls_runtime_runner(self) -> None:
-        """Check Runtime Runner bash operation is called on handler call."""
+    async def test_exec_command_calls_runtime_runner_process_start(self) -> None:
+        """exec_command starts a Runner-owned process and returns metadata."""
         toolkit = _make_toolkit()
         runner_operations = cast(
             _FakeRunnerOperations,
@@ -1178,19 +1262,30 @@ class TestExecuteCodeHandler:
         ctx = _make_context()
         publish_event = cast(AsyncMock, ctx.publish_event)
         state = await toolkit.update_context(ctx)
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
         result = await tool.handler(json.dumps({"command": "echo hello"}))
-        assert isinstance(result, str)
-        assert "hello" in result
-        assert runner_operations.bash_calls == [{"command": "echo hello", "env": None}]
+
+        assert isinstance(result, FunctionToolResult)
+        assert "stdout:\nhello" in result.output
+        assert result.metadata["kind"] == "exec_command_result"
+        assert result.metadata["session_id"] == "proc-1"
+        assert runner_operations.process_start_calls == [
+            {
+                "command": "echo hello",
+                "workdir": None,
+                "yield_time_ms": 10000,
+                "max_output_bytes": 40000,
+                "env": None,
+            }
+        ]
         published_event_types = [
             type(call.args[0]) for call in publish_event.await_args_list
         ]
         assert published_event_types == [RuntimeReadyEvent]
 
     @pytest.mark.asyncio
-    async def test_execute_code_injects_envvar_peer_toolkit(self) -> None:
+    async def test_exec_command_injects_envvar_peer_toolkit(self) -> None:
         """EnvVarToolkit peer is passed to runtime runner operation env.
 
         ``Toolkit.expose_env()`` → ``_collect_secret_env`` → runner operation env
@@ -1218,18 +1313,17 @@ class TestExecuteCodeHandler:
 
         ctx = _make_context()
         state = await toolkit.update_context(ctx)
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
-        result = await tool.handler(json.dumps({"command": "echo $MY_TEST_KEY"}))
+        await tool.handler(json.dumps({"command": "echo $MY_TEST_KEY"}))
 
-        assert runner_operations.bash_calls[-1]["env"] == {"MY_TEST_KEY": marker}
-        # Whether handler return value has marker (runtime stdout passthrough)
-        assert isinstance(result, str)
-        assert marker in result
+        assert runner_operations.process_start_calls[-1]["env"] == {
+            "MY_TEST_KEY": marker
+        }
 
     @pytest.mark.asyncio
-    async def test_execute_code_uses_runtime_runner(self) -> None:
-        """When existing runtime exists, run as Runner operation."""
+    async def test_write_stdin_calls_runtime_runner_process_write(self) -> None:
+        """write_stdin writes to an existing Runner process session."""
         toolkit = _make_toolkit()
         runner_operations = cast(
             _FakeRunnerOperations,
@@ -1237,17 +1331,29 @@ class TestExecuteCodeHandler:
         )
         ctx = _make_context()
         state = await toolkit.update_context(ctx)
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "write_stdin")
 
-        result = await tool.handler(json.dumps({"command": "ls"}))
-        assert isinstance(result, str)
-        assert runner_operations.bash_calls == [{"command": "ls", "env": None}]
+        result = await tool.handler(
+            json.dumps({"session_id": "proc-1", "chars": "input\n"})
+        )
+
+        assert isinstance(result, FunctionToolResult)
+        assert "status: running" in result.output
+        assert result.metadata["kind"] == "write_stdin_result"
+        assert runner_operations.process_write_calls == [
+            {
+                "process_id": "proc-1",
+                "stdin": "input\n",
+                "yield_time_ms": 10000,
+                "max_output_bytes": 40000,
+            }
+        ]
 
     @pytest.mark.asyncio
-    async def test_execute_code_waits_when_provider_not_running(
+    async def test_exec_command_waits_when_provider_not_running(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """bash waits until Provider is ready unless running."""
+        """exec_command waits until Provider is ready unless running."""
         monkeypatch.setattr(
             builtin_module,
             "_RUNTIME_READY_WAIT_TIMEOUT_SECONDS",
@@ -1257,13 +1363,13 @@ class TestExecuteCodeHandler:
             provider_observed_state=RuntimeProviderObservedState.STOPPED
         )
         state = await toolkit.update_context(_make_context())
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
         with pytest.raises(FunctionToolError, match="Runtime is still starting"):
             await tool.handler(json.dumps({"command": "ls"}))
 
     @pytest.mark.asyncio
-    async def test_execute_code_requests_start_when_runtime_stopped(
+    async def test_exec_command_requests_start_when_runtime_stopped(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Runtime tool changes stopped status to start desired and waits."""
@@ -1279,7 +1385,7 @@ class TestExecuteCodeHandler:
         )
         runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
         state = await toolkit.update_context(_make_context())
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
         with pytest.raises(FunctionToolError, match="Runtime is still starting"):
             await tool.handler(json.dumps({"command": "ls"}))
@@ -1291,10 +1397,10 @@ class TestExecuteCodeHandler:
         )
 
     @pytest.mark.asyncio
-    async def test_execute_code_waits_until_runtime_ready(
+    async def test_exec_command_waits_until_runtime_ready(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """bash waits briefly until Runtime is ready, then runs."""
+        """exec_command waits briefly until Runtime is ready, then runs."""
         monkeypatch.setattr(
             builtin_module,
             "_RUNTIME_READY_POLL_INTERVAL_SECONDS",
@@ -1328,50 +1434,51 @@ class TestExecuteCodeHandler:
             cast(Any, toolkit)._test_runner_operations,
         )
         state = await toolkit.update_context(_make_context())
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
         result = await tool.handler(json.dumps({"command": "ls"}))
 
-        assert isinstance(result, str)
-        assert runner_operations.bash_calls == [{"command": "ls", "env": None}]
+        assert isinstance(result, FunctionToolResult)
+        assert runner_operations.process_start_calls[-1]["command"] == "ls"
         assert runtime_repo.get_by_agent_id.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_execute_code_fails_fast_when_provider_failed(self) -> None:
+    async def test_exec_command_fails_fast_when_provider_failed(self) -> None:
         """Provider failed status is immediately delivered as error."""
         toolkit = _make_toolkit(
             provider_observed_state=RuntimeProviderObservedState.FAILED,
             runner_state=RuntimeRunnerState.UNKNOWN,
         )
         state = await toolkit.update_context(_make_context())
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
         with pytest.raises(FunctionToolError, match="Runtime failed"):
             await tool.handler(json.dumps({"command": "ls"}))
 
     @pytest.mark.asyncio
-    async def test_execute_code_fails_fast_when_provider_disconnected(self) -> None:
+    async def test_exec_command_fails_fast_when_provider_disconnected(self) -> None:
         """Runtime with disconnected Provider fails explicitly."""
         toolkit = _make_toolkit(
             provider_observed_state=RuntimeProviderObservedState.STOPPED,
             provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
         )
         state = await toolkit.update_context(_make_context())
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
         with pytest.raises(FunctionToolError, match="Provider is disconnected"):
             await tool.handler(json.dumps({"command": "ls"}))
 
     @pytest.mark.asyncio
-    async def test_bash_stdout_reaches_websocket_payload(self) -> None:
-        """no-warm bash stdout reaches Chat WebSocket payload."""
+    async def test_exec_command_stdout_reaches_websocket_payload(self) -> None:
+        """exec_command stdout reaches Chat WebSocket payload."""
         toolkit = _make_toolkit()
         ctx = _make_context()
         state = await toolkit.update_context(ctx)
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
-        bash_output = await tool.handler(json.dumps({"command": "pwd"}))
-        assert isinstance(bash_output, str)
+        tool_output = await tool.handler(json.dumps({"command": "pwd"}))
+        assert isinstance(tool_output, FunctionToolResult)
+        assert isinstance(tool_output.output, str)
         emits = [
             durable(
                 Event(
@@ -1379,10 +1486,11 @@ class TestExecuteCodeHandler:
                     session_id="session-1",
                     kind=EventKind.CLIENT_TOOL_RESULT,
                     payload=ClientToolResultPayload(
-                        call_id="call-bash-1",
-                        name="bash",
+                        call_id="call-exec-command-1",
+                        name="exec_command",
                         status="completed",
-                        output=bash_output,
+                        output=tool_output.output,
+                        metadata=tool_output.metadata,
                         attachments=[],
                     ),
                     created_at=datetime.now(UTC),
@@ -1407,41 +1515,41 @@ class TestExecuteCodeHandler:
         assert websocket_payloads[0]["kind"] == "client_tool_result"
         payload = websocket_payloads[0]["payload"]
         assert isinstance(payload, dict)
-        assert payload["output"] == "stdout:\n/workspace/agent\n\n\nexit_code: 0"
+        assert "stdout:" in payload["output"]
 
     @pytest.mark.asyncio
-    async def test_execute_code_reuses_runtime_runner_without_lifecycle_events(
+    async def test_exec_command_reuses_runtime_runner_without_lifecycle_events(
         self,
     ) -> None:
-        """Runtime Runner bash execution emits only clear ready event."""
+        """Runtime Runner process execution emits only clear ready event."""
         toolkit = _make_toolkit()
         ctx = _make_context()
         publish_event = cast(AsyncMock, ctx.publish_event)
         state = await toolkit.update_context(ctx)
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
         result = await tool.handler(json.dumps({"command": "pwd"}))
 
-        assert isinstance(result, str)
+        assert isinstance(result, FunctionToolResult)
         publish_event.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_execute_code_operation_failure_stays_tool_observation(
+    async def test_exec_command_operation_failure_stays_tool_observation(
         self,
     ) -> None:
-        """Runner operation failure is delivered only as tool failure."""
+        """Runner process operation failure is delivered only as tool failure."""
         toolkit = _make_toolkit()
         runner_operations = cast(
             _FakeRunnerOperations,
             cast(Any, toolkit)._test_runner_operations,
         )
-        runner_operations.bash_unavailable_message = (
+        runner_operations.process_unavailable_message = (
             "Runner operation route unavailable: subject-1"
         )
         ctx = _make_context()
         publish_event = cast(AsyncMock, ctx.publish_event)
         state = await toolkit.update_context(ctx)
-        tool = _find_tool(state.tools, "bash")
+        tool = _find_tool(state.tools, "exec_command")
 
         with pytest.raises(
             FunctionToolError,
