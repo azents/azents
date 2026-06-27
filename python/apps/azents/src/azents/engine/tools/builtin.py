@@ -1,7 +1,7 @@
 """Builtin tool factory.
 
-Creates bash/file tools injected into agents with Builtin Toolkit.
-Each tool runs through Agent Runtime Runner operation.
+Creates runtime process/file tools injected into agents with Builtin Toolkit.
+Each runtime-backed tool runs through Agent Runtime Runner operation.
 """
 
 import asyncio
@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 from textwrap import dedent
 from typing import NoReturn, Protocol
 
+from azcommon.types import JSONObject
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,7 +41,7 @@ from azents.engine.events.engine_events import (
     RuntimeReadyEvent,
 )
 from azents.engine.io.attachments import RuntimeAttachment
-from azents.engine.run.types import FunctionTool, FunctionToolError
+from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.builtin_agents import (
     AGENTS_LIVE_READ_INTERVAL_TURNS,
@@ -69,6 +70,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeFileStatResult,
     RuntimeGrepFileMatch,
     RuntimeGrepLineMatch,
+    RuntimeProcessResult,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
     RuntimeRunnerOperationGenerationError,
@@ -239,12 +241,15 @@ _RUNNABLE_PROVIDER_STATES = frozenset(
     }
 )
 
-# Maximum execution time in seconds
-_MAX_EXECUTION_TIMEOUT = 120
 _RUNTIME_READY_WAIT_TIMEOUT_SECONDS = 120.0
 _RUNTIME_READY_POLL_INTERVAL_SECONDS = 1.0
 _RUNTIME_OPERATION_RESULT_GRACE_SECONDS = 10
 _RUNTIME_FILE_OPERATION_TIMEOUT_SECONDS = 120
+_DEFAULT_PROCESS_YIELD_TIME_MS = 10_000
+_MAX_PROCESS_YIELD_TIME_MS = 300_000
+_DEFAULT_PROCESS_MAX_OUTPUT_TOKENS = 10_000
+_MAX_PROCESS_MAX_OUTPUT_TOKENS = 100_000
+_PROCESS_BYTES_PER_OUTPUT_TOKEN = 4
 
 
 # ---------------------------------------------------------------------------
@@ -252,13 +257,53 @@ _RUNTIME_FILE_OPERATION_TIMEOUT_SECONDS = 120
 # ---------------------------------------------------------------------------
 
 
-class ExecuteCodeInput(BaseModel):
-    """execute_code tool input."""
+class ExecCommandInput(BaseModel):
+    """exec_command tool input."""
 
     command: str = Field(description="Shell command to execute")
-    timeout: int = Field(
-        default=30,
-        description=f"Execution timeout in seconds (max {_MAX_EXECUTION_TIMEOUT})",
+    workdir: str | None = Field(
+        default=None,
+        description="Working directory. Defaults to /workspace/agent/.",
+    )
+    yield_time_ms: int = Field(
+        default=_DEFAULT_PROCESS_YIELD_TIME_MS,
+        ge=0,
+        le=_MAX_PROCESS_YIELD_TIME_MS,
+        description=(
+            "How long to wait for process output before yielding, in milliseconds "
+            f"(max {_MAX_PROCESS_YIELD_TIME_MS})."
+        ),
+    )
+    max_output_tokens: int = Field(
+        default=_DEFAULT_PROCESS_MAX_OUTPUT_TOKENS,
+        ge=1,
+        le=_MAX_PROCESS_MAX_OUTPUT_TOKENS,
+        description="Maximum stdout/stderr tokens to return in this tool result.",
+    )
+
+
+class WriteStdinInput(BaseModel):
+    """write_stdin tool input."""
+
+    session_id: str = Field(description="Process session_id returned by exec_command")
+    chars: str = Field(
+        default="",
+        description="Characters to write to stdin. Empty string polls for output.",
+    )
+    yield_time_ms: int = Field(
+        default=_DEFAULT_PROCESS_YIELD_TIME_MS,
+        ge=0,
+        le=_MAX_PROCESS_YIELD_TIME_MS,
+        description=(
+            "How long to wait for process output before yielding, in milliseconds "
+            f"(max {_MAX_PROCESS_YIELD_TIME_MS})."
+        ),
+    )
+    max_output_tokens: int = Field(
+        default=_DEFAULT_PROCESS_MAX_OUTPUT_TOKENS,
+        ge=1,
+        le=_MAX_PROCESS_MAX_OUTPUT_TOKENS,
+        description="Maximum stdout/stderr tokens to return in this tool result.",
     )
 
 
@@ -534,13 +579,20 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
         )
 
         tools = [
-            make_execute_code_tool(
+            make_exec_command_tool(
                 self._runner_operations,
                 agent_runtime_repo=self._agent_runtime_repo,
                 session_manager=self._session_manager,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
                 peer_toolkits=self._peer_toolkits,
+            ),
+            make_write_stdin_tool(
+                self._runner_operations,
+                agent_runtime_repo=self._agent_runtime_repo,
+                session_manager=self._session_manager,
+                agent_id=runtime_agent_id,
+                publish_event=context.publish_event,
             ),
             make_read_image_tool(
                 session_storage=file_ss,
@@ -651,8 +703,9 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
             "Prefer the dedicated file tools for filesystem operations: use `read` "
             "instead of `cat`, `grep` instead of shell `grep`/`rg`, and "
             "`write`/`edit` instead of shell redirection or `sed` whenever "
-            "possible. Use `bash` for command execution, package installation, "
-            "and cases where no dedicated tool fits.",
+            "possible. Use `exec_command` for command execution, package "
+            "installation, and cases where no dedicated tool fits. Use "
+            "`write_stdin` with empty chars to poll a running process.",
             "Recommended locations:",
             "- `/workspace/agent/` — Durable working files for this agent runtime",
             "- `/tmp/` — Temporary scratch space for the current runtime instance",
@@ -715,7 +768,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
 
         Use absolute filesystem paths inside the runtime workspace. `/workspace/agent/` is the durable working directory for this agent runtime. `/tmp/` is temporary scratch space. `/tmp/agent/imports/` is where `import_file` places attached files by default; this location is transient, so copy important files to a durable working directory before presenting them.
 
-        Prefer the dedicated file tools for filesystem operations: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, and `write`/`edit` instead of shell redirection or `sed` whenever possible. Use `bash` for command execution, package installation, and cases where no dedicated tool fits.
+        Prefer the dedicated file tools for filesystem operations: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, and `write`/`edit` instead of shell redirection or `sed` whenever possible. Use `exec_command` for command execution, package installation, and cases where no dedicated tool fits. Use `write_stdin` with empty chars to poll a running process.
 
         | Path | Persistence | Usage |
         |------|-------------|-------|
@@ -1179,7 +1232,7 @@ def _grep_line_match(line_match: RuntimeGrepLineMatch) -> GrepLineMatch:
     )
 
 
-def make_execute_code_tool(
+def make_exec_command_tool(
     runner_operations: RuntimeRunnerOperationClient,
     *,
     agent_runtime_repo: AgentRuntimeRepository,
@@ -1188,10 +1241,9 @@ def make_execute_code_tool(
     publish_event: Callable[[EngineEvent], Awaitable[None]],
     peer_toolkits: Sequence[RuntimeEnvProvider] = (),
 ) -> FunctionTool:
-    """Create a bash tool backed by Runtime Runner operations."""
+    """Create an exec_command tool backed by Runtime Runner process operations."""
 
-    async def handler(args: ExecuteCodeInput) -> str:
-        timeout = min(args.timeout, _MAX_EXECUTION_TIMEOUT)
+    async def handler(args: ExecCommandInput) -> FunctionToolResult:
         secret_env = await _collect_secret_env(peer_toolkits, agent_id)
         try:
             runtime = await _ready_runtime_for_agent(
@@ -1200,14 +1252,15 @@ def make_execute_code_tool(
                 agent_id=agent_id,
             )
             await publish_event(RuntimeReadyEvent())
-            result = await runner_operations.run_bash(
+            result = await runner_operations.start_process(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 command=args.command,
-                timeout_seconds=timeout,
+                workdir=args.workdir,
+                yield_time_ms=args.yield_time_ms,
+                max_output_bytes=_max_output_bytes_from_tokens(args.max_output_tokens),
                 env=secret_env or None,
-                deadline_at=datetime.now(UTC)
-                + timedelta(seconds=timeout + _RUNTIME_OPERATION_RESULT_GRACE_SECONDS),
+                deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
             )
         except (
             RuntimeRunnerOperationUnavailable,
@@ -1217,30 +1270,148 @@ def make_execute_code_tool(
         ) as exc:
             message = str(exc)
             logger.warning(
-                "Runtime Runner bash operation failed",
+                "Runtime Runner process start operation failed",
                 extra={"agent_id": agent_id, "error": message},
             )
             raise FunctionToolError(message) from None
 
-        return _format_result(result.stdout, result.stderr, result.exit_code)
+        return FunctionToolResult(
+            output=_format_process_result(result),
+            metadata=_process_result_metadata(result, kind="exec_command_result"),
+        )
 
     return make_tool(
         handler,
-        name="bash",
+        name="exec_command",
         description=(
-            "Execute a shell command in the Agent Runtime workspace. "
-            "Files under /workspace/agent persist for this agent runtime."
+            "Start a shell process in the Agent Runtime workspace. Returns output "
+            "and exit_code when it exits within yield_time_ms; otherwise returns a "
+            "running session_id for write_stdin polling or input."
         ),
     )
 
 
-def _format_result(stdout: str, stderr: str, exit_code: int) -> str:
-    """Format execution result."""
-    parts: list[str] = []
-    if stdout:
-        parts.append(f"stdout:\n{stdout}")
-    if stderr:
-        parts.append(f"stderr:\n{stderr}")
-    result = "\n\n".join(parts) if parts else "(no output)"
-    result += f"\n\nexit_code: {exit_code}"
-    return result
+def make_write_stdin_tool(
+    runner_operations: RuntimeRunnerOperationClient,
+    *,
+    agent_runtime_repo: AgentRuntimeRepository,
+    session_manager: SessionManager[AsyncSession] | None,
+    agent_id: str,
+    publish_event: Callable[[EngineEvent], Awaitable[None]],
+) -> FunctionTool:
+    """Create a write_stdin tool backed by Runtime Runner process operations."""
+
+    async def handler(args: WriteStdinInput) -> FunctionToolResult:
+        try:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=agent_runtime_repo,
+                session_manager=session_manager,
+                agent_id=agent_id,
+            )
+            await publish_event(RuntimeReadyEvent())
+            result = await runner_operations.write_process_stdin(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                process_id=args.session_id,
+                stdin=args.chars,
+                yield_time_ms=args.yield_time_ms,
+                max_output_bytes=_max_output_bytes_from_tokens(args.max_output_tokens),
+                deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
+            )
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+            RuntimeRunnerOperationFailedError,
+            RuntimeStorageError,
+        ) as exc:
+            message = str(exc)
+            logger.warning(
+                "Runtime Runner process write operation failed",
+                extra={"agent_id": agent_id, "error": message},
+            )
+            raise FunctionToolError(message) from None
+
+        return FunctionToolResult(
+            output=_format_process_result(result),
+            metadata=_process_result_metadata(result, kind="write_stdin_result"),
+        )
+
+    return make_tool(
+        handler,
+        name="write_stdin",
+        description=(
+            "Write characters to a running exec_command process session. Pass "
+            "an empty chars string to poll for unread output without sending input."
+        ),
+    )
+
+
+def _runtime_process_operation_deadline(yield_time_ms: int) -> datetime:
+    """Return Runtime process operation round-trip deadline."""
+    return datetime.now(UTC) + timedelta(
+        seconds=yield_time_ms / 1000 + _RUNTIME_OPERATION_RESULT_GRACE_SECONDS
+    )
+
+
+def _max_output_bytes_from_tokens(max_output_tokens: int) -> int:
+    """Convert user-visible output token budget to Runner byte budget."""
+    return max_output_tokens * _PROCESS_BYTES_PER_OUTPUT_TOKEN
+
+
+def _process_result_metadata(
+    result: RuntimeProcessResult,
+    *,
+    kind: str,
+) -> JSONObject:
+    """Build generic tool-result metadata for process snapshots."""
+    metadata: JSONObject = {
+        "kind": kind,
+        "session_id": result.process_id,
+        "process_id": result.process_id,
+        "status": result.status,
+        "exit_code": result.exit_code,
+        "stdout_truncated": result.stdout_truncated,
+        "stderr_truncated": result.stderr_truncated,
+        "stdout_omitted_bytes": result.stdout_omitted_bytes,
+        "stderr_omitted_bytes": result.stderr_omitted_bytes,
+        "missing_reason": result.missing_reason,
+        "final_cursor": result.final_cursor,
+    }
+    return metadata
+
+
+def _format_process_result(result: RuntimeProcessResult) -> str:
+    """Render process snapshot as model-visible tool output text."""
+    parts: list[str] = [
+        f"status: {result.status}",
+        f"session_id: {result.process_id}",
+    ]
+    if result.exit_code is not None:
+        parts.append(f"exit_code: {result.exit_code}")
+    if result.missing_reason:
+        parts.append(f"missing_reason: {result.missing_reason}")
+    truncation = _format_process_truncation(result)
+    if truncation:
+        parts.append(truncation)
+    output_parts: list[str] = []
+    if result.stdout:
+        output_parts.append(f"stdout:\n{result.stdout}")
+    if result.stderr:
+        output_parts.append(f"stderr:\n{result.stderr}")
+    if output_parts:
+        parts.append("\n\n".join(output_parts))
+    else:
+        parts.append("(no output)")
+    return "\n\n".join(parts)
+
+
+def _format_process_truncation(result: RuntimeProcessResult) -> str:
+    """Return process truncation line or empty string."""
+    facts: list[str] = []
+    if result.stdout_truncated:
+        facts.append(f"stdout omitted {result.stdout_omitted_bytes} byte(s)")
+    if result.stderr_truncated:
+        facts.append(f"stderr omitted {result.stderr_omitted_bytes} byte(s)")
+    if not facts:
+        return ""
+    return "truncated: " + "; ".join(facts)

@@ -31,6 +31,23 @@ class RuntimeBashResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeProcessResult:
+    """Completed process operation snapshot result."""
+
+    process_id: str
+    status: Literal["running", "exited", "missing", "terminated", "expired"]
+    exit_code: int | None
+    stdout: str
+    stderr: str
+    stdout_truncated: bool
+    stderr_truncated: bool
+    stdout_omitted_bytes: int
+    stderr_omitted_bytes: int
+    missing_reason: str | None
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeFileReadResult:
     """Completed file read operation result."""
 
@@ -120,6 +137,35 @@ class RuntimeRunnerOperationClient(Protocol):
         cancel_check: RuntimeOperationCancelCheck | None = None,
     ) -> RuntimeBashResult:
         """Run bash operation and return result."""
+        ...
+
+    async def start_process(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        command: str,
+        workdir: str | None,
+        yield_time_ms: int,
+        max_output_bytes: int,
+        env: dict[str, str] | None,
+        deadline_at: datetime,
+    ) -> RuntimeProcessResult:
+        """Start process operation and return process snapshot."""
+        ...
+
+    async def write_process_stdin(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        process_id: str,
+        stdin: str,
+        yield_time_ms: int,
+        max_output_bytes: int,
+        deadline_at: datetime,
+    ) -> RuntimeProcessResult:
+        """Write process stdin or poll with empty stdin."""
         ...
 
     async def read_file(
