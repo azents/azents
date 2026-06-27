@@ -137,6 +137,23 @@ class RuntimeFileWriteResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeProcessResult:
+    """Completed process operation snapshot result."""
+
+    process_id: str
+    status: Literal["running", "exited", "missing", "terminated", "expired"]
+    exit_code: int | None
+    stdout: str
+    stderr: str
+    stdout_truncated: bool
+    stderr_truncated: bool
+    stdout_omitted_bytes: int
+    stderr_omitted_bytes: int
+    missing_reason: str | None
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeOperationReceipt:
     """Background Runner operation receipt."""
 
@@ -152,6 +169,7 @@ type RuntimeForegroundResult = (
     | RuntimeFileStatResult
     | RuntimeGrepResult
     | RuntimeFileWriteResult
+    | RuntimeProcessResult
 )
 
 
@@ -406,6 +424,87 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    async def start_process(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        command: str,
+        workdir: str | None,
+        yield_time_ms: int,
+        max_output_bytes: int,
+        env: dict[str, str] | None,
+        deadline_at: datetime,
+    ) -> RuntimeProcessResult:
+        """Start a pipe-based process and wait for the operation snapshot."""
+        payload: dict[str, JsonValue] = {
+            "command": command,
+            "yield_time_ms": yield_time_ms,
+            "max_output_bytes": max_output_bytes,
+        }
+        if workdir is not None:
+            payload["workdir"] = workdir
+        if env is not None:
+            payload["env"] = dict(env)
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="process.start",
+                payload=payload,
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_process(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
+    async def write_process_stdin(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        process_id: str,
+        stdin: str,
+        yield_time_ms: int,
+        max_output_bytes: int,
+        deadline_at: datetime,
+    ) -> RuntimeProcessResult:
+        """Write stdin to a pipe-based process or poll with empty stdin."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="process.write",
+                payload={
+                    "process_id": process_id,
+                    "stdin": stdin,
+                    "yield_time_ms": yield_time_ms,
+                    "max_output_bytes": max_output_bytes,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_process(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
     async def start_background_operation(
         self,
         operation: RuntimeRunnerOperation,
@@ -594,6 +693,33 @@ class RuntimeRunnerOperationClient:
             final_cursor=final.cursor,
         )
 
+    async def resume_process(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeProcessResult:
+        """Resume reading a process operation reply stream until final snapshot."""
+        folder = _ReplyFolder(after_cursor=after_cursor)
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        result = _process_result(final.event.payload, final_cursor=final.cursor)
+        stdout = result.stdout or "".join(folder.process_stdout)
+        stderr = result.stderr or "".join(folder.process_stderr)
+        return dataclasses.replace(result, stdout=stdout, stderr=stderr)
+
     async def _dispatch_runner_operation(
         self,
         operation: RuntimeRunnerOperation,
@@ -777,6 +903,8 @@ class _ReplyFolder:
     stdout: list[str] = dataclasses.field(default_factory=list)
     stderr: list[str] = dataclasses.field(default_factory=list)
     file_chunks: list[bytes] = dataclasses.field(default_factory=list)
+    process_stdout: list[str] = dataclasses.field(default_factory=list)
+    process_stderr: list[str] = dataclasses.field(default_factory=list)
 
     def apply(self, record: RuntimeReplyRecord) -> None:
         """Fold one reply record into accumulated output state."""
@@ -791,6 +919,14 @@ class _ReplyFolder:
             self.file_chunks.append(
                 base64.b64decode(_str_payload(event.payload, "data_base64"))
             )
+            return
+        if event.event_type == RuntimeReplyEventType.PROCESS_OUTPUT:
+            stream = _str_payload(event.payload, "stream")
+            text = _str_payload(event.payload, "text")
+            if stream == "stdout":
+                self.process_stdout.append(text)
+            elif stream == "stderr":
+                self.process_stderr.append(text)
 
 
 def _str_payload(payload: dict[str, JsonValue], key: str) -> str:
@@ -902,6 +1038,48 @@ def _file_stat_kind(
         return "other"
     if value == "missing":
         return "missing"
+    return None
+
+
+def _process_result(
+    payload: dict[str, JsonValue],
+    *,
+    final_cursor: str,
+) -> RuntimeProcessResult:
+    status = _process_status(payload.get("status"))
+    exit_code = payload.get("exit_code")
+    return RuntimeProcessResult(
+        process_id=_str_payload(payload, "process_id"),
+        status=status or "missing",
+        exit_code=(
+            exit_code
+            if isinstance(exit_code, int) and not isinstance(exit_code, bool)
+            else None
+        ),
+        stdout=_str_payload(payload, "stdout"),
+        stderr=_str_payload(payload, "stderr"),
+        stdout_truncated=_bool_payload(payload, "stdout_truncated", default=False),
+        stderr_truncated=_bool_payload(payload, "stderr_truncated", default=False),
+        stdout_omitted_bytes=_int_payload(payload, "stdout_omitted_bytes", default=0),
+        stderr_omitted_bytes=_int_payload(payload, "stderr_omitted_bytes", default=0),
+        missing_reason=_optional_str_payload(payload, "missing_reason"),
+        final_cursor=final_cursor,
+    )
+
+
+def _process_status(
+    value: object,
+) -> Literal["running", "exited", "missing", "terminated", "expired"] | None:
+    if value == "running":
+        return "running"
+    if value == "exited":
+        return "exited"
+    if value == "missing":
+        return "missing"
+    if value == "terminated":
+        return "terminated"
+    if value == "expired":
+        return "expired"
     return None
 
 

@@ -91,6 +91,8 @@ message RunnerOperationRequest {
     FileListOperationPayload file_list = 23;
     FileGrepOperationPayload file_grep = 24;
     FileStatOperationPayload file_stat = 25;
+    ProcessStartOperationPayload process_start = 26;
+    ProcessWriteOperationPayload process_write = 27;
   }
 }
 
@@ -130,6 +132,21 @@ message FileStatOperationPayload {
   string path = 1;
 }
 
+message ProcessStartOperationPayload {
+  string command = 1;
+  optional string workdir = 2;
+  uint32 yield_time_ms = 3;
+  uint32 max_output_bytes = 4;
+  map<string, string> env = 5;
+}
+
+message ProcessWriteOperationPayload {
+  string process_id = 1;
+  string stdin = 2;
+  uint32 yield_time_ms = 3;
+  uint32 max_output_bytes = 4;
+}
+
 message RunnerBodyChunk {
   uint64 chunk_id = 1;
   bytes data = 2;
@@ -151,6 +168,7 @@ message RunnerOperationEvent {
     RunnerOperationFileChunkPayload file_chunk = 23;
     RunnerOperationFinalSuccessPayload final_success = 24;
     RunnerOperationFinalErrorPayload final_error = 25;
+    RunnerProcessOutputPayload process_output = 26;
   }
 }
 
@@ -166,6 +184,15 @@ message RunnerOperationFileChunkPayload {
   string data_base64 = 1;
 }
 
+message RunnerProcessOutputPayload {
+  string process_id = 1;
+  string stream = 2;
+  uint64 chunk_id = 3;
+  string text = 4;
+  bool truncated = 5;
+  uint64 omitted_bytes = 6;
+}
+
 message RunnerOperationFinalSuccessPayload {
   oneof result {
     BashFinalSuccess bash = 1;
@@ -174,6 +201,7 @@ message RunnerOperationFinalSuccessPayload {
     FileListFinalSuccess file_list = 4;
     FileGrepFinalSuccess file_grep = 5;
     FileStatFinalSuccess file_stat = 6;
+    ProcessOperationFinalSuccess process = 7;
   }
 }
 
@@ -218,6 +246,19 @@ message FileGrepFinalSuccess {
   uint32 searched_file_count = 2;
   uint32 matched_file_count = 3;
   bool truncated = 4;
+}
+
+message ProcessOperationFinalSuccess {
+  string process_id = 1;
+  string status = 2;
+  optional int32 exit_code = 3;
+  string stdout = 4;
+  string stderr = 5;
+  bool stdout_truncated = 6;
+  bool stderr_truncated = 7;
+  uint64 stdout_omitted_bytes = 8;
+  uint64 stderr_omitted_bytes = 9;
+  string missing_reason = 10;
 }
 
 message RuntimeGrepFileMatch {

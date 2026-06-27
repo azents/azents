@@ -35,6 +35,7 @@ class RuntimeRunnerEventType(enum.StrEnum):
     STDOUT = "stdout"
     STDERR = "stderr"
     FILE_CHUNK = "file_chunk"
+    PROCESS_OUTPUT = "process_output"
     HEARTBEAT = "heartbeat"
     FINAL_SUCCESS = "final_success"
     FINAL_ERROR = "final_error"

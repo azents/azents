@@ -423,6 +423,26 @@ def _operation_payload(
         return result
     if payload_kind == "file_stat":
         return {"path": operation.file_stat.path}
+    if payload_kind == "process_start":
+        payload = operation.process_start
+        result: dict[str, JsonValue] = {
+            "command": payload.command,
+            "yield_time_ms": payload.yield_time_ms,
+            "max_output_bytes": payload.max_output_bytes,
+        }
+        if payload.HasField("workdir"):
+            result["workdir"] = payload.workdir
+        if payload.env:
+            result["env"] = dict(payload.env)
+        return result
+    if payload_kind == "process_write":
+        payload = operation.process_write
+        return {
+            "process_id": payload.process_id,
+            "stdin": payload.stdin,
+            "yield_time_ms": payload.yield_time_ms,
+            "max_output_bytes": payload.max_output_bytes,
+        }
     return {}
 
 
@@ -440,6 +460,14 @@ def _copy_event_payload(
             message.stderr.text = _str_payload(payload, "text")
         case RuntimeRunnerEventType.FILE_CHUNK:
             message.file_chunk.data_base64 = _str_payload(payload, "data_base64")
+        case RuntimeRunnerEventType.PROCESS_OUTPUT:
+            process_output = message.process_output
+            process_output.process_id = _str_payload(payload, "process_id")
+            process_output.stream = _str_payload(payload, "stream")
+            process_output.chunk_id = _int_payload(payload, "chunk_id")
+            process_output.text = _str_payload(payload, "text")
+            process_output.truncated = _bool_payload(payload, "truncated")
+            process_output.omitted_bytes = _int_payload(payload, "omitted_bytes")
         case RuntimeRunnerEventType.FINAL_SUCCESS:
             _copy_final_success(message.final_success, payload)
         case RuntimeRunnerEventType.FINAL_ERROR:
@@ -453,6 +481,21 @@ def _copy_final_success(
     message: runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload,
     payload: Mapping[str, JsonValue],
 ) -> None:
+    if "process_id" in payload or "status" in payload:
+        process = message.process
+        process.process_id = _str_payload(payload, "process_id")
+        process.status = _str_payload(payload, "status")
+        exit_code = _optional_int_payload(payload, "exit_code")
+        if exit_code is not None:
+            process.exit_code = exit_code
+        process.stdout = _str_payload(payload, "stdout")
+        process.stderr = _str_payload(payload, "stderr")
+        process.stdout_truncated = _bool_payload(payload, "stdout_truncated")
+        process.stderr_truncated = _bool_payload(payload, "stderr_truncated")
+        process.stdout_omitted_bytes = _int_payload(payload, "stdout_omitted_bytes")
+        process.stderr_omitted_bytes = _int_payload(payload, "stderr_omitted_bytes")
+        process.missing_reason = _str_payload(payload, "missing_reason")
+        return
     if "exit_code" in payload:
         message.bash.exit_code = _int_payload(payload, "exit_code")
         return
@@ -486,6 +529,7 @@ def _copy_final_success(
         resolved_kind = _optional_str_payload(payload, "resolved_kind")
         if resolved_kind is not None:
             stat.resolved_kind = resolved_kind
+        return
 
 
 def _event_payload(
@@ -500,6 +544,15 @@ def _event_payload(
         return {"text": message.stderr.text}
     if payload_kind == "file_chunk":
         return {"data_base64": message.file_chunk.data_base64}
+    if payload_kind == "process_output":
+        return {
+            "process_id": message.process_output.process_id,
+            "stream": message.process_output.stream,
+            "chunk_id": message.process_output.chunk_id,
+            "text": message.process_output.text,
+            "truncated": message.process_output.truncated,
+            "omitted_bytes": message.process_output.omitted_bytes,
+        }
     if payload_kind == "final_error":
         return {
             "error_code": message.final_error.error_code,
@@ -565,6 +618,21 @@ def _final_success_payload(
             payload["real_path"] = message.file_stat.real_path
         if message.file_stat.HasField("resolved_kind"):
             payload["resolved_kind"] = message.file_stat.resolved_kind
+        return payload
+    if result_kind == "process":
+        payload: dict[str, JsonValue] = {
+            "process_id": message.process.process_id,
+            "status": message.process.status,
+            "stdout": message.process.stdout,
+            "stderr": message.process.stderr,
+            "stdout_truncated": message.process.stdout_truncated,
+            "stderr_truncated": message.process.stderr_truncated,
+            "stdout_omitted_bytes": message.process.stdout_omitted_bytes,
+            "stderr_omitted_bytes": message.process.stderr_omitted_bytes,
+            "missing_reason": message.process.missing_reason,
+        }
+        if message.process.HasField("exit_code"):
+            payload["exit_code"] = message.process.exit_code
         return payload
     return {}
 

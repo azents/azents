@@ -127,13 +127,13 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
         RuntimeRunnerOperation(
             runtime_id="runtime-1",
             runner_generation=accepted.register_accepted.generation,
-            operation_type="file.grep",
+            operation_type="process.start",
             payload={
-                "path": "/workspace/agent",
-                "pattern": "needle",
-                "exclude_patterns": ["node_modules"],
-                "max_matching_files": 50,
-                "max_lines_per_file": 10,
+                "command": "python -m http.server",
+                "workdir": "/workspace/agent",
+                "yield_time_ms": 1000,
+                "max_output_bytes": 4096,
+                "env": {"PYTHONUNBUFFERED": "1"},
             },
             deadline_at=_now() + timedelta(seconds=30),
             body_stream_id=None,
@@ -145,10 +145,13 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
     command = await anext(stream)
     assert isinstance(result, RuntimeDispatchResult)
     assert command.operation_request.runtime_id == "runtime-1"
-    assert command.operation_request.operation_type == "file.grep"
-    assert command.operation_request.WhichOneof("payload") == "file_grep"
-    assert not command.operation_request.file_grep.HasField("recursive")
-    assert command.operation_request.file_grep.max_matching_files == 50
+    assert command.operation_request.operation_type == "process.start"
+    assert command.operation_request.WhichOneof("payload") == "process_start"
+    assert command.operation_request.process_start.command == "python -m http.server"
+    assert command.operation_request.process_start.workdir == "/workspace/agent"
+    assert command.operation_request.process_start.yield_time_ms == 1000
+    assert command.operation_request.process_start.max_output_bytes == 4096
+    assert command.operation_request.process_start.env == {"PYTHONUNBUFFERED": "1"}
 
     await inbound.put(
         runtime_runner_control_pb2.RunnerMessage(
@@ -159,25 +162,16 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
                 runtime_id="runtime-1",
                 operation_id="operation:req-1",
                 generation=accepted.register_accepted.generation,
-                event_type="final_success",
+                event_type="process_output",
                 created_at=_timestamp(_now()),
-                final=True,
-                final_success=runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload(
-                    file_grep=runtime_runner_control_pb2.FileGrepFinalSuccess(
-                        files=[
-                            runtime_runner_control_pb2.RuntimeGrepFileMatch(
-                                path="/workspace/agent/a.txt",
-                                lines=[
-                                    runtime_runner_control_pb2.RuntimeGrepLineMatch(
-                                        line_number=3,
-                                        text="needle here",
-                                    )
-                                ],
-                            )
-                        ],
-                        searched_file_count=1,
-                        matched_file_count=1,
-                    )
+                final=False,
+                process_output=runtime_runner_control_pb2.RunnerProcessOutputPayload(
+                    process_id="proc_123",
+                    stream="stdout",
+                    chunk_id=1,
+                    text="Serving HTTP",
+                    truncated=False,
+                    omitted_bytes=0,
                 ),
             ),
         )
@@ -189,7 +183,9 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
         limit=10,
     )
 
-    assert replies[0].event.event_type is RuntimeReplyEventType.FINAL_SUCCESS
+    assert replies[0].event.event_type is RuntimeReplyEventType.PROCESS_OUTPUT
+    assert replies[0].event.payload["process_id"] == "proc_123"
+    assert replies[0].event.payload["text"] == "Serving HTTP"
     await stream.aclose()
 
 
