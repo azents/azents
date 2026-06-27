@@ -3,10 +3,9 @@
 import datetime
 
 import pytest
-from litellm.types.utils import ModelResponse
 
 import azents.services.session_title as session_title_module
-from azents.core.enums import EventKind
+from azents.core.enums import EventKind, LLMProvider
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
@@ -44,36 +43,50 @@ class TestSessionTitleHelpers:
 
         assert title == "Insurance option comparison"
 
-    async def test_generate_session_title_reads_typed_model_response(
+    async def test_generate_session_title_uses_shared_responses_helper(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Generated title reads LiteLLM's typed ModelResponse shape."""
+        """Generated title delegates to the shared Responses helper."""
+        calls: list[dict[str, object]] = []
 
-        async def fake_acompletion(*args: object, **kwargs: object) -> ModelResponse:
-            del args, kwargs
-            return ModelResponse(
-                choices=[
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "Insurance option comparison",
-                        },
-                        "finish_reason": "stop",
-                        "index": 0,
-                    }
-                ]
-            )
+        async def fake_call_responses_model(**kwargs: object) -> object:
+            calls.append(kwargs)
+            return {"output_text": "Insurance option comparison"}
 
-        monkeypatch.setattr(session_title_module, "acompletion", fake_acompletion)
+        monkeypatch.setattr(
+            session_title_module,
+            "call_responses_model",
+            fake_call_responses_model,
+        )
 
         title = await generate_session_title_with_model(
-            model="openai/test",
+            provider=LLMProvider.ANTHROPIC,
+            model="anthropic/test",
             credential_kwargs={},
             context="Compare two insurance options",
         )
 
         assert title == "Insurance option comparison"
+        assert calls == [
+            {
+                "provider": LLMProvider.ANTHROPIC,
+                "model": "anthropic/test",
+                "credential_kwargs": {},
+                "input_items": [
+                    {
+                        "role": "user",
+                        "content": "Generate a title for this initial user prompt:\n"
+                        "Compare two insurance options",
+                    }
+                ],
+                "instructions": calls[0]["instructions"],
+                "stream": False,
+                "max_output_tokens": 80,
+            }
+        ]
+        assert isinstance(calls[0]["instructions"], str)
+        assert "session title generator" in calls[0]["instructions"]
 
     def test_initial_prompt_context_uses_only_user_text(self) -> None:
         """Initial prompt context excludes later transcript content."""
