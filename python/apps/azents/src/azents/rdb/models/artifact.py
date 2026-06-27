@@ -34,11 +34,10 @@ class RDBArtifact(RDBModel):
 
     IX_WORKSPACE_ID = sa.Index("ix_artifacts_workspace_id", "workspace_id")
     IX_SESSION_STATUS = sa.Index("ix_artifacts_session_status", "session_id", "status")
-    IX_EXPIRATION = sa.Index(
-        "ix_artifacts_expiration",
-        "session_id",
+    IX_STATUS_EXPIRES_AT = sa.Index(
+        "ix_artifacts_status_expires_at",
         "status",
-        "expires_after_run_index",
+        "expires_at",
     )
     UQ_STORAGE_KEY = sa.UniqueConstraint(
         "storage_key",
@@ -68,7 +67,9 @@ class RDBArtifact(RDBModel):
     )
     created_run_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     created_run_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    expires_after_run_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    expires_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime, nullable=False
+    )
     name: Mapped[str] = mapped_column(sa.String(255), nullable=False)
     media_type: Mapped[str] = mapped_column(sa.String(255), nullable=False)
     size_bytes: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
@@ -121,10 +122,16 @@ class RDBArtifact(RDBModel):
         nullable=True,
         default=None,
     )
+    blob_deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=True,
+        default=None,
+    )
 
     __table_args__ = (
         IX_WORKSPACE_ID,
         IX_SESSION_STATUS,
-        IX_EXPIRATION,
+        IX_STATUS_EXPIRES_AT,
         UQ_STORAGE_KEY,
     )

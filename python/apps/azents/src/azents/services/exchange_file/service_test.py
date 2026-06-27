@@ -79,6 +79,7 @@ class _FakeExchangeFileRepository:
             preview_generated_at=create.preview_generated_at,
             expires_at=create.expires_at,
             expired_at=None,
+            blob_deleted_at=None,
             created_at=_NOW,
         )
         self.files[file.id] = file
@@ -233,10 +234,17 @@ class _WorkspaceS3Config:
     bucket = "test-bucket"
 
 
+class _FileLifecycleConfig:
+    """File lifecycle config for tests."""
+
+    exchange_file_ttl = datetime.timedelta(days=30)
+
+
 class _Config:
     """Config for tests."""
 
     workspace_s3 = _WorkspaceS3Config()
+    file_lifecycle = _FileLifecycleConfig()
 
 
 @asynccontextmanager
@@ -574,31 +582,6 @@ async def test_resolve_attachment_metadata_keeps_expired_attachment_visible() ->
 
     assert isinstance(result, Success)
     assert result.value.status == ExchangeFileStatus.EXPIRED
-
-
-@pytest.mark.asyncio
-async def test_expire_due_files_marks_expired_and_deletes_blob() -> None:
-    """Expiration cleanup hook marks due file expired and tries object delete."""
-    service, repository, s3_service = _make_service(
-        workspace_user=_make_workspace_user()
-    )
-    created = await service.create_agent_upload(
-        agent_id="agent-1",
-        user_id="user-1",
-        filename="report.csv",
-        media_type="text/csv",
-        body=b"a,b\n1,2\n",
-    )
-    assert isinstance(created, Success)
-    repository.files[created.value.id] = created.value.model_copy(
-        update={"expires_at": _NOW - datetime.timedelta(seconds=1)}
-    )
-
-    expired = await service.expire_due_files()
-
-    assert [file.id for file in expired] == [created.value.id]
-    assert repository.files[created.value.id].status == ExchangeFileStatus.EXPIRED
-    assert created.value.object_key not in s3_service.objects
 
 
 @pytest.mark.asyncio

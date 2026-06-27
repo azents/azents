@@ -13,8 +13,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-06-16
-spec_version: 11
+last_verified_at: 2026-06-27
+spec_version: 12
 ---
 
 # Context Compaction
@@ -46,7 +46,7 @@ When compaction is required:
    - preserved tail turns that must remain raw in the next model input.
 4. Generate the summary from only the summarized older events.
 5. Append `compaction_summary` with the same `compaction_id` and reason.
-6. Move `agent_sessions.model_input_head_event_id` to the summary event id.
+6. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event.
 7. For automatic compaction, assign the summary an intermediate model order before the preserved tail
    so the future model input reads as `compaction_summary` followed by the preserved raw tail. The
    preserved tail keeps its existing model order when a gap is available.
@@ -107,15 +107,16 @@ delta after that marker. The estimator computes model-visible byte cost first an
 fields, and counts only user/assistant text, tool call name/arguments, tool result text, compaction
 summary text, and bounded file/attachment/artifact metadata that can reach model input.
 
-Before lowering model input, event pre-lower filters may update attachment/file lifecycle state and
-run automatic compaction. They do not omit old tool outputs for context pressure. Adapter-native request
-guards run after lowering and do not mutate DB state.
+Before lowering model input, event pre-lower filters may update attachment/file availability projections and
+run automatic compaction. They do not run Artifact, ExchangeFile, or ModelFile cleanup; file cleanup is
+scheduler-owned. They do not omit old tool outputs for context pressure. Adapter-native request guards
+run after lowering and do not mutate DB state.
 
 ## Invariants
 
 - Compaction is append-only.
 - Successful compaction writes the trigger reason to both `compaction_marker.payload.reason` and `compaction_summary.payload.reason` so context/debug views can explain why the checkpoint was created.
-- `model_input_head_event_id` points at the event summary event after successful compaction.
+- `model_input_head_event_id` points at the event summary event after successful compaction, and `model_input_head_model_order` stores the same head event model order for scheduler GC cursor comparisons.
 - Future model input is selected and sorted by event model order, not by physical append id.
 - Automatic compaction presents model input as `compaction_summary` followed by preserved raw tail
   turns.
@@ -124,5 +125,5 @@ guards run after lowering and do not mutate DB state.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.
 - Summary model calls are non-streaming and carry API-level `max_output_tokens`.
 - Summary content is bounded by the runtime char guard after the model returns.
-- UI/audit history continues to include pre-compaction events.
+- UI/audit history continues to include pre-compaction events. ModelFile GC may later delete unpinned ModelFile blobs whose single FilePart event is behind the head cursor, but it does not delete events or history metadata.
 - Legacy SDK compaction packages are not part of production compaction.

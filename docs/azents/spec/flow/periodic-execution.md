@@ -8,6 +8,7 @@ code_paths:
   - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/azents/scheduler/executor.py
   - python/apps/azents/src/azents/scheduler/service.py
+  - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
   - python/apps/azents/src/azents/repos/scheduled_task_state/__init__.py
   - python/apps/azents/src/azents/repos/scheduled_task_state/data.py
   - python/apps/azents/src/azents/rdb/models/scheduled_task_state.py
@@ -19,8 +20,8 @@ code_paths:
   - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-06-20
-spec_version: 1
+last_verified_at: 2026-06-27
+spec_version: 2
 ---
 
 # Periodic Execution Flow Spec
@@ -51,7 +52,7 @@ A definition includes:
 
 The database does not store task definitions or schedule overrides. It stores current runtime state only.
 
-The initial registered task is `scheduler_heartbeat`. It is a no-op heartbeat that returns a small execution summary and has no external network dependency.
+Registered tasks include `scheduler_heartbeat`, model catalog projection, and `file_lifecycle_cleanup`. `scheduler_heartbeat` is a no-op heartbeat that returns a small execution summary and has no external network dependency.
 
 ## Execution backend
 
@@ -145,6 +146,23 @@ Supported v1 policies:
 - `bounded_backoff`: failure uses exponential backoff bounded by min and max delay.
 
 Success resets the failure streak. Failure increments the persisted streak before the next retry time is calculated.
+
+## File lifecycle cleanup task
+
+`file_lifecycle_cleanup` is the scheduler-owned maintenance task for temporary file resources.
+It must not run from AgentWorker run input preparation.
+
+Each pass is bounded and may process:
+
+- due Artifact TTL rows, marking metadata expired and attempting blob deletion;
+- due ExchangeFile TTL rows, preserving existing ExchangeFile TTL behavior;
+- stale ModelFile pins for terminal runs;
+- AgentSession ModelFile GC cursor ranges where `model_file_gc_cursor_model_order` lags behind `model_input_head_model_order`.
+
+ModelFile GC scans events in `(cursor_order, head_order]`, extracts FilePart `model_file_id`s,
+marks available unpinned ModelFiles deleted, attempts blob deletion, and advances the session GC cursor
+only through the processed range. Access denial is metadata-driven; failed blob deletion is logged and
+can be retried by a later pass.
 
 ## CLI operations
 

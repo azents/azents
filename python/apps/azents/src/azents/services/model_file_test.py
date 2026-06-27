@@ -8,8 +8,6 @@ from PIL import Image
 from azents.services.model_file import (
     ModelFileInvalidImage,
     ModelFileOversized,
-    degrade_image_model_file_body,
-    model_file_retention_age_for_kind,
     model_file_size_limit_message,
     normalize_model_file_body,
 )
@@ -20,14 +18,6 @@ def _png_bytes() -> bytes:
     image = Image.new("RGBA", (2, 2), (255, 0, 0, 128))
     output = BytesIO()
     image.save(output, format="PNG")
-    return output.getvalue()
-
-
-def _jpeg_bytes(size: tuple[int, int]) -> bytes:
-    """Create JPEG bytes for tests."""
-    image = Image.new("RGB", size, (255, 0, 0))
-    output = BytesIO()
-    image.save(output, format="JPEG")
     return output.getvalue()
 
 
@@ -48,20 +38,6 @@ def test_invalid_image_fails_without_storing_random_bytes_as_image() -> None:
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, ModelFileInvalidImage)
-
-
-def test_image_model_file_degrades_to_max_edge_jpeg() -> None:
-    """Image ModelFile degradation creates max edge JPEG."""
-    result = degrade_image_model_file_body(
-        body=_jpeg_bytes((1200, 800)),
-        max_edge=300,
-    )
-
-    assert isinstance(result, Success)
-    assert result.value.media_type == "image/jpeg"
-    assert result.value.normalized_format == "jpeg:300"
-    image = Image.open(BytesIO(result.value.body))
-    assert max(image.size) == 300
 
 
 def test_non_image_model_file_keeps_original_bytes_under_cap() -> None:
@@ -88,11 +64,3 @@ def test_non_image_model_file_rejects_oversized_input() -> None:
     assert "File size exceeds the allowed limit" in model_file_size_limit_message(
         result.error
     )
-
-
-def test_model_file_retention_age_depends_on_kind() -> None:
-    """Image and non-image ModelFile run-age retention criteria differ."""
-    assert model_file_retention_age_for_kind(kind="image") == 10
-    assert model_file_retention_age_for_kind(kind="document") == 3
-    assert model_file_retention_age_for_kind(kind="text") == 3
-    assert model_file_retention_age_for_kind(kind="binary") == 3

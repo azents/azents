@@ -1,13 +1,13 @@
 """Docker image utilities for testing.
 
-CI 환경에서는 ECR pull-through cache를 사용하고,
-로컬 환경에서는 Docker Hub를 직접 사용합니다.
+CI can use an ECR pull-through cache when configured. Local environments use
+Docker Hub directly.
 """
 
 import os
 
 _PUBLIC_ECR_DOCKER_HUB_LIBRARY = "public.ecr.aws/docker/library"
-_PUBLIC_ECR_LIBRARY_IMAGES = frozenset({"postgres", "redis"})
+_PUBLIC_ECR_LIBRARY_IMAGES = frozenset({"redis"})
 
 
 def _split_image_name(image: str) -> tuple[str, str | None]:
@@ -19,17 +19,17 @@ def _split_image_name(image: str) -> tuple[str, str | None]:
 
 
 def get_docker_hub_image(image: str) -> str:
-    """Docker 이미지 경로를 반환합니다.
+    """Return the Docker image reference to use for tests.
 
-    ECR_REGISTRY 환경변수가 설정된 경우 ECR pull-through cache를 사용합니다.
-    그렇지 않으면 Docker Hub pull rate limit 을 피하기 위해 ECR Public 에
-    mirror 가 있는 official library 이미지는 ECR Public 을 사용합니다.
+    When ECR_REGISTRY is set, use the configured ECR pull-through cache.
+    Otherwise, only use ECR Public for known official library mirrors whose
+    tags are consistently available; keep all other images on Docker Hub.
 
     Args:
-        image: Docker Hub 이미지 이름 (예: "rustfs/rustfs:latest")
+        image: Docker Hub image name, for example ``rustfs/rustfs:latest``.
 
     Returns:
-        실제 사용할 이미지 경로
+        Image reference to pull.
     """
     ecr_registry = os.environ.get("ECR_REGISTRY")
     if ecr_registry:

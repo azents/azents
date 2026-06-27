@@ -436,7 +436,7 @@ async def test_filepart_placeholder_filter_rewrites_missing_assistant_filepart()
 
 
 async def test_filepart_placeholder_filter_keeps_available_filepart() -> None:
-    """Available/Degraded FilePart does not change transcript payload."""
+    """Available FilePart does not change transcript payload."""
     file_part = FileOutputPart(
         model_file_id="m" * 32,
         media_type="image/jpeg",
@@ -451,7 +451,7 @@ async def test_filepart_placeholder_filter_keeps_available_filepart() -> None:
     )
     transcript = [event]
     transcript_repo = _TranscriptRepo(transcript)
-    status_repo = _ModelFileStatusRepo({"m" * 32: ModelFileStatus.DEGRADED})
+    status_repo = _ModelFileStatusRepo({"m" * 32: ModelFileStatus.AVAILABLE})
 
     result = await EventFilePartPlaceholderFilter(
         session_id="session-1",

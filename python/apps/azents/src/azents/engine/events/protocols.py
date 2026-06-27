@@ -279,6 +279,7 @@ class SessionHeadState(Protocol):
     """Session state with model input head."""
 
     model_input_head_event_id: str | None
+    model_input_head_model_order: int | None
 
 
 class SessionHeadRepository(Protocol):

@@ -132,13 +132,11 @@ def _model_file() -> ModelFile:
         kind="image",
         size_bytes=11,
         created_run_index=1,
-        expires_after_run_index=3,
         storage_key="model-files/workspace-1/session-1/m",
         status=ModelFileStatus.AVAILABLE,
         normalized_format="jpeg",
         sha256="2" * 64,
         metadata={},
         created_at=_NOW,
-        degraded_at=None,
         deleted_at=None,
     )

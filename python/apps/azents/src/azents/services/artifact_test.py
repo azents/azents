@@ -51,7 +51,7 @@ class _FakeArtifactRepository:
             agent_id=create.agent_id,
             created_run_id=create.created_run_id,
             created_run_index=create.created_run_index,
-            expires_after_run_index=create.expires_after_run_index,
+            expires_at=create.expires_at,
             name=create.name,
             media_type=create.media_type,
             size_bytes=create.size_bytes,
@@ -68,6 +68,7 @@ class _FakeArtifactRepository:
             metadata=create.metadata,
             created_at=_NOW,
             expired_at=None,
+            blob_deleted_at=None,
         )
         self.artifacts[artifact.id] = artifact
         return artifact
@@ -93,32 +94,40 @@ class _FakeArtifactRepository:
                 return artifact
         return None
 
-    async def expire_for_run_boundary(
+    async def expire_due(
         self,
         session: AsyncSession,
         *,
-        session_id: str,
-        current_run_index: int,
-        expired_at: datetime.datetime,
+        now: datetime.datetime,
+        limit: int,
     ) -> list[Artifact]:
-        """Expire Artifact by run boundary."""
-        del session
+        """Expire due Artifact rows."""
+        del session, limit
         expired: list[Artifact] = []
         for artifact in list(self.artifacts.values()):
             if (
-                artifact.session_id == session_id
-                and artifact.status == ArtifactStatus.AVAILABLE
-                and artifact.expires_after_run_index < current_run_index
+                artifact.status == ArtifactStatus.AVAILABLE
+                and artifact.expires_at <= now
             ):
                 updated = artifact.model_copy(
-                    update={
-                        "status": ArtifactStatus.EXPIRED,
-                        "expired_at": expired_at,
-                    }
+                    update={"status": ArtifactStatus.EXPIRED, "expired_at": now}
                 )
                 self.artifacts[artifact.id] = updated
                 expired.append(updated)
         return expired
+
+    async def mark_blob_deleted(
+        self,
+        session: AsyncSession,
+        *,
+        artifact_id: str,
+        blob_deleted_at: datetime.datetime,
+    ) -> None:
+        """Record blob deletion."""
+        del session
+        self.artifacts[artifact_id] = self.artifacts[artifact_id].model_copy(
+            update={"blob_deleted_at": blob_deleted_at}
+        )
 
 
 class _FakeAgentSessionRepository:
@@ -201,10 +210,17 @@ class _WorkspaceS3Config:
     bucket = "test-bucket"
 
 
+class _FileLifecycleConfig:
+    """File lifecycle config for tests."""
+
+    artifact_ttl = datetime.timedelta(days=7)
+
+
 class _Config:
     """Config for tests."""
 
     workspace_s3 = _WorkspaceS3Config()
+    file_lifecycle = _FileLifecycleConfig()
 
 
 @asynccontextmanager
@@ -291,7 +307,7 @@ async def test_create_and_resolve_artifact() -> None:
     assert isinstance(created, Success)
     artifact = created.value
     assert artifact.id == "a" * 32
-    assert artifact.expires_after_run_index == 5
+    assert artifact.expires_at - datetime.timedelta(days=7) >= _NOW
     assert artifact.storage_key == "artifacts/workspace-1/session-1/3/" + "a" * 32
     assert artifact.uri == f"artifact://{artifact.storage_key}"
     assert s3.objects[artifact.storage_key] == b"hello"
@@ -328,33 +344,6 @@ async def test_expired_artifact_is_denied_even_if_blob_exists() -> None:
 
     assert isinstance(resolved, Failure)
     assert isinstance(resolved.error, ArtifactExpired)
-
-
-@pytest.mark.asyncio
-async def test_expire_for_run_boundary_marks_and_deletes_blobs() -> None:
-    """Run-boundary expiration handles metadata status and object deletion together."""
-    service, artifact_repo, s3 = _make_service()
-    artifact_repo.next_id = "c" * 32
-    created = await service.create(
-        session_id="session-1",
-        user_id="user-1",
-        created_run_id="run-1",
-        created_run_index=1,
-        filename="report.txt",
-        media_type="text/plain",
-        body=b"hello",
-    )
-    assert isinstance(created, Success)
-
-    expired = await service.expire_for_run_boundary(
-        session_id="session-1",
-        current_run_index=4,
-    )
-
-    assert [artifact.id for artifact in expired] == ["c" * 32]
-    assert artifact_repo.artifacts["c" * 32].status == ArtifactStatus.EXPIRED
-    assert s3.deleted_keys == [created.value.storage_key]
-    assert created.value.storage_key not in s3.objects
 
 
 def test_artifact_uri_returns_storage_key_only() -> None:

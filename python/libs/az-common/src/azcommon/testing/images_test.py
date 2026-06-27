@@ -1,25 +1,25 @@
-"""Docker 이미지 경로 변환 테스트."""
+"""Docker image path conversion tests."""
 
 import pytest
 
 from azcommon.testing.images import get_docker_hub_image
 
 
-def test_get_docker_hub_image_uses_public_ecr_for_postgres_without_registry(
+def test_get_docker_hub_image_keeps_postgres_on_docker_hub_without_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ECR_REGISTRY 가 없어도 Postgres 는 ECR Public mirror 를 사용합니다."""
+    """Postgres stays on Docker Hub because ECR Public tag coverage is incomplete."""
     monkeypatch.delenv("ECR_REGISTRY", raising=False)
 
     image = get_docker_hub_image("postgres:18")
 
-    assert image == "public.ecr.aws/docker/library/postgres:18"
+    assert image == "postgres:18"
 
 
 def test_get_docker_hub_image_uses_configured_pull_through_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ECR_REGISTRY 가 있으면 기존 pull-through cache 경로를 우선합니다."""
+    """ECR_REGISTRY keeps using the configured pull-through cache path."""
     registry = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com"
     monkeypatch.setenv("ECR_REGISTRY", registry)
 
@@ -31,7 +31,7 @@ def test_get_docker_hub_image_uses_configured_pull_through_cache(
 def test_get_docker_hub_image_keeps_non_library_images_without_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ECR Public mirror 를 확정할 수 없는 이미지는 Docker Hub 경로를 유지합니다."""
+    """Images without a known ECR Public mirror stay on Docker Hub."""
     monkeypatch.delenv("ECR_REGISTRY", raising=False)
 
     image = get_docker_hub_image("rustfs/rustfs:1.0.0-alpha.90")

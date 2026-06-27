@@ -1,7 +1,6 @@
 """ModelFile service."""
 
 import dataclasses
-import datetime
 import hashlib
 import re
 from io import BytesIO
@@ -31,16 +30,9 @@ _IMAGE_MEDIA_PREFIX = "image/"
 _TEXT_MEDIA_PREFIX = "text/"
 _MODEL_IMAGE_MEDIA_TYPE = "image/jpeg"
 _MODEL_IMAGE_NORMALIZED_FORMAT = "jpeg"
-_MODEL_IMAGE_DEGRADED_1024_FORMAT = "jpeg:1024"
-_MODEL_IMAGE_DEGRADED_300_FORMAT = "jpeg:300"
 _ORIGINAL_NORMALIZED_FORMAT = "original"
 _IMAGE_JPEG_QUALITY = 85
 _NON_IMAGE_MAX_BYTES = 1_000_000
-_MODEL_FILE_DEGRADE_1024_AGE = 1
-_MODEL_FILE_DEGRADE_300_AGE = 3
-_MODEL_FILE_NON_IMAGE_REMOVE_AGE = 3
-_MODEL_FILE_REMOVE_AGE = 10
-_MODEL_FILE_UNREACHABLE_GRACE_RUNS = 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -112,27 +104,6 @@ def model_file_size_limit_message(error: ModelFileOversized) -> str:
     )
 
 
-def model_file_retention_age_for_kind(*, kind: str) -> int:
-    """Return run-age retention criteria by ModelFile kind."""
-    if kind == "image":
-        return _MODEL_FILE_REMOVE_AGE
-    return _MODEL_FILE_NON_IMAGE_REMOVE_AGE
-
-
-def _unreachable_grace_expired(
-    model_file: ModelFile,
-    *,
-    current_run_index: int,
-) -> bool:
-    """Return whether deferred GC grace for unreachable ModelFile ended."""
-    if model_file.unreachable_run_index is None:
-        return True
-    return (
-        current_run_index - model_file.unreachable_run_index
-        >= _MODEL_FILE_UNREACHABLE_GRACE_RUNS
-    )
-
-
 @dataclasses.dataclass
 class ModelFileService:
     """Coordinate ModelFile metadata and object storage."""
@@ -193,9 +164,6 @@ class ModelFileService:
                     return Failure(ModelFileAccessDenied())
 
                 normalized_body = normalized.value
-                retention_age = model_file_retention_age_for_kind(
-                    kind=normalized_body.kind,
-                )
                 created = await self.model_file_repository.create(
                     session,
                     ModelFileCreate(
@@ -207,7 +175,6 @@ class ModelFileService:
                         kind=normalized_body.kind,
                         size_bytes=len(normalized_body.body),
                         created_run_index=created_run_index,
-                        expires_after_run_index=(created_run_index + retention_age - 1),
                         normalized_format=normalized_body.normalized_format,
                         sha256=hashlib.sha256(normalized_body.body).hexdigest(),
                         metadata=_json_metadata(metadata),
@@ -289,9 +256,6 @@ class ModelFileService:
                 )
 
                 normalized_body = normalized.value
-                retention_age = model_file_retention_age_for_kind(
-                    kind=normalized_body.kind,
-                )
                 created = await self.model_file_repository.create(
                     session,
                     ModelFileCreate(
@@ -303,7 +267,6 @@ class ModelFileService:
                         kind=normalized_body.kind,
                         size_bytes=len(normalized_body.body),
                         created_run_index=next_run_index,
-                        expires_after_run_index=(next_run_index + retention_age - 1),
                         normalized_format=normalized_body.normalized_format,
                         sha256=hashlib.sha256(normalized_body.body).hexdigest(),
                         metadata=_json_metadata(metadata),
@@ -362,10 +325,7 @@ class ModelFileService:
         if isinstance(model_file_result, Failure):
             return Failure(model_file_result.error)
         model_file = model_file_result.value
-        if model_file.status not in {
-            ModelFileStatus.AVAILABLE,
-            ModelFileStatus.DEGRADED,
-        }:
+        if model_file.status != ModelFileStatus.AVAILABLE:
             return Failure(ModelFileUnavailable())
         body = await self.s3_service.download_bytes(
             bucket=self.config.workspace_s3.bucket,
@@ -374,145 +334,6 @@ class ModelFileService:
         if body is None:
             return Failure(ModelFileUnavailable())
         return Success(ModelFileDownload(model_file=model_file, body=body))
-
-    async def expire_for_run_boundary(
-        self,
-        *,
-        session_id: str,
-        current_run_index: int,
-    ) -> list[ModelFile]:
-        """Degrade/delete ModelFile by run boundary."""
-        now = datetime.datetime.now(datetime.timezone.utc)
-        changed: list[ModelFile] = []
-        async with self.session_manager() as session:
-            candidates = await self.model_file_repository.list_for_run_boundary(
-                session,
-                session_id=session_id,
-                current_run_index=current_run_index,
-            )
-
-        for model_file in candidates:
-            if model_file.status is ModelFileStatus.UNREACHABLE:
-                if _unreachable_grace_expired(
-                    model_file,
-                    current_run_index=current_run_index,
-                ):
-                    changed.append(await self._mark_deleted(model_file, deleted_at=now))
-                continue
-
-            age = current_run_index - model_file.created_run_index
-            if age >= model_file_retention_age_for_kind(kind=model_file.kind):
-                changed.append(
-                    await self._mark_unreachable(
-                        model_file,
-                        unreachable_run_index=current_run_index,
-                        unreachable_at=now,
-                    )
-                )
-                continue
-            if model_file.kind != "image":
-                continue
-            target_edge = _target_image_edge(model_file, age=age)
-            if target_edge is None:
-                continue
-            body = await self.s3_service.download_bytes(
-                bucket=self.config.workspace_s3.bucket,
-                key=model_file.storage_key,
-            )
-            if body is None:
-                changed.append(
-                    await self._mark_unreachable(
-                        model_file,
-                        unreachable_run_index=current_run_index,
-                        unreachable_at=now,
-                    )
-                )
-                continue
-            degraded = degrade_image_model_file_body(
-                body=body,
-                max_edge=target_edge,
-            )
-            if isinstance(degraded, Failure):
-                changed.append(
-                    await self._mark_unreachable(
-                        model_file,
-                        unreachable_run_index=current_run_index,
-                        unreachable_at=now,
-                    )
-                )
-                continue
-            normalized = degraded.value
-            await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
-                key=model_file.storage_key,
-                body=normalized.body,
-                content_type=normalized.media_type,
-            )
-            changed.append(
-                await self._mark_degraded(
-                    model_file,
-                    size_bytes=len(normalized.body),
-                    normalized_format=normalized.normalized_format,
-                    sha256=hashlib.sha256(normalized.body).hexdigest(),
-                    degraded_at=now,
-                )
-            )
-        return changed
-
-    async def _mark_deleted(
-        self,
-        model_file: ModelFile,
-        *,
-        deleted_at: datetime.datetime,
-    ) -> ModelFile:
-        """Mark ModelFile as deleted, then try blob deletion."""
-        async with self.session_manager() as session:
-            deleted = await self.model_file_repository.mark_deleted(
-                session,
-                model_file_id=model_file.id,
-                deleted_at=deleted_at,
-            )
-        await self.s3_service.delete(
-            bucket=self.config.workspace_s3.bucket,
-            key=model_file.storage_key,
-        )
-        return deleted
-
-    async def _mark_unreachable(
-        self,
-        model_file: ModelFile,
-        *,
-        unreachable_run_index: int,
-        unreachable_at: datetime.datetime,
-    ) -> ModelFile:
-        """Change ModelFile to inaccessible and defer blob GC to next run."""
-        async with self.session_manager() as session:
-            return await self.model_file_repository.mark_unreachable(
-                session,
-                model_file_id=model_file.id,
-                unreachable_run_index=unreachable_run_index,
-                unreachable_at=unreachable_at,
-            )
-
-    async def _mark_degraded(
-        self,
-        model_file: ModelFile,
-        *,
-        size_bytes: int,
-        normalized_format: str,
-        sha256: str,
-        degraded_at: datetime.datetime,
-    ) -> ModelFile:
-        """Update ModelFile degraded metadata in short transaction."""
-        async with self.session_manager() as session:
-            return await self.model_file_repository.mark_degraded(
-                session,
-                model_file_id=model_file.id,
-                size_bytes=size_bytes,
-                normalized_format=normalized_format,
-                sha256=sha256,
-                degraded_at=degraded_at,
-            )
 
     async def _get_accessible_model_file(
         self,
@@ -634,19 +455,6 @@ def _normalize_image_model_file(
     return Success(normalized.value)
 
 
-def degrade_image_model_file_body(
-    *,
-    body: bytes,
-    max_edge: int,
-) -> Result[NormalizedModelFileBody, ModelFileInvalidImage]:
-    """Degrade Image ModelFile blob to specified max edge JPEG."""
-    return _jpeg_model_file_body(
-        body=body,
-        max_edge=max_edge,
-        normalized_format=f"jpeg:{max_edge}",
-    )
-
-
 def _jpeg_model_file_body(
     *,
     body: bytes,
@@ -685,21 +493,6 @@ def _jpeg_model_file_body(
             normalized_format=normalized_format,
         )
     )
-
-
-def _target_image_edge(model_file: ModelFile, *, age: int) -> int | None:
-    """Return image degrade edge to apply for current run age."""
-    if age >= _MODEL_FILE_DEGRADE_300_AGE:
-        if model_file.normalized_format != _MODEL_IMAGE_DEGRADED_300_FORMAT:
-            return 300
-        return None
-    if age >= _MODEL_FILE_DEGRADE_1024_AGE:
-        if model_file.normalized_format not in {
-            _MODEL_IMAGE_DEGRADED_1024_FORMAT,
-            _MODEL_IMAGE_DEGRADED_300_FORMAT,
-        }:
-            return 1024
-    return None
 
 
 def _kind_for_media_type(

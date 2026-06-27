@@ -130,11 +130,11 @@ def _artifact_text(part: ArtifactOutputPart) -> str:
             f"URI: {part.uri}\nStatus: expired; no longer accessible"
         )
     suffix = ""
-    if part.expires_after_run_index is not None:
-        suffix = f"\nExpires after run index: {part.expires_after_run_index}"
+    if part.expires_at is not None:
+        suffix = f"\nExpires at: {part.expires_at.isoformat()}"
     return (
         f"Artifact: {part.name} ({part.media_type}, {part.size} bytes)\n"
-        f"URI: {part.uri}{suffix}\nUse import_file to inspect this artifact."
+        f"URI: {part.uri}{suffix}"
     )
 
 

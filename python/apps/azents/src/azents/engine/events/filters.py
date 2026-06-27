@@ -1011,6 +1011,6 @@ def _unavailable_file_reason(
     status = statuses.get(part.model_file_id)
     if status is None:
         return "model file metadata is unavailable"
-    if status in {ModelFileStatus.AVAILABLE, ModelFileStatus.DEGRADED}:
+    if status == ModelFileStatus.AVAILABLE:
         return None
     return f"model file status is {status.value}"

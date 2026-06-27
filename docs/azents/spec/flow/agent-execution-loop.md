@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-06-26
-spec_version: 44
+last_verified_at: 2026-06-27
+spec_version: 45
 ---
 
 # Agent Execution Loop
@@ -140,8 +140,8 @@ Pre-lower filters may mutate DB-backed event transcript state or shape an in-mem
 clone for the next model call. Post-lower filters operate on adapter-native request payloads and must
 not mutate DB state.
 
-The pre-lower order is significant. Event attachment/file lifecycle filters run before automatic
-compaction. The runtime does not omit old tool outputs in normal model input. If the lowered request
+The pre-lower order is significant. Event attachment/file availability filters run before automatic
+compaction. Scheduler-owned file cleanup does not run in run input preparation. The runtime does not omit old tool outputs in normal model input. If the lowered request
 is still too large, `NativeRequestSizeGuard` remains the final post-lower hard guard.
 
 `LiteLLMResponsesLowerer` owns the full provider-native request surface for the Responses adapter:
@@ -223,10 +223,12 @@ a bounded placeholder and is not silently omitted.
 
 Attachment and Artifact parts are not automatically converted into FilePart. Explicit FilePart
 creation stores a normalized ModelFile and durable events reference it by `model_file_id`,
-not by URI. ModelFile blobs are request-local inputs during lowering only: image blobs degrade at
-run age 1 and 3, image blobs are deleted at run age 10, and non-image blobs are deleted at run age 3.
-No durable event, REST/WS projection, or frontend state stores raw bytes, inline base64, data URL, or
-provider-native file payload.
+not by URI. A `model_file_id` is single-event scoped; later reuse of the same source bytes materializes
+a new ModelFile/FilePart. ModelFile blobs are request-local inputs during lowering only and are protected
+by active run pins while the run depends on them. Persistent ModelFile run-age degradation/unreachable
+stages are not part of the execution loop; scheduler-owned GC deletes unpinned ModelFiles after their
+single FilePart event falls behind the model-input head cursor. No durable event, REST/WS projection,
+or frontend state stores raw bytes, inline base64, data URL, or provider-native file payload.
 
 Before the event engine builds the tool catalog, `AgentWorker` resolves the
 desired toolkit list for the message and `_SessionRunner` reconciles it through the

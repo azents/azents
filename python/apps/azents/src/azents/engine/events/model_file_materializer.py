@@ -6,21 +6,13 @@ from typing import Protocol
 
 from azcommon.result import Failure, Result
 
-from azents.core.enums import EventKind
 from azents.engine.events.file_parts import (
     ModelFileLoweringContent,
     RequestLocalModelFileResolver,
     make_model_file_data_url,
 )
-from azents.engine.events.output_parts import iter_output_parts
-from azents.engine.events.types import (
-    AssistantMessagePayload,
-    ClientToolResultPayload,
-    Event,
-    FileOutputPart,
-    ProviderToolResultPayload,
-    UserMessagePayload,
-)
+from azents.engine.events.model_file_refs import unique_model_file_ids
+from azents.engine.events.types import Event
 from azents.services.model_file import (
     ModelFileAccessDenied,
     ModelFileDownload,
@@ -72,7 +64,7 @@ class ModelFileMaterializer:
         self._resolver.clear()
         if self._user_id is None:
             return
-        for model_file_id in _model_file_ids(transcript):
+        for model_file_id in unique_model_file_ids(transcript):
             resolved = await self._model_file_service.download_for_agent(
                 model_file_id=model_file_id,
                 agent_id=self._agent_id,
@@ -91,41 +83,6 @@ class ModelFileMaterializer:
                     ),
                 ),
             )
-
-
-def _model_file_ids(transcript: Sequence[Event]) -> list[str]:
-    """Return ModelFile IDs with order-preserving deduplication."""
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for event in transcript:
-        for part in _file_parts(event):
-            if part.model_file_id in seen:
-                continue
-            seen.add(part.model_file_id)
-            ordered.append(part.model_file_id)
-    return ordered
-
-
-def _file_parts(event: Event) -> list[FileOutputPart]:
-    """Extract FileOutputPart from one Event."""
-    payload = event.payload
-    if event.kind == EventKind.USER_MESSAGE and isinstance(payload, UserMessagePayload):
-        if isinstance(payload.content, str):
-            return []
-        return [part for part in payload.content if isinstance(part, FileOutputPart)]
-    if event.kind == EventKind.ASSISTANT_MESSAGE and isinstance(
-        payload, AssistantMessagePayload
-    ):
-        if isinstance(payload.content, str):
-            return []
-        return [part for part in payload.content if isinstance(part, FileOutputPart)]
-    if isinstance(payload, ClientToolResultPayload | ProviderToolResultPayload):
-        return [
-            part
-            for part in iter_output_parts(payload.output)
-            if isinstance(part, FileOutputPart)
-        ]
-    return []
 
 
 def _log_unavailable_model_file(

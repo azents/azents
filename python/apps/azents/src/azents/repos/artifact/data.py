@@ -17,7 +17,7 @@ class Artifact(BaseModel):
     agent_id: str = Field(description="Agent ID")
     created_run_id: str = Field(description="Created run ID")
     created_run_index: int = Field(description="Created run index")
-    expires_after_run_index: int = Field(description="Expiration reference run index")
+    expires_at: datetime.datetime = Field(description="Expiration time")
     name: str = Field(description="Display filename")
     media_type: str = Field(description="MIME type")
     size_bytes: int = Field(description="File size")
@@ -35,7 +35,10 @@ class Artifact(BaseModel):
     )
     created_at: datetime.datetime = Field(description="Created time")
     expired_at: datetime.datetime | None = Field(
-        default=None, description="Expiration time"
+        default=None, description="Expired transition time"
+    )
+    blob_deleted_at: datetime.datetime | None = Field(
+        default=None, description="Blob deletion time"
     )
 
     @property
@@ -52,7 +55,7 @@ class ArtifactCreate(BaseModel):
     agent_id: str = Field(description="Agent ID")
     created_run_id: str = Field(description="Created run ID")
     created_run_index: int = Field(description="Created run index")
-    expires_after_run_index: int = Field(description="Expiration reference run index")
+    expires_at: datetime.datetime = Field(description="Expiration time")
     name: str = Field(description="Display filename")
     media_type: str = Field(description="MIME type")
     size_bytes: int = Field(description="File size")

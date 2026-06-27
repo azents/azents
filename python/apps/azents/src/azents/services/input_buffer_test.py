@@ -172,6 +172,7 @@ def _exchange_file(
         preview_generated_at=None,
         expires_at=tznow() + datetime.timedelta(days=30),
         expired_at=None,
+        blob_deleted_at=None,
         created_at=tznow(),
     )
 

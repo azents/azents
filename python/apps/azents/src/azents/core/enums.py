@@ -236,8 +236,6 @@ class ModelFileStatus(enum.StrEnum):
     """ModelFile lifecycle status."""
 
     AVAILABLE = "available"
-    DEGRADED = "degraded"
-    UNREACHABLE = "unreachable"
     DELETED = "deleted"
 
 
