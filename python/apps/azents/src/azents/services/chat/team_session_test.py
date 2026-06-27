@@ -1,5 +1,8 @@
 """ChatSessionService team session tests."""
 
+import datetime
+
+import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -480,6 +483,132 @@ class TestChatSessionTeamSessions:
         ]
         assert sessions[0].primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
         assert sessions[1].primary_kind is None
+
+    async def test_list_agent_sessions_orders_non_primary_by_latest_user_input(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Non-primary sessions sort by user input recency after team primary."""
+        workspace_id = await _create_workspace(
+            rdb_session, "team-session-user-input-sort"
+        )
+        user_id = await _create_user(
+            rdb_session, "team-session-user-input-sort@example.com"
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "team-user-input-sort-agent"
+        )
+        primary = await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+
+        first_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        second_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        assert isinstance(first_result, Success)
+        assert isinstance(second_result, Success)
+        first_session = first_result.value
+        second_session = second_result.value
+
+        old_user_event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=first_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload={
+                    "content": "Older user request",
+                    "attachments": [],
+                    "metadata": {},
+                },
+            ),
+        )
+        await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=first_session.id,
+                kind=EventKind.ASSISTANT_MESSAGE,
+                payload={
+                    "content": "Later assistant activity",
+                    "attachments": [],
+                    "native_artifact": {
+                        "adapter": "test",
+                        "provider": "test",
+                        "model": "test",
+                        "native_format": "test",
+                        "schema_version": "1",
+                        "compat_key": "test:test:test:test:1",
+                        "item": {},
+                    },
+                },
+            ),
+        )
+        recent_user_event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=second_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload={
+                    "content": "Recent user request",
+                    "attachments": [],
+                    "metadata": {},
+                },
+            ),
+        )
+        first_last_user_input_at = await rdb_session.scalar(
+            sa.select(RDBAgentSession.last_user_input_at).where(
+                RDBAgentSession.id == first_session.id
+            )
+        )
+        second_last_user_input_at = await rdb_session.scalar(
+            sa.select(RDBAgentSession.last_user_input_at).where(
+                RDBAgentSession.id == second_session.id
+            )
+        )
+        assert first_last_user_input_at == old_user_event.created_at
+        assert second_last_user_input_at == recent_user_event.created_at
+        await rdb_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == first_session.id)
+            .values(
+                last_user_input_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
+                updated_at=datetime.datetime(2026, 1, 5, tzinfo=datetime.UTC),
+            )
+        )
+        await rdb_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == second_session.id)
+            .values(
+                last_user_input_at=datetime.datetime(2026, 1, 3, tzinfo=datetime.UTC),
+                updated_at=datetime.datetime(2026, 1, 3, tzinfo=datetime.UTC),
+            )
+        )
+        await rdb_session.commit()
+
+        list_result = await _service(rdb_session_manager).list_agent_sessions(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(list_result, Success)
+        assert [session.id for session in list_result.value] == [
+            primary.id,
+            second_session.id,
+            first_session.id,
+        ]
 
     async def test_archive_non_primary_session_removes_it_from_active_list(
         self,

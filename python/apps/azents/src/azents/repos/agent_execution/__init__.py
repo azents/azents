@@ -134,6 +134,7 @@ class EventTranscriptRepository:
         )
         session.add(rdb)
         await session.flush()
+        await self._update_session_last_user_input_at(session, rdb)
         return self._build(rdb)
 
     async def _append_with_external_id(
@@ -180,6 +181,7 @@ class EventTranscriptRepository:
         inserted = result.scalar_one_or_none()
         if inserted is not None:
             await session.flush()
+            await self._update_session_last_user_input_at(session, inserted)
             return self._build(inserted)
 
         existing = await self.get_by_external_id(
@@ -190,6 +192,21 @@ class EventTranscriptRepository:
         if existing is None:
             raise RuntimeError("Event idempotent append failed")
         return existing
+
+    async def _update_session_last_user_input_at(
+        self,
+        session: AsyncSession,
+        event: RDBEvent,
+    ) -> None:
+        """Update AgentSession latest user input timestamp for user messages."""
+        if event.kind != EventKind.USER_MESSAGE:
+            return
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == event.session_id)
+            .values(last_user_input_at=event.created_at)
+        )
+        await session.flush()
 
     async def list_for_model_input(
         self,

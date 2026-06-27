@@ -1145,6 +1145,7 @@ def _agent_session() -> AgentSession:
         title_source=None,
         title_generated_at=None,
         title_generation_event_id=None,
+        last_user_input_at=now,
         created_at=now,
         updated_at=now,
         started_at=now,

@@ -36,6 +36,9 @@ class AgentSession(BaseModel):
     title_generation_event_id: str | None = Field(
         description="Event ID used for automatic title generation",
     )
+    last_user_input_at: datetime.datetime = Field(
+        description="Latest user input timestamp or creation-time baseline",
+    )
     end_reason: AgentSessionEndReason | None = Field(
         default=None, description="End reason"
     )

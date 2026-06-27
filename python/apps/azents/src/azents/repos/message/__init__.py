@@ -527,7 +527,35 @@ class MessageRepository:
             .values(reverted=True)
         )
         del result
+        await self._refresh_session_last_user_input_at(session, session_id)
         return delete_count
+
+    async def _refresh_session_last_user_input_at(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> None:
+        """Refresh AgentSession latest user input timestamp after event revert."""
+        latest_user_input_at = (
+            sa.select(sa.func.max(RDBEvent.created_at))
+            .where(
+                RDBEvent.session_id == session_id,
+                RDBEvent.kind == EventKind.USER_MESSAGE,
+                RDBEvent.reverted.is_(False),
+            )
+            .scalar_subquery()
+        )
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == session_id)
+            .values(
+                last_user_input_at=sa.func.coalesce(
+                    latest_user_input_at,
+                    RDBAgentSession.created_at,
+                )
+            )
+        )
+        await session.flush()
 
     async def is_at_or_before_model_input_head(
         self,
