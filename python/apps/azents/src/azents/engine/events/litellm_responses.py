@@ -195,13 +195,6 @@ class LiteLLMResponsesLowerer:
         for event in transcript:
             native_item = self._compatible_native_item(event)
             if native_item is not None:
-                if kwargs.get("store") is False:
-                    # With store=False, provider response items are not persisted;
-                    # replaying ids like rs_... can resolve missing items.
-                    # Keep call_id for tool continuity.
-                    native_item = _drop_provider_item_id_for_unstored_request(
-                        native_item
-                    )
                 input_items.append(native_item)
                 continue
 
@@ -209,6 +202,12 @@ class LiteLLMResponsesLowerer:
             if lowered is not None:
                 input_items.append(lowered)
 
+        if kwargs.get("store") is False:
+            # With store=False, provider response items are not persisted; replaying
+            # ids like rs_... can resolve missing items. Keep call_id for tool
+            # continuity, but mask every item id consistently so prompt cache keys
+            # remain stable across turns.
+            input_items = _mask_response_item_ids_for_unstored_request(input_items)
         input_items = _drop_orphan_tool_outputs(input_items)
         hosted = _lower_hosted_tools(
             self._hosted_tools,
@@ -603,14 +602,18 @@ def _drop_orphan_tool_outputs(
     return filtered
 
 
-def _drop_provider_item_id_for_unstored_request(
-    item: dict[str, object],
-) -> dict[str, object]:
-    """Remove provider item id from native replay when response items are unstored."""
-    if "id" not in item:
-        return item
-    normalized = dict(item)
-    normalized.pop("id", None)
+def _mask_response_item_ids_for_unstored_request(
+    input_items: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Set response item ids to null when response items are unstored."""
+    normalized: list[dict[str, object]] = []
+    for item in input_items:
+        if "id" not in item:
+            normalized.append(item)
+            continue
+        masked = dict(item)
+        masked["id"] = None
+        normalized.append(masked)
     return normalized
 
 
