@@ -741,8 +741,8 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.input == [raw_item]
 
-    def test_drops_native_provider_item_id_when_store_is_false(self) -> None:
-        """Do not replay unstored provider response item ids."""
+    def test_masks_native_provider_item_id_when_store_is_false(self) -> None:
+        """Mask unstored provider response item ids consistently."""
         lowerer = LiteLLMResponsesLowerer(
             provider="openai",
             model="gpt-5.1",
@@ -763,13 +763,13 @@ class TestLiteLLMResponsesLowerer:
 
         request = lowerer.lower(transcript, model="gpt-5.1")
 
-        assert request.input == [{"type": "reasoning", "summary": []}]
+        assert request.input == [{"type": "reasoning", "id": None, "summary": []}]
         assert request.kwargs["store"] is False
 
-    def test_drops_native_item_id_but_keeps_call_id_when_store_is_false(
+    def test_masks_native_item_id_but_keeps_call_id_when_store_is_false(
         self,
     ) -> None:
-        """Preserve tool continuity while avoiding unstored provider item ids."""
+        """Preserve tool continuity while masking unstored provider item ids."""
         lowerer = LiteLLMResponsesLowerer(
             provider="openai",
             model="gpt-5.1",
@@ -800,10 +800,100 @@ class TestLiteLLMResponsesLowerer:
         assert request.input == [
             {
                 "type": "function_call",
+                "id": None,
                 "call_id": "call-1",
                 "name": "read_text",
                 "arguments": "{}",
             }
+        ]
+        assert request.kwargs["store"] is False
+
+    def test_masks_all_response_item_ids_when_store_is_false(self) -> None:
+        """Mask ids on native and canonical input items for unstored responses."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            provider_id=LLMProvider.CHATGPT_OAUTH,
+        )
+        transcript = [
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(content="hello"),
+            ),
+            _event(
+                EventKind.ASSISTANT_MESSAGE,
+                AssistantMessagePayload(
+                    content="done",
+                    native_artifact=_artifact(
+                        {
+                            "type": "message",
+                            "id": "msg-1",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "done",
+                                }
+                            ],
+                        }
+                    ),
+                ),
+            ),
+            _event(
+                EventKind.CLIENT_TOOL_CALL,
+                ClientToolCallPayload(
+                    call_id="call-1",
+                    name="read_text",
+                    arguments="{}",
+                    native_artifact=_artifact(
+                        {
+                            "type": "function_call",
+                            "id": "fc-1",
+                            "call_id": "call-1",
+                            "name": "read_text",
+                            "arguments": "{}",
+                        }
+                    ),
+                ),
+            ),
+            _event(
+                EventKind.CLIENT_TOOL_RESULT,
+                ClientToolResultPayload(
+                    call_id="call-1",
+                    name="read_text",
+                    status="completed",
+                    output="result",
+                ),
+            ),
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [
+            {"role": "user", "content": "hello"},
+            {
+                "type": "message",
+                "id": None,
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "done",
+                    }
+                ],
+            },
+            {
+                "type": "function_call",
+                "id": None,
+                "call_id": "call-1",
+                "name": "read_text",
+                "arguments": "{}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call-1",
+                "output": "result",
+            },
         ]
         assert request.kwargs["store"] is False
 
