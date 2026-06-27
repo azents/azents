@@ -283,7 +283,7 @@ export function AgentFocusedSidebar({
       </Modal>
 
       <Stack h="100%" gap={0} style={{ overflow: "hidden" }}>
-        <Stack px="md" pt="lg" pb="md" gap="lg">
+        <Stack px="md" pt="md" pb="md" gap="sm">
           <Button
             component={Link}
             href={workspacePath}
