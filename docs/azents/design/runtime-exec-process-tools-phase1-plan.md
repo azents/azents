@@ -24,7 +24,7 @@ Phase 1 adds the generic metadata foundation required by later exec process tool
 
 ### 1. Reuse shared JSON object type
 
-Use the existing shared `azcommon.types.JSONObject` type for generic tool metadata rather than adding exec-specific payload classes or a duplicate JSON alias.
+Use `azcommon.types.JSONObject` for generic tool metadata.
 
 ### 2. Function tool result metadata
 
