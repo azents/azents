@@ -4,6 +4,7 @@
  */
 import { router } from "../init";
 import { debugRouter } from "./debug";
+import { modelCatalogRouter } from "./modelCatalog";
 import { signupTokenRouter } from "./signupToken";
 import { userRouter } from "./user";
 import { userEmailRouter } from "./userEmail";
@@ -19,6 +20,7 @@ export const appRouter = router({
   workspaceMember: workspaceMemberRouter,
   verification: verificationRouter,
   signupToken: signupTokenRouter,
+  modelCatalog: modelCatalogRouter,
 });
 
 // 클라이언트용 타입 export

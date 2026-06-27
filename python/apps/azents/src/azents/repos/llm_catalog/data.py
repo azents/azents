@@ -83,6 +83,14 @@ class LLMCatalogEntryList:
 
 
 @dataclass(frozen=True)
+class LLMCatalogSnapshotCounts:
+    """Current catalog snapshot count summary."""
+
+    visible_count: int
+    hidden_count: int
+
+
+@dataclass(frozen=True)
 class CatalogNotFound:
     """Catalog does not exist or is outside workspace scope."""
 
