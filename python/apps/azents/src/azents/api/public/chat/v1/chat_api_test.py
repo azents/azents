@@ -15,6 +15,7 @@ from azents.api.public.chat.v1 import (
     _write_command_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_edit_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
+    _write_new_session_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     archive_agent_session,
     create_team_agent_session,
     delete_input_buffer,
@@ -33,6 +34,7 @@ from azents.api.public.chat.v1.data import (
     ChatCommandWriteRequest,
     ChatEditMessageWriteRequest,
     ChatMessageWriteRequest,
+    ChatSessionCreateMessageWriteRequest,
     GoalStatusUpdateRequest,
 )
 from azents.broker.types import (
@@ -64,7 +66,10 @@ from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request.data import ChatWriteRequest
 from azents.repos.input_buffer.data import InputBuffer
-from azents.services.agent_session_input import BufferedAgentSessionInputResult
+from azents.services.agent_session_input import (
+    BufferedAgentSessionInputResult,
+    CreatedAgentSessionInputResult,
+)
 from azents.services.chat.data import (
     ArchiveSessionResult,
     ChatLiveRunState,
@@ -176,9 +181,58 @@ class _BufferedInputService:
         """Return InputBuffer creation result."""
         self.calls.append("create_buffered_agent_input")
         self.kwargs.append(kwargs)
-        message = cast(InputMessage, kwargs["message"])
         session_id = self.target_session_id or str(kwargs["agent_session_id"])
-        input_buffer = InputBuffer(
+        input_buffer = self._input_buffer(kwargs, session_id=session_id)
+        return Success(
+            BufferedAgentSessionInputResult(
+                agent_runtime_id="1123456789abcdef0123456789abcdef",
+                agent_session_id=session_id,
+                input_buffer=input_buffer,
+            )
+        )
+
+    async def create_team_session_with_buffered_input(
+        self,
+        **kwargs: object,
+    ) -> Success[CreatedAgentSessionInputResult]:
+        """Return AgentSession creation with InputBuffer result."""
+        self.calls.append("create_team_session_with_buffered_input")
+        self.kwargs.append(kwargs)
+        session_id = self.target_session_id or "4123456789abcdef0123456789abcdef"
+        input_buffer = self._input_buffer(kwargs, session_id=session_id)
+        return Success(
+            CreatedAgentSessionInputResult(
+                agent_runtime_id="1123456789abcdef0123456789abcdef",
+                agent_session=AgentSession(
+                    id=session_id,
+                    workspace_id="workspace-1",
+                    agent_id=str(kwargs["agent_id"]),
+                    status=AgentSessionStatus.ACTIVE,
+                    start_reason=AgentSessionStartReason.INITIAL,
+                    title=None,
+                    title_source=None,
+                    title_generated_at=None,
+                    title_generation_event_id=None,
+                    last_user_input_at=datetime.datetime(
+                        2026, 6, 5, tzinfo=datetime.UTC
+                    ),
+                    started_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                    created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                    updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                ),
+                input_buffer=input_buffer,
+            )
+        )
+
+    def _input_buffer(
+        self,
+        kwargs: dict[str, object],
+        *,
+        session_id: str,
+    ) -> InputBuffer:
+        """Create an InputBuffer for test responses."""
+        message = cast(InputMessage, kwargs["message"])
+        return InputBuffer(
             id="0123456789abcdef0123456789abcdef",
             session_id=session_id,
             kind=InputBufferKind.USER_MESSAGE,
@@ -190,16 +244,9 @@ class _BufferedInputService:
                 else None
             ),
             metadata={"source": "chat"},
-            attachments=[],
-            file_parts=[],
+            attachments=message.attachments,
+            file_parts=message.file_parts,
             created_at=datetime.datetime(2026, 5, 19, tzinfo=datetime.UTC),
-        )
-        return Success(
-            BufferedAgentSessionInputResult(
-                agent_runtime_id="1123456789abcdef0123456789abcdef",
-                agent_session_id=session_id,
-                input_buffer=input_buffer,
-            )
         )
 
 
@@ -1040,6 +1087,43 @@ class TestRestMessageWriteContract:
         assert response.snapshot.session_run_state == AgentSessionRunState.IDLE
         assert response.history_reload_required is False
         assert broadcast.events[0][1]["type"] == "live_event_upserted"
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+
+    async def test_new_session_message_creates_session_and_returns_snapshot(
+        self,
+    ) -> None:
+        """Draft-session REST write returns the created session id and snapshot."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        chat_service = _RestWriteChatService(
+            session_id="4123456789abcdef0123456789abcdef"
+        )
+        input_service = _BufferedInputService()
+
+        response = await _write_new_session_message_via_rest(
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            ChatSessionCreateMessageWriteRequest(
+                client_request_id="client-new-1",
+                message="hello from draft",
+            ),
+            agent_id="agent-1",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert input_service.calls == ["create_team_session_with_buffered_input"]
+        assert input_service.kwargs[0]["client_request_id"] == "client-new-1"
+        assert response.session_id == "4123456789abcdef0123456789abcdef"
+        assert response.accepted.id == "0123456789abcdef0123456789abcdef"
+        snapshot_buffer = response.snapshot.input_buffer_events[0]
+        assert snapshot_buffer.session_id == response.session_id
+        assert response.history_reload_required is False
+        assert broadcast.events[0][0] == response.session_id
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 

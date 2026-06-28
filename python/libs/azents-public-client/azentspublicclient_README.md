@@ -115,6 +115,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_create_command**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_command) | **POST** /chat/v1/sessions/{session_id}/commands | Create Command
 *ChatV1Api* | [**chat_v1_create_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_message) | **POST** /chat/v1/sessions/{session_id}/messages | Create Message
 *ChatV1Api* | [**chat_v1_create_team_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions | Create Team Agent Session
+*ChatV1Api* | [**chat_v1_create_team_agent_session_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session_message) | **POST** /chat/v1/agents/{agent_id}/sessions/messages | Create Team Agent Session Message
 *ChatV1Api* | [**chat_v1_delete_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_project) | **DELETE** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id} | Delete Agent Project
 *ChatV1Api* | [**chat_v1_delete_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
 *ChatV1Api* | [**chat_v1_delete_input_buffer**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
@@ -279,6 +280,7 @@ Class | Method | HTTP request | Description
  - [ChatGPTOAuthSessionStatus](azentspublicclient/docs/ChatGPTOAuthSessionStatus.md)
  - [ChatLiveRunStateResponse](azentspublicclient/docs/ChatLiveRunStateResponse.md)
  - [ChatMessageWriteRequest](azentspublicclient/docs/ChatMessageWriteRequest.md)
+ - [ChatSessionCreateMessageWriteRequest](azentspublicclient/docs/ChatSessionCreateMessageWriteRequest.md)
  - [ChatStopResponse](azentspublicclient/docs/ChatStopResponse.md)
  - [ChatWriteAcceptedResponse](azentspublicclient/docs/ChatWriteAcceptedResponse.md)
  - [ChatWriteResponse](azentspublicclient/docs/ChatWriteResponse.md)

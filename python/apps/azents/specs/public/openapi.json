@@ -2195,6 +2195,80 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/messages": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Create Team Agent Session Message",
+        "description": "Create a team AgentSession and accept its first message.",
+        "operationId": "chat_v1_create_team_agent_session_message",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Timezone"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatSessionCreateMessageWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatWriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/sessions/{session_id}/edit-message": {
       "post": {
         "tags": [
@@ -9586,6 +9660,44 @@
         ],
         "title": "ChatMessageWriteRequest",
         "description": "REST message write request."
+      },
+      "ChatSessionCreateMessageWriteRequest": {
+        "properties": {
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "description": "Client-generated idempotency key"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Message content"
+          },
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachments",
+            "description": "Attachment reference list, exchange:// URIs received after upload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "client_request_id",
+          "message"
+        ],
+        "title": "ChatSessionCreateMessageWriteRequest",
+        "description": "REST first message write request for a draft AgentSession."
       },
       "ChatStopResponse": {
         "properties": {
