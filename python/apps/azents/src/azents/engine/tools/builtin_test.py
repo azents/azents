@@ -1446,6 +1446,28 @@ class TestProcessToolHandler:
         assert runner_operations.process_write_calls[-1]["yield_time_ms"] == 5000
 
     @pytest.mark.asyncio
+    async def test_write_stdin_rejects_out_of_range_mode_specific_yields(self) -> None:
+        """write_stdin validates mode-specific yield ranges in its input model."""
+        toolkit = _make_toolkit()
+        state = await toolkit.update_context(_make_context())
+        tool = _find_tool(state.tools, "write_stdin")
+
+        with pytest.raises(FunctionToolError, match="empty poll yield_time_ms"):
+            await tool.handler(
+                json.dumps({"process_id": "proc-1", "yield_time_ms": 250})
+            )
+        with pytest.raises(FunctionToolError, match="non-empty write yield_time_ms"):
+            await tool.handler(
+                json.dumps(
+                    {
+                        "process_id": "proc-1",
+                        "chars": "input\n",
+                        "yield_time_ms": 60000,
+                    }
+                )
+            )
+
+    @pytest.mark.asyncio
     async def test_process_tool_schema_documents_codex_yield_defaults(self) -> None:
         """Process tool schemas document Codex-style defaults and ranges."""
         toolkit = _make_toolkit()
@@ -1464,7 +1486,7 @@ class TestProcessToolHandler:
         assert exec_yield["default"] == 10000
         assert exec_yield["minimum"] == 250
         assert exec_yield["maximum"] == 30000
-        assert "effective range is 250-30000 ms" in exec_yield["description"]
+        assert "accepted range is 250-30000 ms" in exec_yield["description"]
         assert write_yield["default"] == 250
         assert write_yield["maximum"] == 300000
         assert "Non-empty writes default to 250 ms" in write_yield["description"]
