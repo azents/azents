@@ -134,8 +134,9 @@ _14 documents_
 - [ADR-0082: Add Agent Workspace File Management Operations](adr/0082-agent-workspace-file-management.md)
 - [ADR-0083: User Stop Terminates Session-Owned Runtime Exec Processes](adr/0083-runtime-exec-user-stop-termination.md)
 - [ADR-0084: Failed-run Error Retry and Finalization](adr/0084-failed-run-error-retry.md)
+- [ADR-0085: Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/0085-deterministic-tool-catalog-and-mcp-snapshots.md)
 
-_85 documents_
+_86 documents_
 
 ## Issues (Bug Tracking)
 
@@ -165,4 +166,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 318
+- Total documents: 319
