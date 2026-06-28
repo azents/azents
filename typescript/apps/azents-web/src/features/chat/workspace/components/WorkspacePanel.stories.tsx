@@ -137,7 +137,9 @@ const readyState: WorkspacePanelState = {
     ],
   },
   fileState: { type: "IDLE" },
+  workspaceView: "browser",
   selectedFilePath: null,
+  selectedPaths: [],
   selectedEntry: null,
   inspectorState: { type: "IDLE" },
   isRefreshing: false,
@@ -149,6 +151,7 @@ const readyState: WorkspacePanelState = {
 
 const fileState: WorkspacePanelState = {
   ...readyState,
+  workspaceView: "preview",
   fileState: {
     type: "LOADED",
     file: {
@@ -200,11 +203,17 @@ const meta = {
     onResetRuntime: noop,
     onOpenDirectory: noop,
     onOpenFile: noop,
+    onShowInfo: noop,
+    onBackToBrowser: noop,
+    onToggleSelectedPath: noop,
+    onClearSelection: noop,
     onRefresh: noop,
     onCreateDirectory: noop,
     onRenamePath: noop,
     onMovePath: noop,
     onDeletePath: noop,
+    onBulkMovePaths: noop,
+    onBulkDeletePaths: noop,
     getDownloadHref: (path: string): string => `/download?path=${path}`,
   },
 } satisfies Meta<typeof WorkspacePanel>;

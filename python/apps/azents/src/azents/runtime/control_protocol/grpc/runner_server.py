@@ -563,6 +563,19 @@ def _copy_operation_payload(
             payload, "owner_session_id"
         )
         return
+    if operation_type == "file.bulk_delete":
+        message.file_bulk_delete.paths.extend(_str_list_payload(payload, "paths"))
+        message.file_bulk_delete.recursive = _bool_payload(payload, "recursive")
+        return
+    if operation_type == "file.bulk_move":
+        message.file_bulk_move.source_paths.extend(
+            _str_list_payload(payload, "source_paths")
+        )
+        message.file_bulk_move.destination_directory = _str_payload(
+            payload, "destination_directory"
+        )
+        message.file_bulk_move.overwrite = _bool_payload(payload, "overwrite")
+        return
 
 
 def _str_payload(payload: dict[str, JsonValue], key: str) -> str:

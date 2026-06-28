@@ -97,6 +97,8 @@ message RunnerOperationRequest {
     FileMkdirOperationPayload file_mkdir = 29;
     FileMoveOperationPayload file_move = 30;
     ProcessTerminateSessionOperationPayload process_terminate_session = 31;
+    FileBulkDeleteOperationPayload file_bulk_delete = 32;
+    FileBulkMoveOperationPayload file_bulk_move = 33;
   }
 }
 
@@ -173,6 +175,17 @@ message ProcessTerminateSessionOperationPayload {
   string owner_session_id = 1;
 }
 
+message FileBulkDeleteOperationPayload {
+  repeated string paths = 1;
+  bool recursive = 2;
+}
+
+message FileBulkMoveOperationPayload {
+  repeated string source_paths = 1;
+  string destination_directory = 2;
+  bool overwrite = 3;
+}
+
 message RunnerBodyChunk {
   uint64 chunk_id = 1;
   bytes data = 2;
@@ -231,6 +244,8 @@ message RunnerOperationFinalSuccessPayload {
     FileDeleteFinalSuccess file_delete = 8;
     FileMkdirFinalSuccess file_mkdir = 9;
     FileMoveFinalSuccess file_move = 10;
+    FileBulkDeleteFinalSuccess file_bulk_delete = 11;
+    FileBulkMoveFinalSuccess file_bulk_move = 12;
   }
 }
 
@@ -283,6 +298,19 @@ message FileMkdirFinalSuccess {
 message FileMoveFinalSuccess {
   string source_path = 1;
   string destination_path = 2;
+}
+
+message FileBulkDeleteFinalSuccess {
+  repeated string paths = 1;
+}
+
+message RuntimeFileMoveEntry {
+  string source_path = 1;
+  string destination_path = 2;
+}
+
+message FileBulkMoveFinalSuccess {
+  repeated RuntimeFileMoveEntry entries = 1;
 }
 
 message FileGrepFinalSuccess {

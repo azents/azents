@@ -4,7 +4,9 @@
 import {
   ActionIcon,
   Box,
+  Checkbox,
   Group,
+  Menu,
   rem,
   ScrollArea,
   Stack,
@@ -18,14 +20,19 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconChevronUp,
+  IconDotsVertical,
+  IconDownload,
+  IconEdit,
   IconFile,
   IconFileCode,
   IconFileDescription,
   IconFileSpreadsheet,
   IconFolder,
   IconFolderOpen,
+  IconInfoCircle,
   IconRefresh,
   IconSearch,
+  IconTrash,
   IconX,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
@@ -40,9 +47,20 @@ interface FileBrowserProps {
   entries: WorkspaceEntry[];
   directoryEntriesByPath: Record<string, WorkspaceEntry[]>;
   selectedFilePath: string | null;
+  selectedPaths: string[];
   isRefreshing: boolean;
+  getDownloadHref: (path: string) => string;
   onOpenDirectory: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onShowInfo: (path: string) => void;
+  onToggleSelectedPath: (path: string) => void;
+  onClearSelection: () => void;
+  onBulkMove: () => void;
+  onBulkDelete: () => void;
+  onCreateDirectory: (basePath: string) => void;
+  onRenamePath: (entry: WorkspaceEntry) => void;
+  onMovePath: (entry: WorkspaceEntry) => void;
+  onDeletePath: (entry: WorkspaceEntry) => void;
   onRefresh: () => void;
 }
 
@@ -186,9 +204,17 @@ interface TreeNodeProps {
   root: string;
   expanded: Set<string>;
   activePath: string | null;
+  selectedPaths: Set<string>;
+  getDownloadHref: (path: string) => string;
   onToggle: (path: string) => void;
   onOpenDirectory: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onShowInfo: (path: string) => void;
+  onToggleSelectedPath: (path: string) => void;
+  onCreateDirectory: (basePath: string) => void;
+  onRenamePath: (entry: WorkspaceEntry) => void;
+  onMovePath: (entry: WorkspaceEntry) => void;
+  onDeletePath: (entry: WorkspaceEntry) => void;
 }
 
 function TreeNode({
@@ -197,28 +223,38 @@ function TreeNode({
   root,
   expanded,
   activePath,
+  selectedPaths,
+  getDownloadHref,
   onToggle,
   onOpenDirectory,
   onOpenFile,
+  onShowInfo,
+  onToggleSelectedPath,
+  onCreateDirectory,
+  onRenamePath,
+  onMovePath,
+  onDeletePath,
 }: TreeNodeProps): React.ReactElement {
+  const t = useTranslations("chat.workspacePanel");
   const theme = useMantineTheme();
   const compact = useMediaQuery(`(min-width: ${theme.breakpoints.lg})`);
   const open = expanded.has(node.path);
   const active = activePath === node.path;
+  const checked = selectedPaths.has(node.path);
   const isDirectory = node.kind === "directory";
   const rowStyle = compact
     ? {
         minHeight: rem(28),
         paddingBottom: rem(3),
         paddingLeft: rem(8 + depth * 14),
-        paddingRight: rem(8),
+        paddingRight: rem(4),
         paddingTop: rem(3),
       }
     : {
         minHeight: rem(34),
         paddingBottom: rem(6),
         paddingLeft: rem(10 + depth * 18),
-        paddingRight: rem(10),
+        paddingRight: rem(6),
         paddingTop: rem(6),
       };
   const iconSize = compact ? "0.875rem" : "1rem";
@@ -252,9 +288,7 @@ function TreeNode({
           background: active
             ? "var(--mantine-color-default-hover)"
             : "transparent",
-          borderLeft: `${rem(2)} solid ${
-            active ? "var(--mantine-color-blue-6)" : "transparent"
-          }`,
+          borderLeft: `${rem(2)} solid ${active ? "var(--mantine-color-blue-6)" : "transparent"}`,
           color: active
             ? "var(--mantine-color-blue-7)"
             : "var(--mantine-color-text)",
@@ -264,6 +298,13 @@ function TreeNode({
           width: "max-content",
         }}
       >
+        <Checkbox
+          size="xs"
+          checked={checked}
+          aria-label={t("selectPath")}
+          onClick={(event) => event.stopPropagation()}
+          onChange={() => onToggleSelectedPath(node.path)}
+        />
         <Box
           c="dimmed"
           w={rem(16)}
@@ -301,6 +342,55 @@ function TreeNode({
         >
           {node.name}
         </Text>
+        <Menu withinPortal position="bottom-end">
+          <Menu.Target>
+            <ActionIcon
+              size="sm"
+              variant="subtle"
+              ml="auto"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <IconDotsVertical size="0.875rem" />
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown onClick={(event) => event.stopPropagation()}>
+            <Menu.Item
+              leftSection={<IconInfoCircle size="0.875rem" />}
+              onClick={() => onShowInfo(node.path)}
+            >
+              {t("fileInfo")}
+            </Menu.Item>
+            {node.kind === "file" && (
+              <Menu.Item
+                component="a"
+                href={getDownloadHref(node.path)}
+                leftSection={<IconDownload size="0.875rem" />}
+              >
+                {t("download")}
+              </Menu.Item>
+            )}
+            {node.kind === "directory" && (
+              <Menu.Item onClick={() => onCreateDirectory(node.path)}>
+                {t("newFolder")}
+              </Menu.Item>
+            )}
+            <Menu.Item
+              leftSection={<IconEdit size="0.875rem" />}
+              onClick={() => onRenamePath(node)}
+            >
+              {t("rename")}
+            </Menu.Item>
+            <Menu.Item onClick={() => onMovePath(node)}>{t("move")}</Menu.Item>
+            <Menu.Divider />
+            <Menu.Item
+              color="red"
+              leftSection={<IconTrash size="0.875rem" />}
+              onClick={() => onDeletePath(node)}
+            >
+              {t("delete")}
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
       </Group>
       {isDirectory && open
         ? node.children?.map((child) => (
@@ -311,9 +401,17 @@ function TreeNode({
               root={root}
               expanded={expanded}
               activePath={activePath}
+              selectedPaths={selectedPaths}
+              getDownloadHref={getDownloadHref}
               onToggle={onToggle}
               onOpenDirectory={onOpenDirectory}
               onOpenFile={onOpenFile}
+              onShowInfo={onShowInfo}
+              onToggleSelectedPath={onToggleSelectedPath}
+              onCreateDirectory={onCreateDirectory}
+              onRenamePath={onRenamePath}
+              onMovePath={onMovePath}
+              onDeletePath={onDeletePath}
             />
           ))
         : null}
@@ -329,9 +427,20 @@ export function FileBrowser({
   entries,
   directoryEntriesByPath,
   selectedFilePath,
+  selectedPaths,
   isRefreshing,
+  getDownloadHref,
   onOpenDirectory,
   onOpenFile,
+  onShowInfo,
+  onToggleSelectedPath,
+  onClearSelection,
+  onBulkMove,
+  onBulkDelete,
+  onCreateDirectory,
+  onRenamePath,
+  onMovePath,
+  onDeletePath,
   onRefresh,
 }: FileBrowserProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
@@ -341,6 +450,10 @@ export function FileBrowser({
     [cwd, directoryEntriesByPath, entries, manifestEntries],
   );
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([cwd]));
+  const selectedPathSet = useMemo(
+    () => new Set(selectedPaths),
+    [selectedPaths],
+  );
 
   useEffect(() => {
     setExpanded((previous) => {
@@ -416,6 +529,30 @@ export function FileBrowser({
           }
           styles={{ input: { border: 0, background: "transparent" } }}
         />
+        <Menu withinPortal position="bottom-end">
+          <Menu.Target>
+            <ActionIcon
+              size="sm"
+              variant="subtle"
+              disabled={selectedPaths.length === 0}
+            >
+              <IconDotsVertical size="0.75rem" />
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>
+              {t("selectedCount", { count: selectedPaths.length })}
+            </Menu.Label>
+            <Menu.Item onClick={onBulkMove}>{t("move")}</Menu.Item>
+            <Menu.Item color="red" onClick={onBulkDelete}>
+              {t("delete")}
+            </Menu.Item>
+            <Menu.Divider />
+            <Menu.Item onClick={onClearSelection}>
+              {t("clearSelection")}
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
         <Tooltip label={t("expandAll")}>
           <ActionIcon size="sm" variant="subtle" onClick={handleExpandAll}>
             <IconChevronDown size="0.75rem" />
@@ -475,9 +612,17 @@ export function FileBrowser({
                 root={root}
                 expanded={effectiveExpanded}
                 activePath={activePath}
+                selectedPaths={selectedPathSet}
+                getDownloadHref={getDownloadHref}
                 onToggle={handleToggle}
                 onOpenDirectory={onOpenDirectory}
                 onOpenFile={onOpenFile}
+                onShowInfo={onShowInfo}
+                onToggleSelectedPath={onToggleSelectedPath}
+                onCreateDirectory={onCreateDirectory}
+                onRenamePath={onRenamePath}
+                onMovePath={onMovePath}
+                onDeletePath={onDeletePath}
               />
             ))
           )}

@@ -652,6 +652,67 @@ async def test_process_terminate_session_terminates_only_owned_processes(
     assert client.events[-1].payload["status"] == "running"
 
 
+@pytest.mark.asyncio
+async def test_file_bulk_delete_removes_multiple_files(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("a")
+    (tmp_path / "b.txt").write_text("b")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.bulk_delete",
+            payload={"paths": ["a.txt", "b.txt"], "recursive": False},
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    assert client.events[-1].payload == {
+        "deleted_paths": [f"{tmp_path}/a.txt", f"{tmp_path}/b.txt"]
+    }
+    assert not (tmp_path / "a.txt").exists()
+    assert not (tmp_path / "b.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_file_bulk_move_moves_multiple_files_into_directory(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a.txt").write_text("a")
+    (tmp_path / "b.txt").write_text("b")
+    (tmp_path / "archive").mkdir()
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.bulk_move",
+            payload={
+                "source_paths": ["a.txt", "b.txt"],
+                "destination_directory": "archive",
+                "overwrite": False,
+            },
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    assert client.events[-1].payload == {
+        "moved_entries": [
+            {
+                "source_path": f"{tmp_path}/a.txt",
+                "destination_path": f"{tmp_path}/archive/a.txt",
+            },
+            {
+                "source_path": f"{tmp_path}/b.txt",
+                "destination_path": f"{tmp_path}/archive/b.txt",
+            },
+        ]
+    }
+    assert not (tmp_path / "a.txt").exists()
+    assert (tmp_path / "archive" / "a.txt").read_text() == "a"
+    assert (tmp_path / "archive" / "b.txt").read_text() == "b"
+
+
 def _operation(
     *,
     operation_type: str,

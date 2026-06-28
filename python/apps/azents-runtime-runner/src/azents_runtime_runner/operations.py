@@ -212,6 +212,12 @@ class RunnerOperations:
             if operation.operation_type == "process.terminate_session":
                 await self._process_terminate_session(operation)
                 return
+            if operation.operation_type == "file.bulk_delete":
+                await self._file_bulk_delete(operation)
+                return
+            if operation.operation_type == "file.bulk_move":
+                await self._file_bulk_move(operation)
+                return
             await self._final_error(
                 operation,
                 "UNSUPPORTED_OPERATION",
@@ -483,6 +489,144 @@ class RunnerOperations:
                 ),
             },
         )
+
+    async def _file_bulk_delete(self, operation: RunnerOperationEnvelope) -> None:
+        paths: list[Path] = []
+        for raw_path in _str_list_payload(operation.payload, "paths"):
+            try:
+                paths.append(_resolve_lexical_path(raw_path, workspace=self._workspace))
+            except ValueError as exc:
+                await self._final_error(operation, "INVALID_PATH", str(exc))
+                return
+        if not paths:
+            await self._final_error(operation, "INVALID_PAYLOAD", "paths is required")
+            return
+        recursive = _bool_payload(operation.payload, "recursive", default=False)
+        stats: list[tuple[Path, os.stat_result]] = []
+        try:
+            for path in paths:
+                stats.append((path, path.lstat()))
+        except FileNotFoundError as exc:
+            await self._final_error(operation, "NOT_FOUND", str(exc))
+            return
+        except OSError as exc:
+            await self._final_error(operation, "DELETE_FAILED", str(exc))
+            return
+        for path, stat_result in stats:
+            if (
+                stat_module.S_ISDIR(stat_result.st_mode)
+                and not stat_module.S_ISLNK(stat_result.st_mode)
+                and not recursive
+            ):
+                await self._final_error(
+                    operation,
+                    "DIRECTORY_RECURSIVE_REQUIRED",
+                    f"Directory delete requires recursive=true: {path}",
+                )
+                return
+        deleted_paths: list[JsonValue] = []
+        try:
+            for path, stat_result in stats:
+                if stat_module.S_ISDIR(stat_result.st_mode) and not stat_module.S_ISLNK(
+                    stat_result.st_mode
+                ):
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+                deleted_paths.append(self._workspace.display_path(path))
+        except FileNotFoundError as exc:
+            await self._final_error(operation, "NOT_FOUND", str(exc))
+            return
+        except OSError as exc:
+            await self._final_error(operation, "DELETE_FAILED", str(exc))
+            return
+        await self._final_success(operation, {"deleted_paths": deleted_paths})
+
+    async def _file_bulk_move(self, operation: RunnerOperationEnvelope) -> None:
+        source_paths: list[Path] = []
+        for raw_path in _str_list_payload(operation.payload, "source_paths"):
+            try:
+                source_paths.append(
+                    _resolve_lexical_path(raw_path, workspace=self._workspace)
+                )
+            except ValueError as exc:
+                await self._final_error(operation, "INVALID_PATH", str(exc))
+                return
+        if not source_paths:
+            await self._final_error(
+                operation, "INVALID_PAYLOAD", "source_paths is required"
+            )
+            return
+        try:
+            destination_directory = _resolve_lexical_path(
+                operation.payload.get("destination_directory"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        overwrite = _bool_payload(operation.payload, "overwrite", default=False)
+        if not destination_directory.exists():
+            await self._final_error(
+                operation,
+                "PARENT_NOT_FOUND",
+                f"Destination directory does not exist: {destination_directory}",
+            )
+            return
+        if not destination_directory.is_dir():
+            await self._final_error(
+                operation,
+                "PARENT_NOT_DIRECTORY",
+                f"Destination path is not a directory: {destination_directory}",
+            )
+            return
+        seen_destinations: set[Path] = set()
+        moves: list[tuple[Path, Path]] = []
+        for source_path in source_paths:
+            if not source_path.exists() and not source_path.is_symlink():
+                await self._final_error(
+                    operation, "NOT_FOUND", f"No such file: {source_path}"
+                )
+                return
+            destination_path = destination_directory / source_path.name
+            if destination_path in seen_destinations:
+                await self._final_error(
+                    operation,
+                    "DESTINATION_EXISTS",
+                    f"Duplicate destination: {destination_path}",
+                )
+                return
+            seen_destinations.add(destination_path)
+            if destination_path.exists() or destination_path.is_symlink():
+                if not overwrite:
+                    await self._final_error(
+                        operation,
+                        "DESTINATION_EXISTS",
+                        f"Destination already exists: {destination_path}",
+                    )
+                    return
+            moves.append((source_path, destination_path))
+        moved_entries: list[JsonValue] = []
+        try:
+            for source_path, destination_path in moves:
+                if destination_path.exists() or destination_path.is_symlink():
+                    if destination_path.is_dir() and not destination_path.is_symlink():
+                        shutil.rmtree(destination_path)
+                    else:
+                        destination_path.unlink()
+                shutil.move(str(source_path), str(destination_path))
+                moved_entries.append(
+                    {
+                        "source_path": self._workspace.display_path(source_path),
+                        "destination_path": self._workspace.display_path(
+                            destination_path
+                        ),
+                    }
+                )
+        except OSError as exc:
+            await self._final_error(operation, "MOVE_FAILED", str(exc))
+            return
+        await self._final_success(operation, {"moved_entries": moved_entries})
 
     async def _file_grep(self, operation: RunnerOperationEnvelope) -> None:
         try:

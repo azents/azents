@@ -3734,6 +3734,122 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/workspace/files/bulk": {
+      "delete": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Bulk Delete Agent Workspace Paths",
+        "description": "Delete multiple Agent Workspace files or directories.",
+        "operationId": "chat_v1_bulk_delete_agent_workspace_paths",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWorkspaceBulkDeleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWorkspaceBulkDeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/workspace/move/bulk": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Bulk Move Agent Workspace Paths",
+        "description": "Move multiple Agent Workspace files or directories.",
+        "operationId": "chat_v1_bulk_move_agent_workspace_paths",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWorkspaceBulkMoveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWorkspaceBulkMoveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/workspace/download": {
       "get": {
         "tags": [
@@ -8671,6 +8787,96 @@
         "type": "object",
         "title": "AgentWorkspaceActionsResponse",
         "description": "Agent Runtime lifecycle action set response."
+      },
+      "AgentWorkspaceBulkDeleteRequest": {
+        "properties": {
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Paths",
+            "description": "File or directory paths to delete"
+          },
+          "recursive": {
+            "type": "boolean",
+            "title": "Recursive",
+            "description": "Delete directories recursively",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "paths"
+        ],
+        "title": "AgentWorkspaceBulkDeleteRequest",
+        "description": "Agent Workspace bulk delete request."
+      },
+      "AgentWorkspaceBulkDeleteResponse": {
+        "properties": {
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Paths",
+            "description": "Deleted paths"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paths"
+        ],
+        "title": "AgentWorkspaceBulkDeleteResponse",
+        "description": "Agent Workspace bulk delete response."
+      },
+      "AgentWorkspaceBulkMoveRequest": {
+        "properties": {
+          "source_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Paths",
+            "description": "Source paths"
+          },
+          "destination_directory": {
+            "type": "string",
+            "title": "Destination Directory",
+            "description": "Destination directory"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "description": "Overwrite existing destinations",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_paths",
+          "destination_directory"
+        ],
+        "title": "AgentWorkspaceBulkMoveRequest",
+        "description": "Agent Workspace bulk move request."
+      },
+      "AgentWorkspaceBulkMoveResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/AgentWorkspaceMoveResponse"
+            },
+            "type": "array",
+            "title": "Entries",
+            "description": "Moved entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "AgentWorkspaceBulkMoveResponse",
+        "description": "Agent Workspace bulk move response."
       },
       "AgentWorkspaceConnectingAccessResponse": {
         "properties": {

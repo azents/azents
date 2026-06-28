@@ -1,10 +1,6 @@
 "use client";
 
-/**
- * Workspace panel container hook.
- *
- * tRPC call, selected path, runtime lifecycle mutation  owns and UI ADT  with convert..
- */
+/** Workspace panel container hook. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import {
@@ -33,11 +29,17 @@ export interface WorkspacePanelContainerOutput {
   onResetRuntime: () => void;
   onOpenDirectory: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onShowInfo: (path: string) => void;
+  onBackToBrowser: () => void;
+  onToggleSelectedPath: (path: string) => void;
+  onClearSelection: () => void;
   onRefresh: () => void;
   onCreateDirectory: (path: string) => void;
   onRenamePath: (sourcePath: string, newName: string) => void;
   onMovePath: (sourcePath: string, destinationPath: string) => void;
   onDeletePath: (path: string, recursive: boolean) => void;
+  onBulkMovePaths: (destinationDirectory: string) => void;
+  onBulkDeletePaths: (recursive: boolean) => void;
   getDownloadHref: (path: string) => string;
   onRegisterProjectPathChange: (path: string) => void;
   onRegisterProject: () => void;
@@ -53,6 +55,10 @@ function getErrorMessage(error: unknown): string {
   return "Workspace request failed.";
 }
 
+function parentPath(path: string): string {
+  return path.slice(0, Math.max(0, path.lastIndexOf("/")));
+}
+
 export function useWorkspacePanelContainer({
   handle,
   agentId,
@@ -61,7 +67,11 @@ export function useWorkspacePanelContainer({
   const [currentDirectoryPath, setCurrentDirectoryPath] = useState<
     string | null
   >(null);
+  const [workspaceView, setWorkspaceView] = useState<
+    "browser" | "preview" | "info"
+  >("browser");
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [directoryEntriesByPath, setDirectoryEntriesByPath] = useState<
     Record<string, WorkspaceEntry[]>
   >({});
@@ -84,6 +94,8 @@ export function useWorkspacePanelContainer({
   useEffect(() => {
     setCurrentDirectoryPath(null);
     setSelectedFilePath(null);
+    setSelectedPaths([]);
+    setWorkspaceView("browser");
     setDirectoryEntriesByPath({});
   }, [agentId, sessionId]);
 
@@ -106,7 +118,6 @@ export function useWorkspacePanelContainer({
     agentId,
     sessionId,
   });
-
   const registrationRequestsQuery =
     trpc.chat.listAgentProjectRegistrationRequests.useQuery({
       agentId,
@@ -140,11 +151,7 @@ export function useWorkspacePanelContainer({
   }, [manifest]);
 
   const directoryQuery = trpc.chat.readAgentWorkspacePath.useQuery(
-    {
-      agentId,
-      sessionId,
-      path: activeDirectoryPath,
-    },
+    { agentId, sessionId, path: activeDirectoryPath },
     {
       enabled:
         workspaceQuery.data?.workspace.type === "READY" &&
@@ -166,28 +173,23 @@ export function useWorkspacePanelContainer({
   }, [directoryEntriesByPath, selectedFilePath]);
 
   const fileQuery = trpc.chat.readAgentWorkspacePath.useQuery(
-    {
-      agentId,
-      sessionId,
-      path: selectedFilePath ?? "",
-    },
+    { agentId, sessionId, path: selectedFilePath ?? "" },
     {
       enabled:
         workspaceQuery.data?.workspace.type === "READY" &&
         selectedFilePath !== null &&
-        selectedEntry?.kind === "file",
+        selectedEntry?.kind === "file" &&
+        workspaceView === "preview",
     },
   );
 
   const statQuery = trpc.chat.statAgentWorkspacePath.useQuery(
-    {
-      agentId,
-      path: selectedFilePath ?? "",
-    },
+    { agentId, path: selectedFilePath ?? "" },
     {
       enabled:
         workspaceQuery.data?.workspace.type === "READY" &&
-        selectedFilePath !== null,
+        selectedFilePath !== null &&
+        workspaceView === "info",
     },
   );
 
@@ -218,19 +220,49 @@ export function useWorkspacePanelContainer({
     onSuccess: async (_data, variables) => {
       if (selectedFilePath === variables.path) {
         setSelectedFilePath(null);
+        setWorkspaceView("browser");
       }
+      setSelectedPaths((previous) =>
+        previous.filter((path) => path !== variables.path),
+      );
       await invalidateWorkspaceFiles(variables.path);
     },
   });
+
+  const bulkDeletePathsMutation =
+    trpc.chat.bulkDeleteAgentWorkspacePaths.useMutation({
+      onSuccess: async (_data, variables) => {
+        if (selectedFilePath && variables.paths.includes(selectedFilePath)) {
+          setSelectedFilePath(null);
+          setWorkspaceView("browser");
+        }
+        setSelectedPaths([]);
+        await invalidateWorkspaceFiles();
+      },
+    });
 
   const movePathMutation = trpc.chat.moveAgentWorkspacePath.useMutation({
     onSuccess: async (_data, variables) => {
       if (selectedFilePath === variables.sourcePath) {
         setSelectedFilePath(variables.destinationPath);
       }
+      setSelectedPaths((previous) =>
+        previous.map((path) =>
+          path === variables.sourcePath ? variables.destinationPath : path,
+        ),
+      );
       await invalidateWorkspaceFiles(variables.destinationPath);
     },
   });
+
+  const bulkMovePathsMutation =
+    trpc.chat.bulkMoveAgentWorkspacePaths.useMutation({
+      onSuccess: async () => {
+        setSelectedPaths([]);
+        setWorkspaceView("browser");
+        await invalidateWorkspaceFiles();
+      },
+    });
 
   const startRuntimeMutation = trpc.chat.startAgentRuntime.useMutation({
     onSuccess: async (_data, variables) => {
@@ -241,9 +273,15 @@ export function useWorkspacePanelContainer({
     },
   });
 
+  const clearWorkspaceSelection = useCallback(() => {
+    setSelectedFilePath(null);
+    setSelectedPaths([]);
+    setWorkspaceView("browser");
+  }, []);
+
   const stopRuntimeMutation = trpc.chat.stopAgentRuntime.useMutation({
     onSuccess: async (_data, variables) => {
-      setSelectedFilePath(null);
+      clearWorkspaceSelection();
       setCurrentDirectoryPath(null);
       await utils.chat.getAgentWorkspace.invalidate({
         agentId: variables.agentId,
@@ -254,7 +292,7 @@ export function useWorkspacePanelContainer({
 
   const restartRuntimeMutation = trpc.chat.restartAgentRuntime.useMutation({
     onSuccess: async (_data, variables) => {
-      setSelectedFilePath(null);
+      clearWorkspaceSelection();
       setCurrentDirectoryPath(null);
       setDirectoryEntriesByPath({});
       await utils.chat.getAgentWorkspace.invalidate({
@@ -266,7 +304,7 @@ export function useWorkspacePanelContainer({
 
   const resetRuntimeMutation = trpc.chat.resetAgentRuntime.useMutation({
     onSuccess: async (_data, variables) => {
-      setSelectedFilePath(null);
+      clearWorkspaceSelection();
       setCurrentDirectoryPath(null);
       setDirectoryEntriesByPath({});
       await utils.chat.getAgentWorkspace.invalidate({
@@ -281,9 +319,7 @@ export function useWorkspacePanelContainer({
       setRegisterProjectError(null);
       await utils.chat.listAgentProjects.invalidate({ agentId, sessionId });
     },
-    onError: (error) => {
-      setRegisterProjectError(error.message);
-    },
+    onError: (error) => setRegisterProjectError(error.message),
   });
 
   const approveRegistrationRequestMutation =
@@ -298,9 +334,7 @@ export function useWorkspacePanelContainer({
           }),
         ]);
       },
-      onError: () => {
-        setPendingApproveRequestId(null);
-      },
+      onError: () => setPendingApproveRequestId(null),
     });
 
   const rejectRegistrationRequestMutation =
@@ -312,9 +346,7 @@ export function useWorkspacePanelContainer({
           sessionId,
         });
       },
-      onError: () => {
-        setPendingRejectRequestId(null);
-      },
+      onError: () => setPendingRejectRequestId(null),
     });
 
   const deleteProjectMutation = trpc.chat.deleteAgentProject.useMutation({
@@ -322,50 +354,59 @@ export function useWorkspacePanelContainer({
       setPendingDeleteProjectId(null);
       await utils.chat.listAgentProjects.invalidate({ agentId, sessionId });
     },
-    onError: () => {
-      setPendingDeleteProjectId(null);
-    },
+    onError: () => setPendingDeleteProjectId(null),
   });
 
-  const onStartRuntime = useCallback(() => {
-    startRuntimeMutation.mutate({ handle, agentId });
-  }, [agentId, handle, startRuntimeMutation]);
-
-  const onStopRuntime = useCallback(() => {
-    stopRuntimeMutation.mutate({ handle, agentId });
-  }, [agentId, handle, stopRuntimeMutation]);
-
-  const onRestartRuntime = useCallback(() => {
-    restartRuntimeMutation.mutate({ handle, agentId });
-  }, [agentId, handle, restartRuntimeMutation]);
-
-  const onResetRuntime = useCallback(() => {
-    resetRuntimeMutation.mutate({ handle, agentId });
-  }, [agentId, handle, resetRuntimeMutation]);
+  const onStartRuntime = useCallback(
+    () => startRuntimeMutation.mutate({ handle, agentId }),
+    [agentId, handle, startRuntimeMutation],
+  );
+  const onStopRuntime = useCallback(
+    () => stopRuntimeMutation.mutate({ handle, agentId }),
+    [agentId, handle, stopRuntimeMutation],
+  );
+  const onRestartRuntime = useCallback(
+    () => restartRuntimeMutation.mutate({ handle, agentId }),
+    [agentId, handle, restartRuntimeMutation],
+  );
+  const onResetRuntime = useCallback(
+    () => resetRuntimeMutation.mutate({ handle, agentId }),
+    [agentId, handle, resetRuntimeMutation],
+  );
 
   const onOpenDirectory = useCallback((path: string) => {
     setCurrentDirectoryPath(path);
-    setSelectedFilePath(null);
+    setSelectedFilePath(path);
+    setWorkspaceView("browser");
   }, []);
 
   const onOpenFile = useCallback((path: string) => {
     setSelectedFilePath(path);
+    setWorkspaceView("preview");
+  }, []);
+
+  const onShowInfo = useCallback((path: string) => {
+    setSelectedFilePath(path);
+    setWorkspaceView("info");
+  }, []);
+
+  const onToggleSelectedPath = useCallback((path: string) => {
+    setSelectedPaths((previous) =>
+      previous.includes(path)
+        ? previous.filter((value) => value !== path)
+        : [...previous, path],
+    );
   }, []);
 
   const onCreateDirectory = useCallback(
-    (path: string) => {
-      createDirectoryMutation.mutate({ agentId, path, parents: false });
-    },
+    (path: string) =>
+      createDirectoryMutation.mutate({ agentId, path, parents: false }),
     [agentId, createDirectoryMutation],
   );
 
   const onRenamePath = useCallback(
     (sourcePath: string, newName: string) => {
-      const parent = sourcePath.slice(
-        0,
-        Math.max(0, sourcePath.lastIndexOf("/")),
-      );
-      const destinationPath = `${parent}/${newName}`;
+      const destinationPath = `${parentPath(sourcePath)}/${newName}`;
       movePathMutation.mutate({
         agentId,
         sourcePath,
@@ -389,10 +430,38 @@ export function useWorkspacePanelContainer({
   );
 
   const onDeletePath = useCallback(
-    (path: string, recursive: boolean) => {
-      deletePathMutation.mutate({ agentId, path, recursive });
-    },
+    (path: string, recursive: boolean) =>
+      deletePathMutation.mutate({ agentId, path, recursive }),
     [agentId, deletePathMutation],
+  );
+
+  const onBulkMovePaths = useCallback(
+    (destinationDirectory: string) => {
+      if (selectedPaths.length === 0) {
+        return;
+      }
+      bulkMovePathsMutation.mutate({
+        agentId,
+        sourcePaths: selectedPaths,
+        destinationDirectory,
+        overwrite: false,
+      });
+    },
+    [agentId, bulkMovePathsMutation, selectedPaths],
+  );
+
+  const onBulkDeletePaths = useCallback(
+    (recursive: boolean) => {
+      if (selectedPaths.length === 0) {
+        return;
+      }
+      bulkDeletePathsMutation.mutate({
+        agentId,
+        paths: selectedPaths,
+        recursive,
+      });
+    },
+    [agentId, bulkDeletePathsMutation, selectedPaths],
   );
 
   const onRefresh = useCallback(() => {
@@ -405,22 +474,19 @@ export function useWorkspacePanelContainer({
         agentId,
         sessionId,
       }),
-    ]).finally(() => {
-      setIsManualRefreshing(false);
-    });
+    ]).finally(() => setIsManualRefreshing(false));
   }, [
     agentId,
+    sessionId,
     utils.chat.getAgentWorkspace,
     utils.chat.listAgentProjectRegistrationRequests,
-    sessionId,
     utils.chat.listAgentProjects,
     utils.chat.readAgentWorkspacePath,
   ]);
 
   const getDownloadHref = useCallback(
-    (path: string): string => {
-      return `/api/chat/agents/${encodeURIComponent(agentId)}/workspace/download?path=${encodeURIComponent(path)}`;
-    },
+    (path: string): string =>
+      `/api/chat/agents/${encodeURIComponent(agentId)}/workspace/download?path=${encodeURIComponent(path)}`,
     [agentId],
   );
 
@@ -495,17 +561,18 @@ export function useWorkspacePanelContainer({
       : null;
     const directory =
       manifest && mappedDirectory?.type === "DIRECTORY"
-        ? {
-            path: mappedDirectory.path,
-            entries: mappedDirectory.entries,
-          }
+        ? { path: mappedDirectory.path, entries: mappedDirectory.entries }
         : {
             path: activeDirectoryPath || manifest?.cwd || "",
             entries: manifest?.entries ?? [],
           };
 
     const fileState = (() => {
-      if (!selectedFilePath || selectedEntry?.kind !== "file") {
+      if (
+        !selectedFilePath ||
+        selectedEntry?.kind !== "file" ||
+        workspaceView !== "preview"
+      ) {
         return { type: "IDLE" } as const;
       }
       if (fileQuery.isLoading) {
@@ -521,10 +588,9 @@ export function useWorkspacePanelContainer({
         return { type: "LOADING", path: selectedFilePath } as const;
       }
       const mappedFile = mapWorkspacePathResult(fileQuery.data);
-      if (mappedFile.type === "FILE") {
-        return { type: "LOADED", file: mappedFile.file } as const;
-      }
-      return { type: "IDLE" } as const;
+      return mappedFile.type === "FILE"
+        ? ({ type: "LOADED", file: mappedFile.file } as const)
+        : ({ type: "IDLE" } as const);
     })();
 
     return {
@@ -534,10 +600,12 @@ export function useWorkspacePanelContainer({
       directory,
       directoryEntriesByPath,
       fileState,
+      workspaceView,
       selectedFilePath,
       selectedEntry,
+      selectedPaths,
       inspectorState: (() => {
-        if (!selectedFilePath) {
+        if (!selectedFilePath || workspaceView !== "info") {
           return { type: "IDLE" } as const;
         }
         if (statQuery.isLoading) {
@@ -561,7 +629,9 @@ export function useWorkspacePanelContainer({
       isMutating:
         createDirectoryMutation.isPending ||
         deletePathMutation.isPending ||
-        movePathMutation.isPending,
+        bulkDeletePathsMutation.isPending ||
+        movePathMutation.isPending ||
+        bulkMovePathsMutation.isPending,
       isStarting:
         startRuntimeMutation.isPending ||
         restartRuntimeMutation.isPending ||
@@ -572,32 +642,36 @@ export function useWorkspacePanelContainer({
     };
   }, [
     activeDirectoryPath,
+    bulkDeletePathsMutation.isPending,
+    bulkMovePathsMutation.isPending,
+    createDirectoryMutation.isPending,
+    deletePathMutation.isPending,
+    directoryEntriesByPath,
     directoryQuery.data,
     directoryQuery.isFetching,
-    directoryEntriesByPath,
     fileQuery.data,
     fileQuery.error,
     fileQuery.isError,
     fileQuery.isLoading,
     isManualRefreshing,
     manifest,
+    movePathMutation.isPending,
+    resetRuntimeMutation.isPending,
+    restartRuntimeMutation.isPending,
     selectedEntry,
     selectedFilePath,
+    selectedPaths,
+    startRuntimeMutation.isPending,
     statQuery.data,
     statQuery.error,
     statQuery.isError,
     statQuery.isLoading,
-    createDirectoryMutation.isPending,
-    deletePathMutation.isPending,
-    movePathMutation.isPending,
-    restartRuntimeMutation.isPending,
-    startRuntimeMutation.isPending,
     stopRuntimeMutation.isPending,
-    resetRuntimeMutation.isPending,
     workspaceQuery.data,
     workspaceQuery.error,
     workspaceQuery.isError,
     workspaceQuery.isLoading,
+    workspaceView,
   ]);
 
   const projectState = useMemo<WorkspaceProjectPanelState>(() => {
@@ -650,11 +724,17 @@ export function useWorkspacePanelContainer({
     onResetRuntime,
     onOpenDirectory,
     onOpenFile,
+    onShowInfo,
+    onBackToBrowser: () => setWorkspaceView("browser"),
+    onToggleSelectedPath,
+    onClearSelection: () => setSelectedPaths([]),
     onRefresh,
     onCreateDirectory,
     onRenamePath,
     onMovePath,
     onDeletePath,
+    onBulkMovePaths,
+    onBulkDeletePaths,
     getDownloadHref,
     onRegisterProjectPathChange: setRegisterProjectPath,
     onRegisterProject,

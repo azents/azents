@@ -40,6 +40,8 @@ from azents.services.chat.workspace import (
     AgentWorkspaceAccessUnavailable,
     AgentWorkspaceAction,
     AgentWorkspaceActions,
+    AgentWorkspaceBulkDeleteResult,
+    AgentWorkspaceBulkMoveResult,
     AgentWorkspaceControlUnavailable,
     AgentWorkspaceDirectory,
     AgentWorkspaceEntry,
@@ -698,12 +700,29 @@ class AgentWorkspaceDeleteRequest(BaseModel):
     recursive: bool = Field(default=False, description="Delete directories recursively")
 
 
+class AgentWorkspaceBulkDeleteRequest(BaseModel):
+    """Agent Workspace bulk delete request."""
+
+    paths: list[str] = Field(description="File or directory paths to delete")
+    recursive: bool = Field(default=False, description="Delete directories recursively")
+
+
 class AgentWorkspaceMoveRequest(BaseModel):
     """Agent Workspace move request."""
 
     source_path: str = Field(description="Source path")
     destination_path: str = Field(description="Destination path")
     overwrite: bool = Field(default=False, description="Overwrite existing destination")
+
+
+class AgentWorkspaceBulkMoveRequest(BaseModel):
+    """Agent Workspace bulk move request."""
+
+    source_paths: list[str] = Field(description="Source paths")
+    destination_directory: str = Field(description="Destination directory")
+    overwrite: bool = Field(
+        default=False, description="Overwrite existing destinations"
+    )
 
 
 class AgentWorkspaceMutationResponse(BaseModel):
@@ -729,6 +748,30 @@ class AgentWorkspaceMoveResponse(BaseModel):
         return cls(
             source_path=result.source_path,
             destination_path=result.destination_path,
+        )
+
+
+class AgentWorkspaceBulkDeleteResponse(BaseModel):
+    """Agent Workspace bulk delete response."""
+
+    paths: list[str] = Field(description="Deleted paths")
+
+    @classmethod
+    def from_domain(cls, result: AgentWorkspaceBulkDeleteResult) -> Self:
+        """Convert from service model."""
+        return cls(paths=result.paths)
+
+
+class AgentWorkspaceBulkMoveResponse(BaseModel):
+    """Agent Workspace bulk move response."""
+
+    entries: list[AgentWorkspaceMoveResponse] = Field(description="Moved entries")
+
+    @classmethod
+    def from_domain(cls, result: AgentWorkspaceBulkMoveResult) -> Self:
+        """Convert from service model."""
+        return cls(
+            entries=[AgentWorkspaceMoveResponse.from_domain(e) for e in result.entries]
         )
 
 

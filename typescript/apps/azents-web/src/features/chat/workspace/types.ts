@@ -81,8 +81,10 @@ export type WorkspacePanelState =
       directory: { path: string; entries: WorkspaceEntry[] };
       directoryEntriesByPath: Record<string, WorkspaceEntry[]>;
       fileState: WorkspaceFileState;
+      workspaceView: "browser" | "preview" | "info";
       selectedFilePath: string | null;
       selectedEntry: WorkspaceEntry | null;
+      selectedPaths: string[];
       inspectorState:
         | { type: "IDLE" }
         | { type: "LOADING"; path: string }
