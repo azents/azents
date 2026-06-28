@@ -151,6 +151,45 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
     assert request.tools == catalog.native_tools
 
 
+async def test_native_tools_are_sorted_by_function_name() -> None:
+    """Canonicalize provider-facing native tool order by function name."""
+    tools = [
+        FunctionTool(
+            spec=FunctionToolSpec(
+                name=name,
+                description=f"{name} tool.",
+                input_schema={"type": "object"},
+            ),
+            handler=_echo,
+        )
+        for name in ["zeta", "alpha", "middle"]
+    ]
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(tool),
+                slug="",
+                use_prefix=False,
+            )
+            for tool in tools
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    assert [tool["name"] for tool in catalog.native_tools] == [
+        "alpha",
+        "middle",
+        "zeta",
+    ]
+
+
 async def test_client_tool_executor_returns_event_result() -> None:
     """Convert Tool handler result to event client_tool_result."""
     catalog = await build_tool_catalog(

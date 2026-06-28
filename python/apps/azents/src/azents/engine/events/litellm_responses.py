@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import datetime
 import hashlib
+import json
 import os
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Sequence
 from typing import Any, Protocol, cast, runtime_checkable
@@ -508,7 +509,14 @@ def _lower_hosted_tools(
         model_developer=model_developer,
     )
 
-    for tool in hosted_tools:
+    for tool in sorted(
+        hosted_tools,
+        key=lambda item: (
+            item.name,
+            bool(item.config),
+            json.dumps(item.config, sort_keys=True, separators=(",", ":")),
+        ),
+    ):
         if tool.name != "web_search":
             continue
         if tool.name not in supported:

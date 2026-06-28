@@ -33,8 +33,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-06-28
-spec_version: 37
+last_verified_at: 2026-06-29
+spec_version: 38
 ---
 
 # Toolkit
@@ -117,6 +117,8 @@ github__azents__get_file_contents
 
 The slug prefix is only a tool-call namespace. Toolkit State uses its own `toolkit_namespace` field and is not derived automatically from the model-visible tool name.
 
+Final provider-facing client tools are canonicalized by model-visible tool name before lowering to the model request. Toolkit-local generation may use whatever construction order is convenient, but `ToolCatalog.native_tools` is name-sorted so identical toolkit configuration and identical successful toolkit state produce stable function-tool ordering. Provider-hosted tools are also sorted by stable semantic name/config before request lowering when more than one hosted tool is present.
+
 ### Toolkit CRUD / Setup UI
 
 azents-web provides workspace-scoped toolkit management screens.
@@ -173,6 +175,20 @@ Runtime loads `mcp_oauth_connections` by `toolkit_id`, refreshes near-expiry tok
 
 Toolkit config responses include an `oauth_connection` summary for UI status/actions. The toolkit edit page exposes connect/reconnect/disconnect actions for generic MCP OAuth, Notion, and Sentry.
 
+### MCP Tool Snapshot Lifecycle
+
+MCP-backed toolkits must keep `list_tools` discovery off the normal run preparation critical path.
+
+- `update_context()` reads the latest successful session-bound Toolkit State snapshot and returns immediately.
+- If no successful snapshot exists, the toolkit exposes no MCP tools.
+- Background refresh lists tools, sorts them deterministically, builds a complete serializable snapshot, then atomically replaces the stored snapshot.
+- Refresh failure keeps the previous successful snapshot unchanged. If there is no previous snapshot, no tools are exposed.
+- Loading, retry, setup, and status pseudo-tools are not model-visible MCP availability controls.
+- MCP loading/error text is not injected into Toolkit prompts.
+- Generic MCP, Notion, and Sentry use the common MCP snapshot lifecycle. AWS, GCP, and GitHub MCP wrapper paths follow the same non-blocking/no-loading-prompt exposure contract and sort component/tool output deterministically.
+
+Snapshot payload stores only serializable tool metadata needed to rebuild model-visible wrappers, including raw MCP name, model-visible name, description, input schema, server URL, transport mode, loaded timestamp, and a stable tool hash. Runtime-only objects such as background tasks, auth callbacks, SigV4 auth, token providers, and artifact sinks stay in process memory.
+
 ### Credential Isolation
 
 Strong invariant: **raw credential is never exposed in agent prompt**.
@@ -191,7 +207,7 @@ Shell is composed of the builtin/runtime toolkit (`exec_command` / `write_stdin`
 - Shell file tools guide LLM-facing path surface for durable working files under Provider-reported Agent Workspace and temporary files under `/tmp/**`. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
 - `grep` file tool accepts both file path and directory path. Directory path searches recursively by default. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip. Grep also enforces searched-file and scanned-byte safety caps so sparse matches across very large workspaces do not monopolize Runtime operation time.
 - `glob` file tool accepts absolute path patterns. Recursive patterns such as `**` search below the non-glob prefix and may return matching directories as well as files so directory-oriented patterns like `/workspace/agent/.claude/skills/*` are visible to agents. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip.
-- Shell prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `exec_command` for command execution, package installation, or when dedicated tool does not fit. Use `write_stdin` with empty `chars` to poll a running process.
+- Shell prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `exec_command` for command execution, package installation, or when dedicated tool does not fit. Use `write_stdin` with empty `chars` to poll a running process. Runtime config prompts sort registered projects and domain lists deterministically.
 - `exec_command(command, workdir?, yield_time_ms?, max_output_bytes?)` starts a pipe-based Runner-owned process. If the process exits within the yield window, the tool result includes final output and exit code. If it is still running, the result includes collected output plus a process `process_id` for later interaction. `yield_time_ms` defaults to 10000 ms and accepts the 250-30000 ms range.
 - `write_stdin(process_id, chars = "", yield_time_ms?, max_output_bytes?)` writes to an existing process. Empty `chars` is the poll primitive and only drains unread output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls default to 5000 ms and allow 5000-300000 ms. Missing/expired/terminated process ids are returned as normal tool observations with structured metadata rather than assistant/system failures. Per ADR-0083, user stop requests TERM for all live exec processes owned by the stopped `AgentSession`; worker graceful shutdown/handover does not TERM runner-owned exec processes by itself.
 - Runtime process tool results are text for model visibility plus generic `metadata` on the client tool result payload. Metadata includes process status, process id when present, exit code when exited, truncation facts, and missing reason when unavailable. The engine preserves this metadata generically and does not branch on exec-specific keys.
@@ -227,26 +243,30 @@ Injected prompt returned by `on_turn_start` is passed to engine as event hook pr
 
 `deny` decision from `on_before_tool_call` short-circuits on first deny, returns deny message as tool output, and does not run handler. `on_after_tool_call` forms provider-order pipeline. If earlier provider returns `replace_output`, next provider receives replaced `output_text`; final replacement applies only to SDK output text channel. Image artifact block is preserved and output cap is reapplied after replacement.
 
-AGENTS.md instruction loader now registers `on_before_tool_call` in `hooks()` mapping to observe file-tool target path, rather than directly calling legacy `on_before_tool_call()`.
+AGENTS.md instruction loader registers runtime hooks through `hooks()`. It does not inject AGENTS.md content into Toolkit prompts.
 
 ### AGENTS.md Instruction Loading
 
-Shell builtin runtime injects Agent Workspace instruction file into system prompt.
+Shell runtime treats AGENTS.md as a successful `read` tool result appendix, not as a Toolkit/system prompt fragment.
 
-- Root instruction: `<Agent Workspace>/AGENTS.md`
-  - `BuiltinToolkit` injects as prompt block `Session Workspace Instructions`.
-  - If DB Runtime state is workspace-readable and Provider-reported workspace path exists, sends Runner file operation by `agent_runtime_id` to read live file.
-  - On live read success, update agent_id-keyed in-process snapshot.
-  - If no active Runtime, use snapshot fallback. Do not start Runtime start/reset just to load root instruction.
-- Project-scoped instruction: ancestor `AGENTS.md` inside registered Project
-  - `SandboxToolkit` observes target path of path-explicit file tools (`read`, `read_image`, `write`, `edit`, `delete`, `grep`, `glob`, `import_file`, `present_file`) in `on_before_tool_call()`.
-  - If observed path is inside registered Project, candidate `AGENTS.md` files are generated from Project root to target directory and scheduled for background refresh. Candidate becomes active only when live read confirms regular file exists.
-  - `AGENTS.md` inside unregistered folder is not auto-loaded.
-  - Active AGENTS file is cached in Toolkit State. `update_context()` renders only cached content immediately; cache miss or periodic refresh schedules background task. Cache miss does not wait for live read; once cache is populated, prompt reflects it from next turn.
-  - background refresh removes missing/not-file candidate from `active_project_paths` and `project_contents`. Temporary live read failure keeps existing cached content as fallback.
-  - `on_session_compact` clears both Project-scoped `active_project_paths` and `project_contents`. Workspace root instruction state remains. When file tool target path is observed again, candidates are live-read and only existing Project `AGENTS.md` is reactivated.
-  - background refresh over 10 seconds logs warn.
-- Prompt ordering: root instruction block first, Project instruction block after it. Project block uses path sort for stable ordering.
+- Root instruction candidate is `/workspace/agent/AGENTS.md` for read targets under `/workspace/agent`.
+- Registered Project instruction candidates are `AGENTS.md` files from the Project root to the read target directory, parent-to-child.
+- Candidate content is read fresh from Runtime file storage only while handling a successful `read` result.
+- Missing and non-file candidates are ignored.
+- Reading an `AGENTS.md` file does not append that same file as its own appendix.
+- `write`, `edit`, `delete`, `grep`, `glob`, `import_file`, `present_file`, and `read_image` do not append AGENTS.md instructions in this contract.
+- Toolkit State stores only a sorted dedupe path list under namespace `builtin`, state name `agents_md_appendix_dedupe`; it does not store AGENTS.md content.
+- `on_session_compact` clears the dedupe path list so future reads may append current AGENTS.md content again.
+- Appendix content uses the existing AGENTS.md content cap and is appended after the original read output in a `<system-reminder>` block.
+- Prompt builds and toolkit startup must not start or touch Runtime solely to discover AGENTS.md.
+
+The shell runtime prompt contains only fixed guidance that read results may include `<system-reminder>` AGENTS.md appendix blocks and that the agent should follow them for the paths they apply to.
+
+### Goal/Todo Prompt and Result Stability
+
+Goal and Todo auto-bound toolkits expose fixed tool definitions independent of current stored state. Their Toolkit prompts are fixed instruction text and do not include the current Goal objective/status or Todo list. The model can call `get_goal` when it needs exact Goal state; Todo UI/state snapshots remain the user-visible source of truth for Todo state.
+
+`update_todo` persists the new state and publishes `TodoStateChanged`, but returns compact acknowledgement text (`Done`) instead of echoing the full Todo JSON.
 
 ### Activation Conditions by Toolkit
 

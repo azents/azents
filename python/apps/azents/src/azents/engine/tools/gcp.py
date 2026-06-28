@@ -280,7 +280,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
     async def __aenter__(self) -> GcpToolkit:
         """Start per-service background parallel MCP connections."""
         self._entered = True
-        for server in self._server_configs:
+        for server in sorted(self._server_configs, key=lambda item: item.service.value):
             task = asyncio.create_task(self._connect_service(server))
             self._bg_tasks[server.service] = task
         return self
@@ -341,7 +341,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
         is_writable = server.service in self._writable_services
         tools: list[FunctionTool] = []
-        for mcp_tool in mcp_tools:
+        for mcp_tool in sorted(mcp_tools, key=lambda tool: tool.name):
             if not is_writable and not _is_read_only_tool(mcp_tool):
                 continue
             tools.append(
@@ -367,15 +367,17 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         """
         self._refresh_artifact_sink(context)
         if not self._entered:
-            return await self._sync_update_context()
+            return ToolkitState(
+                status=ToolkitStatus.ENABLED,
+                tools=[],
+                prompt=self._render_config_prompt(),
+            )
 
         # Collect from background status
         tools: list[FunctionTool] = []
-        loading_services: list[str] = []
 
-        for server in self._server_configs:
+        for server in sorted(self._server_configs, key=lambda item: item.service.value):
             svc = server.service
-            task = self._bg_tasks.get(svc)
 
             if svc in self._bg_results:
                 # Connection complete: collect tools
@@ -383,18 +385,13 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
             elif svc in self._bg_errors:
                 # Connection failure: skip (error already logged)
                 pass
-            elif task is not None and not task.done():
-                # Connection in progress
-                meta = GCP_SERVICE_CONFIG.get(svc)
-                desc = meta.description if meta else svc.value
-                loading_services.append(desc)
 
         prompt = self._render_config_prompt()
-        if loading_services:
-            loading_text = ", ".join(loading_services)
-            prompt = f"{prompt}\nLoading: {loading_text}"
-
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt=prompt)
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=sorted(tools, key=lambda tool: tool.spec.name),
+            prompt=prompt,
+        )
 
     async def _sync_update_context(self) -> ToolkitState:
         """Collect tools synchronously in parallel from per-service MCP servers."""
@@ -429,7 +426,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
             server, mcp_tools, use_streamable_http = result
             is_writable = server.service in self._writable_services
-            for mcp_tool in mcp_tools:
+            for mcp_tool in sorted(mcp_tools, key=lambda tool: tool.name):
                 if not is_writable and not _is_read_only_tool(mcp_tool):
                     continue
 

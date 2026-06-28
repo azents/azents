@@ -107,6 +107,7 @@ class TestAwsToolkitUpdateContext:
             new_callable=AsyncMock,
             return_value=(mock_tools, False),
         ):
+            await toolkit._connect_and_list_tools()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
             state = await toolkit.update_context(ctx)
 
         assert len(state.tools) == 2
@@ -120,12 +121,7 @@ class TestAwsToolkitUpdateContext:
         toolkit = _make_toolkit(region="ap-northeast-2")
         ctx = _make_context()
 
-        with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
-            new_callable=AsyncMock,
-            return_value=([], False),
-        ):
-            state = await toolkit.update_context(ctx)
+        state = await toolkit.update_context(ctx)
 
         assert "ap-northeast-2" in state.prompt
 
@@ -137,12 +133,7 @@ class TestAwsToolkitUpdateContext:
         )
         ctx = _make_context()
 
-        with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
-            new_callable=AsyncMock,
-            return_value=([], False),
-        ):
-            state = await toolkit.update_context(ctx)
+        state = await toolkit.update_context(ctx)
 
         assert "arn:aws:iam::123456789012:role/MyRole" in state.prompt
 
@@ -152,12 +143,7 @@ class TestAwsToolkitUpdateContext:
         toolkit = _make_toolkit(role_arn=None)
         ctx = _make_context()
 
-        with patch(
-            "azents.engine.tools.aws.mcp_list_tools",
-            new_callable=AsyncMock,
-            return_value=([], False),
-        ):
-            state = await toolkit.update_context(ctx)
+        state = await toolkit.update_context(ctx)
 
         assert "Assumed Role" not in state.prompt
 
@@ -184,7 +170,7 @@ class TestAwsToolkitConnectionFailure:
             state = await toolkit.update_context(ctx)
 
         assert state.tools == []
-        assert "connection failed" in state.prompt.lower()
+        assert "connection failed" not in state.prompt.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +207,7 @@ class TestAwsToolkitBackgroundConnect:
                 # connection in progress -> loading
                 state = await toolkit.update_context(ctx)
                 assert state.tools == []
-                assert state.prompt == "Loading tools..."
+                assert "Loading" not in state.prompt
 
                 # connection complete
                 connect_event.set()
@@ -255,7 +241,7 @@ class TestAwsToolkitBackgroundConnect:
 
                 state = await toolkit.update_context(ctx)
                 assert state.tools == []
-                assert "AWS MCP server connection failed" in state.prompt
+                assert "AWS MCP server connection failed" not in state.prompt
 
     @pytest.mark.asyncio
     async def test_aexit_cancels_task(self) -> None:
@@ -279,8 +265,8 @@ class TestAwsToolkitBackgroundConnect:
         assert toolkit._bg_task is None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate background task cleanup in tests
 
     @pytest.mark.asyncio
-    async def test_fallback_sync_without_aenter(self) -> None:
-        """Synchronous connection fallback when called without __aenter__."""
+    async def test_without_aenter_does_not_sync_discover_tools(self) -> None:
+        """update_context without __aenter__ does not synchronously list tools."""
         toolkit = _make_toolkit()
         ctx = _make_context()
 
@@ -293,5 +279,5 @@ class TestAwsToolkitBackgroundConnect:
         ):
             state = await toolkit.update_context(ctx)
 
-        assert len(state.tools) == 1
+        assert state.tools == []
         assert "us-east-1" in state.prompt

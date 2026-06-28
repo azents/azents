@@ -17,8 +17,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-06-23
-spec_version: 3
+last_verified_at: 2026-06-29
+spec_version: 4
 ---
 
 # MCP OAuth Flow
@@ -133,7 +133,9 @@ sequenceDiagram
         AS-->>Runtime: new token set
         Runtime->>DB: Update encrypted tokens
     end
-    Runtime->>MCP: list_tools with Bearer token
+    Runtime-->>Runtime: update_context reads latest successful tool snapshot without waiting for list_tools
+    Runtime->>MCP: background list_tools refresh with Bearer token
+    Runtime->>DB: atomically replace successful deterministic tool snapshot
     Runtime->>MCP: call_tool with Bearer token
     alt call_tool returns 401
         Runtime->>DB: SELECT connection FOR UPDATE
@@ -202,6 +204,10 @@ Toolkit config responses include `oauth_connection` when a toolkit has a connect
 | Missing connection | Exchange without prior connect | 404 | Restart connect |
 | Refresh invalid_grant | Provider revoked or rotated away refresh token | `reconnect_required` | Manager reconnects |
 | 401 after retry | Refresh failed or token still rejected | Tool call returns MCP auth error | Manager reconnects or fixes provider scopes |
+
+Runtime `list_tools` failure is not a run-startup failure. If a previous successful snapshot exists,
+the old snapshot remains model-visible. If no snapshot exists, no MCP tools are exposed and no MCP
+loading/error prompt or retry pseudo-tool is added to the model-visible surface.
 
 ## Cryptography
 

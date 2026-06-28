@@ -17,10 +17,10 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-06-18 | 35 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-06-28 | 75 |
-| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-06-23 | 6 |
+| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-06-29 | 7 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-05-10 | 1 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-06-28 | 37 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-06-29 | 38 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-18 | 4 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-06-27 | 21 |
 
@@ -38,7 +38,7 @@ _8 documents_
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-06-27 | 12 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-06-27 | 8 |
-| [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-23 | 3 |
+| [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-06-25 | 7 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-06-27 | 9 |
@@ -134,8 +134,9 @@ _14 documents_
 - [ADR-0082: Add Agent Workspace File Management Operations](adr/0082-agent-workspace-file-management.md)
 - [ADR-0083: User Stop Terminates Session-Owned Runtime Exec Processes](adr/0083-runtime-exec-user-stop-termination.md)
 - [ADR-0084: Failed-run Error Retry and Finalization](adr/0084-failed-run-error-retry.md)
+- [ADR-0085: Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/0085-deterministic-tool-catalog-and-mcp-snapshots.md)
 
-_85 documents_
+_86 documents_
 
 ## Issues (Bug Tracking)
 
@@ -165,4 +166,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 318
+- Total documents: 319

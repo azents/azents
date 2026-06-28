@@ -9,9 +9,12 @@ import asyncio
 import base64
 import binascii
 import dataclasses
+import datetime
+import hashlib
 import json
 import logging
 import mimetypes
+import time
 from abc import ABC
 from collections.abc import Awaitable, Callable
 from typing import Generic, TypeVar
@@ -32,6 +35,7 @@ from mcp.types import (
 )
 from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.mcp_transport import call_tool as mcp_call_tool
 from azents.core.mcp_transport import list_tools as mcp_list_tools
@@ -50,11 +54,20 @@ from azents.engine.run.types import (
     FunctionToolSpec,
 )
 from azents.engine.tooling.make_tool import make_tool
+from azents.engine.tooling.toolkit_state import (
+    ToolkitStateHandle,
+    ToolkitStateIdentity,
+    ToolkitStateModel,
+    ToolkitStateStore,
+)
+from azents.rdb.session import SessionManager
 from azents.services.artifact import ArtifactService
 
 logger = logging.getLogger(__name__)
 
 McpConfigT = TypeVar("McpConfigT", bound=McpToolkitConfig)
+MCP_TOOL_SNAPSHOT_SCHEMA_VERSION = 1
+MCP_TOOL_SNAPSHOT_STATE_NAME = "tool_snapshot"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -71,6 +84,27 @@ class McpArtifactSink:
 ArtifactSinkGetter = Callable[[], McpArtifactSink | None]
 
 
+class McpToolSnapshotItem(BaseModel):
+    """Serializable MCP tool snapshot item."""
+
+    raw_name: str
+    model_name: str
+    description: str
+    input_schema: dict[str, object]
+    server_url: str
+    use_streamable_http: bool = False
+
+
+class McpToolSnapshotState(ToolkitStateModel):
+    """Latest successful MCP tool snapshot."""
+
+    schema_version: int = MCP_TOOL_SNAPSHOT_SCHEMA_VERSION
+    loaded_at: str | None = None
+    server_url: str = ""
+    tool_hash: str = ""
+    tools: list[McpToolSnapshotItem] = Field(default_factory=list)
+
+
 def build_mcp_artifact_sink(
     context: TurnContext,
     artifact_service: ArtifactService | None,
@@ -84,6 +118,36 @@ def build_mcp_artifact_sink(
         user_id=context.user_id,
         run_id=context.run_id,
         run_index=context.run_index,
+    )
+
+
+def _build_mcp_tool_snapshot(
+    *,
+    server_url: str,
+    mcp_tools: list[McpBaseTool],
+    use_streamable_http: bool,
+) -> McpToolSnapshotState:
+    """Build a deterministic serializable MCP tool snapshot."""
+    items = [
+        McpToolSnapshotItem(
+            raw_name=tool.name,
+            model_name=tool.name,
+            description=tool.description or "",
+            input_schema=tool.inputSchema,
+            server_url=server_url,
+            use_streamable_http=use_streamable_http,
+        )
+        for tool in sorted(mcp_tools, key=lambda item: item.name)
+    ]
+    payload = [item.model_dump(mode="json") for item in items]
+    tool_hash = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return McpToolSnapshotState(
+        loaded_at=datetime.datetime.now(datetime.UTC).isoformat(),
+        server_url=server_url,
+        tool_hash=tool_hash,
+        tools=items,
     )
 
 
@@ -498,6 +562,11 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
     _proxy_url: str | None
     _session_type: SessionType
     _artifact_service: ArtifactService | None
+    _session_manager: SessionManager[AsyncSession] | None
+    _agent_id: str
+    _session_id: str
+    _state_namespace: str
+    _state_name: str
 
     # Background connection status
     _bg_task: asyncio.Task[None] | None
@@ -516,6 +585,19 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._bg_error = None
         self._artifact_sink = None
         self._entered = False
+        self._agent_id = getattr(self, "_agent_id", "")
+        self._session_id = getattr(self, "_session_id", "")
+        self._session_manager = getattr(self, "_session_manager", None)
+        self._state_namespace = getattr(self, "_state_namespace", "mcp")
+        self._state_name = getattr(self, "_state_name", MCP_TOOL_SNAPSHOT_STATE_NAME)
+
+    def set_agent_id(self, agent_id: str) -> None:
+        """Inject agent ID for Toolkit State identity."""
+        self._agent_id = agent_id
+
+    def set_session_id(self, session_id: str) -> None:
+        """Inject session ID for Toolkit State identity."""
+        self._session_id = session_id
 
     def _current_artifact_sink(self) -> McpArtifactSink | None:
         """Return Artifact sink for current run."""
@@ -544,7 +626,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         """Start MCP server connection in background."""
         self._entered = True
 
-        self._bg_task = asyncio.create_task(self._connect_and_list_tools())
+        self._ensure_refresh_task()
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -557,13 +639,20 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 pass
         self._bg_task = None
 
+    def _ensure_refresh_task(self) -> None:
+        """Start background refresh unless one is already running."""
+        if self._bg_task is not None and not self._bg_task.done():
+            return
+        self._bg_task = asyncio.create_task(self._connect_and_list_tools())
+
     async def _connect_and_list_tools(self) -> None:
         """Connect to MCP server in background and collect tool list.
 
-        Store success/failure in internal state (_bg_tools / _bg_error).
+        Store a successful deterministic snapshot atomically in Toolkit State.
         """
         config = self._config
         headers = _build_auth_headers(config, self._secret)
+        started = time.monotonic()
 
         try:
             mcp_tools, use_streamable_http = await mcp_list_tools(
@@ -584,146 +673,133 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 self._bg_error = f"MCP server connection failed: {exc}"
             return
 
+        mcp_tools = sorted(mcp_tools, key=lambda item: item.name)
+        snapshot = _build_mcp_tool_snapshot(
+            server_url=config.server_url,
+            mcp_tools=mcp_tools,
+            use_streamable_http=use_streamable_http,
+        )
+        await self._save_tool_snapshot(snapshot)
+
         logger.info(
-            "MCP tools loaded",
+            "MCP tool snapshot refreshed",
             extra={
                 "server_url": config.server_url,
                 "tool_count": len(mcp_tools),
                 "tool_names": [t.name for t in mcp_tools],
+                "tool_hash": snapshot.tool_hash,
                 "transport": "streamable_http" if use_streamable_http else "sse",
+                "duration_seconds": round(time.monotonic() - started, 3),
             },
         )
 
         self._bg_error = (
             None  # Clear previous error when reconnection succeeds after retry
         )
-        self._bg_tools = [
-            wrap_mcp_tool(
-                mcp_tool,
-                config.server_url,
-                headers,
-                config.timeout,
-                use_streamable_http=use_streamable_http,
-                on_auth_failure=self._on_auth_failure,
-                proxy_url=self._proxy_url,
-                artifact_sink_getter=self._current_artifact_sink,
-            )
-            for mcp_tool in mcp_tools
-        ]
+        self._bg_tools = self._tools_from_snapshot(snapshot)
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return current toolkit state immediately based on internal state.
 
 
-        Without __aenter__, fall back to synchronous connection.
-
         :param context: Context passed each turn
         :return: Current state (tools + prompt)
         """
         self._refresh_artifact_sink(context)
-
-        # Fallback without __aenter__: synchronous connection
-        if not self._entered:
-            return await self._sync_connect()
-
-        # Return immediately based on background task status
-        # Keep previous tools when present during reload
-        cached = self._bg_tools or []
-
-        if self._bg_task is not None and not self._bg_task.done():
-            if cached:
-                return ToolkitState(
-                    status=ToolkitStatus.ENABLED,
-                    tools=cached,
-                    prompt="",
-                )
-
-            # If connection is in progress and no usable tool exists, report status.
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=[],
-                prompt="Tools are still loading. Try again shortly.",
-            )
-
-        if self._bg_error is not None:
-            # Connection failure: include retry tool
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=[*cached, self._make_retry_tool()],
-                prompt=f"Connection failed: {self._bg_error}. "
-                "Call retry to attempt reconnection."
-                if not cached
-                else "",
-            )
-
-        if self._bg_tools is not None:
-            # Connection complete
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED, tools=self._bg_tools, prompt=""
-            )
-
-        # When task was not started in __aenter__, e.g. per-user OAuth skip
-        return ToolkitState(
-            status=ToolkitStatus.ENABLED,
-            tools=[],
-            prompt="Waiting for connection...",
-        )
+        snapshot = await self._load_tool_snapshot()
+        tools = self._tools_from_snapshot(snapshot) if snapshot is not None else []
+        if snapshot is None and self._session_manager is None:
+            tools = self._bg_tools or []
+        self._bg_tools = tools or self._bg_tools
+        if self._entered:
+            self._ensure_refresh_task()
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt="")
 
     async def _sync_connect(self) -> ToolkitState:
-        """Connect to MCP server synchronously (backward compatibility fallback).
+        """Return the latest successful snapshot without synchronous discovery.
 
         Used when update_context() is called without __aenter__.
 
         :return: Current state (tools + prompt)
         """
-        config = self._config
-        headers = _build_auth_headers(config, self._secret)
+        snapshot = await self._load_tool_snapshot()
+        tools = self._tools_from_snapshot(snapshot) if snapshot is not None else []
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt="")
 
-        try:
-            mcp_tools, use_streamable_http = await mcp_list_tools(
-                config.server_url, headers, config.timeout, proxy_url=self._proxy_url
-            )
-        except Exception as exc:
-            if _is_http_auth_error(exc):
-                logger.warning(
-                    "MCP server auth failed",
-                    extra={"server_url": config.server_url},
-                )
-            else:
-                logger.exception(
-                    "Failed to connect to MCP server",
-                    extra={"server_url": config.server_url},
-                )
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=[],
-                prompt=f"MCP server connection failed: {config.server_url}",
-            )
+    async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
+        """Load the latest successful MCP tool snapshot from Toolkit State."""
+        if self._session_manager is None:
+            return None
+        async with self._session_manager() as session:
+            handle = self._tool_snapshot_handle(session)
+            if handle is None:
+                return None
+            snapshot = await handle.load(default_factory=McpToolSnapshotState)
+        if not snapshot.tools:
+            return None
+        if snapshot.server_url != self._config.server_url:
+            return None
+        return snapshot
 
-        logger.info(
-            "MCP tools loaded",
-            extra={
-                "server_url": config.server_url,
-                "tool_count": len(mcp_tools),
-                "tool_names": [t.name for t in mcp_tools],
-                "transport": "streamable_http" if use_streamable_http else "sse",
-            },
+    async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
+        """Atomically save a successful MCP tool snapshot."""
+        if self._session_manager is None:
+            return
+        async with self._session_manager() as session:
+            handle = self._tool_snapshot_handle(session)
+            if handle is None:
+                return
+            await handle.load(default_factory=McpToolSnapshotState)
+            await handle.save(snapshot)
+
+    def _tool_snapshot_handle(
+        self,
+        session: AsyncSession,
+    ) -> ToolkitStateHandle[McpToolSnapshotState] | None:
+        """Create Toolkit State handle for MCP tool snapshot."""
+        if not self._agent_id or not self._session_id:
+            return None
+        identity = ToolkitStateIdentity(
+            agent_id=self._agent_id,
+            session_id=self._session_id,
+            toolkit_namespace=self._state_namespace,
+            state_name=self._state_name,
+        )
+        return ToolkitStateStore(session=session).handle(
+            identity,
+            McpToolSnapshotState,
         )
 
-        tools = [
-            wrap_mcp_tool(
+    def _tools_from_snapshot(
+        self, snapshot: McpToolSnapshotState
+    ) -> list[FunctionTool]:
+        """Rebuild FunctionTool wrappers from a stored snapshot."""
+        config = self._config
+        headers = _build_auth_headers(config, self._secret)
+        tools: list[FunctionTool] = []
+        for item in sorted(snapshot.tools, key=lambda tool: tool.model_name):
+            mcp_tool = McpBaseTool(
+                name=item.raw_name,
+                description=item.description,
+                inputSchema=item.input_schema,
+            )
+            tool = wrap_mcp_tool(
                 mcp_tool,
-                config.server_url,
+                item.server_url,
                 headers,
                 config.timeout,
-                use_streamable_http=use_streamable_http,
+                use_streamable_http=item.use_streamable_http,
                 on_auth_failure=self._on_auth_failure,
                 proxy_url=self._proxy_url,
                 artifact_sink_getter=self._current_artifact_sink,
             )
-            for mcp_tool in mcp_tools
-        ]
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt="")
+            if item.model_name != item.raw_name:
+                tool = dataclasses.replace(
+                    tool,
+                    spec=dataclasses.replace(tool.spec, name=item.model_name),
+                )
+            tools.append(tool)
+        return tools
 
     def _make_retry_tool(self) -> FunctionTool:
         """Tool provided on connection failure. Attempts reconnect on call.

@@ -1181,6 +1181,30 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.tools == [{"type": "web_search"}]
 
+    def test_lowers_hosted_tools_in_deterministic_order(self) -> None:
+        """Sort hosted tools by semantic name/config before provider request."""
+        capabilities = ModelCapabilities()
+        capabilities.built_in_tools.supported = ["web_search"]
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            provider_id=LLMProvider.OPENAI,
+            hosted_tools=[
+                BuiltinToolSpec(
+                    name="web_search", config={"search_context_size": "low"}
+                ),
+                BuiltinToolSpec(name="web_search", config={}),
+            ],
+            model_capabilities=capabilities,
+        )
+
+        request = lowerer.lower([], model="gpt-5.1")
+
+        assert request.tools == [
+            {"type": "web_search"},
+            {"type": "web_search", "search_context_size": "low"},
+        ]
+
     def test_lowers_google_web_search_hosted_tool(self) -> None:
         """Lower Google web_search opt-in to google_search tool shape."""
         capabilities = ModelCapabilities()

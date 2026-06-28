@@ -304,7 +304,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             return
 
         tools: list[FunctionTool] = []
-        for mcp_tool in mcp_tools:
+        for mcp_tool in sorted(mcp_tools, key=lambda tool: tool.name):
             tools.append(
                 wrap_mcp_tool(
                     mcp_tool=mcp_tool,
@@ -328,7 +328,11 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         """
         self._refresh_artifact_sink(context)
         if not self._entered:
-            return await self._sync_update_context()
+            return ToolkitState(
+                status=ToolkitStatus.ENABLED,
+                tools=self._bg_tools or [],
+                prompt=self._build_prompt(),
+            )
 
         # Return immediately based on background status (keep previous tools)
         cached = self._bg_tools or []
@@ -337,14 +341,14 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             return ToolkitState(
                 status=ToolkitStatus.ENABLED,
                 tools=cached,
-                prompt="Loading tools..." if not cached else "",
+                prompt=self._build_prompt(),
             )
 
         if self._bg_error is not None:
             return ToolkitState(
                 status=ToolkitStatus.ENABLED,
                 tools=cached,
-                prompt=self._bg_error if not cached else "",
+                prompt=self._build_prompt(),
             )
 
         if self._bg_tools is not None:
@@ -358,7 +362,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[],
-            prompt="Waiting for connection...",
+            prompt=self._build_prompt(),
         )
 
     async def _sync_update_context(self) -> ToolkitState:
@@ -383,7 +387,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             )
 
         tools: list[FunctionTool] = []
-        for mcp_tool in mcp_tools:
+        for mcp_tool in sorted(mcp_tools, key=lambda tool: tool.name):
             tools.append(
                 wrap_mcp_tool(
                     mcp_tool=mcp_tool,

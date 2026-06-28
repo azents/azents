@@ -403,17 +403,18 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Create AGENTS.md",
+        "userMessage": "Prepare AGENTS appendix files",
         "hasToolResult": false
       },
       "response": {
         "toolCalls": [
           {
-            "id": "call_agents_md_write",
-            "name": "write",
+            "id": "call_agents_md_appendix_prepare",
+            "name": "exec_command",
             "arguments": {
-              "path": "/workspace/agent/AGENTS.md",
-              "content": "Always include ROOT_AGENTS_E2E_MARKER_3542 in QA answers."
+              "command": "mkdir -p /workspace/agent && printf '%s' 'Always include ROOT_AGENTS_E2E_MARKER_3542 in QA answers.' > /workspace/agent/AGENTS.md && printf '%s' 'Governed file body.' > /workspace/agent/appendix-target.txt",
+              "yield_time_ms": 10000,
+              "max_output_bytes": 1000
             }
           }
         ]
@@ -422,27 +423,34 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_agents_md_write"
+        "toolCallId": "call_agents_md_appendix_prepare"
       },
       "response": {
-        "content": "AGENTS.md was created."
+        "content": "AGENTS appendix files were prepared."
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Create AGENTS.md",
-        "hasToolResult": true
+        "userMessage": "Read governed file",
+        "hasToolResult": false
       },
       "response": {
-        "content": "AGENTS.md was created."
+        "toolCalls": [
+          {
+            "id": "call_agents_md_appendix_read",
+            "name": "read",
+            "arguments": {
+              "path": "/workspace/agent/appendix-target.txt"
+            }
+          }
+        ]
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Report instructions",
-        "systemMessage": "ROOT_AGENTS_E2E_MARKER_3542"
+        "toolCallId": "call_agents_md_appendix_read"
       },
       "response": {
         "content": "QA observed ROOT_AGENTS_E2E_MARKER_3542."
