@@ -132,8 +132,9 @@ _14 documents_
 - [ADR-0080: Simplified File Lifecycle Policy](adr/0080-simplified-file-lifecycle-policy.md)
 - [ADR-0081: Runtime Exec Process Tools](adr/0081-runtime-exec-process.md)
 - [ADR-0082: Add Agent Workspace File Management Operations](adr/0082-agent-workspace-file-management.md)
+- [ADR-0083: User Stop Terminates Session-Owned Runtime Exec Processes](adr/0083-runtime-exec-user-stop-termination.md)
 
-_83 documents_
+_84 documents_
 
 ## Issues (Bug Tracking)
 
@@ -163,4 +164,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 315
+- Total documents: 316

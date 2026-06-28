@@ -129,7 +129,7 @@ Processes are ephemeral AgentSession-owned resources scoped to an AgentRuntime R
 - `terminated`
 - `expired`
 
-Runner restart or generation mismatch means previous processes are gone. A later `write_stdin` returns a missing-process observation.
+Runner restart or generation mismatch means previous processes are gone. A later `write_stdin` returns a missing-process observation. Per ADR-0083, user stop terminates all live exec processes owned by the stopped `AgentSession`, while worker graceful shutdown/handover does not terminate runner-owned processes by itself.
 
 ## User-visible Behavior
 
@@ -192,7 +192,7 @@ Client tool result events preserve generic metadata. UI projection may use metad
 
 - Runtime Runner must support concurrent processes without blocking unrelated runner operations beyond configured capacity.
 - Runner must continuously drain stdout/stderr to avoid pipe backpressure.
-- Runner must enforce process quotas, output caps, idle timeout, max lifetime, and exited-unread TTL.
+- Runner must enforce process quotas, output caps, idle timeout, max lifetime, exited-unread TTL, and session-wide termination on user stop.
 - Runtime-control must keep operation deadlines and generation fencing.
 - UI/live transport must tolerate output batching/coalescing and should not require durable recovery of every live delta after runner restart.
 
@@ -207,6 +207,8 @@ Client tool result events preserve generic metadata. UI projection may use metad
 | Output exceeds cap | Runner keeps bounded retained output and reports truncation/omitted facts. |
 | Slow UI subscriber | UI deltas may be batched/coalesced; runner/worker memory remains bounded. |
 | Stale worker/control projection | Runner lookup/generation fencing wins; stale projection cannot resurrect a process. |
+| User stop during exec process | Runtime-control asks the active Runner to TERM all live processes owned by the stopped `AgentSession`; current run closes as interrupted without waiting for process termination. |
+| Worker graceful shutdown/handover during exec process | Worker-side waits are interrupted for recovery, but Runtime-control must not TERM runner-owned processes merely because the worker is shutting down gracefully. |
 
 ## Requirements
 

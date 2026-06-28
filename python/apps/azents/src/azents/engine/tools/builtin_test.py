@@ -29,6 +29,7 @@ from azents.engine.hooks.types import SessionCompactHookContext
 from azents.engine.run.emit import PublishedEvent, durable, handle_engine_event
 from azents.engine.run.types import (
     FunctionTool,
+    FunctionToolCancelRequest,
     FunctionToolError,
     FunctionToolResult,
 )
@@ -213,6 +214,7 @@ class _FakeRunnerOperations:
         self.bash_calls: list[dict[str, object]] = []
         self.process_start_calls: list[dict[str, object]] = []
         self.process_write_calls: list[dict[str, object]] = []
+        self.process_terminate_session_calls: list[dict[str, object]] = []
         self.stat_calls: list[str] = []
         self.stat_started_event: asyncio.Event | None = None
         self.stat_continue_event: asyncio.Event | None = None
@@ -349,6 +351,21 @@ class _FakeRunnerOperations:
         if self.process_unavailable_message is not None:
             raise RuntimeRunnerOperationUnavailable(self.process_unavailable_message)
         return self.next_process_write_result
+
+    async def terminate_session_processes(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        deadline_at: datetime,
+    ) -> None:
+        del runtime_id, runner_generation, deadline_at
+        self.process_terminate_session_calls.append(
+            {"owner_session_id": owner_session_id}
+        )
+        if self.process_unavailable_message is not None:
+            raise RuntimeRunnerOperationUnavailable(self.process_unavailable_message)
 
     async def read_file(
         self,
@@ -1318,6 +1335,30 @@ class TestProcessToolHandler:
         assert isinstance(
             publish_event.await_args_list[-1].args[0], RuntimeProcessOutputDeltaEvent
         )
+
+    @pytest.mark.asyncio
+    async def test_exec_command_cancel_terminates_session_processes(self) -> None:
+        """User stop cancel hook terminates all session-owned processes."""
+        toolkit = _make_toolkit()
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        state = await toolkit.update_context(_make_context())
+        tool = _find_tool(state.tools, "exec_command")
+
+        assert tool.cancel_handler is not None
+        await tool.cancel_handler(
+            FunctionToolCancelRequest(
+                call_id="call-1",
+                name="exec_command",
+                arguments='{"command": "sleep 30"}',
+            )
+        )
+
+        assert runner_operations.process_terminate_session_calls == [
+            {"owner_session_id": "session-1"}
+        ]
 
     @pytest.mark.asyncio
     async def test_exec_command_injects_envvar_peer_toolkit(self) -> None:

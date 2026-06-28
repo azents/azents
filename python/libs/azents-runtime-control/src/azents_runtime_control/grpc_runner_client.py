@@ -461,6 +461,9 @@ def _operation_payload(
             "destination_path": operation.file_move.destination_path,
             "overwrite": operation.file_move.overwrite,
         }
+    if payload_kind == "process_terminate_session":
+        payload = operation.process_terminate_session
+        return {"owner_session_id": payload.owner_session_id}
     return {}
 
 

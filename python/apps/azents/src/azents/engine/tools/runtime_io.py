@@ -194,6 +194,17 @@ class RuntimeRunnerOperationClient(Protocol):
         """Write process stdin or poll with empty stdin."""
         ...
 
+    async def terminate_session_processes(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        deadline_at: datetime,
+    ) -> None:
+        """Terminate all live processes owned by an AgentSession."""
+        ...
+
     async def read_file(
         self,
         *,

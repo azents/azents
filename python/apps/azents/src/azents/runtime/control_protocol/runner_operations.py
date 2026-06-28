@@ -663,6 +663,36 @@ class RuntimeRunnerOperationClient:
             process_output_callback=process_output_callback,
         )
 
+    async def terminate_session_processes(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        deadline_at: datetime,
+    ) -> None:
+        """Terminate all Runner-owned processes for one AgentSession."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="process.terminate_session",
+                payload={"owner_session_id": owner_session_id},
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        await self._read_until_final(
+            dispatch.reply_stream_id,
+            _ReplyFolder(after_cursor=None),
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
     async def start_background_operation(
         self,
         operation: RuntimeRunnerOperation,

@@ -5,6 +5,7 @@ Each runtime-backed tool runs through Agent Runtime Runner operation.
 """
 
 import asyncio
+import dataclasses
 import logging
 import shlex
 import time
@@ -42,7 +43,12 @@ from azents.engine.events.engine_events import (
     RuntimeReadyEvent,
 )
 from azents.engine.io.attachments import RuntimeAttachment
-from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
+from azents.engine.run.types import (
+    FunctionTool,
+    FunctionToolCancelRequest,
+    FunctionToolError,
+    FunctionToolResult,
+)
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.builtin_agents import (
     AGENTS_LIVE_READ_INTERVAL_TURNS,
@@ -247,6 +253,7 @@ _RUNTIME_READY_WAIT_TIMEOUT_SECONDS = 120.0
 _RUNTIME_READY_POLL_INTERVAL_SECONDS = 1.0
 _RUNTIME_OPERATION_RESULT_GRACE_SECONDS = 10
 _RUNTIME_FILE_OPERATION_TIMEOUT_SECONDS = 120
+_RUNTIME_PROCESS_TERMINATE_TIMEOUT_SECONDS = 10
 _DEFAULT_PROCESS_YIELD_TIME_MS = 10_000
 _MAX_PROCESS_YIELD_TIME_MS = 300_000
 _DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 64 * 1024
@@ -1286,13 +1293,23 @@ def make_exec_command_tool(
             metadata=_process_result_metadata(result, kind="exec_command_result"),
         )
 
-    return make_tool(
+    tool = make_tool(
         handler,
         name="exec_command",
         description=(
             "Start a shell process in the Agent Runtime workspace. Returns output "
             "and exit_code when it exits within yield_time_ms; otherwise returns a "
             "running process_id for write_stdin polling or input."
+        ),
+    )
+    return dataclasses.replace(
+        tool,
+        cancel_handler=_make_process_cancel_handler(
+            runner_operations=runner_operations,
+            agent_runtime_repo=agent_runtime_repo,
+            session_manager=session_manager,
+            agent_id=agent_id,
+            owner_session_id=owner_session_id,
         ),
     )
 
@@ -1345,7 +1362,7 @@ def make_write_stdin_tool(
             metadata=_process_result_metadata(result, kind="write_stdin_result"),
         )
 
-    return make_tool(
+    tool = make_tool(
         handler,
         name="write_stdin",
         description=(
@@ -1353,6 +1370,56 @@ def make_write_stdin_tool(
             "chars string to poll for unread output without sending input."
         ),
     )
+    return dataclasses.replace(
+        tool,
+        cancel_handler=_make_process_cancel_handler(
+            runner_operations=runner_operations,
+            agent_runtime_repo=agent_runtime_repo,
+            session_manager=session_manager,
+            agent_id=agent_id,
+            owner_session_id=owner_session_id,
+        ),
+    )
+
+
+def _make_process_cancel_handler(
+    *,
+    runner_operations: RuntimeRunnerOperationClient,
+    agent_runtime_repo: AgentRuntimeRepository,
+    session_manager: SessionManager[AsyncSession] | None,
+    agent_id: str,
+    owner_session_id: str,
+) -> Callable[[FunctionToolCancelRequest], Awaitable[None]]:
+    """Return user-stop cancellation hook for session-owned exec processes."""
+
+    async def cancel_handler(request: FunctionToolCancelRequest) -> None:
+        del request
+        try:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=agent_runtime_repo,
+                session_manager=session_manager,
+                agent_id=agent_id,
+            )
+            await runner_operations.terminate_session_processes(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=owner_session_id,
+                deadline_at=datetime.now(UTC)
+                + timedelta(seconds=_RUNTIME_PROCESS_TERMINATE_TIMEOUT_SECONDS),
+            )
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+            RuntimeRunnerOperationFailedError,
+            RuntimeStorageError,
+        ):
+            logger.debug(
+                "Runtime Runner process cancellation failed during user stop",
+                extra={"agent_id": agent_id},
+                exc_info=True,
+            )
+
+    return cancel_handler
 
 
 def _publish_process_output_delta(

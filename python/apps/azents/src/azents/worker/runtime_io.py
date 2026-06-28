@@ -131,6 +131,24 @@ class RuntimeRunnerOperationAdapter:
         )
         return _process_result(result)
 
+    async def terminate_session_processes(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        deadline_at: datetime,
+    ) -> None:
+        """Terminate all Runner-owned processes for one AgentSession."""
+        await _translate_runtime_errors(
+            self._client.terminate_session_processes(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
+                deadline_at=deadline_at,
+            )
+        )
+
     async def read_file(
         self,
         *,

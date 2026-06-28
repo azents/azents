@@ -1114,12 +1114,13 @@ async def test_non_user_tool_cancellation_reraises_without_repair() -> None:
     """Non-user tool cancellation propagates cancellation without durable repair."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
+    tool_executor = _CancellingToolExecutor()
     execution = AgentRunExecution(
         lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
-        tool_executor=_CancellingToolExecutor(),
+        tool_executor=tool_executor,
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1141,6 +1142,7 @@ async def test_non_user_tool_cancellation_reraises_without_repair() -> None:
     ]
     assert result_events == []
     assert run_repo.active_tool_calls
+    assert tool_executor.cancelled_calls == []
 
 
 async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
