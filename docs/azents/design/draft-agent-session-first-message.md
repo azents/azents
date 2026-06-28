@@ -16,8 +16,9 @@ list, and exposes session-scoped tabs before there is a real conversation.
 Target product behavior:
 
 1. Clicking "new session" opens a draft chat surface without creating an `AgentSession` row.
-2. The draft surface shows only chat input and empty chat copy. Session-scoped Projects and Context
-tabs are hidden because there is no session-owned state yet.
+2. The draft surface keeps the Agent top bar so users can open Agent navigation and leave the
+draft. Session-scoped Projects and Context tabs remain hidden because there is no session-owned state
+yet.
 3. Sending the first message creates the session and accepts that message in one backend boundary.
 4. The browser URL is replaced with the canonical session URL so refresh resumes the created session.
 

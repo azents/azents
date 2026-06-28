@@ -147,9 +147,9 @@ create response is `ChatWriteResponse`, including the created `session_id` and l
 Agent detail routes surface the active session list in the Agent rail and navigate selected sessions
 through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action
 navigates to `/w/{handle}/agents/{agent_id}/sessions/new`, which is a draft route and must not create
-an `AgentSession` row. The draft route renders only the chat input surface; on first-message success,
-azents-web replaces the draft URL with the created session URL and invalidates the Agent session list
-cache.
+an `AgentSession` row. The draft route renders the Agent top bar plus the chat input surface, but it
+does not render session-scoped Projects or Context tabs. On first-message success, azents-web replaces
+the draft URL with the created session URL and invalidates the Agent session list cache.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":

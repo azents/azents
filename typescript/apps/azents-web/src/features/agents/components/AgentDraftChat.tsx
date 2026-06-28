@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { ChatInput } from "@/features/chat/components/ChatInput";
 import { useFileUpload } from "@/features/chat/hooks/useFileUpload";
 import styles from "./AgentChatTab.module.css";
+import { AgentSettingsHeader } from "./AgentSettingsHeader";
 import type { AgentDraftChatContainerOutput } from "../containers/useAgentDraftChatContainer";
 import type { UploadedFile } from "@/features/chat/hooks/useFileUpload";
 
@@ -75,6 +76,7 @@ export function AgentDraftChat(
         flexDirection: "column",
       }}
     >
+      <AgentSettingsHeader agent={agent} />
       <Center flex={1} mih={0} px="md">
         <Stack align="center" gap="sm">
           <IconMessageCircle size={48} color="var(--mantine-color-dimmed)" />
