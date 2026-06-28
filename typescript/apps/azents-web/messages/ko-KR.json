@@ -1035,6 +1035,7 @@
       "selectedCount": "선택 {count}개",
       "clearSelection": "선택 해제",
       "bulkDeleteConfirm": "선택한 {count}개 항목을 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
+      "bulkDeleteConfirmTitle": "선택 항목 삭제",
       "newFolder": "새 폴더",
       "rename": "이름 변경",
       "move": "이동",
@@ -1054,6 +1055,7 @@
       "newFolderPrompt": "폴더 이름",
       "renamePrompt": "새 이름",
       "movePrompt": "이동할 경로",
+      "deleteConfirmTitle": "파일 또는 폴더 삭제",
       "deleteConfirm": "{path}을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다."
     },
     "toolCall": {

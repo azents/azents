@@ -59,6 +59,26 @@ function parentPath(path: string): string {
   return path.slice(0, Math.max(0, path.lastIndexOf("/")));
 }
 
+function isSameOrDescendant(path: string, targetPath: string): boolean {
+  return path === targetPath || path.startsWith(`${targetPath}/`);
+}
+
+function removeDeletedWorkspaceEntries(
+  entriesByPath: Record<string, WorkspaceEntry[]>,
+  deletedPaths: string[],
+): Record<string, WorkspaceEntry[]> {
+  const isDeleted = (path: string): boolean =>
+    deletedPaths.some((deletedPath) => isSameOrDescendant(path, deletedPath));
+  return Object.fromEntries(
+    Object.entries(entriesByPath)
+      .filter(([path]) => !isDeleted(path))
+      .map(([path, entries]) => [
+        path,
+        entries.filter((entry) => !isDeleted(entry.path)),
+      ]),
+  );
+}
+
 export function useWorkspacePanelContainer({
   handle,
   agentId,
@@ -218,25 +238,60 @@ export function useWorkspacePanelContainer({
 
   const deletePathMutation = trpc.chat.deleteAgentWorkspacePath.useMutation({
     onSuccess: async (_data, variables) => {
-      if (selectedFilePath === variables.path) {
+      const deletedPath = variables.path;
+      if (
+        selectedFilePath &&
+        isSameOrDescendant(selectedFilePath, deletedPath)
+      ) {
         setSelectedFilePath(null);
         setWorkspaceView("browser");
       }
+      if (
+        currentDirectoryPath &&
+        isSameOrDescendant(currentDirectoryPath, deletedPath)
+      ) {
+        setCurrentDirectoryPath(
+          parentPath(deletedPath) || manifest?.cwd || null,
+        );
+        setWorkspaceView("browser");
+      }
       setSelectedPaths((previous) =>
-        previous.filter((path) => path !== variables.path),
+        previous.filter((path) => !isSameOrDescendant(path, deletedPath)),
       );
-      await invalidateWorkspaceFiles(variables.path);
+      setDirectoryEntriesByPath((previous) =>
+        removeDeletedWorkspaceEntries(previous, [deletedPath]),
+      );
+      await invalidateWorkspaceFiles(deletedPath);
     },
   });
 
   const bulkDeletePathsMutation =
     trpc.chat.bulkDeleteAgentWorkspacePaths.useMutation({
       onSuccess: async (_data, variables) => {
-        if (selectedFilePath && variables.paths.includes(selectedFilePath)) {
+        const deletedPaths = variables.paths;
+        const includesDeletedPath = (path: string): boolean =>
+          deletedPaths.some((deletedPath) =>
+            isSameOrDescendant(path, deletedPath),
+          );
+        if (selectedFilePath && includesDeletedPath(selectedFilePath)) {
           setSelectedFilePath(null);
           setWorkspaceView("browser");
         }
+        if (currentDirectoryPath && includesDeletedPath(currentDirectoryPath)) {
+          const deletedAncestor = deletedPaths.find((deletedPath) =>
+            isSameOrDescendant(currentDirectoryPath, deletedPath),
+          );
+          setCurrentDirectoryPath(
+            deletedAncestor
+              ? parentPath(deletedAncestor) || manifest?.cwd || null
+              : null,
+          );
+          setWorkspaceView("browser");
+        }
         setSelectedPaths([]);
+        setDirectoryEntriesByPath((previous) =>
+          removeDeletedWorkspaceEntries(previous, deletedPaths),
+        );
         await invalidateWorkspaceFiles();
       },
     });

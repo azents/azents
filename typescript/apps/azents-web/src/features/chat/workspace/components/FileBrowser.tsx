@@ -17,6 +17,7 @@ import {
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import {
+  IconArrowRight,
   IconChevronDown,
   IconChevronRight,
   IconChevronUp,
@@ -29,6 +30,7 @@ import {
   IconFileSpreadsheet,
   IconFolder,
   IconFolderOpen,
+  IconFolderPlus,
   IconInfoCircle,
   IconRefresh,
   IconSearch,
@@ -370,7 +372,10 @@ function TreeNode({
               </Menu.Item>
             )}
             {node.kind === "directory" && (
-              <Menu.Item onClick={() => onCreateDirectory(node.path)}>
+              <Menu.Item
+                leftSection={<IconFolderPlus size="0.875rem" />}
+                onClick={() => onCreateDirectory(node.path)}
+              >
                 {t("newFolder")}
               </Menu.Item>
             )}
@@ -380,7 +385,12 @@ function TreeNode({
             >
               {t("rename")}
             </Menu.Item>
-            <Menu.Item onClick={() => onMovePath(node)}>{t("move")}</Menu.Item>
+            <Menu.Item
+              leftSection={<IconArrowRight size="0.875rem" />}
+              onClick={() => onMovePath(node)}
+            >
+              {t("move")}
+            </Menu.Item>
             <Menu.Divider />
             <Menu.Item
               color="red"
@@ -543,12 +553,24 @@ export function FileBrowser({
             <Menu.Label>
               {t("selectedCount", { count: selectedPaths.length })}
             </Menu.Label>
-            <Menu.Item onClick={onBulkMove}>{t("move")}</Menu.Item>
-            <Menu.Item color="red" onClick={onBulkDelete}>
+            <Menu.Item
+              leftSection={<IconArrowRight size="0.875rem" />}
+              onClick={onBulkMove}
+            >
+              {t("move")}
+            </Menu.Item>
+            <Menu.Item
+              color="red"
+              leftSection={<IconTrash size="0.875rem" />}
+              onClick={onBulkDelete}
+            >
               {t("delete")}
             </Menu.Item>
             <Menu.Divider />
-            <Menu.Item onClick={onClearSelection}>
+            <Menu.Item
+              leftSection={<IconX size="0.875rem" />}
+              onClick={onClearSelection}
+            >
               {t("clearSelection")}
             </Menu.Item>
           </Menu.Dropdown>

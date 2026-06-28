@@ -1035,6 +1035,7 @@
       "selectedCount": "{count} sélectionné(s)",
       "clearSelection": "Effacer la sélection",
       "bulkDeleteConfirm": "Supprimer les {count} éléments sélectionnés ? Cette action est irréversible.",
+      "bulkDeleteConfirmTitle": "Supprimer les éléments sélectionnés",
       "newFolder": "Nouveau dossier",
       "rename": "Renommer",
       "move": "Déplacer",
@@ -1054,6 +1055,7 @@
       "newFolderPrompt": "Nom du dossier",
       "renamePrompt": "Nouveau nom",
       "movePrompt": "Chemin de destination",
+      "deleteConfirmTitle": "Supprimer le fichier ou le dossier",
       "deleteConfirm": "Supprimer {path} ? Cette action est irréversible."
     },
     "toolCall": {
