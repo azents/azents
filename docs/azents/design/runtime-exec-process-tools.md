@@ -137,15 +137,15 @@ Runner restart or generation mismatch means previous processes are gone. A later
 
 When the model calls `exec_command` for a quick command, the user sees a normal tool result with output and exit code.
 
-When the command keeps running past the yield window, the model receives a result explaining that the process is still running and includes a process id. The UI can show live output associated with the process.
+When the command keeps running past the yield window, the model receives a result explaining that the process is still running and includes a process id. The UI can show live output associated with the process. `exec_command` defaults to a 10000 ms yield window clamped to 250-30000 ms.
 
 ### Polling output
 
-The model calls `write_stdin` with empty `chars` to retrieve newly unread output. If the process exited, the result includes final output and exit code. If the process is still running, the result includes output collected so far and keeps the process id available.
+The model calls `write_stdin` with empty `chars` to retrieve newly unread output. If the process exited, the result includes final output and exit code. If the process is still running, the result includes output collected so far and keeps the process id available. Empty polls default to 5000 ms and may wait up to 300000 ms.
 
 ### Sending input
 
-The model calls `write_stdin` with non-empty `chars` to send input to the process and receive output produced during the yield window.
+The model calls `write_stdin` with non-empty `chars` to send input to the process and receive output produced during the yield window. Non-empty writes default to 250 ms and cap at 30000 ms.
 
 ### Missing process
 

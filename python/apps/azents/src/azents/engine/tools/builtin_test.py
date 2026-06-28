@@ -1420,7 +1420,7 @@ class TestProcessToolHandler:
             {
                 "process_id": "proc-1",
                 "stdin": "input\n",
-                "yield_time_ms": 10000,
+                "yield_time_ms": 250,
                 "max_output_bytes": 65536,
                 "owner_session_id": "session-1",
                 "process_output_callback": runner_operations.process_write_calls[0][
@@ -1428,6 +1428,47 @@ class TestProcessToolHandler:
                 ],
             }
         ]
+
+    @pytest.mark.asyncio
+    async def test_write_stdin_empty_poll_defaults_to_longer_yield(self) -> None:
+        """Empty write_stdin polls use the Codex-style polling default."""
+        toolkit = _make_toolkit()
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        state = await toolkit.update_context(_make_context())
+        tool = _find_tool(state.tools, "write_stdin")
+
+        await tool.handler(json.dumps({"process_id": "proc-1"}))
+
+        assert runner_operations.process_write_calls[-1]["stdin"] == ""
+        assert runner_operations.process_write_calls[-1]["yield_time_ms"] == 5000
+
+    @pytest.mark.asyncio
+    async def test_process_tool_schema_documents_codex_yield_defaults(self) -> None:
+        """Process tool schemas document Codex-style defaults and ranges."""
+        toolkit = _make_toolkit()
+        state = await toolkit.update_context(_make_context())
+        exec_tool = _find_tool(state.tools, "exec_command")
+        write_tool = _find_tool(state.tools, "write_stdin")
+
+        exec_properties = cast(
+            dict[str, Any], exec_tool.spec.input_schema["properties"]
+        )
+        write_properties = cast(
+            dict[str, Any], write_tool.spec.input_schema["properties"]
+        )
+        exec_yield = cast(dict[str, Any], exec_properties["yield_time_ms"])
+        write_yield = cast(dict[str, Any], write_properties["yield_time_ms"])
+        assert exec_yield["default"] == 10000
+        assert exec_yield["minimum"] == 250
+        assert exec_yield["maximum"] == 30000
+        assert "effective range is 250-30000 ms" in exec_yield["description"]
+        assert write_yield["default"] == 250
+        assert write_yield["maximum"] == 300000
+        assert "Non-empty writes default to 250 ms" in write_yield["description"]
+        assert "empty polls default to 5000 ms" in write_yield["description"]
 
     @pytest.mark.asyncio
     async def test_exec_command_waits_when_provider_not_running(
