@@ -1,13 +1,13 @@
-"""AGENTS.md t E2E test."""
+"""AGENTS.md read appendix E2E test."""
 
 import time
-import uuid
-from typing import Any, LiteralString, NamedTuple, cast
+from typing import Any, NamedTuple, cast
 
 import azentsadminclient
 import azentspublicclient
-import psycopg
+import pytest
 import requests
+from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
@@ -22,9 +22,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
-from psycopg.types.json import Jsonb
 from testcontainers.core.container import DockerContainer
-from testcontainers.postgres import PostgresContainer
 
 from support.utils import (
     authenticate_user,
@@ -32,15 +30,27 @@ from support.utils import (
     unique,
 )
 
+pytestmark = [
+    pytest.mark.runtime_provider,
+    pytest.mark.usefixtures("azents_runtime_provider_docker_container"),
+]
+
+_RUNTIME_PROVIDER_ID = "system-docker"
 _MARKER = "ROOT_AGENTS_E2E_MARKER_3542"
+_PREPARE_MESSAGE = "Prepare AGENTS appendix files"
+_PREPARE_CALL_ID = "call_agents_md_appendix_prepare"
+_READ_MESSAGE = "Read governed file"
+_READ_CALL_ID = "call_agents_md_appendix_read"
 
 
 class AgentsMdExerciseResult(NamedTuple):
-    """AGENTS.md loader exercise result."""
+    """AGENTS.md appendix exercise result."""
 
     requests_count: int
-    instruction_marker_requests: list[int]
+    system_marker_requests: list[int]
+    tool_result_marker_requests: list[int]
     instruction_snippets: list[str]
+    tool_result_snippets: list[str]
     request_summaries: list[str]
     agent_shell_enabled: bool | None
 
@@ -70,6 +80,28 @@ def _system_message_texts(item: dict[str, object]) -> list[str]:
             continue
         message_dict = cast("dict[str, object]", message)
         if message_dict.get("role") != "system":
+            continue
+        content = message_dict.get("content")
+        if isinstance(content, str):
+            texts.append(content)
+    return texts
+
+
+def _tool_result_texts(item: dict[str, object]) -> list[str]:
+    """AIMock journal item t tool result strings."""
+    body = item.get("body")
+    if not isinstance(body, dict):
+        return []
+    body_dict = cast("dict[str, object]", body)
+    messages = body_dict.get("messages")
+    if not isinstance(messages, list):
+        return []
+    texts: list[str] = []
+    for message in cast("list[object]", messages):
+        if not isinstance(message, dict):
+            continue
+        message_dict = cast("dict[str, object]", message)
+        if message_dict.get("role") != "tool":
             continue
         content = message_dict.get("content")
         if isinstance(content, str):
@@ -169,14 +201,54 @@ def _event_content(event: dict[str, object]) -> str:
     return ""
 
 
+def _event_payload(event: dict[str, object]) -> dict[str, object]:
+    """Return event payload object."""
+    payload = event.get("payload")
+    if isinstance(payload, dict):
+        return cast("dict[str, object]", payload)
+    return {}
+
+
 def _run_marker_completed(event: dict[str, object]) -> bool:
     """run_marker completed t returnt."""
     if event.get("kind") != "run_marker":
         return False
-    payload = event.get("payload")
-    if not isinstance(payload, dict):
-        return False
-    return cast("dict[str, object]", payload).get("status") == "completed"
+    return _event_payload(event).get("status") == "completed"
+
+
+def _tool_result_output_text(
+    *,
+    public_url: str,
+    access_token: str,
+    session_id: str,
+    call_id: str,
+) -> str | None:
+    """Return persisted client tool result text for a call id."""
+    for event in _history_events(
+        public_url=public_url,
+        access_token=access_token,
+        session_id=session_id,
+    ):
+        if event.get("kind") != "client_tool_result":
+            continue
+        payload = _event_payload(event)
+        if payload.get("call_id") != call_id:
+            continue
+        output = payload.get("output")
+        if isinstance(output, str):
+            return output
+        if isinstance(output, list):
+            texts: list[str] = []
+            for part in cast("list[object]", output):
+                if not isinstance(part, dict):
+                    continue
+                part_dict = cast("dict[str, object]", part)
+                text = part_dict.get("text")
+                if isinstance(text, str):
+                    texts.append(text)
+            return "\n".join(texts)
+        return str(output)
+    return None
 
 
 def _wait_for_turn_complete(
@@ -211,14 +283,14 @@ def _wait_for_turn_complete(
     raise TimeoutError(f"turn did not complete: {message}, events={last_events!r}")
 
 
-def _run_new_session(
+def _start_session(
     *,
     public_api_client: azentspublicclient.ApiClient,
     public_url: str,
     access_token: str,
     agent_id: str,
 ) -> str:
-    """t session t messaget REST write boundary t t session_id t returnt."""
+    """Resolve the agent team primary session id."""
     del public_api_client
     session_response = requests.get(
         f"{public_url}/chat/v1/agents/{agent_id}/team-primary-session",
@@ -232,36 +304,17 @@ def _run_new_session(
         raise AssertionError(
             f"Team primary response did not include id: {session_payload!r}"
         )
-    response = requests.post(
-        f"{public_url}/chat/v1/sessions/{session_id}/messages",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "agent_id": agent_id,
-            "client_request_id": f"agents-md-create-{unique()}",
-            "message": "Create AGENTS.md",
-        },
-        timeout=10,
-    )
-    response.raise_for_status()
-    _wait_for_turn_complete(
-        public_url=public_url,
-        access_token=access_token,
-        session_id=session_id,
-        message="Create AGENTS.md",
-    )
     return session_id
 
 
-def _run_existing_session(
+def _run_message(
     *,
     public_api_client: azentspublicclient.ApiClient,
     public_url: str,
     access_token: str,
     agent_id: str,
     session_id: str,
+    message: str,
 ) -> None:
     """t session messaget REST write boundary t t."""
     del public_api_client
@@ -273,8 +326,8 @@ def _run_existing_session(
         },
         json={
             "agent_id": agent_id,
-            "client_request_id": f"agents-md-report-{unique()}",
-            "message": "Report instructions",
+            "client_request_id": f"agents-md-appendix-{unique()}",
+            "message": message,
         },
         timeout=10,
     )
@@ -283,73 +336,48 @@ def _run_existing_session(
         public_url=public_url,
         access_token=access_token,
         session_id=session_id,
-        message="Report instructions",
+        message=message,
     )
 
 
-def _seed_root_agents_state(
-    postgres_container: PostgresContainer,
+def _wait_for_runtime_runner_ready(
     *,
+    public_api_client: azentspublicclient.ApiClient,
+    token: str,
+    workspace_handle: str,
     agent_id: str,
-    session_id: str,
-    content: str,
 ) -> None:
-    """Runtime root AGENTS.md Toolkit Statet deterministic E2E DBt seedt."""
-    with psycopg.connect(
-        host=postgres_container.get_container_host_ip(),
-        port=postgres_container.get_exposed_port(5432),
-        dbname=postgres_container.dbname,
-        user=postgres_container.username,
-        password=postgres_container.password,
-    ) as conn:
-        upsert_state_sql: LiteralString = """
-            INSERT INTO toolkit_states (
-                id,
-                agent_id,
-                session_id,
-                toolkit_namespace,
-                state_name,
-                state_json,
-                schema_version,
-                version
-            )
-            VALUES (
-                %s,
-                %s,
-                %s,
-                'builtin',
-                'root_agents_instruction',
-                %s,
-                1,
-                1
-            )
-            ON CONFLICT ON CONSTRAINT uq_toolkit_states_identity
-            DO UPDATE SET
-                state_json = EXCLUDED.state_json,
-                schema_version = EXCLUDED.schema_version,
-                version = toolkit_states.version + 1,
-                updated_at = now()
-        """
-        conn.execute(  # pyright: ignore[reportUnknownMemberType] # psycopg execute overload is partially unknown.
-            upsert_state_sql,
-            (
-                uuid.uuid4().hex,
-                agent_id,
-                session_id,
-                Jsonb({"schema_version": 1, "root_content": content}),
-            ),
+    """Start and wait for a usable Runtime Runner."""
+    api = AgentRuntimeV1Api(public_api_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    api.agent_runtime_v1_start_agent_runtime(
+        agent_id=agent_id,
+        handle=workspace_handle,
+        _headers=headers,
+    )
+    deadline = time.monotonic() + 120
+    last_state: object | None = None
+    while time.monotonic() < deadline:
+        state = api.agent_runtime_v1_observe_agent_runtime(
+            agent_id=agent_id,
+            handle=workspace_handle,
+            _headers=headers,
         )
+        last_state = state
+        if state.state.actions.use_runner:
+            return
+        time.sleep(1)
+    raise AssertionError(f"runtime runner did not become ready: {last_state!r}")
 
 
 def _exercise_agents_md_loader(
     *,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
-    postgres_container: PostgresContainer,
     public_url: str,
     mock_openai_url: str,
 ) -> AgentsMdExerciseResult:
-    """AGENTS.md state seed t next turn t mock journal marker t returnt."""
+    """AGENTS.md read appendix t mock journal marker t returnt."""
     requests.delete(
         f"{mock_openai_url}/v1/_requests",
         timeout=10,
@@ -397,47 +425,77 @@ def _exercise_agents_md_loader(
             model_selection=model_selection,
             lightweight_model_selection=model_selection,
             type=AgentType.PUBLIC,
+            runtime_provider_id=_RUNTIME_PROVIDER_ID,
             shell_enabled=True,
         ),
         _headers={"Authorization": f"Bearer {access_token}"},
     )
 
-    session_id = _run_new_session(
+    session_id = _start_session(
         public_api_client=public_api_client,
         public_url=public_url,
         access_token=access_token,
         agent_id=agent.id,
     )
-    _seed_root_agents_state(
-        postgres_container,
+    _wait_for_runtime_runner_ready(
+        public_api_client=public_api_client,
+        token=access_token,
+        workspace_handle=workspace_handle,
+        agent_id=agent.id,
+    )
+    _run_message(
+        public_api_client=public_api_client,
+        public_url=public_url,
+        access_token=access_token,
         agent_id=agent.id,
         session_id=session_id,
-        content=f"Always include {_MARKER} in QA answers.",
+        message=_PREPARE_MESSAGE,
     )
-    for _ in range(3):
-        _run_existing_session(
-            public_api_client=public_api_client,
-            public_url=public_url,
-            access_token=access_token,
-            agent_id=agent.id,
-            session_id=session_id,
+    prepare_output = _tool_result_output_text(
+        public_url=public_url,
+        access_token=access_token,
+        session_id=session_id,
+        call_id=_PREPARE_CALL_ID,
+    )
+    if prepare_output is None or "exit_code: 0" not in prepare_output:
+        raise AssertionError(f"AGENTS.md prepare tool failed: {prepare_output!r}")
+
+    _run_message(
+        public_api_client=public_api_client,
+        public_url=public_url,
+        access_token=access_token,
+        agent_id=agent.id,
+        session_id=session_id,
+        message=_READ_MESSAGE,
+    )
+    read_output = _tool_result_output_text(
+        public_url=public_url,
+        access_token=access_token,
+        session_id=session_id,
+        call_id=_READ_CALL_ID,
+    )
+    if read_output is None:
+        raise AssertionError("AGENTS.md governed read did not persist a tool result")
+    if _MARKER not in read_output or "<system-reminder>" not in read_output:
+        raise AssertionError(
+            f"AGENTS.md appendix missing from read result: {read_output!r}"
         )
-        payload = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
-        instruction_marker_requests = [
-            index
-            for index, item in enumerate(payload, start=1)
-            if any(_MARKER in text for text in _system_message_texts(item))
-        ]
-        if instruction_marker_requests:
-            break
-        time.sleep(1.0)
 
     payload = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
     requests_count = len(payload)
-    instruction_marker_requests = [
+    system_marker_requests = [
         index
         for index, item in enumerate(payload, start=1)
         if any(_MARKER in text for text in _system_message_texts(item))
+    ]
+    tool_result_marker_requests = [
+        index
+        for index, item in enumerate(payload, start=1)
+        if isinstance(item, dict)
+        and any(
+            _MARKER in text
+            for text in _tool_result_texts(cast("dict[str, object]", item))
+        )
     ]
     instruction_snippets = [
         text[:500]
@@ -445,10 +503,18 @@ def _exercise_agents_md_loader(
         if isinstance(item, dict)
         for text in _system_message_texts(cast("dict[str, object]", item))
     ]
+    tool_result_snippets = [
+        text[:1200]
+        for item in payload
+        if isinstance(item, dict)
+        for text in _tool_result_texts(cast("dict[str, object]", item))
+    ]
     return AgentsMdExerciseResult(
         requests_count=requests_count,
-        instruction_marker_requests=instruction_marker_requests,
+        system_marker_requests=system_marker_requests,
+        tool_result_marker_requests=tool_result_marker_requests,
         instruction_snippets=instruction_snippets,
+        tool_result_snippets=tool_result_snippets,
         request_summaries=[
             _request_summary(cast("dict[str, object]", item))
             for item in payload
@@ -459,28 +525,26 @@ def _exercise_agents_md_loader(
 
 
 class TestAgentsMdLoader:
-    """AGENTS.md t WebSocket E2E."""
+    """AGENTS.md appendix E2E."""
 
-    def test_root_agents_md_written_by_tool_is_loaded_into_next_prompt(
+    def test_root_agents_md_is_appended_to_relevant_read_result(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         azents_engine_worker_container: DockerContainer,
-        postgres_container: PostgresContainer,
         mock_openai_url: str,
     ) -> None:
-        """root AGENTS.md statet next LLM requestt t."""
+        """root AGENTS.md is read-result appendix, not live prompt state."""
         del azents_engine_worker_container
 
         result = _exercise_agents_md_loader(
             public_api_client=public_api_client,
             admin_api_client=admin_api_client,
-            postgres_container=postgres_container,
             public_url=azents_public_server_url,
             mock_openai_url=mock_openai_url,
         )
 
         assert result.requests_count >= 3
-        assert 1 not in result.instruction_marker_requests
-        assert result.instruction_marker_requests, result
+        assert not result.system_marker_requests, result
+        assert result.tool_result_marker_requests, result
