@@ -254,8 +254,13 @@ _RUNTIME_READY_POLL_INTERVAL_SECONDS = 1.0
 _RUNTIME_OPERATION_RESULT_GRACE_SECONDS = 10
 _RUNTIME_FILE_OPERATION_TIMEOUT_SECONDS = 120
 _RUNTIME_PROCESS_TERMINATE_TIMEOUT_SECONDS = 10
+_MIN_PROCESS_YIELD_TIME_MS = 250
 _DEFAULT_PROCESS_YIELD_TIME_MS = 10_000
-_MAX_PROCESS_YIELD_TIME_MS = 300_000
+_MAX_PROCESS_YIELD_TIME_MS = 30_000
+_DEFAULT_PROCESS_WRITE_YIELD_TIME_MS = 250
+_MIN_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 5_000
+_DEFAULT_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 5_000
+_MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 300_000
 _DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 64 * 1024
 _MAX_PROCESS_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 
@@ -275,11 +280,11 @@ class ExecCommandInput(BaseModel):
     )
     yield_time_ms: int = Field(
         default=_DEFAULT_PROCESS_YIELD_TIME_MS,
-        ge=0,
+        ge=_MIN_PROCESS_YIELD_TIME_MS,
         le=_MAX_PROCESS_YIELD_TIME_MS,
         description=(
-            "How long to wait for process output before yielding, in milliseconds "
-            f"(max {_MAX_PROCESS_YIELD_TIME_MS})."
+            "How long to wait for process output before yielding, in milliseconds. "
+            "Defaults to 10000 ms; effective range is 250-30000 ms."
         ),
     )
     max_output_bytes: int = Field(
@@ -299,12 +304,13 @@ class WriteStdinInput(BaseModel):
         description="Characters to write to stdin. Empty string polls for output.",
     )
     yield_time_ms: int = Field(
-        default=_DEFAULT_PROCESS_YIELD_TIME_MS,
+        default=_DEFAULT_PROCESS_WRITE_YIELD_TIME_MS,
         ge=0,
-        le=_MAX_PROCESS_YIELD_TIME_MS,
+        le=_MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS,
         description=(
-            "How long to wait for process output before yielding, in milliseconds "
-            f"(max {_MAX_PROCESS_YIELD_TIME_MS})."
+            "How long to wait for process output before yielding, in milliseconds. "
+            "Non-empty writes default to 250 ms and cap at 30000 ms; "
+            "empty polls default to 5000 ms and allow 5000-300000 ms."
         ),
     )
     max_output_bytes: int = Field(
@@ -1263,16 +1269,17 @@ def make_exec_command_tool(
                 agent_id=agent_id,
             )
             await publish_event(RuntimeReadyEvent())
+            yield_time_ms = _exec_process_yield_time_ms(args)
             result = await runner_operations.start_process(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 command=args.command,
                 workdir=args.workdir,
-                yield_time_ms=args.yield_time_ms,
+                yield_time_ms=yield_time_ms,
                 max_output_bytes=args.max_output_bytes,
                 env=secret_env or None,
                 owner_session_id=owner_session_id,
-                deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
+                deadline_at=_runtime_process_operation_deadline(yield_time_ms),
                 process_output_callback=_publish_process_output_delta(publish_event),
             )
         except (
@@ -1299,7 +1306,8 @@ def make_exec_command_tool(
         description=(
             "Start a shell process in the Agent Runtime workspace. Returns output "
             "and exit_code when it exits within yield_time_ms; otherwise returns a "
-            "running process_id for write_stdin polling or input."
+            "running process_id for write_stdin polling or input. yield_time_ms "
+            "defaults to 10000 ms and is clamped to 250-30000 ms."
         ),
     )
     return dataclasses.replace(
@@ -1333,15 +1341,16 @@ def make_write_stdin_tool(
                 agent_id=agent_id,
             )
             await publish_event(RuntimeReadyEvent())
+            yield_time_ms = _write_process_yield_time_ms(args)
             result = await runner_operations.write_process_stdin(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 process_id=args.process_id,
                 stdin=args.chars,
-                yield_time_ms=args.yield_time_ms,
+                yield_time_ms=yield_time_ms,
                 max_output_bytes=args.max_output_bytes,
                 owner_session_id=owner_session_id,
-                deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
+                deadline_at=_runtime_process_operation_deadline(yield_time_ms),
                 process_output_callback=_publish_process_output_delta(publish_event),
             )
         except (
@@ -1367,7 +1376,9 @@ def make_write_stdin_tool(
         name="write_stdin",
         description=(
             "Write characters to a running exec_command process. Pass an empty "
-            "chars string to poll for unread output without sending input."
+            "chars string to poll for unread output without sending input. Non-empty "
+            "writes default to 250 ms and cap at 30000 ms; empty polls default to "
+            "5000 ms and allow 5000-300000 ms."
         ),
     )
     return dataclasses.replace(
@@ -1440,6 +1451,31 @@ def _publish_process_output_delta(
         )
 
     return callback
+
+
+def _exec_process_yield_time_ms(args: ExecCommandInput) -> int:
+    """Return Codex-style effective exec yield window."""
+    return max(
+        _MIN_PROCESS_YIELD_TIME_MS,
+        min(args.yield_time_ms, _MAX_PROCESS_YIELD_TIME_MS),
+    )
+
+
+def _write_process_yield_time_ms(args: WriteStdinInput) -> int:
+    """Return Codex-style effective write/poll yield window."""
+    explicit = "yield_time_ms" in args.model_fields_set
+    if args.chars == "":
+        requested = args.yield_time_ms
+        if not explicit:
+            requested = _DEFAULT_PROCESS_EMPTY_POLL_YIELD_TIME_MS
+        return max(
+            _MIN_PROCESS_EMPTY_POLL_YIELD_TIME_MS,
+            min(requested, _MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS),
+        )
+    return max(
+        _MIN_PROCESS_YIELD_TIME_MS,
+        min(args.yield_time_ms, _MAX_PROCESS_YIELD_TIME_MS),
+    )
 
 
 def _runtime_process_operation_deadline(yield_time_ms: int) -> datetime:
