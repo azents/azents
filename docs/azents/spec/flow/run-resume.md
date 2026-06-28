@@ -170,6 +170,12 @@ source. Recovery and handover must preserve the failed attempt count and `next_r
 restart must not reset the retry budget or bypass exponential backoff. If a terminal transition closes
 the run, terminal helpers clear `retry_state` so stale retry state cannot be resumed.
 
+A worker that acquires a session during retry must treat the run as still active. It may re-enter the
+same run boundary with the existing `run_id`; the adapter must reuse the existing `agent_runs` row
+instead of creating a replacement row. Retry wait may be resumed from `next_retry_at`, and stop while
+waiting finalizes the failed run with `finalization_reason = retry_stopped_by_user`. Shutdown while
+waiting leaves the run `running` for the next worker instead of writing durable failed history.
+
 ## Tool Recovery
 
 If a foreground tool call has no corresponding result after interruption, the runtime appends a

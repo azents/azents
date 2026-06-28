@@ -329,14 +329,6 @@ class AgentRunExecution:
                         )
                     return AgentRunStatus.INTERRUPTED
         except UserVisibleRuntimeError:
-            await self._append_run_marker(
-                session,
-                request.session_id,
-                request.run_id,
-                "failed",
-            )
-            await self._mark_terminal(session, request.run_id, AgentRunStatus.FAILED)
-            await session.commit()
             raise
 
         await self._append_run_marker(

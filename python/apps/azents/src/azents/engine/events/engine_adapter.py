@@ -107,7 +107,6 @@ from azents.engine.hooks.types import (
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
-from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.types import (
     USER_STOP_CANCEL_MESSAGE,
     CheckStop,
@@ -276,10 +275,14 @@ class AgentEngineAdapter:
                 request.user_messages,
                 transcript_repo=self.transcript_repo,
             )
-            run_state = await self.run_repo.create(
-                session,
-                AgentRunCreate(id=context.run_id, session_id=request.session_id),
-            )
+            run_state = await self.run_repo.get_by_id(session, context.run_id)
+            if run_state is None:
+                run_state = await self.run_repo.create(
+                    session,
+                    AgentRunCreate(id=context.run_id, session_id=request.session_id),
+                )
+            else:
+                await self.run_repo.update_retry_state(session, context.run_id, None)
             await session.commit()
         for event in user_message_events:
             yield durable(event)
@@ -455,24 +458,7 @@ class AgentEngineAdapter:
                         yield get_task.result()
                     elif run_task in done and emit_queue.empty():
                         break
-                try:
-                    status = run_task.result()
-                except UserVisibleRuntimeError as exc:
-                    status = AgentRunStatus.FAILED
-                    async with self.session_manager() as session:
-                        error_event = await self.transcript_repo.append(
-                            session,
-                            EventCreate(
-                                session_id=request.session_id,
-                                kind=EventKind.SYSTEM_ERROR,
-                                payload=SystemErrorPayload(
-                                    content=exc.user_message,
-                                    severity="error",
-                                    recoverable=True,
-                                ).model_dump(mode="json", exclude_none=True),
-                            ),
-                        )
-                    yield durable(error_event)
+                status = run_task.result()
             except asyncio.CancelledError as exc:
                 cancel_args = exc.args
                 raise

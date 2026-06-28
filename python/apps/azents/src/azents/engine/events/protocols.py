@@ -17,6 +17,7 @@ from azents.engine.events.types import (
     EventPayload,
     TokenUsagePayload,
 )
+from azents.engine.run.failure import FailedRunRetryState
 from azents.repos.agent_execution.data import (
     AgentRunCreate,
     EventCreate,
@@ -141,6 +142,14 @@ class AdapterOutputNormalizer(Protocol):
 class AgentRunCreateRepository(Protocol):
     """Agent run create repository protocol."""
 
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Fetch run state."""
+        ...
+
     async def create(
         self,
         session: AsyncSession,
@@ -159,6 +168,15 @@ class AgentRunCreateRepository(Protocol):
         last_completed_event_id: str | None = None,
     ) -> object:
         """Record run terminal state."""
+        ...
+
+    async def update_retry_state(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        retry_state: FailedRunRetryState | None,
+    ) -> object:
+        """Set or clear durable failed-run retry state."""
         ...
 
 
@@ -194,6 +212,15 @@ class RunStateRepository(Protocol):
         last_completed_event_id: str | None = None,
     ) -> object:
         """Record run terminal state."""
+        ...
+
+    async def update_retry_state(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        retry_state: FailedRunRetryState | None,
+    ) -> object:
+        """Set or clear durable failed-run retry state."""
         ...
 
 

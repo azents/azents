@@ -32,7 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-06-28
-spec_version: 47
+spec_version: 48
 ---
 
 # Agent Execution Loop
@@ -90,6 +90,20 @@ progress for a still-running run and includes the latest user-safe error message
 count, max retries, backoff seconds, `next_retry_at`, error type/source, and future retry
 classification fields. Terminal run transitions clear `retry_state`. `/live` exposes this as the
 optional `run.retry` projection so retry UI does not need durable transcript retry-attempt events.
+
+Failed-run retry is owned by the worker run boundary, not by the event execution core. User-visible
+model/runtime errors that stop a run attempt propagate out of `AgentRunExecution` without appending a
+durable `system_error`, without appending a failed `run_marker`, and without marking the run
+terminal. `RunExecutor` converts the propagated failure into `FailedRunAttempt`, persists
+`agent_runs.retry_state`, waits until `next_retry_at` while observing stop/shutdown, and retries the
+same `run_id`. This keeps the run `running` and prevents durable failed history until retry is
+finalized.
+
+When the next attempt succeeds, the normal terminal completed path closes the same `agent_runs` row
+and clears `retry_state`. When retry is exhausted, or when stop is requested while retry is waiting,
+`FailedRunErrorFinalizer` promotes the latest attempt to durable failed-run output by appending the
+terminal `system_error` with failed-run metadata, appending the failed run marker, marking the run
+`failed`, clearing retry state, and emitting `RunComplete`.
 
 ## 3. Event Transcript
 
