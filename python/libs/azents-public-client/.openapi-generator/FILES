@@ -90,6 +90,7 @@ azentspublicclient/docs/ChatGPTOAuthSessionStatus.md
 azentspublicclient/docs/ChatGPTOAuthV1Api.md
 azentspublicclient/docs/ChatLiveRunStateResponse.md
 azentspublicclient/docs/ChatMessageWriteRequest.md
+azentspublicclient/docs/ChatSessionCreateMessageWriteRequest.md
 azentspublicclient/docs/ChatStopResponse.md
 azentspublicclient/docs/ChatV1Api.md
 azentspublicclient/docs/ChatWriteAcceptedResponse.md
@@ -317,6 +318,7 @@ azentspublicclient/models/chat_gpto_auth_secrets.py
 azentspublicclient/models/chat_gpto_auth_session_status.py
 azentspublicclient/models/chat_live_run_state_response.py
 azentspublicclient/models/chat_message_write_request.py
+azentspublicclient/models/chat_session_create_message_write_request.py
 azentspublicclient/models/chat_stop_response.py
 azentspublicclient/models/chat_write_accepted_response.py
 azentspublicclient/models/chat_write_response.py
@@ -535,6 +537,7 @@ azentspublicclient/test/test_chat_gpto_auth_session_status.py
 azentspublicclient/test/test_chat_gpto_auth_v1_api.py
 azentspublicclient/test/test_chat_live_run_state_response.py
 azentspublicclient/test/test_chat_message_write_request.py
+azentspublicclient/test/test_chat_session_create_message_write_request.py
 azentspublicclient/test/test_chat_stop_response.py
 azentspublicclient/test/test_chat_v1_api.py
 azentspublicclient/test/test_chat_write_accepted_response.py

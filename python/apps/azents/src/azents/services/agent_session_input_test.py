@@ -6,15 +6,18 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
     LLMProvider,
+    WorkspaceUserRole,
 )
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
@@ -22,10 +25,14 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -222,6 +229,25 @@ async def _create_user(session: AsyncSession, email: str) -> str:
     return user.id
 
 
+async def _add_workspace_user(
+    session: AsyncSession,
+    *,
+    workspace_id: str,
+    user_id: str,
+) -> None:
+    """Create WorkspaceUser for tests."""
+    result = await WorkspaceUserRepository().create(
+        session,
+        WorkspaceUserCreate(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            name="AgentSession input user",
+            role=WorkspaceUserRole.OWNER,
+        ),
+    )
+    assert isinstance(result, Success)
+
+
 class TestAgentSessionInputService:
     """AgentSessionInputService tests."""
 
@@ -235,8 +261,11 @@ class TestAgentSessionInputService:
         session_repository = _AgentSessionRepositoryDouble(calls)
         input_buffer_service = _InputBufferServiceDouble(calls)
         service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
             agent_runtime_repository=runtime_repository,
             agent_session_repository=session_repository,
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
             input_buffer_service=input_buffer_service,
             session_manager=rdb_session_manager,
         )
@@ -268,6 +297,82 @@ class TestAgentSessionInputService:
         assert input_buffer_service.enqueued.session_id == "session-1"
         assert input_buffer_service.enqueued.content == "restore me"
 
+    async def test_create_team_session_with_buffered_input_bootstraps_session(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """First draft input creates a session with project snapshot."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(session, "draft-session-input")
+            user_id = await _create_user(session, "draft-session-input@example.com")
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            agent_id = await _create_agent(session, workspace_id, "draft-session-input")
+            primary = await AgentSessionRepository().ensure_team_primary_for_agent(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+            await SessionWorkspaceProjectRepository().create_project(
+                session,
+                SessionWorkspaceProjectCreate(
+                    session_id=primary.id,
+                    path="/workspace/agent/project-a",
+                ),
+            )
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+
+        result = await service.create_team_session_with_buffered_input(
+            agent_id=agent_id,
+            message=InputMessage(
+                text="first draft message",
+                user_id=user_id,
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            ),
+            user_id=user_id,
+            client_request_id="draft-client-1",
+        )
+
+        assert isinstance(result, Success)
+        created = result.value.agent_session
+        assert created.agent_id == agent_id
+        assert created.primary_kind is None
+        assert result.value.input_buffer.session_id == created.id
+        assert result.value.input_buffer.content == "first draft message"
+        assert result.value.input_buffer.idempotency_key == "draft-client-1"
+        async with rdb_session_manager() as session:
+            sessions = await AgentSessionRepository().list_active_by_agent_id(
+                session,
+                agent_id,
+            )
+            projects = await SessionWorkspaceProjectRepository().list_projects(
+                session,
+                session_id=created.id,
+            )
+            updated = await AgentSessionRepository().get_by_id(session, created.id)
+
+        assert [item.primary_kind for item in sessions] == [
+            AgentSessionPrimaryKind.TEAM_PRIMARY,
+            None,
+        ]
+        assert [project.path for project in projects] == ["/workspace/agent/project-a"]
+        assert updated is not None
+        assert updated.run_state == AgentSessionRunState.RUNNING
+
     async def test_buffered_agent_input_rejects_archived_session_after_rollover(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -294,8 +399,11 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
@@ -343,8 +451,11 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
@@ -394,8 +505,11 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )

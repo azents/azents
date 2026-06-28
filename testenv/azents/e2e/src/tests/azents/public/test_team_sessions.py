@@ -150,6 +150,26 @@ def _write_message(
     )
 
 
+def _write_first_session_message(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    message: str,
+    client_request_id: str,
+) -> dict[str, object]:
+    """Create a non-primary session with its first message."""
+    return _post_json(
+        server_url=server_url,
+        token=token,
+        path=f"/chat/v1/agents/{agent_id}/sessions/messages",
+        payload={
+            "client_request_id": client_request_id,
+            "message": message,
+        },
+    )
+
+
 def _event_contents(events: list[dict[str, object]]) -> list[str]:
     """Return event payload contents."""
     contents: list[str] = []
@@ -234,6 +254,53 @@ def test_agent_scoped_team_session_list_has_primary_first(
     assert items[1].get("id") == setup.secondary_session_id
     assert items[1].get("primary_kind") is None
     assert all(item.get("agent_id") == setup.agent_id for item in items)
+
+
+def test_first_message_creates_non_primary_team_session(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+) -> None:
+    """First-message session creation avoids a pre-created empty session."""
+    token, primary_session_id, agent_id = create_chat_session_with_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+    )
+    before_items = _session_items(
+        server_url=azents_public_server_url,
+        token=token,
+        agent_id=agent_id,
+    )
+    message = f"First draft team session message {unique()}"
+
+    response = _write_first_session_message(
+        server_url=azents_public_server_url,
+        token=token,
+        agent_id=agent_id,
+        message=message,
+        client_request_id=f"team-session-first-message-{unique()}",
+    )
+
+    created_session_id = response.get("session_id")
+    if not isinstance(created_session_id, str):
+        raise AssertionError(f"Write response did not include session_id: {response!r}")
+    assert created_session_id != primary_session_id
+    assert message in _snapshot_input_contents(response)
+
+    after_items = _session_items(
+        server_url=azents_public_server_url,
+        token=token,
+        agent_id=agent_id,
+    )
+    before_ids = {item.get("id") for item in before_items}
+    created_items = [
+        item for item in after_items if item.get("id") == created_session_id
+    ]
+    assert len(created_items) == 1
+    assert created_session_id not in before_ids
+    assert created_items[0].get("primary_kind") is None
+    assert created_items[0].get("agent_id") == agent_id
 
 
 def test_secondary_team_session_write_is_session_isolated(

@@ -13,6 +13,7 @@ import {
   chatV1CreateCommand,
   chatV1CreateMessage,
   chatV1CreateTeamAgentSession,
+  chatV1CreateTeamAgentSessionMessage,
   chatV1DeleteAgentProject,
   chatV1DeleteInputBuffer,
   chatV1EditMessage,
@@ -95,6 +96,39 @@ export const chatRouter = router({
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  createTeamAgentSessionMessage: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        clientRequestId: z.string().min(1).max(64),
+        message: z.string().min(1),
+        attachments: z.array(z.string().min(1)).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1CreateTeamAgentSessionMessage({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          body: {
+            client_request_id: input.clientRequestId,
+            message: input.message,
+            attachments: input.attachments,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

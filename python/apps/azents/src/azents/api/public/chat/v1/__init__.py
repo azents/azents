@@ -49,11 +49,13 @@ from azents.core.auth.jwt import (
 from azents.core.config import AuthConfig, Config
 from azents.core.deps import get_appctx, get_auth_config
 from azents.core.redis import create_redis_client
+from azents.engine.events.types import FileOutputPart
 from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
 from azents.engine.run.input import InputMessage
 from azents.engine.run.resolve import (
     materialize_user_input_exchange_file_attachments,
 )
+from azents.repos.input_buffer.data import InputBuffer
 from azents.services.agent_session_input import (
     AgentSessionInputError,
     AgentSessionInputInactiveSession,
@@ -61,6 +63,7 @@ from azents.services.agent_session_input import (
     AgentSessionInputSessionNotFound,
     AgentSessionInputWrongAgent,
     BufferedAgentSessionInputResult,
+    CreatedAgentSessionInputResult,
 )
 from azents.services.chat import ChatSessionService
 from azents.services.chat.context import SessionContextService
@@ -148,6 +151,7 @@ from .data import (
     ChatEventResponse,
     ChatLiveRunStateResponse,
     ChatMessageWriteRequest,
+    ChatSessionCreateMessageWriteRequest,
     ChatStopResponse,
     ChatWriteAcceptedResponse,
     ChatWriteResponse,
@@ -501,14 +505,10 @@ async def _write_message_via_rest(
         model_file_service=model_file_service,
         user_id=user_id,
     )
-    message = InputMessage(
+    message = _create_chat_input_message(
         text=request.message,
         user_id=user_id,
-        headers=[],
-        metadata={
-            "timestamp": datetime.now(tz).isoformat(),
-            "source": "chat",
-        },
+        tz=tz,
         attachments=[attachment.uri for attachment in materialized.attachments],
         file_parts=materialized.file_parts,
     )
@@ -522,13 +522,61 @@ async def _write_message_via_rest(
     result = _handle_agent_session_input_result(input_result)
     if result.agent_session_id != resolved_session_id:
         raise RuntimeError("AgentSession input target changed during REST write")
-    live_event_upserted = chat_live_event_upserted_dump(
-        input_buffer_to_live_event(result.input_buffer)
-    )
-    await broadcast.publish(result.agent_session_id, live_event_upserted)
-    broker_message = SessionWakeUp(
+    return await _finalize_message_write_response(
+        chat_service,
+        broker,
+        broadcast,
+        live_event_store,
         agent_id=request.agent_id,
         session_id=result.agent_session_id,
+        user_id=user_id,
+        client_request_id=request.client_request_id,
+        input_buffer=result.input_buffer,
+    )
+
+
+def _create_chat_input_message(
+    *,
+    text: str,
+    user_id: str,
+    tz: ZoneInfo,
+    attachments: list[str],
+    file_parts: list[FileOutputPart],
+) -> InputMessage:
+    """Create a normalized chat input message for REST writes."""
+    return InputMessage(
+        text=text,
+        user_id=user_id,
+        headers=[],
+        metadata={
+            "timestamp": datetime.now(tz).isoformat(),
+            "source": "chat",
+        },
+        attachments=attachments,
+        file_parts=file_parts,
+    )
+
+
+async def _finalize_message_write_response(
+    chat_service: ChatSessionService,
+    broker: SessionBroker,
+    broadcast: WebSocketBroadcast,
+    live_event_store: LiveEventStore,
+    *,
+    agent_id: str,
+    session_id: str,
+    user_id: str,
+    client_request_id: str,
+    input_buffer: InputBuffer,
+) -> ChatWriteResponse:
+    """Publish live state, wake the worker, and return a write snapshot."""
+    live_event_upserted = chat_live_event_upserted_dump(
+        input_buffer_to_live_event(input_buffer)
+    )
+    await broadcast.publish(session_id, live_event_upserted)
+    broker_message = SessionWakeUp(
+        agent_id=agent_id,
+        session_id=session_id,
         user_id=user_id,
         additional_system_prompt=None,
         interface=None,
@@ -539,19 +587,43 @@ async def _write_message_via_rest(
     snapshot = await _build_chat_write_snapshot(
         chat_service,
         live_event_store,
-        session_id=result.agent_session_id,
+        session_id=session_id,
         user_id=user_id,
     )
     return ChatWriteResponse(
-        session_id=result.agent_session_id,
-        client_request_id=request.client_request_id,
+        session_id=session_id,
+        client_request_id=client_request_id,
         accepted=ChatWriteAcceptedResponse(
             type="input_buffer",
-            id=result.input_buffer.id,
+            id=input_buffer.id,
         ),
         snapshot=snapshot,
         history_reload_required=False,
     )
+
+
+def _handle_created_agent_session_input_result(
+    result: Result[CreatedAgentSessionInputResult, AgentSessionInputError],
+) -> CreatedAgentSessionInputResult:
+    """Convert draft session input service result to REST response semantics."""
+    match result:
+        case Success(value):
+            return value
+        case Failure(error):
+            match error:
+                case AgentSessionInputSessionNotFound():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case AgentSessionInputWrongAgent():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case AgentSessionInputInactiveSession():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Session is not active.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
 
 
 def _handle_agent_session_input_result(
@@ -786,6 +858,75 @@ async def create_message(
         session_id=session_id,
         user_id=current_user.user_id,
         tz=_parse_timezone(timezone),
+    )
+
+
+@router.post("/agents/{agent_id}/sessions/messages")
+async def create_team_agent_session_message(
+    agent_id: str,
+    request: ChatSessionCreateMessageWriteRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+    agent_session_input_service: Annotated[AgentSessionInputService, Depends()],
+    broker: Annotated[SessionBroker, Depends(get_broker)],
+    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
+    timezone: str | None = None,
+) -> ChatWriteResponse:
+    """Create a team AgentSession and accept its first message."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    return await _write_new_session_message_via_rest(
+        chat_service,
+        agent_session_input_service,
+        broker,
+        broadcast,
+        live_event_store,
+        request,
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        tz=_parse_timezone(timezone),
+    )
+
+
+async def _write_new_session_message_via_rest(
+    chat_service: ChatSessionService,
+    agent_session_input_service: AgentSessionInputService,
+    broker: SessionBroker,
+    broadcast: WebSocketBroadcast,
+    live_event_store: LiveEventStore,
+    request: ChatSessionCreateMessageWriteRequest,
+    *,
+    agent_id: str,
+    user_id: str,
+    tz: ZoneInfo,
+) -> ChatWriteResponse:
+    """Handle first-message writes that create the AgentSession boundary."""
+    message = _create_chat_input_message(
+        text=request.message,
+        user_id=user_id,
+        tz=tz,
+        attachments=request.attachments or [],
+        file_parts=[],
+    )
+    input_result = (
+        await agent_session_input_service.create_team_session_with_buffered_input(
+            agent_id=agent_id,
+            message=message,
+            user_id=user_id,
+            client_request_id=request.client_request_id,
+        )
+    )
+    result = _handle_created_agent_session_input_result(input_result)
+    return await _finalize_message_write_response(
+        chat_service,
+        broker,
+        broadcast,
+        live_event_store,
+        agent_id=agent_id,
+        session_id=result.agent_session.id,
+        user_id=user_id,
+        client_request_id=request.client_request_id,
+        input_buffer=result.input_buffer,
     )
 
 

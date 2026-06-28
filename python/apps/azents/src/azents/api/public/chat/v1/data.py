@@ -78,6 +78,21 @@ class ChatMessageWriteRequest(BaseModel):
     )
 
 
+class ChatSessionCreateMessageWriteRequest(BaseModel):
+    """REST first message write request for a draft AgentSession."""
+
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Client-generated idempotency key",
+    )
+    message: str = Field(description="Message content")
+    attachments: list[str] | None = Field(
+        default=None,
+        description="Attachment reference list, exchange:// URIs received after upload",
+    )
+
+
 class ChatEditMessageWriteRequest(BaseModel):
     """REST user message edit request."""
 

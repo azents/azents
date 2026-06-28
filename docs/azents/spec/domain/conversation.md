@@ -57,6 +57,7 @@ api_routes:
   - /chat/v1/sessions/{session_id}/commands
   - /chat/v1/agents/{agent_id}/team-primary-session
   - /chat/v1/agents/{agent_id}/sessions
+  - /chat/v1/agents/{agent_id}/sessions/messages
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/archive
   - /chat/v1/sessions/{session_id}/title
@@ -72,8 +73,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-06-27
-spec_version: 74
+last_verified_at: 2026-06-28
+spec_version: 75
 ---
 
 # Conversation & Events
@@ -137,13 +138,18 @@ non-primary team sessions may exist under the same agent with `primary_kind = nu
 first and the remaining sessions ordered by persisted `last_user_input_at`, the timestamp of the
 most recent non-reverted `user_message` event or the session creation time when no user input exists.
 This lets newly created sessions appear naturally in the active list before their first message. Each
-session item includes `run_state` so
-azents-web can mark running sessions in the Agent rail session list. `POST /chat/v1/agents/{agent_id}/sessions`
-creates an active non-primary team session and snapshot-copies registered projects from the team
-primary session. Pending project registration requests are not copied. azents-web Agent detail routes
-surface this list in the Agent rail and navigate selected sessions through
-`/w/{handle}/agents/{agent_id}/sessions/{session_id}`. Creating a session invalidates the Agent
-session list cache and navigates to the newly created session URL.
+session item includes `run_state` so azents-web can mark running sessions in the Agent rail session
+list. `POST /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session and
+snapshot-copies registered projects from the team primary session. Pending project registration
+requests are not copied. `POST /chat/v1/agents/{agent_id}/sessions/messages` creates the same kind of
+non-primary team session and enqueues the first user message in one write boundary. The first-message
+create response is `ChatWriteResponse`, including the created `session_id` and live snapshot. azents-web
+Agent detail routes surface the active session list in the Agent rail and navigate selected sessions
+through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action
+navigates to `/w/{handle}/agents/{agent_id}/sessions/new`, which is a draft route and must not create
+an `AgentSession` row. The draft route renders only the chat input surface; on first-message success,
+azents-web replaces the draft URL with the created session URL and invalidates the Agent session list
+cache.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":

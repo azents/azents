@@ -9,6 +9,7 @@ Method | HTTP request | Description
 [**chat_v1_create_command**](ChatV1Api.md#chat_v1_create_command) | **POST** /chat/v1/sessions/{session_id}/commands | Create Command
 [**chat_v1_create_message**](ChatV1Api.md#chat_v1_create_message) | **POST** /chat/v1/sessions/{session_id}/messages | Create Message
 [**chat_v1_create_team_agent_session**](ChatV1Api.md#chat_v1_create_team_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions | Create Team Agent Session
+[**chat_v1_create_team_agent_session_message**](ChatV1Api.md#chat_v1_create_team_agent_session_message) | **POST** /chat/v1/agents/{agent_id}/sessions/messages | Create Team Agent Session Message
 [**chat_v1_delete_agent_project**](ChatV1Api.md#chat_v1_delete_agent_project) | **DELETE** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id} | Delete Agent Project
 [**chat_v1_delete_exchange_file**](ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
 [**chat_v1_delete_input_buffer**](ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
@@ -433,6 +434,90 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_create_team_agent_session_message**
+> ChatWriteResponse chat_v1_create_team_agent_session_message(agent_id, chat_session_create_message_write_request, timezone=timezone)
+
+Create Team Agent Session Message
+
+Create a team AgentSession and accept its first message.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.chat_session_create_message_write_request import ChatSessionCreateMessageWriteRequest
+from azentspublicclient.models.chat_write_response import ChatWriteResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str |
+    chat_session_create_message_write_request = azentspublicclient.ChatSessionCreateMessageWriteRequest() # ChatSessionCreateMessageWriteRequest |
+    timezone = 'timezone_example' # str |  (optional)
+
+    try:
+        # Create Team Agent Session Message
+        api_response = api_instance.chat_v1_create_team_agent_session_message(agent_id, chat_session_create_message_write_request, timezone=timezone)
+        print("The response of ChatV1Api->chat_v1_create_team_agent_session_message:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_create_team_agent_session_message: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  |
+ **chat_session_create_message_write_request** | [**ChatSessionCreateMessageWriteRequest**](ChatSessionCreateMessageWriteRequest.md)|  |
+ **timezone** | **str**|  | [optional]
+
+### Return type
+
+[**ChatWriteResponse**](ChatWriteResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
  - **Accept**: application/json
 
 ### HTTP response details

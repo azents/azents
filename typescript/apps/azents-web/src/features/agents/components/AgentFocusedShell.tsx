@@ -70,13 +70,6 @@ export function AgentFocusedShell({
       staleTime: 0,
     },
   );
-  const createSessionMutation = trpc.chat.createTeamAgentSession.useMutation({
-    onSuccess: (session) => {
-      void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
-      closeDrawer();
-      router.push(`/w/${handle}/agents/${agent.id}/sessions/${session.id}`);
-    },
-  });
   const updateTitleMutation = trpc.chat.updateAgentSessionTitle.useMutation();
   const archiveSessionMutation = trpc.chat.archiveAgentSession.useMutation({
     onSuccess: (_result, variables) => {
@@ -89,8 +82,9 @@ export function AgentFocusedShell({
   });
 
   const handleCreateSession = useCallback((): void => {
-    createSessionMutation.mutate({ agentId: agent.id });
-  }, [createSessionMutation, agent.id]);
+    closeDrawer();
+    router.push(`/w/${handle}/agents/${agent.id}/sessions/new`);
+  }, [agent.id, handle, router]);
 
   const handleRenameSession = useCallback(
     async (sessionId: string, title: string | null): Promise<void> => {
@@ -142,7 +136,7 @@ export function AgentFocusedShell({
           sessionsLoading={sessionsQuery.isPending}
           sessionsError={sessionsQuery.error?.message ?? null}
           activeSessionId={activeSessionId}
-          creatingSession={createSessionMutation.isPending}
+          creatingSession={false}
           renamingSessionId={
             updateTitleMutation.isPending
               ? updateTitleMutation.variables.sessionId
@@ -174,7 +168,7 @@ export function AgentFocusedShell({
             sessionsLoading={sessionsQuery.isPending}
             sessionsError={sessionsQuery.error?.message ?? null}
             activeSessionId={activeSessionId}
-            creatingSession={createSessionMutation.isPending}
+            creatingSession={false}
             renamingSessionId={
               updateTitleMutation.isPending
                 ? updateTitleMutation.variables.sessionId
