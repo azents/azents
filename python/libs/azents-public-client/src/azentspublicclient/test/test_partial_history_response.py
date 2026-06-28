@@ -37,17 +37,17 @@ class TestPartialHistoryResponse(unittest.TestCase):
             return PartialHistoryResponse(
                 items = [
                     azentspublicclient.models.chat_event_response.ChatEventResponse(
-                        id = '', 
-                        session_id = '', 
-                        kind = 'user_message', 
-                        payload = { }, 
-                        model_order = 56, 
-                        external_id = '', 
-                        adapter = '', 
-                        provider = '', 
-                        model = '', 
-                        native_format = '', 
-                        schema_version = '', 
+                        id = '',
+                        session_id = '',
+                        kind = 'user_message',
+                        payload = { },
+                        model_order = 56,
+                        external_id = '',
+                        adapter = '',
+                        provider = '',
+                        model = '',
+                        native_format = '',
+                        schema_version = '',
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -55,17 +55,17 @@ class TestPartialHistoryResponse(unittest.TestCase):
             return PartialHistoryResponse(
                 items = [
                     azentspublicclient.models.chat_event_response.ChatEventResponse(
-                        id = '', 
-                        session_id = '', 
-                        kind = 'user_message', 
-                        payload = { }, 
-                        model_order = 56, 
-                        external_id = '', 
-                        adapter = '', 
-                        provider = '', 
-                        model = '', 
-                        native_format = '', 
-                        schema_version = '', 
+                        id = '',
+                        session_id = '',
+                        kind = 'user_message',
+                        payload = { },
+                        model_order = 56,
+                        external_id = '',
+                        adapter = '',
+                        provider = '',
+                        model = '',
+                        native_format = '',
+                        schema_version = '',
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

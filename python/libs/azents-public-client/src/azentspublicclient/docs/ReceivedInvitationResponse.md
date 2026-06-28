@@ -6,14 +6,14 @@ Received invitation response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Invitation ID | 
-**workspace_id** | **str** | Workspace ID | 
-**workspace_name** | **str** | Workspace name | 
-**workspace_handle** | **str** | Workspace handle | 
-**email** | **str** | Invitation target email | 
-**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Invitation role | 
-**status** | [**InvitationStatus**](InvitationStatus.md) | Invitation status | 
-**created_at** | **datetime** | Created time | 
+**id** | **str** | Invitation ID |
+**workspace_id** | **str** | Workspace ID |
+**workspace_name** | **str** | Workspace name |
+**workspace_handle** | **str** | Workspace handle |
+**email** | **str** | Invitation target email |
+**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Invitation role |
+**status** | [**InvitationStatus**](InvitationStatus.md) | Invitation status |
+**created_at** | **datetime** | Created time |
 
 ## Example
 

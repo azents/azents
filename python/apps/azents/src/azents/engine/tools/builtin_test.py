@@ -40,11 +40,7 @@ from azents.engine.run.types import (
 )
 from azents.engine.tools import builtin as builtin_module
 from azents.engine.tools.builtin import BuiltinToolkit, RuntimeToolkit
-from azents.engine.tools.builtin_agents import (
-    AgentsAppendixDedupeState,
-    ProjectAgentsInstructionState,
-    RootAgentsInstructionState,
-)
+from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
 from azents.engine.tools.edit import make_edit_tool
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_io import (
@@ -127,7 +123,7 @@ def _make_mock_memory_repo(
     return repo
 
 
-def _make_runtime_repo(
+def _make_runtime_repo(  # pyright: ignore[reportUnusedFunction] -- retained test helper
     *,
     runtime_id: str = "runtime-1",
     desired_state: RuntimeDesiredState = RuntimeDesiredState.RUNNING,
@@ -152,66 +148,11 @@ def _make_runtime_repo(
     return repo
 
 
-class _FakeAgentsInstructionStateStore:
-    """AGENTS.md instruction state store for tests."""
+class _FakeAgentsAppendixDedupeStateStore:
+    """AGENTS.md appendix dedupe state store for tests."""
 
     def __init__(self) -> None:
-        self.root_states: dict[tuple[str, str], RootAgentsInstructionState] = {}
-        self.project_states: dict[tuple[str, str], ProjectAgentsInstructionState] = {}
         self.dedupe_states: dict[tuple[str, str], AgentsAppendixDedupeState] = {}
-
-    async def load_root(
-        self, agent_id: str, session_id: str
-    ) -> RootAgentsInstructionState:
-        """Return stored root state."""
-        return self.root_states.get(
-            (agent_id, session_id), RootAgentsInstructionState()
-        )
-
-    async def save_root(
-        self, agent_id: str, session_id: str, state: RootAgentsInstructionState
-    ) -> None:
-        """Store root state."""
-        self.root_states[(agent_id, session_id)] = state
-
-    async def update_root(
-        self,
-        agent_id: str,
-        session_id: str,
-        mutator: Callable[[RootAgentsInstructionState], RootAgentsInstructionState],
-    ) -> None:
-        """Apply root state update."""
-        state = await self.load_root(agent_id, session_id)
-        await self.save_root(agent_id, session_id, mutator(state))
-
-    async def load_project(
-        self, agent_id: str, session_id: str
-    ) -> ProjectAgentsInstructionState:
-        """Return stored project state."""
-        return self.project_states.get(
-            (agent_id, session_id), ProjectAgentsInstructionState()
-        )
-
-    async def save_project(
-        self,
-        agent_id: str,
-        session_id: str,
-        state: ProjectAgentsInstructionState,
-    ) -> None:
-        """Store project state."""
-        self.project_states[(agent_id, session_id)] = state
-
-    async def update_project(
-        self,
-        agent_id: str,
-        session_id: str,
-        mutator: Callable[
-            [ProjectAgentsInstructionState], ProjectAgentsInstructionState
-        ],
-    ) -> None:
-        """Apply project state update."""
-        state = await self.load_project(agent_id, session_id)
-        await self.save_project(agent_id, session_id, mutator(state))
 
     async def load_appendix_dedupe(
         self, agent_id: str, session_id: str
@@ -565,7 +506,7 @@ def _make_toolkit(
     runner_state: RuntimeRunnerState = RuntimeRunnerState.READY,
     storage_files: dict[str, bytes] | None = None,
     projects: list[SessionWorkspaceProject] | None = None,
-    agents_store: _FakeAgentsInstructionStateStore | None = None,
+    agents_store: _FakeAgentsAppendixDedupeStateStore | None = None,
 ) -> RuntimeToolkit:
     """Create RuntimeToolkit for tests."""
     runner_operations = _FakeRunnerOperations(storage_files)
@@ -586,7 +527,7 @@ def _make_toolkit(
         project_repo = AsyncMock(spec=SessionWorkspaceProjectRepository)
         project_repo.list_projects.return_value = projects
     if agents_store is None:
-        agents_store = _FakeAgentsInstructionStateStore()
+        agents_store = _FakeAgentsAppendixDedupeStateStore()
 
     toolkit = RuntimeToolkit(
         config=config or ShellToolkitConfig(),
@@ -626,7 +567,6 @@ def _make_builtin_toolkit(
     session_manager: SessionManager[AsyncMock] | None = None,
     memory_repo: MemoryRepository | None = None,
     agent_runtime_repo: AgentRuntimeRepository | None = None,
-    agents_store: _FakeAgentsInstructionStateStore | None = None,
 ) -> BuiltinToolkit:
     """Create BuiltinToolkit for tests."""
     toolkit = BuiltinToolkit(
@@ -635,7 +575,6 @@ def _make_builtin_toolkit(
         session_manager=session_manager,
         memory_repo=memory_repo,
         agent_runtime_repo=agent_runtime_repo,
-        agents_store=agents_store,
     )
     toolkit.set_session_id(session_id)
     return toolkit
@@ -780,7 +719,7 @@ class TestRuntimeToolkitUpdateContext:
     @pytest.mark.asyncio
     async def test_read_appends_agents_only_once_until_compaction(self) -> None:
         """AGENTS.md appendix is deduped by path until compaction clears state."""
-        agents_store = _FakeAgentsInstructionStateStore()
+        agents_store = _FakeAgentsAppendixDedupeStateStore()
         toolkit = _make_toolkit(
             agents_store=agents_store,
             projects=[_make_project(path="/workspace/agent/app")],
@@ -982,27 +921,6 @@ class TestBuiltinToolkitMemoryPrompt:
         assert "bash" not in tool_names
         assert "exec_command" not in tool_names
         assert "Runtime Files" not in state.prompt
-
-    @pytest.mark.asyncio
-    async def test_root_agents_loaded_from_persistent_state(self) -> None:
-        """persistent root AGENTS.md state is not included in prompt."""
-        agents_store = _FakeAgentsInstructionStateStore()
-        await agents_store.save_root(
-            "agent-root-state-test",
-            "session-1",
-            RootAgentsInstructionState(root_content="SNAPSHOT_ROOT_RULE"),
-        )
-        toolkit = _make_builtin_toolkit(
-            config=ShellToolkitConfig(memory_enabled=False),
-            agent_id="agent-root-state-test",
-            session_manager=_make_mock_session_manager(),
-            agent_runtime_repo=_make_runtime_repo(runtime_id="runtime-root-state"),
-            agents_store=agents_store,
-        )
-
-        state = await toolkit.update_context(_make_context())
-
-        assert "SNAPSHOT_ROOT_RULE" not in state.prompt
 
 
 # ---------------------------------------------------------------------------

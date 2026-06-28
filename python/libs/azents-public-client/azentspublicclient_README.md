@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Get Agent Runtime
@@ -112,11 +112,15 @@ Class | Method | HTTP request | Description
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_start_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_start_device) | **POST** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start | Start Device
 *ChatV1Api* | [**chat_v1_approve_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_approve_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/approve | Approve Agent Project Registration Request
 *ChatV1Api* | [**chat_v1_archive_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_archive_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/archive | Archive Agent Session
+*ChatV1Api* | [**chat_v1_bulk_delete_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
+*ChatV1Api* | [**chat_v1_bulk_move_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
+*ChatV1Api* | [**chat_v1_create_agent_workspace_directory**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_agent_workspace_directory) | **POST** /chat/v1/agents/{agent_id}/workspace/directories | Create Agent Workspace Directory
 *ChatV1Api* | [**chat_v1_create_command**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_command) | **POST** /chat/v1/sessions/{session_id}/commands | Create Command
 *ChatV1Api* | [**chat_v1_create_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_message) | **POST** /chat/v1/sessions/{session_id}/messages | Create Message
 *ChatV1Api* | [**chat_v1_create_team_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions | Create Team Agent Session
 *ChatV1Api* | [**chat_v1_create_team_agent_session_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session_message) | **POST** /chat/v1/agents/{agent_id}/sessions/messages | Create Team Agent Session Message
 *ChatV1Api* | [**chat_v1_delete_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_project) | **DELETE** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id} | Delete Agent Project
+*ChatV1Api* | [**chat_v1_delete_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_workspace_path) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files | Delete Agent Workspace Path
 *ChatV1Api* | [**chat_v1_delete_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
 *ChatV1Api* | [**chat_v1_delete_input_buffer**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
 *ChatV1Api* | [**chat_v1_delete_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_session) | **DELETE** /chat/v1/sessions/{session_id} | Delete Session
@@ -135,18 +139,16 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_list_live_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
 *ChatV1Api* | [**chat_v1_list_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_sessions) | **GET** /chat/v1/workspaces/{handle}/sessions | List Sessions
 *ChatV1Api* | [**chat_v1_list_slash_commands**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_slash_commands) | **GET** /chat/v1/commands | List Slash Commands
+*ChatV1Api* | [**chat_v1_move_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_move_agent_workspace_path) | **POST** /chat/v1/agents/{agent_id}/workspace/move | Move Agent Workspace Path
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
 *ChatV1Api* | [**chat_v1_reject_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reject_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject | Reject Agent Project Registration Request
+*ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
 *ChatV1Api* | [**chat_v1_stop_session_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
 *ChatV1Api* | [**chat_v1_update_agent_session_title**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_agent_session_title) | **PATCH** /chat/v1/sessions/{session_id}/title | Update Agent Session Title
 *ChatV1Api* | [**chat_v1_update_session_goal**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal) | **PATCH** /chat/v1/sessions/{session_id}/goal | Update Session Goal
 *ChatV1Api* | [**chat_v1_update_session_goal_status**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_session_goal_status) | **PATCH** /chat/v1/sessions/{session_id}/goal/status | Update Session Goal Status
 *ChatV1Api* | [**chat_v1_upload_file_for_agent**](azentspublicclient/docs/ChatV1Api.md#chat_v1_upload_file_for_agent) | **POST** /chat/v1/agents/{agent_id}/upload | Upload File For Agent
-*GitHubPATV1Api* | [**github_pat_v1_delete_pat**](azentspublicclient/docs/GitHubPATV1Api.md#github_pat_v1_delete_pat) | **DELETE** /github-pat/v1/workspaces/{handle}/github-pat | Delete Pat
-*GitHubPATV1Api* | [**github_pat_v1_get_pat_status**](azentspublicclient/docs/GitHubPATV1Api.md#github_pat_v1_get_pat_status) | **GET** /github-pat/v1/workspaces/{handle}/github-pat | Get Pat Status
-*GitHubPATV1Api* | [**github_pat_v1_get_setup_status**](azentspublicclient/docs/GitHubPATV1Api.md#github_pat_v1_get_setup_status) | **GET** /github-pat/v1/workspaces/{handle}/github-pat/setup-status | Get Setup Status
-*GitHubPATV1Api* | [**github_pat_v1_register_pat**](azentspublicclient/docs/GitHubPATV1Api.md#github_pat_v1_register_pat) | **POST** /github-pat/v1/workspaces/{handle}/github-pat | Register Pat
 *HealthV1Api* | [**health_v1_liveness**](azentspublicclient/docs/HealthV1Api.md#health_v1_liveness) | **GET** /health/v1/liveness | Liveness
 *HealthV1Api* | [**health_v1_readiness**](azentspublicclient/docs/HealthV1Api.md#health_v1_readiness) | **GET** /health/v1/readiness | Readiness
 *InvitationV1Api* | [**invitation_v1_accept_invitation**](azentspublicclient/docs/InvitationV1Api.md#invitation_v1_accept_invitation) | **POST** /invitation/v1/invitations/{invitation_id}/accept | Accept Invitation
@@ -250,16 +252,26 @@ Class | Method | HTTP request | Description
  - [AgentUpdateRequest](azentspublicclient/docs/AgentUpdateRequest.md)
  - [AgentWorkspaceActionResponse](azentspublicclient/docs/AgentWorkspaceActionResponse.md)
  - [AgentWorkspaceActionsResponse](azentspublicclient/docs/AgentWorkspaceActionsResponse.md)
+ - [AgentWorkspaceBulkDeleteRequest](azentspublicclient/docs/AgentWorkspaceBulkDeleteRequest.md)
+ - [AgentWorkspaceBulkDeleteResponse](azentspublicclient/docs/AgentWorkspaceBulkDeleteResponse.md)
+ - [AgentWorkspaceBulkMoveRequest](azentspublicclient/docs/AgentWorkspaceBulkMoveRequest.md)
+ - [AgentWorkspaceBulkMoveResponse](azentspublicclient/docs/AgentWorkspaceBulkMoveResponse.md)
  - [AgentWorkspaceConnectingAccessResponse](azentspublicclient/docs/AgentWorkspaceConnectingAccessResponse.md)
  - [AgentWorkspaceControlUnavailableAccessResponse](azentspublicclient/docs/AgentWorkspaceControlUnavailableAccessResponse.md)
+ - [AgentWorkspaceDeleteRequest](azentspublicclient/docs/AgentWorkspaceDeleteRequest.md)
  - [AgentWorkspaceDirectoryResponse](azentspublicclient/docs/AgentWorkspaceDirectoryResponse.md)
  - [AgentWorkspaceEntryResponse](azentspublicclient/docs/AgentWorkspaceEntryResponse.md)
  - [AgentWorkspaceFileResponse](azentspublicclient/docs/AgentWorkspaceFileResponse.md)
  - [AgentWorkspaceManifestResponse](azentspublicclient/docs/AgentWorkspaceManifestResponse.md)
+ - [AgentWorkspaceMkdirRequest](azentspublicclient/docs/AgentWorkspaceMkdirRequest.md)
+ - [AgentWorkspaceMoveRequest](azentspublicclient/docs/AgentWorkspaceMoveRequest.md)
+ - [AgentWorkspaceMoveResponse](azentspublicclient/docs/AgentWorkspaceMoveResponse.md)
+ - [AgentWorkspaceMutationResponse](azentspublicclient/docs/AgentWorkspaceMutationResponse.md)
  - [AgentWorkspaceReadFailedAccessResponse](azentspublicclient/docs/AgentWorkspaceReadFailedAccessResponse.md)
  - [AgentWorkspaceReadyAccessResponse](azentspublicclient/docs/AgentWorkspaceReadyAccessResponse.md)
  - [AgentWorkspaceResponse](azentspublicclient/docs/AgentWorkspaceResponse.md)
  - [AgentWorkspaceRuntimeResponse](azentspublicclient/docs/AgentWorkspaceRuntimeResponse.md)
+ - [AgentWorkspaceStatResponse](azentspublicclient/docs/AgentWorkspaceStatResponse.md)
  - [AgentWorkspaceUnavailableAccessResponse](azentspublicclient/docs/AgentWorkspaceUnavailableAccessResponse.md)
  - [ApiKeySecrets](azentspublicclient/docs/ApiKeySecrets.md)
  - [AuthMethod](azentspublicclient/docs/AuthMethod.md)
@@ -345,7 +357,6 @@ Class | Method | HTTP request | Description
  - [MyJoinRequestResponse](azentspublicclient/docs/MyJoinRequestResponse.md)
  - [OAuthAuthorizeResponse](azentspublicclient/docs/OAuthAuthorizeResponse.md)
  - [OAuthExchangeRequest](azentspublicclient/docs/OAuthExchangeRequest.md)
- - [PATStatusResponse](azentspublicclient/docs/PATStatusResponse.md)
  - [PartialHistoryResponse](azentspublicclient/docs/PartialHistoryResponse.md)
  - [PasswordLoginRequest](azentspublicclient/docs/PasswordLoginRequest.md)
  - [PasswordLoginResponse](azentspublicclient/docs/PasswordLoginResponse.md)
@@ -361,8 +372,6 @@ Class | Method | HTTP request | Description
  - [RedeemSignupTokenResponse](azentspublicclient/docs/RedeemSignupTokenResponse.md)
  - [RefreshTokenRequest](azentspublicclient/docs/RefreshTokenRequest.md)
  - [RefreshTokenResponse](azentspublicclient/docs/RefreshTokenResponse.md)
- - [RegisterPATRequest](azentspublicclient/docs/RegisterPATRequest.md)
- - [RegisterPATResponse](azentspublicclient/docs/RegisterPATResponse.md)
  - [RequestSignupEmailRequest](azentspublicclient/docs/RequestSignupEmailRequest.md)
  - [RequestSignupEmailResponse](azentspublicclient/docs/RequestSignupEmailResponse.md)
  - [ResetAgentRuntimeRequest](azentspublicclient/docs/ResetAgentRuntimeRequest.md)
@@ -391,7 +400,6 @@ Class | Method | HTTP request | Description
  - [SessionWorkspaceProjectRegistrationRequestResponse](azentspublicclient/docs/SessionWorkspaceProjectRegistrationRequestResponse.md)
  - [SessionWorkspaceProjectResponse](azentspublicclient/docs/SessionWorkspaceProjectResponse.md)
  - [SetPasswordRequest](azentspublicclient/docs/SetPasswordRequest.md)
- - [SetupStatusResponse](azentspublicclient/docs/SetupStatusResponse.md)
  - [SignupStatusResponse](azentspublicclient/docs/SignupStatusResponse.md)
  - [SlashCommandListResponse](azentspublicclient/docs/SlashCommandListResponse.md)
  - [SlashCommandResponse](azentspublicclient/docs/SlashCommandResponse.md)

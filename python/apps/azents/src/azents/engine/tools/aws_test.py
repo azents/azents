@@ -6,13 +6,96 @@ authentication and creates prompt correctly. Also validate background connection
 """
 
 import asyncio
+from typing import AsyncContextManager
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp.types import Tool as McpBaseTool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import AwsToolkitConfig, ToolkitState, TurnContext
+from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
 from azents.engine.tools.aws import AwsCredentialProvider, AwsToolkit
+
+
+class _FakeToolkitStateHandle:
+    """In-memory Toolkit State handle for tests."""
+
+    _states: dict[tuple[str, str, str, str], object] = {}
+
+    def __init__(self, identity: ToolkitStateIdentity) -> None:
+        self.identity = identity
+
+    async def load(self, default_factory: object) -> object:
+        """Load state from in-memory store."""
+        key = self._key()
+        if key not in self._states:
+            return default_factory()  # type: ignore[operator]
+        return self._states[key]
+
+    async def save(self, state: object) -> object:
+        """Save state to in-memory store."""
+        self._states[self._key()] = state
+        return object()
+
+    @classmethod
+    def clear(cls) -> None:
+        """Clear stored Toolkit State."""
+        cls._states.clear()
+
+    def _key(self) -> tuple[str, str, str, str]:
+        return (
+            self.identity.agent_id,
+            self.identity.session_id,
+            self.identity.toolkit_namespace,
+            self.identity.state_name,
+        )
+
+
+class _FakeToolkitStateStore:
+    """In-memory Toolkit State store for tests."""
+
+    def __init__(self, *, session: object) -> None:
+        del session
+
+    def handle(
+        self, identity: ToolkitStateIdentity, _model_type: object
+    ) -> _FakeToolkitStateHandle:
+        """Return fake handle."""
+        return _FakeToolkitStateHandle(identity)
+
+
+class _FakeSessionContext:
+    """Minimal async session context manager for tests."""
+
+    async def __aenter__(self) -> AsyncSession:
+        return AsyncSession()
+
+    async def __aexit__(self, *exc: object) -> None:
+        pass
+
+
+class _FakeSessionManager:
+    """Minimal async context manager factory for tests."""
+
+    def __call__(self) -> AsyncContextManager[AsyncSession]:
+        return _FakeSessionContext()
+
+
+_session_manager = _FakeSessionManager()
+
+
+@pytest.fixture(autouse=True)
+def _toolkit_state_store(  # pyright: ignore[reportUnusedFunction] -- pytest autouse fixture
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Patch Toolkit State to an in-memory store."""
+    _FakeToolkitStateHandle.clear()
+    monkeypatch.setattr(
+        "azents.engine.tools.aws.ToolkitStateStore",
+        _FakeToolkitStateStore,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -65,6 +148,12 @@ def _make_toolkit(
         credential_provider=credential_provider,
         default_region=region,
         timeout=30.0,
+        proxy_url=None,
+        artifact_service=None,
+        session_manager=_session_manager,
+        agent_id="agent-1",
+        session_id="session-1",
+        state_name="tool_snapshot:test",
     )
 
 
@@ -107,7 +196,7 @@ class TestAwsToolkitUpdateContext:
             new_callable=AsyncMock,
             return_value=(mock_tools, False),
         ):
-            await toolkit._connect_and_list_tools()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            await toolkit._refresh_tool_snapshot()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
             state = await toolkit.update_context(ctx)
 
         assert len(state.tools) == 2

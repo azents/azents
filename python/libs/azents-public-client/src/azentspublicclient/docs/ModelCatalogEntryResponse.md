@@ -6,18 +6,18 @@ Stored model catalog entry response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  | 
-**provider** | [**LLMProvider**](LLMProvider.md) |  | 
-**provider_model_identifier** | **str** |  | 
-**runtime_model_identifier** | **str** |  | 
-**display_name** | **str** |  | 
-**normalized_capabilities** | [**ModelCapabilities**](ModelCapabilities.md) |  | 
-**lifecycle_status** | **str** |  | 
-**visibility_status** | **str** |  | 
-**publisher** | **str** |  | 
-**family** | **str** |  | 
-**source_metadata** | **Dict[str, object]** |  | 
-**projection_metadata** | **Dict[str, object]** |  | 
+**id** | **str** |  |
+**provider** | [**LLMProvider**](LLMProvider.md) |  |
+**provider_model_identifier** | **str** |  |
+**runtime_model_identifier** | **str** |  |
+**display_name** | **str** |  |
+**normalized_capabilities** | [**ModelCapabilities**](ModelCapabilities.md) |  |
+**lifecycle_status** | **str** |  |
+**visibility_status** | **str** |  |
+**publisher** | **str** |  |
+**family** | **str** |  |
+**source_metadata** | **Dict[str, object]** |  |
+**projection_metadata** | **Dict[str, object]** |  |
 
 ## Example
 

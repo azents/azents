@@ -6,8 +6,8 @@ User-controlled Goal status update request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**status** | **str** | User-controlled goal status. Active resumes paused or blocked goals; paused pauses active goals. | 
-**resume_hint** | **str** |  | [optional] 
+**status** | **str** | User-controlled goal status. Active resumes paused or blocked goals; paused pauses active goals. |
+**resume_hint** | **str** |  | [optional]
 
 ## Example
 

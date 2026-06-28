@@ -37,9 +37,9 @@ class TestSessionWorkspaceProjectListResponse(unittest.TestCase):
             return SessionWorkspaceProjectListResponse(
                 items = [
                     azentspublicclient.models.session_workspace_project_response.SessionWorkspaceProjectResponse(
-                        id = '', 
-                        path = '', 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        id = '',
+                        path = '',
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -47,9 +47,9 @@ class TestSessionWorkspaceProjectListResponse(unittest.TestCase):
             return SessionWorkspaceProjectListResponse(
                 items = [
                     azentspublicclient.models.session_workspace_project_response.SessionWorkspaceProjectResponse(
-                        id = '', 
-                        path = '', 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        id = '',
+                        path = '',
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

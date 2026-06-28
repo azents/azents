@@ -6,11 +6,11 @@ ToolkitScope response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  | 
-**toolkit_id** | **str** |  | 
-**scope_type** | [**ToolkitScopeType**](ToolkitScopeType.md) |  | 
-**scope_id** | **str** |  | 
-**created_at** | **datetime** |  | 
+**id** | **str** |  |
+**toolkit_id** | **str** |  |
+**scope_type** | [**ToolkitScopeType**](ToolkitScopeType.md) |  |
+**scope_id** | **str** |  |
+**created_at** | **datetime** |  |
 
 ## Example
 

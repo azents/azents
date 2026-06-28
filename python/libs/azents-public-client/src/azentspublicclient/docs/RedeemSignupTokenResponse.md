@@ -6,9 +6,9 @@ Signup token redeem response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**access_token** | **str** | JWT access token | 
-**refresh_token** | **str** | Refresh token | 
-**expires_in** | **int** | Access token expiration time (seconds) | 
+**access_token** | **str** | JWT access token |
+**refresh_token** | **str** | Refresh token |
+**expires_in** | **int** | Access token expiration time (seconds) |
 
 ## Example
 

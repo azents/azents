@@ -6,8 +6,11 @@ and supports direct Access Key use or STS AssumeRole.
 """
 
 import asyncio
+import datetime
+import hashlib
+import json
 import logging
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from datetime import timedelta
 from textwrap import dedent
 from typing import ClassVar
@@ -17,9 +20,13 @@ from azcommon.datetime import tznow
 from botocore.auth import SigV4Auth as BotoSigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.credentials import Credentials
+from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.mcp_transport import (
+    call_tool as mcp_call_tool,
+)
 from azents.core.mcp_transport import (
     extract_network_error,
 )
@@ -36,12 +43,25 @@ from azents.core.tools import (
     ToolkitStatus,
     TurnContext,
 )
-from azents.engine.run.types import FunctionTool
+from azents.engine.run.types import (
+    FunctionTool,
+    FunctionToolError,
+    FunctionToolResult,
+    FunctionToolSpec,
+)
+from azents.engine.tooling.toolkit_state import (
+    ToolkitStateHandle,
+    ToolkitStateIdentity,
+    ToolkitStateStore,
+)
 from azents.engine.tools.mcp_base import (
     McpArtifactSink,
+    McpToolSnapshotItem,
+    McpToolSnapshotState,
+    _extract_tool_result,  # pyright: ignore[reportPrivateUsage] -- reuse common MCP result extraction for AWS wrapper.
     build_mcp_artifact_sink,
-    wrap_mcp_tool,
 )
+from azents.rdb.session import SessionManager
 from azents.services.artifact import ArtifactService
 
 logger = logging.getLogger(__name__)
@@ -53,6 +73,7 @@ _AWS_MCP_REGION = "us-east-1"
 _ASSUME_REFRESH_MARGIN = timedelta(minutes=5)
 # AssumeRole session validity period
 _ASSUME_DURATION_SECONDS = 3600
+_AWS_TOOLKIT_STATE_NAMESPACE = "aws"
 
 
 # ---------------------------------------------------------------------------
@@ -215,19 +236,7 @@ def _extract_xml_tag(xml: str, tag: str) -> str:
 
 
 class AwsToolkit(Toolkit[AwsToolkitConfig]):
-    """Provide AWS Managed MCP Server tools.
-
-    **Dynamic status transition (state machine)**:
-    - ``__aenter__``: Start background MCP connection
-    - ``update_context()``: Return immediately based on connection status
-      (loading / ready / error)
-    - ``__aexit__``: Cancel background task
-
-    :param credential_provider: AWS credential provider
-    :param default_region: Default AWS region
-    :param timeout: MCP tool call timeout
-    :param proxy_url: MCP egress proxy URL
-    """
+    """Provide AWS Managed MCP Server tools from Toolkit State snapshots."""
 
     def __init__(
         self,
@@ -236,8 +245,12 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         credential_provider: AwsCredentialProvider,
         default_region: str,
         timeout: float,
-        proxy_url: str | None = None,
-        artifact_service: ArtifactService | None = None,
+        proxy_url: str | None,
+        artifact_service: ArtifactService | None,
+        session_manager: SessionManager[AsyncSession] | None,
+        agent_id: str,
+        session_id: str,
+        state_name: str,
     ) -> None:
         self._config = config
         self._credential_provider = credential_provider
@@ -245,10 +258,11 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         self._timeout = timeout
         self._proxy_url = proxy_url
         self._artifact_service = artifact_service
-        # Background connection status
+        self._session_manager = session_manager
+        self._agent_id = agent_id
+        self._session_id = session_id
+        self._state_name = state_name
         self._bg_task: asyncio.Task[None] | None = None
-        self._bg_tools: list[FunctionTool] | None = None
-        self._bg_error: str | None = None
         self._artifact_sink: McpArtifactSink | None = None
         self._entered = False
 
@@ -264,13 +278,13 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         )
 
     async def __aenter__(self) -> AwsToolkit:
-        """Start AWS MCP server connection in background."""
+        """Start AWS MCP snapshot refresh in background."""
         self._entered = True
-        self._bg_task = asyncio.create_task(self._connect_and_list_tools())
+        self._ensure_refresh_task()
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        """Cancel background connection task."""
+        """Cancel background refresh task."""
         if self._bg_task is not None and not self._bg_task.done():
             self._bg_task.cancel()
             try:
@@ -279,18 +293,17 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
                 pass
         self._bg_task = None
 
-    async def _connect_and_list_tools(self) -> None:
-        """Connect to AWS MCP server in background and collect tools."""
+    def _ensure_refresh_task(self) -> None:
+        """Start background refresh unless one is already running."""
+        if self._bg_task is not None and not self._bg_task.done():
+            return
+        self._bg_task = asyncio.create_task(self._refresh_tool_snapshot())
+
+    async def _refresh_tool_snapshot(self) -> None:
+        """Refresh the AWS MCP tool snapshot in the background."""
         try:
             credentials = await self._credential_provider.get_credentials()
-        except Exception:
-            logger.exception("Failed to get AWS credentials")
-            self._bg_error = "AWS credential acquisition failed"
-            return
-
-        sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
-
-        try:
+            sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
             mcp_tools, use_streamable_http = await mcp_list_tools(
                 _AWS_MCP_ENDPOINT,
                 {},
@@ -298,111 +311,91 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
                 proxy_url=self._proxy_url,
                 auth=sigv4_auth,
             )
-        except Exception as exc:
-            logger.exception("Failed to connect to AWS MCP server")
-            self._bg_error = f"AWS MCP server connection failed: {exc}"
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Failed to refresh AWS MCP tool snapshot")
             return
 
-        tools: list[FunctionTool] = []
-        for mcp_tool in sorted(mcp_tools, key=lambda tool: tool.name):
-            tools.append(
-                wrap_mcp_tool(
-                    mcp_tool=mcp_tool,
-                    server_url=_AWS_MCP_ENDPOINT,
-                    headers={},
-                    timeout=self._timeout,
-                    use_streamable_http=use_streamable_http,
-                    proxy_url=self._proxy_url,
-                    auth=sigv4_auth,
-                    artifact_sink_getter=self._current_artifact_sink,
-                )
-            )
-        self._bg_tools = tools
+        snapshot = _build_aws_tool_snapshot(
+            mcp_tools=mcp_tools,
+            use_streamable_http=use_streamable_http,
+        )
+        await self._save_tool_snapshot(snapshot)
+        logger.info(
+            "AWS MCP tool snapshot refreshed",
+            extra={
+                "tool_count": len(snapshot.tools),
+                "tool_hash": snapshot.tool_hash,
+            },
+        )
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Return immediately based on AWS MCP Server connection status.
-
-        After __aenter__: return based on background connection status.
-        When called without __aenter__: existing synchronous mode
-        (backward compatibility).
-        """
+        """Return AWS tools from the latest successful Toolkit State snapshot."""
         self._refresh_artifact_sink(context)
-        if not self._entered:
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=self._bg_tools or [],
-                prompt=self._build_prompt(),
-            )
-
-        # Return immediately based on background status (keep previous tools)
-        cached = self._bg_tools or []
-
-        if self._bg_task is not None and not self._bg_task.done():
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=cached,
-                prompt=self._build_prompt(),
-            )
-
-        if self._bg_error is not None:
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=cached,
-                prompt=self._build_prompt(),
-            )
-
-        if self._bg_tools is not None:
-            prompt = self._build_prompt()
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=self._bg_tools,
-                prompt=prompt,
-            )
-
+        snapshot = await self._load_tool_snapshot()
+        tools = self._tools_from_snapshot(snapshot) if snapshot is not None else []
+        if self._entered:
+            self._ensure_refresh_task()
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
-            tools=[],
+            tools=tools,
             prompt=self._build_prompt(),
         )
 
-    async def _sync_update_context(self) -> ToolkitState:
-        """Collect tools from AWS MCP Server synchronously (backward compatibility)."""
-        credentials = await self._credential_provider.get_credentials()
-        sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
+    async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
+        """Load the latest successful AWS MCP tool snapshot."""
+        if self._session_manager is None:
+            return None
+        async with self._session_manager() as session:
+            handle = self._tool_snapshot_handle(session)
+            if handle is None:
+                return None
+            snapshot = await handle.load(default_factory=McpToolSnapshotState)
+        if not snapshot.tools or snapshot.server_url != _AWS_MCP_ENDPOINT:
+            return None
+        return snapshot
 
-        try:
-            mcp_tools, use_streamable_http = await mcp_list_tools(
-                _AWS_MCP_ENDPOINT,
-                {},
-                self._timeout,
+    async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
+        """Atomically save a successful AWS MCP tool snapshot."""
+        if self._session_manager is None:
+            return
+        async with self._session_manager() as session:
+            handle = self._tool_snapshot_handle(session)
+            if handle is None:
+                return
+            await handle.load(default_factory=McpToolSnapshotState)
+            await handle.save(snapshot)
+
+    def _tool_snapshot_handle(
+        self,
+        session: AsyncSession,
+    ) -> ToolkitStateHandle[McpToolSnapshotState] | None:
+        """Create Toolkit State handle for the AWS MCP snapshot."""
+        if not self._agent_id or not self._session_id:
+            return None
+        identity = ToolkitStateIdentity(
+            agent_id=self._agent_id,
+            session_id=self._session_id,
+            toolkit_namespace=_AWS_TOOLKIT_STATE_NAMESPACE,
+            state_name=self._state_name,
+        )
+        return ToolkitStateStore(session=session).handle(identity, McpToolSnapshotState)
+
+    def _tools_from_snapshot(
+        self, snapshot: McpToolSnapshotState
+    ) -> list[FunctionTool]:
+        """Rebuild AWS tool wrappers from a stored snapshot."""
+        return [
+            _wrap_aws_snapshot_tool(
+                item=item,
+                credential_provider=self._credential_provider,
+                timeout=self._timeout,
                 proxy_url=self._proxy_url,
-                auth=sigv4_auth,
+                artifact_sink_getter=self._current_artifact_sink,
             )
-        except Exception:
-            logger.exception("Failed to connect to AWS MCP server")
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=[],
-                prompt="AWS MCP server connection failed.",
-            )
-
-        tools: list[FunctionTool] = []
-        for mcp_tool in sorted(mcp_tools, key=lambda tool: tool.name):
-            tools.append(
-                wrap_mcp_tool(
-                    mcp_tool=mcp_tool,
-                    server_url=_AWS_MCP_ENDPOINT,
-                    headers={},
-                    timeout=self._timeout,
-                    use_streamable_http=use_streamable_http,
-                    proxy_url=self._proxy_url,
-                    auth=sigv4_auth,
-                    artifact_sink_getter=self._current_artifact_sink,
-                )
-            )
-
-        prompt = self._build_prompt()
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt=prompt)
+            for item in sorted(snapshot.tools, key=lambda tool: tool.model_name)
+        ]
 
     def _build_prompt(self) -> str:
         """Create AWS prompt."""
@@ -410,6 +403,94 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             f"\nAssumed Role: {self._config.role_arn}" if self._config.role_arn else ""
         )
         return f"AWS Region: {self._default_region}{role_info}"
+
+
+def _build_aws_tool_snapshot(
+    *,
+    mcp_tools: list[McpBaseTool],
+    use_streamable_http: bool,
+) -> McpToolSnapshotState:
+    """Build a deterministic AWS MCP tool snapshot."""
+    items = [
+        McpToolSnapshotItem(
+            raw_name=tool.name,
+            model_name=tool.name,
+            description=tool.description or "",
+            input_schema=tool.inputSchema,
+            server_url=_AWS_MCP_ENDPOINT,
+            use_streamable_http=use_streamable_http,
+        )
+        for tool in sorted(mcp_tools, key=lambda item: item.name)
+    ]
+    payload = [item.model_dump(mode="json") for item in items]
+    tool_hash = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return McpToolSnapshotState(
+        loaded_at=datetime.datetime.now(datetime.UTC).isoformat(),
+        server_url=_AWS_MCP_ENDPOINT,
+        tool_hash=tool_hash,
+        tools=items,
+    )
+
+
+def _wrap_aws_snapshot_tool(
+    *,
+    item: McpToolSnapshotItem,
+    credential_provider: AwsCredentialProvider,
+    timeout: float,
+    proxy_url: str | None,
+    artifact_sink_getter: Callable[[], McpArtifactSink | None] | None,
+) -> FunctionTool:
+    """Wrap an AWS MCP snapshot item as a FunctionTool."""
+    spec = FunctionToolSpec(
+        name=item.model_name,
+        description=item.description,
+        input_schema=item.input_schema,
+    )
+
+    async def handler(arguments_json: str) -> str | FunctionToolResult:
+        try:
+            args: dict[str, object] = (
+                json.loads(arguments_json) if arguments_json else {}
+            )
+        except json.JSONDecodeError as exc:
+            raise FunctionToolError(f"Invalid JSON in tool arguments: {exc}") from None
+        credentials = await credential_provider.get_credentials()
+        auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
+        result = await mcp_call_tool(
+            item.server_url,
+            {},
+            timeout,
+            item.raw_name,
+            args,
+            use_streamable_http=item.use_streamable_http,
+            proxy_url=proxy_url,
+            auth=auth,
+        )
+        return await _extract_tool_result(
+            result,
+            tool_name=item.raw_name,
+            artifact_sink=(
+                artifact_sink_getter() if artifact_sink_getter is not None else None
+            ),
+        )
+
+    return FunctionTool(spec=spec, handler=handler)
+
+
+def _aws_snapshot_state_name(*, toolkit_id: str, config: AwsToolkitConfig) -> str:
+    """Return stable Toolkit State name for an AWS MCP tool snapshot."""
+    payload = {
+        "toolkit_id": toolkit_id,
+        "region": config.region,
+        "role_arn": config.role_arn,
+        "external_id": config.external_id,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:16]
+    return f"tool_snapshot:{digest}"
 
 
 # ---------------------------------------------------------------------------
@@ -438,9 +519,15 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
         The default region is configured in the toolkit settings.""")
     config_model: ClassVar[type[BaseModel]] = AwsToolkitConfig
 
-    def __init__(self, artifact_service: ArtifactService | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        artifact_service: ArtifactService | None = None,
+        session_manager: SessionManager[AsyncSession] | None = None,
+    ) -> None:
         """Initialize AwsToolkitProvider."""
         self._artifact_service = artifact_service
+        self._session_manager = session_manager
 
     async def resolve(
         self,
@@ -469,6 +556,13 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
             timeout=config.timeout,
             proxy_url=context.mcp_proxy_url,
             artifact_service=self._artifact_service,
+            session_manager=self._session_manager,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            state_name=_aws_snapshot_state_name(
+                toolkit_id=context.toolkit_id,
+                config=config,
+            ),
         )
 
     async def validate_credentials(

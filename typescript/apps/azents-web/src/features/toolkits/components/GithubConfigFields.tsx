@@ -38,7 +38,6 @@ const GITHUB_AUTH_TYPE_OPTIONS = [
   { value: "pat", labelKey: "authTypePat" },
   { value: "github_app", labelKey: "authTypeApp" },
   { value: "github_app_platform", labelKey: "authTypePlatform" },
-  { value: "per_user_pat", labelKey: "authTypePerUserPat" },
 ] as const;
 
 const DEFAULT_TOOLSETS = ["repos", "issues", "pull_requests", "users"] as const;
@@ -617,12 +616,6 @@ export function GithubConfigFields({
             </Alert>
           )}
         </>
-      )}
-
-      {githubAuthType === "per_user_pat" && (
-        <Alert color="blue" variant="light">
-          <Text size="sm">{t("perUserPatDescription")}</Text>
-        </Alert>
       )}
 
       {hasCredentials && (

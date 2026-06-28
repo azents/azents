@@ -36,41 +36,41 @@ class TestAgentWorkspaceResponse(unittest.TestCase):
         if include_optional:
             return AgentWorkspaceResponse(
                 runtime = azentspublicclient.models.agent_workspace_runtime_response.AgentWorkspaceRuntimeResponse(
-                    type = 'NOT_STARTED', 
-                    runtime_id = '', 
-                    workspace_path = '', 
+                    type = 'NOT_STARTED',
+                    runtime_id = '',
+                    workspace_path = '',
                     detail = '', ),
                 workspace = None,
                 actions = azentspublicclient.models.agent_workspace_actions_response.AgentWorkspaceActionsResponse(
                     start = azentspublicclient.models.agent_workspace_action_response.AgentWorkspaceActionResponse(
-                        type = 'START_RUNTIME', 
-                        method = 'POST', 
-                        path = '', ), 
+                        type = 'START_RUNTIME',
+                        method = 'POST',
+                        path = '', ),
                     stop = azentspublicclient.models.agent_workspace_action_response.AgentWorkspaceActionResponse(
-                        type = 'START_RUNTIME', 
-                        method = 'POST', 
-                        path = '', ), 
-                    restart = , 
+                        type = 'START_RUNTIME',
+                        method = 'POST',
+                        path = '', ),
+                    restart = ,
                     reset = , )
             )
         else:
             return AgentWorkspaceResponse(
                 runtime = azentspublicclient.models.agent_workspace_runtime_response.AgentWorkspaceRuntimeResponse(
-                    type = 'NOT_STARTED', 
-                    runtime_id = '', 
-                    workspace_path = '', 
+                    type = 'NOT_STARTED',
+                    runtime_id = '',
+                    workspace_path = '',
                     detail = '', ),
                 workspace = None,
                 actions = azentspublicclient.models.agent_workspace_actions_response.AgentWorkspaceActionsResponse(
                     start = azentspublicclient.models.agent_workspace_action_response.AgentWorkspaceActionResponse(
-                        type = 'START_RUNTIME', 
-                        method = 'POST', 
-                        path = '', ), 
+                        type = 'START_RUNTIME',
+                        method = 'POST',
+                        path = '', ),
                     stop = azentspublicclient.models.agent_workspace_action_response.AgentWorkspaceActionResponse(
-                        type = 'START_RUNTIME', 
-                        method = 'POST', 
-                        path = '', ), 
-                    restart = , 
+                        type = 'START_RUNTIME',
+                        method = 'POST',
+                        path = '', ),
+                    restart = ,
                     reset = , ),
         )
         """

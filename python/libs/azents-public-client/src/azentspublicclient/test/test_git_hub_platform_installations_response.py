@@ -37,9 +37,9 @@ class TestGitHubPlatformInstallationsResponse(unittest.TestCase):
             return GitHubPlatformInstallationsResponse(
                 installations = [
                     azentspublicclient.models.git_hub_installation_item.GitHubInstallationItem(
-                        id = 56, 
-                        account_login = '', 
-                        account_type = '', 
+                        id = 56,
+                        account_login = '',
+                        account_type = '',
                         account_avatar_url = '', )
                     ]
             )
@@ -47,9 +47,9 @@ class TestGitHubPlatformInstallationsResponse(unittest.TestCase):
             return GitHubPlatformInstallationsResponse(
                 installations = [
                     azentspublicclient.models.git_hub_installation_item.GitHubInstallationItem(
-                        id = 56, 
-                        account_login = '', 
-                        account_type = '', 
+                        id = 56,
+                        account_login = '',
+                        account_type = '',
                         account_avatar_url = '', )
                     ],
         )

@@ -6,7 +6,7 @@ Partial history live projection response to compose into Chat timeline.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Partial history event projection list | 
+**items** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Partial history event projection list |
 
 ## Example
 

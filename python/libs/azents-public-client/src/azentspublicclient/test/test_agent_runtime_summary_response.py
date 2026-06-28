@@ -37,28 +37,28 @@ class TestAgentRuntimeSummaryResponse(unittest.TestCase):
             return AgentRuntimeSummaryResponse(
                 summary = 'stopped',
                 actions = azentspublicclient.models.agent_runtime_actions_response.AgentRuntimeActionsResponse(
-                    start = True, 
-                    stop = True, 
-                    restart = True, 
-                    reset = True, 
+                    start = True,
+                    stop = True,
+                    restart = True,
+                    reset = True,
                     use_runner = True, ),
                 failure = azentspublicclient.models.agent_runtime_failure_response.AgentRuntimeFailureResponse(
-                    generation = 56, 
-                    code = '', 
+                    generation = 56,
+                    code = '',
                     message = '', )
             )
         else:
             return AgentRuntimeSummaryResponse(
                 summary = 'stopped',
                 actions = azentspublicclient.models.agent_runtime_actions_response.AgentRuntimeActionsResponse(
-                    start = True, 
-                    stop = True, 
-                    restart = True, 
-                    reset = True, 
+                    start = True,
+                    stop = True,
+                    restart = True,
+                    reset = True,
                     use_runner = True, ),
                 failure = azentspublicclient.models.agent_runtime_failure_response.AgentRuntimeFailureResponse(
-                    generation = 56, 
-                    code = '', 
+                    generation = 56,
+                    code = '',
                     message = '', ),
         )
         """

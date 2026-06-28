@@ -6,7 +6,7 @@ Password set request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**password** | **str** | New password | 
+**password** | **str** | New password |
 
 ## Example
 

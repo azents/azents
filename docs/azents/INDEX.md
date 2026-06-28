@@ -20,8 +20,8 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-06-29 | 7 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-05-10 | 1 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-06-29 | 38 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-18 | 4 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-06-29 | 39 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-29 | 5 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-06-27 | 21 |
 
 _8 documents_
@@ -166,4 +166,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 319
+- Total documents: 320

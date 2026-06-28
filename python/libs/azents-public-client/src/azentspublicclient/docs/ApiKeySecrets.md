@@ -7,7 +7,7 @@ API key based secrets for OpenAI, Anthropic, and Google Gemini.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'api_key']
-**api_key** | **str** | API key | 
+**api_key** | **str** | API key |
 
 ## Example
 

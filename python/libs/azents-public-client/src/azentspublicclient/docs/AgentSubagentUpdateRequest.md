@@ -6,8 +6,8 @@ AgentSubagent update request, for partial updates.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**description** | **str** | Description exposed to LLM | [optional] 
-**enabled** | **bool** | Enabled flag | [optional] 
+**description** | **str** | Description exposed to LLM | [optional]
+**enabled** | **bool** | Enabled flag | [optional]
 
 ## Example
 

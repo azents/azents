@@ -6,8 +6,8 @@ Slash command response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Command name without leading slash | 
-**description** | **str** | Command description | 
+**name** | **str** | Command name without leading slash |
+**description** | **str** | Command description |
 
 ## Example
 

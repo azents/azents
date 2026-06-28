@@ -50,8 +50,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceUserV1Api(api_client)
-    workspace_user_id = 'workspace_user_id_example' # str | 
-    handle = 'handle_example' # str | 
+    workspace_user_id = 'workspace_user_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Delete Workspace User
@@ -67,8 +67,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_id** | **str**|  | 
- **handle** | **str**|  | 
+ **workspace_user_id** | **str**|  |
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -129,7 +129,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceUserV1Api(api_client)
-    handle = 'handle_example' # str | 
+    handle = 'handle_example' # str |
 
     try:
         # Get Current Member
@@ -147,7 +147,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -208,7 +208,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceUserV1Api(api_client)
-    handle = 'handle_example' # str | 
+    handle = 'handle_example' # str |
 
     try:
         # Get My Profile
@@ -226,7 +226,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -289,7 +289,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceUserV1Api(api_client)
-    handle = 'handle_example' # str | 
+    handle = 'handle_example' # str |
 
     try:
         # List Workspace Users
@@ -307,7 +307,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -371,8 +371,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceUserV1Api(api_client)
-    handle = 'handle_example' # str | 
-    update_my_profile_request = azentspublicclient.UpdateMyProfileRequest() # UpdateMyProfileRequest | 
+    handle = 'handle_example' # str |
+    update_my_profile_request = azentspublicclient.UpdateMyProfileRequest() # UpdateMyProfileRequest |
 
     try:
         # Update My Profile
@@ -390,8 +390,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
- **update_my_profile_request** | [**UpdateMyProfileRequest**](UpdateMyProfileRequest.md)|  | 
+ **handle** | **str**|  |
+ **update_my_profile_request** | [**UpdateMyProfileRequest**](UpdateMyProfileRequest.md)|  |
 
 ### Return type
 
@@ -455,9 +455,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceUserV1Api(api_client)
-    workspace_user_id = 'workspace_user_id_example' # str | 
-    handle = 'handle_example' # str | 
-    update_workspace_user_role_request = azentspublicclient.UpdateWorkspaceUserRoleRequest() # UpdateWorkspaceUserRoleRequest | 
+    workspace_user_id = 'workspace_user_id_example' # str |
+    handle = 'handle_example' # str |
+    update_workspace_user_role_request = azentspublicclient.UpdateWorkspaceUserRoleRequest() # UpdateWorkspaceUserRoleRequest |
 
     try:
         # Update Workspace User Role
@@ -475,9 +475,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_id** | **str**|  | 
- **handle** | **str**|  | 
- **update_workspace_user_role_request** | [**UpdateWorkspaceUserRoleRequest**](UpdateWorkspaceUserRoleRequest.md)|  | 
+ **workspace_user_id** | **str**|  |
+ **handle** | **str**|  |
+ **update_workspace_user_role_request** | [**UpdateWorkspaceUserRoleRequest**](UpdateWorkspaceUserRoleRequest.md)|  |
 
 ### Return type
 

@@ -6,8 +6,8 @@ Input/output modalities supported by the model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**input** | [**List[ModelModality]**](ModelModality.md) |  | [optional] 
-**output** | [**List[ModelModality]**](ModelModality.md) |  | [optional] 
+**input** | [**List[ModelModality]**](ModelModality.md) |  | [optional]
+**output** | [**List[ModelModality]**](ModelModality.md) |  | [optional]
 
 ## Example
 

@@ -6,13 +6,13 @@ Toolkit Config creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**toolkit_type** | **str** | Tool slug | 
-**slug** | **str** | Workspace-unique slug. Use lowercase letters, numbers, and underscores only. | [optional] 
-**name** | **str** | Display name | 
-**description** | **str** |  | [optional] 
-**config** | **Dict[str, object]** | Tool configuration | 
-**prompt** | **str** |  | [optional] 
-**credentials** | **Dict[str, object]** |  | [optional] 
+**toolkit_type** | **str** | Tool slug |
+**slug** | **str** | Workspace-unique slug. Use lowercase letters, numbers, and underscores only. | [optional]
+**name** | **str** | Display name |
+**description** | **str** |  | [optional]
+**config** | **Dict[str, object]** | Tool configuration |
+**prompt** | **str** |  | [optional]
+**credentials** | **Dict[str, object]** |  | [optional]
 **enabled** | **bool** | Enabled state | [optional] [default to True]
 
 ## Example

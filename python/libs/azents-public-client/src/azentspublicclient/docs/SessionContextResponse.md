@@ -6,12 +6,12 @@ Agent session context inspector response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**session** | [**SessionContextSessionResponse**](SessionContextSessionResponse.md) | Session summary | 
-**usage** | **Dict[str, object]** |  | [optional] 
-**stats** | [**SessionContextStatsResponse**](SessionContextStatsResponse.md) | Aggregate stats | 
-**breakdown** | [**List[SessionContextBreakdownSegmentResponse]**](SessionContextBreakdownSegmentResponse.md) | Prompt character breakdown | 
-**system_prompt** | [**SessionContextSystemPromptResponse**](SessionContextSystemPromptResponse.md) |  | [optional] 
-**raw_events** | [**List[SessionContextRawEventResponse]**](SessionContextRawEventResponse.md) | Raw events | 
+**session** | [**SessionContextSessionResponse**](SessionContextSessionResponse.md) | Session summary |
+**usage** | **Dict[str, object]** |  | [optional]
+**stats** | [**SessionContextStatsResponse**](SessionContextStatsResponse.md) | Aggregate stats |
+**breakdown** | [**List[SessionContextBreakdownSegmentResponse]**](SessionContextBreakdownSegmentResponse.md) | Prompt character breakdown |
+**system_prompt** | [**SessionContextSystemPromptResponse**](SessionContextSystemPromptResponse.md) |  | [optional]
+**raw_events** | [**List[SessionContextRawEventResponse]**](SessionContextRawEventResponse.md) | Raw events |
 
 ## Example
 

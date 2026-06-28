@@ -6,8 +6,8 @@ OAuth2 token exchange request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**code** | **str** | OAuth2 authorization code | 
-**state** | **str** | OAuth2 state parameter | 
+**code** | **str** | OAuth2 authorization code |
+**state** | **str** | OAuth2 state parameter |
 
 ## Example
 

@@ -16,9 +16,9 @@ from azents.engine.tools.github import GitHubInstallationBinding, GitHubToolkit
 
 
 def _make_config(*, inject_runtime_environment: bool = False) -> GitHubToolkitConfig:
-    """Test fixture — default per_user_pat settings."""
+    """Test fixture using PAT settings."""
     return GitHubToolkitConfig(
-        github_auth_type="per_user_pat",
+        github_auth_type="pat",
         toolsets=["repos"],
         timeout=30.0,
         inject_runtime_environment=inject_runtime_environment,
@@ -242,6 +242,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -255,6 +259,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
             ],
         )
@@ -296,6 +304,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 )
             ],
         )
@@ -331,6 +343,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -344,6 +360,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
             ],
             selected_installation_store=cast(
@@ -378,6 +398,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -393,6 +417,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
             ],
             selected_installation_store=cast(Any, store),
@@ -427,6 +455,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -442,6 +474,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
             ],
             selected_installation_store=cast(Any, store),
@@ -473,6 +509,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
                 GitHubInstallationBinding(
                     target=GitHubInstallationTarget(
@@ -488,6 +528,10 @@ class TestExposeEnvMultiInstallation:
                     lazy_mcp_config=None,
                     lazy_mcp_secret_provider=None,
                     lazy_mcp_proxy_url=None,
+                    session_manager=None,
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    state_name="tool_snapshot:test",
                 ),
             ],
             selected_installation_store=cast(Any, _FakeSelectedInstallationStore()),

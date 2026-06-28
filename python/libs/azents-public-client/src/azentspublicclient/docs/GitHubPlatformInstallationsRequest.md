@@ -6,8 +6,8 @@ GitHub Platform App installation list request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**code** | **str** | GitHub OAuth authorization code | 
-**state** | **str** | OAuth state parameter for CSRF validation | 
+**code** | **str** | GitHub OAuth authorization code |
+**state** | **str** | OAuth state parameter for CSRF validation |
 
 ## Example
 

@@ -6,7 +6,7 @@ GitHub Platform App OAuth URL response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**oauth_url** | **str** | GitHub OAuth authorization URL | 
+**oauth_url** | **str** | GitHub OAuth authorization URL |
 
 ## Example
 

@@ -7,21 +7,104 @@ Also validate background connection (__aenter__ -> update_context -> __aexit__).
 """
 
 import asyncio
+from typing import AsyncContextManager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 from mcp.types import TextContent, ToolAnnotations
 from mcp.types import Tool as McpBaseTool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import GcpService, GcpToolkitConfig, ToolkitState, TurnContext
 from azents.engine.run.types import FunctionTool
+from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
 from azents.engine.tools.gcp import (
     GcpAccessTokenProvider,
     GcpToolkit,
     _GcpServerConfig,  # pyright: ignore[reportPrivateUsage] — directly configure internal server settings in tests
     _is_read_only_tool,  # pyright: ignore[reportPrivateUsage] — directly validate internal utility function in tests
 )
+
+
+class _FakeToolkitStateHandle:
+    """In-memory Toolkit State handle for tests."""
+
+    _states: dict[tuple[str, str, str, str], object] = {}
+
+    def __init__(self, identity: ToolkitStateIdentity) -> None:
+        self.identity = identity
+
+    async def load(self, default_factory: object) -> object:
+        """Load state from in-memory store."""
+        key = self._key()
+        if key not in self._states:
+            return default_factory()  # type: ignore[operator]
+        return self._states[key]
+
+    async def save(self, state: object) -> object:
+        """Save state to in-memory store."""
+        self._states[self._key()] = state
+        return object()
+
+    @classmethod
+    def clear(cls) -> None:
+        """Clear stored Toolkit State."""
+        cls._states.clear()
+
+    def _key(self) -> tuple[str, str, str, str]:
+        return (
+            self.identity.agent_id,
+            self.identity.session_id,
+            self.identity.toolkit_namespace,
+            self.identity.state_name,
+        )
+
+
+class _FakeToolkitStateStore:
+    """In-memory Toolkit State store for tests."""
+
+    def __init__(self, *, session: object) -> None:
+        del session
+
+    def handle(
+        self, identity: ToolkitStateIdentity, _model_type: object
+    ) -> _FakeToolkitStateHandle:
+        """Return fake handle."""
+        return _FakeToolkitStateHandle(identity)
+
+
+class _FakeSessionContext:
+    """Minimal async session context manager for tests."""
+
+    async def __aenter__(self) -> AsyncSession:
+        return AsyncSession()
+
+    async def __aexit__(self, *exc: object) -> None:
+        pass
+
+
+class _FakeSessionManager:
+    """Minimal async context manager factory for tests."""
+
+    def __call__(self) -> AsyncContextManager[AsyncSession]:
+        return _FakeSessionContext()
+
+
+_session_manager = _FakeSessionManager()
+
+
+@pytest.fixture(autouse=True)
+def _toolkit_state_store(  # pyright: ignore[reportUnusedFunction] -- pytest autouse fixture
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Patch Toolkit State to an in-memory store."""
+    _FakeToolkitStateHandle.clear()
+    monkeypatch.setattr(
+        "azents.engine.tools.gcp.ToolkitStateStore",
+        _FakeToolkitStateStore,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -94,6 +177,12 @@ def _make_toolkit(
         server_configs=server_configs,
         project_id=project_id,
         writable_services=writable_services or set(),
+        proxy_url=None,
+        artifact_service=None,
+        session_manager=_session_manager,
+        agent_id="agent-1",
+        session_id="session-1",
+        state_name="tool_snapshot:test",
     )
 
 
@@ -355,8 +444,9 @@ def _make_call_tool_result(text: str) -> MagicMock:
 
 
 async def _wait_gcp_tasks(toolkit: GcpToolkit) -> None:
-    """Wait for background GCP MCP discovery tasks."""
-    for task in toolkit._bg_tasks.values():  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    """Wait for background GCP MCP discovery task."""
+    task = toolkit._bg_task  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    if task is not None:
         await task
 
 
@@ -383,7 +473,7 @@ class TestGcpToolHandlers:
                 return_value=([_make_mcp_tool("log_query")], False),
             ),
             patch(
-                "azents.engine.tools.mcp_base.mcp_call_tool",
+                "azents.engine.tools.gcp.mcp_call_tool",
                 new_callable=AsyncMock,
                 return_value=mock_success,
             ) as mock_call,
@@ -419,7 +509,7 @@ class TestGcpToolHandlers:
                 return_value=([_make_mcp_tool("log_query")], False),
             ),
             patch(
-                "azents.engine.tools.mcp_base.mcp_call_tool",
+                "azents.engine.tools.gcp.mcp_call_tool",
                 new_callable=AsyncMock,
                 side_effect=[http_401, mock_success],
             ) as mock_call,
@@ -445,16 +535,14 @@ class TestGcpToolkitBackgroundConnect:
 
     @pytest.mark.asyncio
     async def test_loading_to_ready(self) -> None:
-        """All service connection success transitions loading -> ready."""
+        """Complete background refresh exposes all service tools at once."""
         toolkit = _make_toolkit(
             services=[GcpService.LOGGING, GcpService.MONITORING],
         )
         ctx = _make_context()
 
-        connect_events: dict[str, asyncio.Event] = {
-            "logging": asyncio.Event(),
-            "monitoring": asyncio.Event(),
-        }
+        continue_refresh = asyncio.Event()
+        refresh_started = asyncio.Event()
 
         async def mock_list_tools(
             endpoint: str,
@@ -464,10 +552,10 @@ class TestGcpToolkitBackgroundConnect:
             proxy_url: str | None = None,
             auth: object = None,
         ) -> tuple[list[McpBaseTool], bool]:
+            refresh_started.set()
+            await continue_refresh.wait()
             if "logging" in endpoint:
-                await connect_events["logging"].wait()
                 return [_make_mcp_tool("log_query")], False
-            await connect_events["monitoring"].wait()
             return [_make_mcp_tool("metric_query")], False
 
         with patch(
@@ -475,30 +563,13 @@ class TestGcpToolkitBackgroundConnect:
             side_effect=mock_list_tools,
         ):
             async with toolkit:
-                # Both services connecting -> loading
+                await asyncio.wait_for(refresh_started.wait(), timeout=1)
                 state = await toolkit.update_context(ctx)
                 assert state.tools == []
                 assert "Loading" not in state.prompt
 
-                # Only logging complete
-                connect_events["logging"].set()
-                await asyncio.sleep(0)  # Allow task switch
-                # Wait for logging task completion
-                logging_task = toolkit._bg_tasks.get(GcpService.LOGGING)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate per-service task status in tests
-                if logging_task:
-                    await logging_task
-
-                state = await toolkit.update_context(ctx)
-                # Return only logging tools; monitoring still loading
-                assert len(state.tools) == 1
-                assert state.tools[0].spec.name == "log_query"
-                assert "Loading" not in state.prompt
-
-                # monitoring also complete
-                connect_events["monitoring"].set()
-                monitoring_task = toolkit._bg_tasks.get(GcpService.MONITORING)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate per-service task status in tests
-                if monitoring_task:
-                    await monitoring_task
+                continue_refresh.set()
+                await _wait_gcp_tasks(toolkit)
 
                 state = await toolkit.update_context(ctx)
                 assert len(state.tools) == 2
@@ -532,9 +603,7 @@ class TestGcpToolkitBackgroundConnect:
             side_effect=mock_list_tools,
         ):
             async with toolkit:
-                # Wait for all tasks to complete
-                for task in toolkit._bg_tasks.values():  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate per-service task status in tests
-                    await task
+                await _wait_gcp_tasks(toolkit)
 
                 state = await toolkit.update_context(ctx)
                 assert len(state.tools) == 1
@@ -558,12 +627,10 @@ class TestGcpToolkitBackgroundConnect:
             side_effect=forever_list_tools,
         ):
             async with toolkit:
-                assert len(toolkit._bg_tasks) == 2  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate per-service task count in tests
-                for task in toolkit._bg_tasks.values():  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate per-service task status in tests
-                    assert not task.done()
+                assert toolkit._bg_task is not None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+                assert not toolkit._bg_task.done()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
 
-        # All tasks are cleaned up after __aexit__
-        assert len(toolkit._bg_tasks) == 0  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate task cleanup in tests
+        assert toolkit._bg_task is None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
 
     @pytest.mark.asyncio
     async def test_without_aenter_does_not_sync_discover_tools(self) -> None:

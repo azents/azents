@@ -6,9 +6,9 @@ Token refresh response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**access_token** | **str** | New JWT access token | 
-**refresh_token** | **str** | New Refresh token | 
-**expires_in** | **int** | Access token expiration time (seconds) | 
+**access_token** | **str** | New JWT access token |
+**refresh_token** | **str** | New Refresh token |
+**expires_in** | **int** | Access token expiration time (seconds) |
 
 ## Example
 

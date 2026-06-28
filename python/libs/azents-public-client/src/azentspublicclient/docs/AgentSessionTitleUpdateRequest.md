@@ -6,7 +6,7 @@ AgentSession title update request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**title** | **str** |  | 
+**title** | **str** |  |
 
 ## Example
 

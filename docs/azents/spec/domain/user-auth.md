@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-06-18
+updated: 2026-06-29
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -49,19 +49,18 @@ code_paths:
 api_routes:
   - /auth/v1
   - /user/v1
-  - /github-pat/v1
   - /security/v1
   - /admin/auth/v1
   - /admin/workspace/v1
-last_verified_at: 2026-06-18
-spec_version: 4
+last_verified_at: 2026-06-29
+spec_version: 5
 ---
 
 # User & Authentication
 
 ## 1. Overview
 
-This domain covers azents user accounts, email, signup, login, session, security elevation, and GitHub PAT credential storage. One platform-wide account can join multiple workspaces as member, and authentication uses JWT access token plus DB-based refresh token session (rotation + grace period) structure.
+This domain covers azents user accounts, email, signup, login, session, and security elevation. One platform-wide account can join multiple workspaces as member, and authentication uses JWT access token plus DB-based refresh token session (rotation + grace period) structure.
 
 Core characteristics:
 
@@ -84,7 +83,6 @@ erDiagram
     User ||--o| UserEmail : "primary_email"
     User ||--o| PasswordLogin : "optional"
     User ||--o{ Session : "has"
-    User ||--o{ GitHubPAT : "per workspace"
     User ||--o{ GithubUserInstallation : "has"
     EmailVerification }o--|| UserEmail : "email string"
     SignupToken ||--o{ SignupTokenRedemption : "redeemed by"
@@ -358,5 +356,6 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - **2026-04-20** (v1) — Initial living spec.
 - **2026-05-09** (v2) — Refresh/session/elevation behavior verified.
 - **2026-06-17** (v3) — Signup-on-first-verify replaced by signup-token controlled registration. Added signup token model/service/API, email signup delivery, invitation signup-link integration, first owner bootstrap, and frontend `/signup`/`/setup` routes.
+- **2026-06-29** (v5) — Removed GitHub PAT credential storage from the user-auth domain; GitHub auth is now toolkit-level only.
 - **2026-06-18** (v3) — Verified cleanup: signup token failed redeem paths no longer consume `used_count`; login signup CTA is gated by signup status; preview exposes a masked email hint; account signup-token admin UI is documented.
 - **2026-06-18** (v4) — Added credential provider projection, SMTP-gated email credential validity, last valid credential deletion invariant, and admin-issued password reset tokens.

@@ -6,9 +6,9 @@ Provider compatibility capability.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**provider_family** | **str** |  | [optional] 
-**responses_api** | **bool** |  | [optional] 
-**unsupported_media_policy** | [**UnsupportedMediaPolicy**](UnsupportedMediaPolicy.md) |  | [optional] 
+**provider_family** | **str** |  | [optional]
+**responses_api** | **bool** |  | [optional]
+**unsupported_media_policy** | [**UnsupportedMediaPolicy**](UnsupportedMediaPolicy.md) |  | [optional]
 
 ## Example
 

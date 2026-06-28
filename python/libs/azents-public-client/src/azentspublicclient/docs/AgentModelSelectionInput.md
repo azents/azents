@@ -6,8 +6,8 @@ Catalog model selection input.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**llm_provider_integration_id** | **str** | LLM provider integration ID | 
-**model_identifier** | **str** | Provider model identifier | 
+**llm_provider_integration_id** | **str** | LLM provider integration ID |
+**model_identifier** | **str** | Provider model identifier |
 
 ## Example
 

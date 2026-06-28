@@ -37,7 +37,7 @@ class TestSlashCommandListResponse(unittest.TestCase):
             return SlashCommandListResponse(
                 items = [
                     azentspublicclient.models.slash_command_response.SlashCommandResponse(
-                        name = '', 
+                        name = '',
                         description = '', )
                     ]
             )
@@ -45,7 +45,7 @@ class TestSlashCommandListResponse(unittest.TestCase):
             return SlashCommandListResponse(
                 items = [
                     azentspublicclient.models.slash_command_response.SlashCommandResponse(
-                        name = '', 
+                        name = '',
                         description = '', )
                     ],
         )

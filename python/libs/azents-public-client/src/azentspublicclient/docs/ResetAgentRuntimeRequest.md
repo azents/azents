@@ -6,7 +6,7 @@ Agent Runtime reset request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**final_desired_state** | [**RuntimeDesiredState**](RuntimeDesiredState.md) | Desired state after reset completes | 
+**final_desired_state** | [**RuntimeDesiredState**](RuntimeDesiredState.md) | Desired state after reset completes |
 
 ## Example
 

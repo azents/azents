@@ -6,7 +6,7 @@ Session goal update request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**objective** | **str** |  | [optional] 
+**objective** | **str** |  | [optional]
 
 ## Example
 

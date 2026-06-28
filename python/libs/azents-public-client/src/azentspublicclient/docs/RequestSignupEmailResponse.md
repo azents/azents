@@ -6,7 +6,7 @@ Signup email response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**sent** | **bool** | Whether email was sent | 
+**sent** | **bool** | Whether email was sent |
 
 ## Example
 

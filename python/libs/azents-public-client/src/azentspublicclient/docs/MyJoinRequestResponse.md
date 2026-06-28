@@ -6,10 +6,10 @@ My join request response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Join request ID | 
-**status** | [**JoinRequestStatus**](JoinRequestStatus.md) | Request status | 
-**message** | **str** |  | 
-**created_at** | **datetime** | Created time | 
+**id** | **str** | Join request ID |
+**status** | [**JoinRequestStatus**](JoinRequestStatus.md) | Request status |
+**message** | **str** |  |
+**created_at** | **datetime** | Created time |
 
 ## Example
 

@@ -6,10 +6,10 @@ Server-computed Agent Runtime status response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Provider runtime status | 
-**runtime_id** | **str** |  | 
-**workspace_path** | **str** |  | [optional] 
-**detail** | **str** |  | [optional] 
+**type** | **str** | Provider runtime status |
+**runtime_id** | **str** |  |
+**workspace_path** | **str** |  | [optional]
+**detail** | **str** |  | [optional]
 
 ## Example
 

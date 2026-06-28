@@ -6,9 +6,9 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**small** | [**ImageFile**](ImageFile.md) |  | [optional] 
-**medium** | [**ImageFile**](ImageFile.md) |  | [optional] 
-**large** | [**ImageFile**](ImageFile.md) |  | [optional] 
+**small** | [**ImageFile**](ImageFile.md) |  | [optional]
+**medium** | [**ImageFile**](ImageFile.md) |  | [optional]
+**large** | [**ImageFile**](ImageFile.md) |  | [optional]
 
 ## Example
 

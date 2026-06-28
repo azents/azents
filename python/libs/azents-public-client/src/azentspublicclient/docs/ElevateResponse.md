@@ -6,8 +6,8 @@ Elevation response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**access_token** | **str** | Elevated JWT access token | 
-**expires_in** | **int** | Access token expiration time (seconds) | 
+**access_token** | **str** | Elevated JWT access token |
+**expires_in** | **int** | Access token expiration time (seconds) |
 
 ## Example
 

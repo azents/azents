@@ -6,7 +6,7 @@ AgentToolkit attach request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**toolkit_id** | **str** | Toolkit ID to attach | 
+**toolkit_id** | **str** | Toolkit ID to attach |
 
 ## Example
 

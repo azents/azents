@@ -6,10 +6,10 @@ Agent Runtime lifecycle action set response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**start** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional] 
-**stop** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional] 
-**restart** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional] 
-**reset** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional] 
+**start** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional]
+**stop** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional]
+**restart** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional]
+**reset** | [**AgentWorkspaceActionResponse**](AgentWorkspaceActionResponse.md) |  | [optional]
 
 ## Example
 

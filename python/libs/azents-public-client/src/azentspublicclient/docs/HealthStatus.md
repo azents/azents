@@ -6,7 +6,7 @@ Server status response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**status** | **str** |  | 
+**status** | **str** |  |
 
 ## Example
 

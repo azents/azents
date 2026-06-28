@@ -6,7 +6,7 @@ Signup email request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Signup email | 
+**email** | **str** | Signup email |
 
 ## Example
 

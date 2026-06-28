@@ -5,6 +5,7 @@ Supports PAT and GitHub App (BYOA/Platform) authentication.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -31,7 +32,6 @@ from azents.core.tools import (
     GitHubToolkitConfig,
     McpToolkitConfig,
     ResolveContext,
-    SessionType,
     TestConnectionResult,
     Toolkit,
     ToolkitProvider,
@@ -39,7 +39,6 @@ from azents.core.tools import (
     ToolkitStatus,
     TurnContext,
 )
-from azents.engine.events.engine_events import AuthorizationRequestEvent
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tooling.toolkit_state import (
@@ -49,7 +48,6 @@ from azents.engine.tooling.toolkit_state import (
 )
 from azents.engine.tools.mcp import McpToolkit
 from azents.rdb.session import SessionManager
-from azents.repos.github_pat import GitHubPATRepository
 from azents.repos.github_user_installation import (
     GithubUserInstallationRepository,
 )
@@ -256,6 +254,10 @@ class GitHubInstallationBinding:
     lazy_mcp_config: McpToolkitConfig | None
     lazy_mcp_secret_provider: Callable[[], Awaitable[str | None]] | None
     lazy_mcp_proxy_url: str | None
+    session_manager: SessionManager[AsyncSession] | None
+    agent_id: str
+    session_id: str
+    state_name: str
     lazy_mcp_task: asyncio.Task[None] | None = None
     lazy_mcp_error: str | None = None
 
@@ -350,10 +352,6 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         config: GitHubToolkitConfig,
         mcp_toolkit: McpToolkit | None = None,
         toolsets: list[str] | None = None,
-        setup_url: str | None = None,
-        toolkit_name: str | None = None,
-        toolkit_id: str | None = None,
-        session_type: SessionType = SessionType.USER,
         runtime_environment_token_provider: Callable[[], Awaitable[str | None]]
         | None = None,
         runtime_environment_token_ttl_seconds: float = 3300.0,
@@ -367,19 +365,12 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
 
         :param config: GitHub toolkit settings
         :param mcp_toolkit: Credential-bound McpToolkit
-            (None for per_user_pat setup)
         :param toolsets: Toolset list to enable (no filtering when None)
-        :param setup_url: per_user_pat settings page URL
-        :param toolkit_name: Toolkit name for per_user_pat setup tool
-        :param toolkit_id: Toolkit ID for per_user_pat setup tool
-        :param session_type: Session type used to exclude per_user_pat in system
-            session
         :param runtime_environment_token_provider:
             When inject_runtime_environment=True, callable that issues GitHub
             token to inject into Runtime environment variables.
             If None, expose_env() returns empty dict. Provider injects an
-            appropriate callable per auth mode (per_user_pat -> PAT DB read,
-            github_app* -> installation token exchange).
+            appropriate callable per auth mode.
         :param runtime_environment_token_ttl_seconds:
             Maximum time to memoize ``runtime_environment_token_provider`` result.
             GitHub App installation token 1h TTL
@@ -390,10 +381,6 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         self._config = config
         self._mcp = mcp_toolkit
         self._toolsets = toolsets
-        self._setup_url = setup_url
-        self._toolkit_name = toolkit_name
-        self._toolkit_id = toolkit_id
-        self._session_type = session_type
         self._runtime_environment_token_provider = runtime_environment_token_provider
         self._runtime_environment_token_ttl_seconds = (
             runtime_environment_token_ttl_seconds
@@ -606,6 +593,10 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 secret=secret,
                 on_auth_failure=binding.lazy_mcp_secret_provider,
                 proxy_url=binding.lazy_mcp_proxy_url,
+                session_manager=binding.session_manager,
+                agent_id=binding.agent_id,
+                session_id=binding.session_id,
+                state_name=binding.state_name,
             )
             await binding.mcp_toolkit.__aenter__()
             binding.lazy_mcp_error = None
@@ -681,17 +672,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Fetch tools from GitHub MCP server and filter by toolset.
 
-        For per_user_pat auth type:
-        - Return empty state for SYSTEM session.
-        - Return only setup_github tool when mcp_toolkit is absent.
-        - Return MCP tools normally when mcp_toolkit exists.
-
         :param context: Context passed each turn
         :return: Current state (tools + prompt)
         """
-        if self._config.github_auth_type == "per_user_pat":
-            return await self._update_context_per_user_pat(context)
-
         if self._installation_bindings:
             return await self._update_context_multi_installation(context)
 
@@ -799,52 +782,6 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             )
         return await self._mcp.update_context(context)
 
-    async def _update_context_per_user_pat(self, context: TurnContext) -> ToolkitState:
-        """Return state for per_user_pat auth type.
-
-        :param context: Context passed each turn
-        :return: Tool state
-        """
-        # Exclude system session because per-user is unavailable
-        if self._session_type == SessionType.SYSTEM:
-            return ToolkitState(status=ToolkitStatus.DISABLED, tools=[], prompt="")
-
-        # Return only setup_github tool when mcp_toolkit is absent
-        if self._mcp is None:
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=[self._create_setup_tool(context)],
-                prompt="",
-            )
-
-        # Normal: fetch MCP tool list + toolset filtering
-        state = await self._mcp_update_context(context)
-        tools = state.tools
-        if self._toolsets is not None:
-            tools = _filter_by_toolsets(tools, self._toolsets)
-        return ToolkitState(status=state.status, tools=tools, prompt=state.prompt)
-
-    def _create_setup_tool(self, context: TurnContext) -> FunctionTool:
-        """Create setup_github tool.
-
-        :param context: Context passed each turn
-        :return: setup_github FunctionTool
-        """
-        toolkit_id = self._toolkit_id or ""
-        toolkit_name = self._toolkit_name or "GitHub"
-
-        async def setup_github() -> str:
-            """Request the user to set up GitHub authentication. Call this when the user wants to use GitHub tools but hasn't completed setup yet."""  # noqa: E501
-            await context.publish_event(
-                AuthorizationRequestEvent(
-                    toolkit_id=toolkit_id,
-                    toolkit_name=toolkit_name,
-                )
-            )
-            return "GitHub setup is required. A setup link has been sent to the user."
-
-        return make_tool(setup_github)
-
 
 # ---------------------------------------------------------------------------
 # GitHubToolkitProvider
@@ -873,19 +810,16 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         *,
         platform_app_id: str | None = None,
         platform_private_key: str | None = None,
-        pat_repo: GitHubPATRepository,
         session_manager: SessionManager[AsyncSession] | None = None,
     ) -> None:
         """Initialize GitHubToolkitProvider.
 
         :param platform_app_id: Platform App ID (environment variable)
         :param platform_private_key: Platform App PEM private key (environment variable)
-        :param pat_repo: GitHub PAT repository
         :param session_manager: DB session manager for Toolkit State
         """
         self._platform_app_id = platform_app_id
         self._platform_private_key = platform_private_key
-        self._pat_repo = pat_repo
         self._session_manager = session_manager
 
     def to_mcp_config(self, config: GitHubToolkitConfig) -> McpToolkitConfig:
@@ -1030,14 +964,20 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         """
         mcp_config = _build_mcp_config(config)
 
-        # per_user_pat does not use credentials_json; fetch per-user PAT from DB
-        if config.github_auth_type == "per_user_pat":
-            return await self._resolve_per_user_pat(config, context)
-
         proxy_url = context.mcp_proxy_url
 
         if context.credentials_json is None:
-            mcp_toolkit = McpToolkit(config=mcp_config, proxy_url=proxy_url)
+            mcp_toolkit = McpToolkit(
+                config=mcp_config,
+                proxy_url=proxy_url,
+                session_manager=self._session_manager,
+                agent_id=context.agent_id,
+                session_id=context.session_id,
+                state_name=_github_snapshot_state_name(
+                    toolkit_id=context.toolkit_id,
+                    suffix="anonymous",
+                ),
+            )
             return GitHubToolkit(
                 config=config, mcp_toolkit=mcp_toolkit, toolsets=config.toolsets
             )
@@ -1046,7 +986,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
 
         match secrets:
             case GitHubSecretsPAT():
-                return self._resolve_pat(secrets, config, proxy_url=proxy_url)
+                return self._resolve_pat(secrets, config, context, proxy_url=proxy_url)
             case GitHubSecretsApp():
                 return await self._resolve_github_app(
                     secrets,
@@ -1064,82 +1004,11 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             case _:
                 raise ValueError(f"Unknown GitHub secret type: {type(secrets)}")
 
-    async def _resolve_per_user_pat(
-        self,
-        config: GitHubToolkitConfig,
-        context: ResolveContext,
-    ) -> GitHubToolkit:
-        """Create GitHubToolkit with per_user_pat auth type.
-
-        If user PAT is registered in DB, bind secret to McpToolkit; otherwise
-        expose setup_github tool with setup_url.
-
-        :param config: GitHub Toolkit settings
-        :param context: Resolve context
-        :return: GitHubToolkit instance
-        """
-        secret: str | None = None
-        mcp_config = _build_mcp_config(config)
-
-        if context.user_id is not None:
-            secret = await self._pat_repo.get_token(
-                context.session, context.workspace_id, context.user_id
-            )
-
-        setup_url = (
-            f"{context.web_url}/w/{context.workspace_handle}/settings/github-pat"
-        )
-
-        mcp_toolkit: McpToolkit | None = None
-        if secret is not None:
-            mcp_toolkit = McpToolkit(
-                config=mcp_config,
-                secret=secret,
-                proxy_url=context.mcp_proxy_url,
-            )
-
-        # per_user_pat fetches user PAT from DB. `context.session` at resolve
-        # after resolve, so do not capture it in closure. Instead capture and return
-        # `secret` already fetched at this point. If user re-registers PAT, next
-        # agent session start reruns resolve and reflects new value.
-        runtime_environment_token_provider: (
-            Callable[[], Awaitable[str | None]] | None
-        ) = None
-        if config.inject_runtime_environment and secret is not None:
-            cached_secret: str = secret
-
-            async def _provide_pat_token() -> str:
-                return cached_secret
-
-            runtime_environment_token_provider = _provide_pat_token
-            logger.info(
-                "GitHub per_user_pat runtime environment enabled",
-                extra={
-                    "event": "github_toolkit.runtime_environment_resolved",
-                    "toolkit_id": context.toolkit_id,
-                    "workspace_id": context.workspace_id,
-                    "user_id": context.user_id,
-                    "auth_type": "per_user_pat",
-                },
-            )
-
-        return GitHubToolkit(
-            config=config,
-            mcp_toolkit=mcp_toolkit,
-            setup_url=setup_url,
-            toolkit_name=context.toolkit_name,
-            toolkit_id=context.toolkit_id,
-            toolsets=config.toolsets,
-            runtime_environment_token_provider=runtime_environment_token_provider,
-            # per_user_pat uses DB as truth, so TTL is short. If user re-registers
-            # reflected from next runtime command within at most 60 seconds.
-            runtime_environment_token_ttl_seconds=60.0,
-        )
-
     def _resolve_pat(
         self,
         secrets: GitHubSecretsPAT,
         config: GitHubToolkitConfig,
+        context: ResolveContext,
         *,
         proxy_url: str | None = None,
     ) -> GitHubToolkit:
@@ -1152,7 +1021,16 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         """
         mcp_config = _build_mcp_config(config)
         mcp_toolkit = McpToolkit(
-            config=mcp_config, secret=secrets.token, proxy_url=proxy_url
+            config=mcp_config,
+            secret=secrets.token,
+            proxy_url=proxy_url,
+            session_manager=self._session_manager,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            state_name=_github_snapshot_state_name(
+                toolkit_id=context.toolkit_id,
+                suffix="pat",
+            ),
         )
 
         # workspace-shared PAT is fixed in config credentials, so same value every time.
@@ -1212,6 +1090,10 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             private_key=secrets.private_key,
             targets=secrets.installations,
             proxy_url=proxy_url,
+            session_manager=self._session_manager,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            toolkit_id=context.toolkit_id,
         )
         return GitHubToolkit(
             config=config,
@@ -1252,6 +1134,10 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             private_key=self._platform_private_key,
             targets=secrets.installations,
             proxy_url=proxy_url,
+            session_manager=self._session_manager,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            toolkit_id=context.toolkit_id,
         )
         logger.info(
             "GitHub github_app_platform installations resolved",
@@ -1283,6 +1169,10 @@ def _build_installation_bindings(
     private_key: str,
     targets: list[GitHubInstallationTarget],
     proxy_url: str | None,
+    session_manager: SessionManager[AsyncSession] | None,
+    agent_id: str,
+    session_id: str,
+    toolkit_id: str,
 ) -> list[GitHubInstallationBinding]:
     """Build bindings for each GitHub App installation."""
     bindings: list[GitHubInstallationBinding] = []
@@ -1308,9 +1198,22 @@ def _build_installation_bindings(
                 lazy_mcp_config=mcp_config,
                 lazy_mcp_secret_provider=provide_token,
                 lazy_mcp_proxy_url=proxy_url,
+                session_manager=session_manager,
+                agent_id=agent_id,
+                session_id=session_id,
+                state_name=_github_snapshot_state_name(
+                    toolkit_id=toolkit_id,
+                    suffix=f"installation:{target.installation_id}",
+                ),
             )
         )
     return bindings
+
+
+def _github_snapshot_state_name(*, toolkit_id: str, suffix: str) -> str:
+    """Return stable Toolkit State name for a GitHub MCP tool snapshot."""
+    digest = hashlib.sha256(f"{toolkit_id}:{suffix}".encode("utf-8")).hexdigest()[:16]
+    return f"tool_snapshot:{digest}"
 
 
 async def _exchange_app_token(

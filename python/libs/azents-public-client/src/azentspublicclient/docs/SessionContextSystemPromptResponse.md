@@ -6,10 +6,10 @@ Session context system prompt analysis response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**agent_prompt** | [**SessionContextSystemPromptFragmentResponse**](SessionContextSystemPromptFragmentResponse.md) |  | [optional] 
-**toolkit_prompts** | [**List[SessionContextSystemPromptFragmentResponse]**](SessionContextSystemPromptFragmentResponse.md) | Toolkit prompt fragments | 
-**injected_prompts** | [**List[SessionContextSystemPromptFragmentResponse]**](SessionContextSystemPromptFragmentResponse.md) | Turn injected prompt fragments | 
-**final_prompt** | [**SessionContextSystemPromptFragmentResponse**](SessionContextSystemPromptFragmentResponse.md) |  | [optional] 
+**agent_prompt** | [**SessionContextSystemPromptFragmentResponse**](SessionContextSystemPromptFragmentResponse.md) |  | [optional]
+**toolkit_prompts** | [**List[SessionContextSystemPromptFragmentResponse]**](SessionContextSystemPromptFragmentResponse.md) | Toolkit prompt fragments |
+**injected_prompts** | [**List[SessionContextSystemPromptFragmentResponse]**](SessionContextSystemPromptFragmentResponse.md) | Turn injected prompt fragments |
+**final_prompt** | [**SessionContextSystemPromptFragmentResponse**](SessionContextSystemPromptFragmentResponse.md) |  | [optional]
 
 ## Example
 

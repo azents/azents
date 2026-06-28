@@ -6,9 +6,9 @@ Runner route/stream unavailable response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type | 
-**detail** | **str** | Status description | 
-**retry_after_ms** | **int** | Recommended retry delay | 
+**type** | **str** | Response type |
+**detail** | **str** | Status description |
+**retry_after_ms** | **int** | Recommended retry delay |
 
 ## Example
 

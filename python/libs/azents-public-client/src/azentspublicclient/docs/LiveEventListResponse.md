@@ -6,12 +6,12 @@ Current live state taxonomy snapshot response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**partial_history** | [**PartialHistoryResponse**](PartialHistoryResponse.md) | Partial history projection list to compose into Chat timeline | 
-**input_buffers** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Pending input buffer projection list | 
-**run** | [**ChatLiveRunStateResponse**](ChatLiveRunStateResponse.md) |  | [optional] 
-**session_run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Authoritative run_state for the current session | 
-**todo** | [**TodoStateResponse**](TodoStateResponse.md) |  | [optional] 
-**goal** | [**GoalStateResponse**](GoalStateResponse.md) |  | [optional] 
+**partial_history** | [**PartialHistoryResponse**](PartialHistoryResponse.md) | Partial history projection list to compose into Chat timeline |
+**input_buffers** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Pending input buffer projection list |
+**run** | [**ChatLiveRunStateResponse**](ChatLiveRunStateResponse.md) |  | [optional]
+**session_run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Authoritative run_state for the current session |
+**todo** | [**TodoStateResponse**](TodoStateResponse.md) |  | [optional]
+**goal** | [**GoalStateResponse**](GoalStateResponse.md) |  | [optional]
 
 ## Example
 
