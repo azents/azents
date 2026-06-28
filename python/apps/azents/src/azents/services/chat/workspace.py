@@ -25,6 +25,7 @@ from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileListEntry,
+    RuntimeFileMoveEntry,
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
@@ -219,6 +220,20 @@ class AgentWorkspaceMoveResult:
 
     source_path: str
     destination_path: str
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentWorkspaceBulkDeleteResult:
+    """Agent Workspace bulk delete result."""
+
+    paths: list[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentWorkspaceBulkMoveResult:
+    """Agent Workspace bulk move result."""
+
+    entries: list[AgentWorkspaceMoveResult]
 
 
 AgentWorkspaceFileResult = AgentWorkspaceDirectory | AgentWorkspaceFile
@@ -860,6 +875,129 @@ class AgentWorkspaceFileService:
         except RuntimeRunnerOperationFailedError as error:
             return _runner_file_error(error)
 
+    async def bulk_delete_paths(
+        self,
+        agent_id: str,
+        user_id: str,
+        raw_paths: list[str],
+        *,
+        recursive: bool,
+    ) -> Result[AgentWorkspaceBulkDeleteResult, AgentWorkspaceError]:
+        """Delete multiple files or directories in Agent Workspace."""
+        access = await self._ensure_active_runtime(agent_id, user_id)
+        match access:
+            case Success(runtime):
+                try:
+                    workspace_root = agent_workspace_root(runtime.workspace_path)
+                except AgentWorkspacePathUnavailable as error:
+                    return Failure(error)
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(access)
+        paths: list[PurePosixPath] = []
+        try:
+            for raw_path in raw_paths:
+                path = normalize_agent_workspace_path(
+                    raw_path, workspace_root=workspace_root
+                )
+                if path == workspace_root:
+                    return Failure(
+                        AgentWorkspaceInvalidOperation(
+                            detail="Agent Workspace root cannot be deleted."
+                        )
+                    )
+                paths.append(path)
+        except AgentWorkspacePathDenied as error:
+            return Failure(error)
+        if not paths:
+            return Failure(
+                AgentWorkspaceInvalidOperation(detail="At least one path is required.")
+            )
+        try:
+            result = await self._runner_operations.bulk_delete_files(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                paths=[path.as_posix() for path in paths],
+                recursive=recursive,
+                deadline_at=_runner_file_operation_deadline(),
+            )
+            return Success(AgentWorkspaceBulkDeleteResult(paths=list(result.paths)))
+        except RuntimeRunnerOperationUnavailable as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationGenerationError as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationFailedError as error:
+            return _runner_file_error(error)
+
+    async def bulk_move_paths(
+        self,
+        agent_id: str,
+        user_id: str,
+        raw_source_paths: list[str],
+        raw_destination_directory: str,
+        *,
+        overwrite: bool,
+    ) -> Result[AgentWorkspaceBulkMoveResult, AgentWorkspaceError]:
+        """Move multiple files or directories into a destination directory."""
+        access = await self._ensure_active_runtime(agent_id, user_id)
+        match access:
+            case Success(runtime):
+                try:
+                    workspace_root = agent_workspace_root(runtime.workspace_path)
+                except AgentWorkspacePathUnavailable as error:
+                    return Failure(error)
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(access)
+        source_paths: list[PurePosixPath] = []
+        try:
+            destination_directory = normalize_agent_workspace_path(
+                raw_destination_directory, workspace_root=workspace_root
+            )
+            for raw_path in raw_source_paths:
+                source_path = normalize_agent_workspace_path(
+                    raw_path, workspace_root=workspace_root
+                )
+                if source_path == workspace_root:
+                    return Failure(
+                        AgentWorkspaceInvalidOperation(
+                            detail="Agent Workspace root cannot be moved."
+                        )
+                    )
+                source_paths.append(source_path)
+        except AgentWorkspacePathDenied as error:
+            return Failure(error)
+        if not source_paths:
+            return Failure(
+                AgentWorkspaceInvalidOperation(
+                    detail="At least one source path is required."
+                )
+            )
+        try:
+            result = await self._runner_operations.bulk_move_files(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                source_paths=[path.as_posix() for path in source_paths],
+                destination_directory=destination_directory.as_posix(),
+                overwrite=overwrite,
+                deadline_at=_runner_file_operation_deadline(),
+            )
+            return Success(
+                AgentWorkspaceBulkMoveResult(
+                    entries=[
+                        _move_result_from_runner(entry) for entry in result.entries
+                    ]
+                )
+            )
+        except RuntimeRunnerOperationUnavailable as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationGenerationError as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationFailedError as error:
+            return _runner_file_error(error)
+
     async def download_file(
         self,
         agent_id: str,
@@ -1098,6 +1236,13 @@ class AgentWorkspaceFileService:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationFailedError as error:
             return _runner_file_error(error)
+
+
+def _move_result_from_runner(entry: RuntimeFileMoveEntry) -> AgentWorkspaceMoveResult:
+    return AgentWorkspaceMoveResult(
+        source_path=entry.source_path,
+        destination_path=entry.destination_path,
+    )
 
 
 def _runner_file_error(

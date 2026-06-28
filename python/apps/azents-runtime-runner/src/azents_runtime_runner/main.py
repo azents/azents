@@ -34,6 +34,8 @@ _CAPABILITIES = (
     "file.delete",
     "file.mkdir",
     "file.move",
+    "file.bulk_delete",
+    "file.bulk_move",
 )
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _LOGGER = logging.getLogger(__name__)

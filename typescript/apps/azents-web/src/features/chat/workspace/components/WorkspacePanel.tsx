@@ -24,7 +24,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { FileBrowser } from "./FileBrowser";
-import { FileInspector } from "./FileInspector";
+import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
 import { RuntimeActivationView } from "./RuntimeActivationView";
 import type { WorkspacePanelState } from "../types";
@@ -40,11 +40,17 @@ interface WorkspacePanelProps {
   onResetRuntime: () => void;
   onOpenDirectory: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onShowInfo: (path: string) => void;
+  onBackToBrowser: () => void;
+  onToggleSelectedPath: (path: string) => void;
+  onClearSelection: () => void;
   onRefresh: () => void;
   onCreateDirectory: (path: string) => void;
   onRenamePath: (sourcePath: string, newName: string) => void;
   onMovePath: (sourcePath: string, destinationPath: string) => void;
   onDeletePath: (path: string, recursive: boolean) => void;
+  onBulkMovePaths: (destinationDirectory: string) => void;
+  onBulkDeletePaths: (recursive: boolean) => void;
   getDownloadHref: (path: string) => string;
 }
 
@@ -57,11 +63,17 @@ export function WorkspacePanel({
   onResetRuntime,
   onOpenDirectory,
   onOpenFile,
+  onShowInfo,
+  onBackToBrowser,
+  onToggleSelectedPath,
+  onClearSelection,
   onRefresh,
   onCreateDirectory,
   onRenamePath,
   onMovePath,
   onDeletePath,
+  onBulkMovePaths,
+  onBulkDeletePaths,
   getDownloadHref,
 }: WorkspacePanelProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
@@ -406,7 +418,65 @@ export function WorkspacePanel({
           state.manifest && (
             <Stack gap={0} h="100%" mih={0}>
               <Box flex={1} mih={0} style={{ overflow: "hidden" }}>
-                {state.fileState.type === "IDLE" ? (
+                {state.workspaceView === "preview" ? (
+                  <FileViewer
+                    state={state.fileState}
+                    getDownloadHref={getDownloadHref}
+                    onBack={onBackToBrowser}
+                  />
+                ) : state.workspaceView === "info" ? (
+                  <FileInfo
+                    entry={state.selectedEntry}
+                    stat={
+                      state.inspectorState.type === "LOADED"
+                        ? state.inspectorState.stat
+                        : null
+                    }
+                    isLoading={state.inspectorState.type === "LOADING"}
+                    error={
+                      state.inspectorState.type === "ERROR"
+                        ? state.inspectorState.message
+                        : null
+                    }
+                    getDownloadHref={getDownloadHref}
+                    onBack={onBackToBrowser}
+                    onCreateDirectory={() => {
+                      const basePath =
+                        state.selectedEntry?.kind === "directory"
+                          ? state.selectedEntry.path
+                          : state.directory.path;
+                      const name = window.prompt(t("newFolderPrompt"));
+                      if (name?.trim()) {
+                        onCreateDirectory(`${basePath}/${name.trim()}`);
+                      }
+                    }}
+                    onRename={(entry) => {
+                      const name = window.prompt(t("renamePrompt"), entry.name);
+                      if (name?.trim() && name.trim() !== entry.name) {
+                        onRenamePath(entry.path, name.trim());
+                      }
+                    }}
+                    onMove={(entry) => {
+                      const destination = window.prompt(
+                        t("movePrompt"),
+                        entry.path,
+                      );
+                      if (
+                        destination?.trim() &&
+                        destination.trim() !== entry.path
+                      ) {
+                        onMovePath(entry.path, destination.trim());
+                      }
+                    }}
+                    onDelete={(entry) => {
+                      if (
+                        window.confirm(t("deleteConfirm", { path: entry.path }))
+                      ) {
+                        onDeletePath(entry.path, entry.kind === "directory");
+                      }
+                    }}
+                  />
+                ) : (
                   <FileBrowser
                     root={state.manifest.root}
                     cwd={state.manifest.cwd}
@@ -415,69 +485,69 @@ export function WorkspacePanel({
                     entries={state.directory.entries}
                     directoryEntriesByPath={state.directoryEntriesByPath}
                     selectedFilePath={state.selectedFilePath}
+                    selectedPaths={state.selectedPaths}
                     isRefreshing={state.isRefreshing}
+                    getDownloadHref={getDownloadHref}
                     onOpenDirectory={onOpenDirectory}
                     onOpenFile={onOpenFile}
+                    onShowInfo={onShowInfo}
+                    onToggleSelectedPath={onToggleSelectedPath}
+                    onClearSelection={onClearSelection}
+                    onBulkMove={() => {
+                      const destination = window.prompt(
+                        t("movePrompt"),
+                        state.directory.path,
+                      );
+                      if (destination?.trim()) {
+                        onBulkMovePaths(destination.trim());
+                      }
+                    }}
+                    onBulkDelete={() => {
+                      if (
+                        window.confirm(
+                          t("bulkDeleteConfirm", {
+                            count: state.selectedPaths.length,
+                          }),
+                        )
+                      ) {
+                        onBulkDeletePaths(true);
+                      }
+                    }}
+                    onCreateDirectory={(basePath) => {
+                      const name = window.prompt(t("newFolderPrompt"));
+                      if (name?.trim()) {
+                        onCreateDirectory(`${basePath}/${name.trim()}`);
+                      }
+                    }}
+                    onRenamePath={(entry) => {
+                      const name = window.prompt(t("renamePrompt"), entry.name);
+                      if (name?.trim() && name.trim() !== entry.name) {
+                        onRenamePath(entry.path, name.trim());
+                      }
+                    }}
+                    onMovePath={(entry) => {
+                      const destination = window.prompt(
+                        t("movePrompt"),
+                        entry.path,
+                      );
+                      if (
+                        destination?.trim() &&
+                        destination.trim() !== entry.path
+                      ) {
+                        onMovePath(entry.path, destination.trim());
+                      }
+                    }}
+                    onDeletePath={(entry) => {
+                      if (
+                        window.confirm(t("deleteConfirm", { path: entry.path }))
+                      ) {
+                        onDeletePath(entry.path, entry.kind === "directory");
+                      }
+                    }}
                     onRefresh={onRefresh}
-                  />
-                ) : (
-                  <FileViewer
-                    state={state.fileState}
-                    getDownloadHref={getDownloadHref}
-                    onBack={() => onOpenDirectory(state.directory.path)}
                   />
                 )}
               </Box>
-              <FileInspector
-                entry={state.selectedEntry}
-                stat={
-                  state.inspectorState.type === "LOADED"
-                    ? state.inspectorState.stat
-                    : null
-                }
-                isLoading={state.inspectorState.type === "LOADING"}
-                error={
-                  state.inspectorState.type === "ERROR"
-                    ? state.inspectorState.message
-                    : null
-                }
-                getDownloadHref={getDownloadHref}
-                onCreateDirectory={() => {
-                  const basePath =
-                    state.selectedEntry?.kind === "directory"
-                      ? state.selectedEntry.path
-                      : state.directory.path;
-                  const name = window.prompt(t("newFolderPrompt"));
-                  if (name?.trim()) {
-                    onCreateDirectory(`${basePath}/${name.trim()}`);
-                  }
-                }}
-                onRename={(entry) => {
-                  const name = window.prompt(t("renamePrompt"), entry.name);
-                  if (name?.trim() && name.trim() !== entry.name) {
-                    onRenamePath(entry.path, name.trim());
-                  }
-                }}
-                onMove={(entry) => {
-                  const destination = window.prompt(
-                    t("movePrompt"),
-                    entry.path,
-                  );
-                  if (
-                    destination?.trim() &&
-                    destination.trim() !== entry.path
-                  ) {
-                    onMovePath(entry.path, destination.trim());
-                  }
-                }}
-                onDelete={(entry) => {
-                  if (
-                    window.confirm(t("deleteConfirm", { path: entry.path }))
-                  ) {
-                    onDeletePath(entry.path, entry.kind === "directory");
-                  }
-                }}
-              />
             </Stack>
           )}
       </Box>

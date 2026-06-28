@@ -141,6 +141,10 @@ from .data import (
     AgentSessionResponse,
     AgentSessionTitleUpdateRequest,
     AgentWorkspaceActionResponse,
+    AgentWorkspaceBulkDeleteRequest,
+    AgentWorkspaceBulkDeleteResponse,
+    AgentWorkspaceBulkMoveRequest,
+    AgentWorkspaceBulkMoveResponse,
     AgentWorkspaceDeleteRequest,
     AgentWorkspaceDirectoryResponse,
     AgentWorkspaceFileResponse,
@@ -1870,6 +1874,57 @@ async def move_agent_workspace_path(
     match result:
         case Success(value):
             return AgentWorkspaceMoveResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_error(error)
+            raise AssertionError("unreachable")
+        case _:
+            assert_never(result)
+
+
+@router.delete("/agents/{agent_id}/workspace/files/bulk")
+async def bulk_delete_agent_workspace_paths(
+    agent_id: str,
+    request: AgentWorkspaceBulkDeleteRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_service: Annotated[AgentWorkspaceFileService, Depends()],
+) -> AgentWorkspaceBulkDeleteResponse:
+    """Delete multiple Agent Workspace files or directories."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await workspace_service.bulk_delete_paths(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        raw_paths=request.paths,
+        recursive=request.recursive,
+    )
+    match result:
+        case Success(value):
+            return AgentWorkspaceBulkDeleteResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_error(error)
+            raise AssertionError("unreachable")
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/workspace/move/bulk")
+async def bulk_move_agent_workspace_paths(
+    agent_id: str,
+    request: AgentWorkspaceBulkMoveRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_service: Annotated[AgentWorkspaceFileService, Depends()],
+) -> AgentWorkspaceBulkMoveResponse:
+    """Move multiple Agent Workspace files or directories."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await workspace_service.bulk_move_paths(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        raw_source_paths=request.source_paths,
+        raw_destination_directory=request.destination_directory,
+        overwrite=request.overwrite,
+    )
+    match result:
+        case Success(value):
+            return AgentWorkspaceBulkMoveResponse.from_domain(value)
         case Failure(error):
             _raise_workspace_error(error)
             raise AssertionError("unreachable")

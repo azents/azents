@@ -464,6 +464,17 @@ def _operation_payload(
     if payload_kind == "process_terminate_session":
         payload = operation.process_terminate_session
         return {"owner_session_id": payload.owner_session_id}
+    if payload_kind == "file_bulk_delete":
+        return {
+            "paths": list(operation.file_bulk_delete.paths),
+            "recursive": operation.file_bulk_delete.recursive,
+        }
+    if payload_kind == "file_bulk_move":
+        return {
+            "source_paths": list(operation.file_bulk_move.source_paths),
+            "destination_directory": operation.file_bulk_move.destination_directory,
+            "overwrite": operation.file_bulk_move.overwrite,
+        }
     return {}
 
 
@@ -554,11 +565,19 @@ def _copy_final_success(
         if modified_at is not None:
             stat.modified_at = modified_at
         return
+    if "deleted_paths" in payload:
+        message.file_bulk_delete.paths.extend(
+            _str_list_payload(payload, "deleted_paths")
+        )
+        return
     if "deleted_path" in payload:
         message.file_delete.path = _str_payload(payload, "deleted_path")
         return
     if "created_path" in payload:
         message.file_mkdir.path = _str_payload(payload, "created_path")
+        return
+    if "moved_entries" in payload:
+        message.file_bulk_move.entries.extend(_move_entries(payload))
         return
     if "moved_source_path" in payload or "moved_destination_path" in payload:
         message.file_move.source_path = _str_payload(payload, "moved_source_path")
@@ -684,7 +703,41 @@ def _final_success_payload(
             "moved_source_path": message.file_move.source_path,
             "moved_destination_path": message.file_move.destination_path,
         }
+    if result_kind == "file_bulk_delete":
+        return {"deleted_paths": list(message.file_bulk_delete.paths)}
+    if result_kind == "file_bulk_move":
+        return {
+            "moved_entries": [
+                {
+                    "source_path": entry.source_path,
+                    "destination_path": entry.destination_path,
+                }
+                for entry in message.file_bulk_move.entries
+            ]
+        }
     return {}
+
+
+def _move_entries(
+    payload: Mapping[str, JsonValue],
+) -> list[runtime_runner_control_pb2.RuntimeFileMoveEntry]:
+    raw_entries = payload.get("moved_entries")
+    if not isinstance(raw_entries, list):
+        return []
+    entries: list[runtime_runner_control_pb2.RuntimeFileMoveEntry] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        source_path = raw_entry.get("source_path")
+        destination_path = raw_entry.get("destination_path")
+        if isinstance(source_path, str) and isinstance(destination_path, str):
+            entries.append(
+                runtime_runner_control_pb2.RuntimeFileMoveEntry(
+                    source_path=source_path,
+                    destination_path=destination_path,
+                )
+            )
+    return entries
 
 
 def _file_list_entries(
@@ -759,6 +812,13 @@ def _grep_line_matches(
             )
         )
     return lines
+
+
+def _str_list_payload(payload: Mapping[str, JsonValue], key: str) -> list[str]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 def _str_payload(payload: Mapping[str, JsonValue], key: str) -> str:

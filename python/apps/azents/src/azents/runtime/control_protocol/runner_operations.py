@@ -4,7 +4,7 @@ import asyncio
 import base64
 import dataclasses
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -203,6 +203,30 @@ class RuntimeFileMoveResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeFileMoveEntry:
+    """Runner file move entry."""
+
+    source_path: str
+    destination_path: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileBulkDeleteResult:
+    """Completed file bulk delete operation result."""
+
+    paths: tuple[str, ...]
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileBulkMoveResult:
+    """Completed file bulk move operation result."""
+
+    entries: tuple[RuntimeFileMoveEntry, ...]
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeOperationReceipt:
     """Background Runner operation receipt."""
 
@@ -222,6 +246,8 @@ type RuntimeForegroundResult = (
     | RuntimeFileDeleteResult
     | RuntimeFileMkdirResult
     | RuntimeFileMoveResult
+    | RuntimeFileBulkDeleteResult
+    | RuntimeFileBulkMoveResult
 )
 
 
@@ -392,6 +418,37 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    async def bulk_delete_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        paths: list[str],
+        recursive: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileBulkDeleteResult:
+        """Run a foreground file bulk delete operation and wait for final result."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="file.bulk_delete",
+                payload={"paths": list(paths), "recursive": recursive},
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_file_bulk_delete(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
     async def mkdir_file(
         self,
         *,
@@ -450,6 +507,42 @@ class RuntimeRunnerOperationClient:
             )
         )
         return await self.resume_file_move(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
+    async def bulk_move_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        source_paths: list[str],
+        destination_directory: str,
+        overwrite: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileBulkMoveResult:
+        """Run a foreground file bulk move operation and wait for final result."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="file.bulk_move",
+                payload={
+                    "source_paths": list(source_paths),
+                    "destination_directory": destination_directory,
+                    "overwrite": overwrite,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_file_bulk_move(
             reply_stream_id=dispatch.reply_stream_id,
             after_cursor=None,
             request_id=dispatch.request_id,
@@ -926,6 +1019,66 @@ class RuntimeRunnerOperationClient:
             final_cursor=final.cursor,
         )
 
+    async def resume_file_bulk_delete(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileBulkDeleteResult:
+        """Resume reading a file bulk delete reply stream until final result."""
+        folder = _ReplyFolder(after_cursor=after_cursor)
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        paths = final.event.payload.get("deleted_paths")
+        return RuntimeFileBulkDeleteResult(
+            paths=tuple(value for value in paths if isinstance(value, str))
+            if isinstance(paths, list)
+            else (),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_file_bulk_move(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileBulkMoveResult:
+        """Resume reading a file bulk move reply stream until final result."""
+        folder = _ReplyFolder(after_cursor=after_cursor)
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        entries = final.event.payload.get("moved_entries")
+        return RuntimeFileBulkMoveResult(
+            entries=tuple(_file_move_entries(entries))
+            if isinstance(entries, list)
+            else (),
+            final_cursor=final.cursor,
+        )
+
     async def resume_grep_files(
         self,
         *,
@@ -1293,6 +1446,23 @@ def _file_list_entries(
                 modified_at=_optional_str_payload(raw_entry, "modified_at"),
             )
         )
+    return entries
+
+
+def _file_move_entries(values: Sequence[object]) -> list[RuntimeFileMoveEntry]:
+    entries: list[RuntimeFileMoveEntry] = []
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        source_path = value.get("source_path")
+        destination_path = value.get("destination_path")
+        if isinstance(source_path, str) and isinstance(destination_path, str):
+            entries.append(
+                RuntimeFileMoveEntry(
+                    source_path=source_path,
+                    destination_path=destination_path,
+                )
+            )
     return entries
 
 

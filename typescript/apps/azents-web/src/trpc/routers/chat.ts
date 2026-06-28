@@ -10,6 +10,8 @@ import {
   agentRuntimeV1StopAgentRuntime,
   chatV1ApproveAgentProjectRegistrationRequest,
   chatV1ArchiveAgentSession,
+  chatV1BulkDeleteAgentWorkspacePaths,
+  chatV1BulkMoveAgentWorkspacePaths,
   chatV1CreateAgentWorkspaceDirectory,
   chatV1CreateCommand,
   chatV1CreateMessage,
@@ -861,6 +863,34 @@ export const chatRouter = router({
       }
     }),
 
+  bulkDeleteAgentWorkspacePaths: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        paths: z.array(z.string().min(1)).min(1),
+        recursive: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1BulkDeleteAgentWorkspacePaths({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          body: { paths: input.paths, recursive: input.recursive },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
   moveAgentWorkspacePath: publicProcedure
     .input(
       z.object({
@@ -878,6 +908,39 @@ export const chatRouter = router({
           body: {
             source_path: input.sourcePath,
             destination_path: input.destinationPath,
+            overwrite: input.overwrite,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  bulkMoveAgentWorkspacePaths: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sourcePaths: z.array(z.string().min(1)).min(1),
+        destinationDirectory: z.string().min(1),
+        overwrite: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1BulkMoveAgentWorkspacePaths({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          body: {
+            source_paths: input.sourcePaths,
+            destination_directory: input.destinationDirectory,
             overwrite: input.overwrite,
           },
           throwOnError: true,

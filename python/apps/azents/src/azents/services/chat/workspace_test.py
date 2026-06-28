@@ -21,10 +21,13 @@ from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.control_protocol.runner_operations import (
+    RuntimeFileBulkDeleteResult,
+    RuntimeFileBulkMoveResult,
     RuntimeFileDeleteResult,
     RuntimeFileListEntry,
     RuntimeFileListResult,
     RuntimeFileMkdirResult,
+    RuntimeFileMoveEntry,
     RuntimeFileMoveResult,
     RuntimeFileReadResult,
     RuntimeFileStatResult,
@@ -109,6 +112,47 @@ class _FakeRunnerOperations:
         self.delete_calls: list[tuple[str, int, str, bool]] = []
         self.mkdir_calls: list[tuple[str, int, str, bool]] = []
         self.move_calls: list[tuple[str, int, str, str, bool]] = []
+        self.bulk_delete_calls: list[tuple[str, int, tuple[str, ...], bool]] = []
+        self.bulk_move_calls: list[tuple[str, int, tuple[str, ...], str, bool]] = []
+
+    async def bulk_move_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        source_paths: list[str],
+        destination_directory: str,
+        overwrite: bool,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileBulkMoveResult:
+        """Record a fake bulk move operation."""
+        del deadline_at
+        self.bulk_move_calls.append(
+            (
+                runtime_id,
+                runner_generation,
+                tuple(source_paths),
+                destination_directory,
+                overwrite,
+            )
+        )
+        entries: list[RuntimeFileMoveEntry] = []
+        for source_path in source_paths:
+            if source_path not in self.files:
+                raise RuntimeRunnerOperationFailedError(
+                    f"NOT_FOUND: No such file: {source_path}"
+                )
+            destination_path = (
+                f"{destination_directory}/{source_path.rsplit('/', 1)[-1]}"
+            )
+            self.files[destination_path] = self.files.pop(source_path)
+            entries.append(
+                RuntimeFileMoveEntry(
+                    source_path=source_path,
+                    destination_path=destination_path,
+                )
+            )
+        return RuntimeFileBulkMoveResult(entries=tuple(entries), final_cursor="0-1")
 
     async def list_files(
         self,
@@ -206,6 +250,29 @@ class _FakeRunnerOperations:
             raise RuntimeRunnerOperationFailedError(f"NOT_FOUND: No such file: {path}")
         del self.files[path]
         return RuntimeFileDeleteResult(path=path, final_cursor="0-1")
+
+    async def bulk_delete_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        paths: list[str],
+        recursive: bool,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileBulkDeleteResult:
+        """Record a fake bulk delete operation."""
+        del deadline_at
+        self.bulk_delete_calls.append(
+            (runtime_id, runner_generation, tuple(paths), recursive)
+        )
+        for path in paths:
+            if path not in self.files:
+                raise RuntimeRunnerOperationFailedError(
+                    f"NOT_FOUND: No such file: {path}"
+                )
+        for path in paths:
+            del self.files[path]
+        return RuntimeFileBulkDeleteResult(paths=tuple(paths), final_cursor="0-1")
 
     async def mkdir_file(
         self,
@@ -582,6 +649,61 @@ async def test_move_path_calls_runner_for_rename() -> None:
     assert result.value.destination_path == destination
     assert runner_operations.move_calls == [
         ("runtime-1", 1, source, destination, False)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_paths_calls_runner() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        session_manager=_session_manager,
+    )
+    first = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
+    second = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()
+
+    result = await service.bulk_delete_paths(
+        "agent-1", "user-1", [first, second], recursive=False
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.paths == [first, second]
+    assert runner_operations.bulk_delete_calls == [
+        ("runtime-1", 1, (first, second), False)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bulk_move_paths_calls_runner() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        session_manager=_session_manager,
+    )
+    first = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
+    second = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()
+    destination = (AGENT_WORKSPACE_ROOT / "archive").as_posix()
+
+    result = await service.bulk_move_paths(
+        "agent-1",
+        "user-1",
+        [first, second],
+        destination,
+        overwrite=False,
+    )
+
+    assert isinstance(result, Success)
+    assert [entry.source_path for entry in result.value.entries] == [first, second]
+    assert runner_operations.bulk_move_calls == [
+        ("runtime-1", 1, (first, second), destination, False)
     ]
 
 
