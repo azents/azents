@@ -111,14 +111,14 @@ The DB payload is JSONB, but application code must validate it through a typed m
 
 #### `RunFailureController` / `FailedRunErrorFinalizer`
 
-The finalizer owns terminal failed-run output. It should be callable from all run-stopping failure paths and should be idempotent around terminal updates and durable event append.
+The finalizer owns terminal failed-run orchestration. It should be callable from all run-stopping failure paths and must delegate durable event append and terminal `agent_runs` updates to the engine event-store boundary instead of reaching into transcript/run repositories directly.
 
 Responsibilities:
 
-- Create the final durable `system_error` event with failed-run metadata.
-- Append a failed run marker where that marker is part of the run transcript contract.
-- Mark the `agent_runs` row terminal failed.
-- Clear retry state and active tool calls.
+- Build the finalization request from the latest retry state.
+- Ask the engine failed-run event store to append the final durable `system_error` event with failed-run metadata.
+- Ask the same event-store boundary to append the failed run marker where that marker is part of the run transcript contract.
+- Ask the same event-store boundary to mark the `agent_runs` row terminal failed, clearing retry state and active tool calls.
 - Emit `RunComplete` through the existing event publishing path.
 - Preserve user-safe durable content and log internal details separately.
 
