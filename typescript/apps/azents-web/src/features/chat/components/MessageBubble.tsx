@@ -21,10 +21,12 @@ import {
 } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import {
+  IconAlertTriangle,
   IconCheck,
   IconChevronRight,
   IconClock,
   IconPencil,
+  IconRepeatOff,
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -680,6 +682,83 @@ function GoalBriefingCard({
   );
 }
 
+function failedRunAttemptText(
+  failedAttemptCount: number | null,
+  maxRetries: number | null,
+  t: ChatTranslator,
+): string | null {
+  if (failedAttemptCount === null || maxRetries === null) {
+    return null;
+  }
+  return t("failedRunError.attempts", {
+    failedAttemptCount,
+    maxRetries,
+  });
+}
+
+function FailedRunRecoveryDetails({
+  message,
+}: {
+  message: ChatMessage;
+}): React.ReactElement | null {
+  const t = useTranslations("chat");
+  const metadata = message.metadata;
+  if (metadata?.failed_run_kind !== "failed_run") {
+    return null;
+  }
+
+  const finalizationReason = metadata.failed_run_finalization_reason ?? "";
+  const retryability = metadata.failed_run_retryability ?? "";
+  const failedAttemptCount = numberMetadataValue(
+    metadata.failed_run_failed_attempt_count ?? null,
+  );
+  const maxRetries = numberMetadataValue(
+    metadata.failed_run_max_retries ?? null,
+  );
+  const attemptText = failedRunAttemptText(failedAttemptCount, maxRetries, t);
+  const actionHint = metadata.failed_run_action_hint || null;
+  const isNonRetryable =
+    finalizationReason === "non_retryable" || retryability === "non_retryable";
+
+  return (
+    <Paper withBorder radius="md" p="xs" mt="xs" bg="var(--mantine-color-body)">
+      <Stack gap={rem(6)}>
+        <Group gap={rem(6)} wrap="nowrap">
+          {isNonRetryable ? (
+            <IconRepeatOff
+              aria-hidden="true"
+              size={15}
+              stroke={1.8}
+              color="var(--mantine-color-orange-6)"
+            />
+          ) : (
+            <IconAlertTriangle
+              aria-hidden="true"
+              size={15}
+              stroke={1.8}
+              color="var(--mantine-color-orange-6)"
+            />
+          )}
+          <Text size="xs" fw={600}>
+            {isNonRetryable
+              ? t("failedRunError.nonRetryableTitle")
+              : t("failedRunError.retryExhaustedTitle")}
+          </Text>
+        </Group>
+        {attemptText && (
+          <Text size="xs" c="dimmed">
+            {attemptText}
+          </Text>
+        )}
+        {actionHint && (
+          <Text size="xs" c="dimmed">
+            {actionHint}
+          </Text>
+        )}
+      </Stack>
+    </Paper>
+  );
+}
 function ErrorTextMessage({
   message,
 }: {
@@ -691,6 +770,8 @@ function ErrorTextMessage({
         <Box className={classes.errorMessageText}>
           <MarkdownContent>{message.content ?? ""}</MarkdownContent>
         </Box>
+
+        <FailedRunRecoveryDetails message={message} />
 
         {message.content && (
           <MessageActionRow

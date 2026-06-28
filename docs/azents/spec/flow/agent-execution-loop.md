@@ -116,6 +116,13 @@ message-processing failures. `SessionRunner` top-level message-processing errors
 the failed-run scope unless they are already inside a concrete run boundary such as `RunExecutor` or
 `CommandExecutor`.
 
+Failed-run terminal `system_error` events carry a user-safe `failure` payload with `kind =
+failed_run`. Frontend history/live mapping must preserve this metadata on the rendered error message.
+The error card should show a recovery summary derived only from that safe payload: finalization
+reason, failed attempt count, retry budget, retryability/non-retryable status, and optional
+`action_hint`. It must not render internal messages, stack traces, raw provider responses, or any
+observability-only diagnostics.
+
 ## 3. Event Transcript
 
 Durable event kinds:

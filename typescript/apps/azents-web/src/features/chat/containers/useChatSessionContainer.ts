@@ -356,6 +356,33 @@ function eventMetadata(event: ChatEventResponse): Record<string, string> {
   };
 }
 
+function failedRunMetadata(failure: unknown): Record<string, string> | null {
+  if (!isRecord(failure) || failure.kind !== "failed_run") {
+    return null;
+  }
+
+  const failedAttemptCount = failure.failed_attempt_count;
+  const maxRetries = failure.max_retries;
+  if (
+    typeof failedAttemptCount !== "number" ||
+    typeof maxRetries !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    failed_run_kind: "failed_run",
+    failed_run_finalization_reason:
+      stringField(failure, "finalization_reason") ?? "",
+    failed_run_failed_attempt_count: String(failedAttemptCount),
+    failed_run_max_retries: String(maxRetries),
+    failed_run_last_error_type: stringField(failure, "last_error_type") ?? "",
+    failed_run_retryability: stringField(failure, "retryability") ?? "",
+    failed_run_failure_code: stringField(failure, "failure_code") ?? "",
+    failed_run_action_hint: stringField(failure, "action_hint") ?? "",
+  };
+}
+
 function nativeArtifactItem(
   event: ChatEventResponse,
 ): Record<string, unknown> | null {
@@ -675,6 +702,7 @@ function mapEvents(
         ];
       }
       case "system_error": {
+        const failureMetadata = failedRunMetadata(payload.failure);
         return [
           ...messages,
           {
@@ -683,7 +711,10 @@ function mapEvents(
             content: stringField(payload, "content"),
             createdAt: event.created_at,
             status: "complete",
-            metadata: eventMetadata(event),
+            metadata: {
+              ...eventMetadata(event),
+              ...(failureMetadata ?? {}),
+            },
           },
         ];
       }

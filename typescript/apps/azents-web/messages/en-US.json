@@ -1241,7 +1241,12 @@
       "durationMinutes": "{count, plural, one {# min} other {# min}}",
       "durationSeconds": "{count, plural, one {# sec} other {# sec}}"
     },
-    "goalUpdatedIndicator": "Goal updated"
+    "goalUpdatedIndicator": "Goal updated",
+    "failedRunError": {
+      "retryExhaustedTitle": "Run failed after retrying",
+      "nonRetryableTitle": "Run failed without retrying",
+      "attempts": "Failed attempts: {failedAttemptCount} / {maxRetries}"
+    }
   },
   "oauth": {
     "title": "Authorization",

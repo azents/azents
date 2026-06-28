@@ -206,11 +206,34 @@ export interface SystemReminderPayload {
   text: string;
 }
 
+export type FailedRunFinalizationReason =
+  | "retry_exhausted"
+  | "retry_stopped_by_user"
+  | "non_retryable";
+
+export type FailedRunRetryability =
+  | "unknown"
+  | "transient"
+  | "user_action_required"
+  | "non_retryable";
+
+export interface FailedRunFailureMetadata {
+  kind: "failed_run";
+  finalization_reason: FailedRunFinalizationReason;
+  failed_attempt_count: number;
+  max_retries: number;
+  last_error_type?: string | null;
+  retryability?: FailedRunRetryability | null;
+  failure_code?: string | null;
+  action_hint?: string | null;
+}
+
 export interface SystemErrorPayload {
   content: string;
   severity?: "info" | "warning" | "error" | null;
   recoverable?: boolean | null;
   reset_suggested?: boolean | null;
+  failure?: FailedRunFailureMetadata | null;
 }
 
 export interface UnknownAdapterOutputPayload {
