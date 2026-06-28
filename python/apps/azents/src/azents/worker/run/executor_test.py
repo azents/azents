@@ -239,8 +239,9 @@ class _FlakyEngine(_Engine):
 class _AlwaysFailingEngine(_Engine):
     """Engine that always raises a user-visible model error."""
 
-    def __init__(self) -> None:
+    def __init__(self, message: str = "model still unavailable") -> None:
         self.calls = 0
+        self.message = message
 
     def run(
         self,
@@ -255,7 +256,7 @@ class _AlwaysFailingEngine(_Engine):
 
         async def iterator() -> AsyncIterator[Emit]:
             self.calls += 1
-            raise ModelCallError("model still unavailable")
+            raise ModelCallError(self.message)
             yield  # pragma: no cover
 
         return iterator()
@@ -832,3 +833,88 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
     assert len(lifecycle.retry_states) == 1
     assert len(finalizer.inputs) == 1
     assert finalizer.inputs[0].reason == "retry_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Known non-retryable model failures are finalized on the first attempt."""
+    monkeypatch.setattr(run_executor_module, "_FAILED_RUN_MAX_RETRIES", 10)
+    lifecycle = _SessionLifecycle()
+    engine = _AlwaysFailingEngine(
+        'Model call failed (503): {"error":{"code":"no_fixture_match"}}'
+    )
+    finalizer = _FailedRunFinalizer()
+    executor = _executor(
+        lifecycle,
+        engine=cast(AgentEngineProtocol, engine),
+        failed_run_finalizer=finalizer,
+    )
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+
+    async def resolve_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return Success(
+            RunRequest(
+                session_id="session-001",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                model="gpt-test",
+                credential_kwargs={},
+                workspace_id="workspace-001",
+                agent_id="agent-001",
+            )
+        )
+
+    async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return []
+
+    async def resolve_subagent_tools_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return []
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
+    )
+    monkeypatch.setattr(
+        run_executor_module, "resolve_subagent_tools", resolve_subagent_tools_success
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        SessionWakeUp(
+            agent_id="agent-001",
+            session_id="session-001",
+            user_id=None,
+            additional_system_prompt=None,
+            interface=None,
+            workspace_id="workspace-001",
+            workspace_handle=None,
+        ),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert engine.calls == 1
+    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert len(lifecycle.retry_states) == 1
+    retry_state = lifecycle.retry_states[0]
+    assert retry_state is not None
+    assert retry_state.retryability == "non_retryable"
+    assert retry_state.failure_code == "no_fixture_match"
+    assert retry_state.backoff_seconds == 0
+    assert len(finalizer.inputs) == 1
+    assert finalizer.inputs[0].reason == "non_retryable"
