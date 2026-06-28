@@ -127,6 +127,16 @@ class _RunRepo:
     def __init__(self) -> None:
         self.created: AgentRunCreate | None = None
         self.terminal_status: AgentRunStatus | None = None
+        self._state: AgentRunState | None = None
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Return existing run state when retry reuses a run id."""
+        del session, run_id
+        return self._state
 
     async def create(
         self,
@@ -136,7 +146,7 @@ class _RunRepo:
         """Record create call."""
         del session
         self.created = create
-        return AgentRunState(
+        self._state = AgentRunState(
             id=create.id or "0" * 32,
             session_id=create.session_id,
             run_index=1,
@@ -146,6 +156,7 @@ class _RunRepo:
             started_at=datetime.datetime.now(datetime.UTC),
             updated_at=datetime.datetime.now(datetime.UTC),
         )
+        return self._state
 
     async def mark_terminal(
         self,
@@ -159,6 +170,16 @@ class _RunRepo:
         """Record terminal update call."""
         del session, run_id, ended_at, last_completed_event_id
         self.terminal_status = status
+        return object()
+
+    async def update_retry_state(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        retry_state: object | None,
+    ) -> object:
+        """Record retry-state clear without mutating this lightweight test repo."""
+        del session, run_id, retry_state
         return object()
 
 
@@ -708,8 +729,8 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
     )
 
 
-async def test_adapter_emits_user_visible_model_call_error() -> None:
-    """User-visible model error is emitted as event system_error event."""
+async def test_adapter_propagates_user_visible_model_call_error() -> None:
+    """User-visible model errors bubble to the worker retry boundary."""
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
         artifact_service=_ArtifactService(),
@@ -721,8 +742,8 @@ async def test_adapter_emits_user_visible_model_call_error() -> None:
         execution_factory=lambda **kwargs: _FailingExecution(),
     )
 
-    emits = [
-        emit
+    emits: list[Emit] = []
+    with pytest.raises(ModelCallError, match="Missing scopes"):
         async for emit in adapter.run(
             RunRequest(
                 session_id="session-1",
@@ -739,15 +760,13 @@ async def test_adapter_emits_user_visible_model_call_error() -> None:
                 run_id="0" * 32,
                 publish_event=_noop_publish,
             ),
-        )
-    ]
+        ):
+            emits.append(emit)
 
-    error_event = _events(emits)[0]
-    assert isinstance(error_event, Event)
-    assert error_event.kind == EventKind.SYSTEM_ERROR
-    assert isinstance(error_event.payload, SystemErrorPayload)
-    assert error_event.payload.content == "Model call failed (401): Missing scopes"
-    assert isinstance(_events(emits)[-1], RunComplete)
+    assert not any(
+        isinstance(event, Event) and event.kind == EventKind.SYSTEM_ERROR
+        for event in _events(emits)
+    )
 
 
 async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:

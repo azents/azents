@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.types import ActiveToolCall
+from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
@@ -195,6 +196,24 @@ class SessionLifecycleService:
                 ended_at=datetime.datetime.now(datetime.UTC),
             ),
             error_log="Failed to mark agent run terminal",
+            session_id=session_id,
+        )
+
+    async def update_agent_run_retry_state(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        retry_state: FailedRunRetryState | None,
+    ) -> None:
+        """Set or clear the AgentRun retry state."""
+        await self.run_short_db(
+            lambda db: self.agent_run_repository.update_retry_state(
+                db,
+                run_id,
+                retry_state,
+            ),
+            error_log="Failed to update agent run retry state",
             session_id=session_id,
         )
 

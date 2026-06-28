@@ -250,6 +250,8 @@ This makes retry responsible for recovering failed attempts and Goal continuatio
 - Persist retry state and project it to live run state.
 - Honor stop/shutdown during retry wait.
 - Preserve durable history until terminal failure.
+- Ensure event execution propagates run-stopping model/runtime failures to the worker retry boundary instead of writing immediate failed durable output.
+- Reuse the same `agent_runs` row and `run_id` across attempts so retry state and eventual terminal status remain attached to one run.
 
 ### Phase 2: command and session-runner convergence
 
