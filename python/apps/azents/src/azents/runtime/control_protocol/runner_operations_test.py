@@ -18,6 +18,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileReadResult,
     RuntimeFileStatResult,
     RuntimeGrepResult,
+    RuntimeProcessOutputDelta,
     RuntimeProcessResult,
     RuntimeRunnerOperationCanceledError,
     RuntimeRunnerOperationClient,
@@ -511,6 +512,7 @@ async def test_start_process_dispatches_and_folds_protocol_events() -> None:
             yield_time_ms=1000,
             max_output_bytes=4096,
             env={"PYTHONUNBUFFERED": "1"},
+            owner_session_id="session-1",
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
@@ -528,6 +530,7 @@ async def test_start_process_dispatches_and_folds_protocol_events() -> None:
         "workdir": "/workspace/agent",
         "yield_time_ms": 1000,
         "max_output_bytes": 4096,
+        "owner_session_id": "session-1",
         "env": {"PYTHONUNBUFFERED": "1"},
     }
 
@@ -587,6 +590,7 @@ async def test_write_process_stdin_dispatches_empty_poll_and_missing_result() ->
             stdin="",
             yield_time_ms=0,
             max_output_bytes=2048,
+            owner_session_id="session-1",
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
@@ -604,6 +608,7 @@ async def test_write_process_stdin_dispatches_empty_poll_and_missing_result() ->
         "stdin": "",
         "yield_time_ms": 0,
         "max_output_bytes": 2048,
+        "owner_session_id": "session-1",
     }
 
     await harness.reply(
@@ -632,7 +637,14 @@ async def test_resume_process_uses_output_deltas_when_final_snapshot_is_empty() 
             request_id="req-1",
             generation=harness.runner_generation,
             event_type=RuntimeReplyEventType.PROCESS_OUTPUT,
-            payload={"process_id": "proc_1", "stream": "stdout", "text": "hello"},
+            payload={
+                "process_id": "proc_1",
+                "stream": "stdout",
+                "chunk_id": 1,
+                "text": "hello",
+                "truncated": False,
+                "omitted_bytes": 0,
+            },
         ),
         reply_stream_id="reply:req-1",
         operation_id=None,
@@ -644,7 +656,14 @@ async def test_resume_process_uses_output_deltas_when_final_snapshot_is_empty() 
             request_id="req-1",
             generation=harness.runner_generation,
             event_type=RuntimeReplyEventType.PROCESS_OUTPUT,
-            payload={"process_id": "proc_1", "stream": "stderr", "text": "warn"},
+            payload={
+                "process_id": "proc_1",
+                "stream": "stderr",
+                "chunk_id": 1,
+                "text": "warn",
+                "truncated": False,
+                "omitted_bytes": 0,
+            },
         ),
         reply_stream_id="reply:req-1",
         operation_id=None,
@@ -656,7 +675,7 @@ async def test_resume_process_uses_output_deltas_when_final_snapshot_is_empty() 
             request_id="req-1",
             generation=harness.runner_generation,
             event_type=RuntimeReplyEventType.FINAL_SUCCESS,
-            payload={"process_id": "proc_1", "status": "exited", "exit_code": 0},
+            payload={"process_id": "proc_1", "status": "exited_unread", "exit_code": 0},
             final=True,
         ),
         reply_stream_id="reply:req-1",
@@ -665,16 +684,19 @@ async def test_resume_process_uses_output_deltas_when_final_snapshot_is_empty() 
         expected_subject_id="runtime-1",
     )
 
+    deltas: list[RuntimeProcessOutputDelta] = []
     result = await harness.client.resume_process(
         reply_stream_id="reply:req-1",
         after_cursor=None,
         deadline_at=_now() + timedelta(seconds=30),
+        process_output_callback=lambda delta: _append_delta(deltas, delta),
     )
 
     assert result.stdout == "hello"
     assert result.stderr == "warn"
     assert result.exit_code == 0
-    assert result.status == "exited"
+    assert result.status == "exited_unread"
+    assert [delta.text for delta in deltas] == ["hello", "warn"]
 
 
 @pytest.mark.asyncio
@@ -794,6 +816,13 @@ def _event(
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _append_delta(
+    deltas: list[RuntimeProcessOutputDelta],
+    delta: RuntimeProcessOutputDelta,
+) -> None:
+    deltas.append(delta)
 
 
 async def _always_cancel() -> bool:

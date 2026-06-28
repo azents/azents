@@ -33,7 +33,9 @@ _DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 64 * 1024
 _DEFAULT_PROCESS_MAX_UNREAD_BYTES = 256 * 1024
 _DEFAULT_PROCESS_IDLE_TIMEOUT_SECONDS = 30 * 60
 _DEFAULT_PROCESS_MAX_LIFETIME_SECONDS = 2 * 60 * 60
-_DEFAULT_MAX_PROCESS_COUNT = 16
+_DEFAULT_PROCESS_EXITED_UNREAD_TTL_SECONDS = 10 * 60
+_DEFAULT_MAX_RUNTIME_PROCESS_COUNT = 16
+_DEFAULT_MAX_SESSION_PROCESS_COUNT = 16
 _PROCESS_READ_CHUNK_BYTES = 4096
 _PROCESS_DRAIN_AFTER_EXIT_TIMEOUT_SECONDS = 1.0
 _PROCESS_TERMINATE_TIMEOUT_SECONDS = 2.0
@@ -103,11 +105,13 @@ class _ManagedProcess:
 
     process_id: str
     generation: int
+    owner_session_id: str
     process: asyncio.subprocess.Process
     stdout: _ProcessOutputBuffer
     stderr: _ProcessOutputBuffer
     created_at: float
     last_accessed_at: float
+    exited_at: float | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     wait_task: asyncio.Task[int] | None = None
     drain_tasks: tuple[asyncio.Task[None], ...] = ()
@@ -119,7 +123,7 @@ class _ManagedProcess:
 class _MissingProcessRecord:
     """Recently removed process state returned as an observation."""
 
-    status: Literal["missing", "terminated", "expired"]
+    status: Literal["consumed", "missing", "terminated", "expired"]
     reason: str
     recorded_at: float
 
@@ -143,7 +147,11 @@ class RunnerOperations:
         process_max_unread_bytes: int = _DEFAULT_PROCESS_MAX_UNREAD_BYTES,
         process_idle_timeout_seconds: float = _DEFAULT_PROCESS_IDLE_TIMEOUT_SECONDS,
         process_max_lifetime_seconds: float = _DEFAULT_PROCESS_MAX_LIFETIME_SECONDS,
-        max_process_count: int = _DEFAULT_MAX_PROCESS_COUNT,
+        process_exited_unread_ttl_seconds: float = (
+            _DEFAULT_PROCESS_EXITED_UNREAD_TTL_SECONDS
+        ),
+        max_runtime_process_count: int = _DEFAULT_MAX_RUNTIME_PROCESS_COUNT,
+        max_session_process_count: int = _DEFAULT_MAX_SESSION_PROCESS_COUNT,
     ) -> None:
         """Initialize operation handlers."""
         self._client = client
@@ -153,7 +161,11 @@ class RunnerOperations:
         self._process_max_unread_bytes = max(process_max_unread_bytes, 1)
         self._process_idle_timeout_seconds = max(process_idle_timeout_seconds, 1.0)
         self._process_max_lifetime_seconds = max(process_max_lifetime_seconds, 1.0)
-        self._max_process_count = max(max_process_count, 1)
+        self._process_exited_unread_ttl_seconds = max(
+            process_exited_unread_ttl_seconds, 1.0
+        )
+        self._max_runtime_process_count = max(max_runtime_process_count, 1)
+        self._max_session_process_count = max(max_session_process_count, 1)
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
         """Run one operation and publish progress/final events."""
@@ -400,8 +412,16 @@ class RunnerOperations:
         if not command:
             await self._final_error(operation, "INVALID_PAYLOAD", "command is required")
             return
+        owner_session_id = _str_payload(operation.payload, "owner_session_id")
+        if not owner_session_id:
+            await self._final_error(
+                operation,
+                "INVALID_PAYLOAD",
+                "owner_session_id is required",
+            )
+            return
         await self._cleanup_expired_processes()
-        await self._enforce_process_quota()
+        await self._enforce_process_quota(owner_session_id)
         workdir = _optional_str_payload(operation.payload, "workdir")
         try:
             cwd = (
@@ -433,7 +453,7 @@ class RunnerOperations:
         except OSError as exc:
             await self._final_error(operation, "PROCESS_START_FAILED", str(exc))
             return
-        record = self._register_process(operation, process)
+        record = self._register_process(operation, process, owner_session_id)
         async with record.lock:
             await self._wait_for_exit_or_yield(
                 record,
@@ -454,12 +474,30 @@ class RunnerOperations:
                 "process_id is required",
             )
             return
+        owner_session_id = _str_payload(operation.payload, "owner_session_id")
+        if not owner_session_id:
+            await self._final_error(
+                operation,
+                "INVALID_PAYLOAD",
+                "owner_session_id is required",
+            )
+            return
         await self._cleanup_expired_processes()
         record = self._processes.get(process_id)
         if record is None:
             await self._final_success(
                 operation,
                 self._missing_process_payload(process_id),
+            )
+            return
+        if record.owner_session_id != owner_session_id:
+            await self._final_success(
+                operation,
+                _process_observation_payload(
+                    process_id,
+                    status="missing",
+                    missing_reason="owner_session_mismatch",
+                ),
             )
             return
         if record.generation != operation.runner_generation:
@@ -492,12 +530,14 @@ class RunnerOperations:
         self,
         operation: RunnerOperationEnvelope,
         process: asyncio.subprocess.Process,
+        owner_session_id: str,
     ) -> _ManagedProcess:
         process_id = f"proc-{uuid.uuid4().hex}"
         now = time.monotonic()
         record = _ManagedProcess(
             process_id=process_id,
             generation=operation.runner_generation,
+            owner_session_id=owner_session_id,
             process=process,
             stdout=_ProcessOutputBuffer(
                 max_unread_bytes=self._process_max_unread_bytes
@@ -562,6 +602,7 @@ class RunnerOperations:
         if wait_task is None:
             return
         if wait_task.done():
+            record.exited_at = record.exited_at or time.monotonic()
             await self._wait_for_process_drains(record)
             return
         if yield_time_ms <= 0:
@@ -574,6 +615,7 @@ class RunnerOperations:
             )
         except TimeoutError:
             return
+        record.exited_at = record.exited_at or time.monotonic()
         await self._wait_for_process_drains(record)
 
     async def _wait_for_process_drains(self, record: _ManagedProcess) -> None:
@@ -622,13 +664,15 @@ class RunnerOperations:
                     "omitted_bytes": stderr.omitted_bytes,
                 },
             )
-        status: Literal["running", "exited"] = (
-            "exited" if _process_exited(record) else "running"
+        status: Literal["running", "exited_unread"] = (
+            "exited_unread" if _process_exited(record) else "running"
         )
         payload: dict[str, JsonValue] = {
             "process_id": record.process_id,
             "status": status,
-            "exit_code": record.process.returncode if status == "exited" else None,
+            "exit_code": (
+                record.process.returncode if status == "exited_unread" else None
+            ),
             "stdout": stdout.text,
             "stderr": stderr.text,
             "stdout_truncated": stdout.truncated,
@@ -638,7 +682,7 @@ class RunnerOperations:
             "missing_reason": None,
         }
         await self._final_success(operation, payload)
-        if status == "exited":
+        if status == "exited_unread":
             await self._consume_exited_process(record)
 
     async def _consume_exited_process(self, record: _ManagedProcess) -> None:
@@ -646,13 +690,18 @@ class RunnerOperations:
         await self._wait_for_process_drains(record)
         self._record_missing(
             record.process_id,
-            status="missing",
+            status="consumed",
             reason="consumed",
         )
 
     async def _cleanup_expired_processes(self) -> None:
         now = time.monotonic()
         for record in tuple(self._processes.values()):
+            if _process_exited(record):
+                record.exited_at = record.exited_at or now
+                if now - record.exited_at > self._process_exited_unread_ttl_seconds:
+                    await self._expire_exited_unread_process(record)
+                continue
             if now - record.created_at > self._process_max_lifetime_seconds:
                 await self._terminate_process(
                     record,
@@ -667,8 +716,25 @@ class RunnerOperations:
                     reason="idle_timeout",
                 )
 
-    async def _enforce_process_quota(self) -> None:
-        while len(self._processes) >= self._max_process_count:
+    async def _enforce_process_quota(self, owner_session_id: str) -> None:
+        while (
+            self._session_process_count(owner_session_id)
+            >= self._max_session_process_count
+        ):
+            oldest = min(
+                (
+                    item
+                    for item in self._processes.values()
+                    if item.owner_session_id == owner_session_id
+                ),
+                key=lambda item: item.last_accessed_at,
+            )
+            await self._terminate_process(
+                oldest,
+                status="terminated",
+                reason="session_quota_pruned",
+            )
+        while len(self._processes) >= self._max_runtime_process_count:
             oldest = min(
                 self._processes.values(),
                 key=lambda item: item.last_accessed_at,
@@ -676,8 +742,24 @@ class RunnerOperations:
             await self._terminate_process(
                 oldest,
                 status="terminated",
-                reason="quota_pruned",
+                reason="runtime_quota_pruned",
             )
+
+    def _session_process_count(self, owner_session_id: str) -> int:
+        return sum(
+            1
+            for record in self._processes.values()
+            if record.owner_session_id == owner_session_id
+        )
+
+    async def _expire_exited_unread_process(self, record: _ManagedProcess) -> None:
+        self._processes.pop(record.process_id, None)
+        await self._wait_for_process_drains(record)
+        self._record_missing(
+            record.process_id,
+            status="expired",
+            reason="exited_unread_ttl",
+        )
 
     async def _terminate_process(
         self,
@@ -710,7 +792,7 @@ class RunnerOperations:
         self,
         process_id: str,
         *,
-        status: Literal["missing", "terminated", "expired"],
+        status: Literal["consumed", "missing", "terminated", "expired"],
         reason: str,
     ) -> None:
         self._missing_processes[process_id] = _MissingProcessRecord(
@@ -728,18 +810,17 @@ class RunnerOperations:
 
     def _missing_process_payload(self, process_id: str) -> dict[str, JsonValue]:
         missing = self._missing_processes.get(process_id)
-        return {
-            "process_id": process_id,
-            "status": missing.status if missing is not None else "missing",
-            "exit_code": None,
-            "stdout": "",
-            "stderr": "",
-            "stdout_truncated": False,
-            "stderr_truncated": False,
-            "stdout_omitted_bytes": 0,
-            "stderr_omitted_bytes": 0,
-            "missing_reason": missing.reason if missing is not None else "not_found",
-        }
+        if missing is None:
+            return _process_observation_payload(
+                process_id,
+                status="missing",
+                missing_reason="not_found",
+            )
+        return _process_observation_payload(
+            process_id,
+            status=missing.status,
+            missing_reason=missing.reason,
+        )
 
     async def _final_success(
         self,
@@ -1060,3 +1141,23 @@ def _entry_type(path: Path) -> str:
     if path.is_file():
         return "file"
     return "other"
+
+
+def _process_observation_payload(
+    process_id: str,
+    *,
+    status: Literal["consumed", "missing", "terminated", "expired"],
+    missing_reason: str,
+) -> dict[str, JsonValue]:
+    return {
+        "process_id": process_id,
+        "status": status,
+        "exit_code": None,
+        "stdout": "",
+        "stderr": "",
+        "stdout_truncated": False,
+        "stderr_truncated": False,
+        "stdout_omitted_bytes": 0,
+        "stderr_omitted_bytes": 0,
+        "missing_reason": missing_reason,
+    }

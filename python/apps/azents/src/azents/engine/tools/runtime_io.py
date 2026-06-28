@@ -6,6 +6,9 @@ from datetime import datetime
 from typing import Literal, Protocol
 
 type RuntimeOperationCancelCheck = Callable[[], Awaitable[bool]]
+type RuntimeProcessOutputCallback = Callable[
+    ["RuntimeProcessOutputDelta"], Awaitable[None]
+]
 
 
 class RuntimeRunnerOperationUnavailable(RuntimeError):
@@ -31,11 +34,30 @@ class RuntimeBashResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeProcessOutputDelta:
+    """Live process output delta emitted by Runtime Runner."""
+
+    process_id: str
+    stream: Literal["stdout", "stderr"]
+    chunk_id: int
+    text: str
+    truncated: bool
+    omitted_bytes: int
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeProcessResult:
     """Completed process operation snapshot result."""
 
     process_id: str
-    status: Literal["running", "exited", "missing", "terminated", "expired"]
+    status: Literal[
+        "running",
+        "exited_unread",
+        "consumed",
+        "missing",
+        "terminated",
+        "expired",
+    ]
     exit_code: int | None
     stdout: str
     stderr: str
@@ -149,7 +171,9 @@ class RuntimeRunnerOperationClient(Protocol):
         yield_time_ms: int,
         max_output_bytes: int,
         env: dict[str, str] | None,
+        owner_session_id: str,
         deadline_at: datetime,
+        process_output_callback: RuntimeProcessOutputCallback | None = None,
     ) -> RuntimeProcessResult:
         """Start process operation and return process snapshot."""
         ...
@@ -163,7 +187,9 @@ class RuntimeRunnerOperationClient(Protocol):
         stdin: str,
         yield_time_ms: int,
         max_output_bytes: int,
+        owner_session_id: str,
         deadline_at: datetime,
+        process_output_callback: RuntimeProcessOutputCallback | None = None,
     ) -> RuntimeProcessResult:
         """Write process stdin or poll with empty stdin."""
         ...

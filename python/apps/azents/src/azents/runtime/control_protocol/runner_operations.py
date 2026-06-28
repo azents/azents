@@ -33,6 +33,9 @@ _DEFAULT_CANCEL_CHECK_INTERVAL_SECONDS = 1.0
 _DEFAULT_BODY_CHUNK_SIZE_BYTES = 1024 * 1024
 
 type RuntimeOperationCancelCheck = Callable[[], Awaitable[bool]]
+type RuntimeProcessOutputCallback = Callable[
+    ["RuntimeProcessOutputDelta"], Awaitable[None]
+]
 
 
 class RuntimeRunnerOperationUnavailable(RuntimeError):
@@ -137,11 +140,30 @@ class RuntimeFileWriteResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeProcessOutputDelta:
+    """Live process output delta returned by Runner protocol."""
+
+    process_id: str
+    stream: Literal["stdout", "stderr"]
+    chunk_id: int
+    text: str
+    truncated: bool
+    omitted_bytes: int
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeProcessResult:
     """Completed process operation snapshot result."""
 
     process_id: str
-    status: Literal["running", "exited", "missing", "terminated", "expired"]
+    status: Literal[
+        "running",
+        "exited_unread",
+        "consumed",
+        "missing",
+        "terminated",
+        "expired",
+    ]
     exit_code: int | None
     stdout: str
     stderr: str
@@ -434,13 +456,16 @@ class RuntimeRunnerOperationClient:
         yield_time_ms: int,
         max_output_bytes: int,
         env: dict[str, str] | None,
+        owner_session_id: str,
         deadline_at: datetime,
+        process_output_callback: RuntimeProcessOutputCallback | None = None,
     ) -> RuntimeProcessResult:
         """Start a pipe-based process and wait for the operation snapshot."""
         payload: dict[str, JsonValue] = {
             "command": command,
             "yield_time_ms": yield_time_ms,
             "max_output_bytes": max_output_bytes,
+            "owner_session_id": owner_session_id,
         }
         if workdir is not None:
             payload["workdir"] = workdir
@@ -465,6 +490,7 @@ class RuntimeRunnerOperationClient:
             runtime_id=runtime_id,
             generation=runner_generation,
             deadline_at=deadline_at,
+            process_output_callback=process_output_callback,
         )
 
     async def write_process_stdin(
@@ -476,7 +502,9 @@ class RuntimeRunnerOperationClient:
         stdin: str,
         yield_time_ms: int,
         max_output_bytes: int,
+        owner_session_id: str,
         deadline_at: datetime,
+        process_output_callback: RuntimeProcessOutputCallback | None = None,
     ) -> RuntimeProcessResult:
         """Write stdin to a pipe-based process or poll with empty stdin."""
         dispatch = await self._dispatch_runner_operation(
@@ -489,6 +517,7 @@ class RuntimeRunnerOperationClient:
                     "stdin": stdin,
                     "yield_time_ms": yield_time_ms,
                     "max_output_bytes": max_output_bytes,
+                    "owner_session_id": owner_session_id,
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -503,6 +532,7 @@ class RuntimeRunnerOperationClient:
             runtime_id=runtime_id,
             generation=runner_generation,
             deadline_at=deadline_at,
+            process_output_callback=process_output_callback,
         )
 
     async def start_background_operation(
@@ -703,9 +733,13 @@ class RuntimeRunnerOperationClient:
         runtime_id: str | None = None,
         generation: int | None = None,
         deadline_at: datetime,
+        process_output_callback: RuntimeProcessOutputCallback | None = None,
     ) -> RuntimeProcessResult:
         """Resume reading a process operation reply stream until final snapshot."""
-        folder = _ReplyFolder(after_cursor=after_cursor)
+        folder = _ReplyFolder(
+            after_cursor=after_cursor,
+            process_output_callback=process_output_callback,
+        )
         final = await self._read_until_final(
             reply_stream_id,
             folder,
@@ -836,7 +870,7 @@ class RuntimeRunnerOperationClient:
                     cursor = record.cursor
                     if request_id is not None and record.event.request_id != request_id:
                         continue
-                    folder.apply(record)
+                    await folder.apply(record)
                     if record.event.final:
                         if record.event.event_type == RuntimeReplyEventType.FINAL_ERROR:
                             raise RuntimeRunnerOperationFailedError(
@@ -905,8 +939,9 @@ class _ReplyFolder:
     file_chunks: list[bytes] = dataclasses.field(default_factory=list)
     process_stdout: list[str] = dataclasses.field(default_factory=list)
     process_stderr: list[str] = dataclasses.field(default_factory=list)
+    process_output_callback: RuntimeProcessOutputCallback | None = None
 
-    def apply(self, record: RuntimeReplyRecord) -> None:
+    async def apply(self, record: RuntimeReplyRecord) -> None:
         """Fold one reply record into accumulated output state."""
         event = record.event
         if event.event_type == RuntimeReplyEventType.STDOUT:
@@ -927,6 +962,23 @@ class _ReplyFolder:
                 self.process_stdout.append(text)
             elif stream == "stderr":
                 self.process_stderr.append(text)
+            else:
+                return
+            if self.process_output_callback is not None:
+                await self.process_output_callback(
+                    RuntimeProcessOutputDelta(
+                        process_id=_str_payload(event.payload, "process_id"),
+                        stream=stream,
+                        chunk_id=_int_payload(event.payload, "chunk_id", default=0),
+                        text=text,
+                        truncated=_bool_payload(
+                            event.payload, "truncated", default=False
+                        ),
+                        omitted_bytes=_int_payload(
+                            event.payload, "omitted_bytes", default=0
+                        ),
+                    )
+                )
 
 
 def _str_payload(payload: dict[str, JsonValue], key: str) -> str:
@@ -1069,11 +1121,23 @@ def _process_result(
 
 def _process_status(
     value: object,
-) -> Literal["running", "exited", "missing", "terminated", "expired"] | None:
+) -> (
+    Literal[
+        "running",
+        "exited_unread",
+        "consumed",
+        "missing",
+        "terminated",
+        "expired",
+    ]
+    | None
+):
     if value == "running":
         return "running"
-    if value == "exited":
-        return "exited"
+    if value == "exited_unread":
+        return "exited_unread"
+    if value == "consumed":
+        return "consumed"
     if value == "missing":
         return "missing"
     if value == "terminated":

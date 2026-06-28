@@ -330,9 +330,10 @@ class TestRuntimeExecProcessTools:
         quick_metadata = _object_dict(quick_result.get("metadata"))
         assert quick_metadata is not None
         assert quick_metadata.get("kind") == "exec_command_result"
-        assert quick_metadata.get("status") == "exited"
+        assert quick_metadata.get("status") == "exited_unread"
         assert quick_metadata.get("exit_code") == 0
-        assert isinstance(quick_metadata.get("session_id"), str)
+        assert "session_id" not in quick_metadata
+        assert isinstance(quick_metadata.get("process_id"), str)
 
         _run_message(
             public_url=azents_public_server_url,

@@ -90,6 +90,20 @@ class RuntimeReadyEvent(BaseModel):
     type: Literal["runtime_ready"] = "runtime_ready"
 
 
+class RuntimeProcessOutputDeltaEvent(BaseModel):
+    """Runtime process stdout/stderr live output delta."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["runtime_process_output_delta"] = "runtime_process_output_delta"
+    process_id: str
+    stream: Literal["stdout", "stderr"]
+    chunk_id: int
+    text: str
+    truncated: bool = False
+    omitted_bytes: int = 0
+
+
 class RuntimeErrorEvent(BaseModel):
     """Runtime error event."""
 
@@ -157,6 +171,7 @@ EngineEvent: TypeAlias = Annotated[
     | RunStopped
     | RuntimeInitializingEvent
     | RuntimeReadyEvent
+    | RuntimeProcessOutputDeltaEvent
     | RuntimeErrorEvent
     | AuthorizationRequestEvent
     | AccountLinkNudgeEvent

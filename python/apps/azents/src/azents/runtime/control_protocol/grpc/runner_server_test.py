@@ -133,6 +133,7 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
                 "workdir": "/workspace/agent",
                 "yield_time_ms": 1000,
                 "max_output_bytes": 4096,
+                "owner_session_id": "session-1",
                 "env": {"PYTHONUNBUFFERED": "1"},
             },
             deadline_at=_now() + timedelta(seconds=30),
@@ -151,6 +152,7 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
     assert command.operation_request.process_start.workdir == "/workspace/agent"
     assert command.operation_request.process_start.yield_time_ms == 1000
     assert command.operation_request.process_start.max_output_bytes == 4096
+    assert command.operation_request.process_start.owner_session_id == "session-1"
     assert command.operation_request.process_start.env == {"PYTHONUNBUFFERED": "1"}
 
     await inbound.put(

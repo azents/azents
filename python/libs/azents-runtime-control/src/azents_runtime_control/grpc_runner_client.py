@@ -429,6 +429,7 @@ def _operation_payload(
             "command": payload.command,
             "yield_time_ms": payload.yield_time_ms,
             "max_output_bytes": payload.max_output_bytes,
+            "owner_session_id": payload.owner_session_id,
         }
         if payload.HasField("workdir"):
             result["workdir"] = payload.workdir
@@ -442,6 +443,7 @@ def _operation_payload(
             "stdin": payload.stdin,
             "yield_time_ms": payload.yield_time_ms,
             "max_output_bytes": payload.max_output_bytes,
+            "owner_session_id": payload.owner_session_id,
         }
     return {}
 

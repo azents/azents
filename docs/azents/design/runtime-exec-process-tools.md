@@ -11,8 +11,8 @@ tags: [architecture, backend, engine, runtime, toolkit]
 
 Azents will replace the current runtime-backed `bash` tool with Codex-like runtime process tools:
 
-- `exec_command` starts a process in the Runtime Runner and returns either final output or a running process session id after a bounded yield window.
-- `write_stdin` writes to a running process session and also acts as the empty-input polling primitive.
+- `exec_command` starts a process in the Runtime Runner and returns either final output or a running process id after a bounded yield window.
+- `write_stdin` writes to a running process and also acts as the empty-input polling primitive.
 
 The design keeps the Agent Engine core tool-agnostic. Runtime process ownership, output drain, unread buffers, and lifecycle stay inside the Runtime Runner. Worker, runtime-control, and UI paths use structured process metadata/events for projection and diagnostics, but they do not become process-handle sources of truth.
 
@@ -35,7 +35,7 @@ A naive implementation can easily violate Azents architecture boundaries. OS pro
 1. Replace the LLM-visible `bash` tool with `exec_command` and `write_stdin`.
 2. Preserve one model-visible tool result per tool call.
 3. Stream process output to UI as structured live events.
-4. Let the model continue interacting with a running process by process/session id.
+4. Let the model continue interacting with a running process by process id.
 5. Keep OS process handles, stdout/stderr drain, unread output buffers, and process lifecycle in the Runtime Runner.
 6. Add a generic tool-result metadata boundary without introducing exec-specific engine-core behavior.
 7. Treat missing/expired/terminated process states as model-visible observations, not assistant/system failures.
@@ -57,7 +57,7 @@ A naive implementation can easily violate Azents architecture boundaries. OS pro
 
 The runtime toolkit exposes a `bash`/execute-code style tool that dispatches a `bash` operation to the Runtime Runner. The Runner executes a shell command, waits for `communicate()`, emits stdout/stderr reply events, and returns a final success/error. The worker-side operation client folds the reply stream into a completed result.
 
-This path has bounded foreground deadlines, but it has no persistent runner process session id and no stdin continuation primitive.
+This path has bounded foreground deadlines, but it has no persistent runner process id and no stdin continuation primitive.
 
 ### Engine tool result contract
 
@@ -65,7 +65,7 @@ Function tool handlers currently return either plain strings, structured output 
 
 ### Background tool calls
 
-Background tool calls are engine/worker tasks or runtime-control background operations whose completion can be injected into the parent session. They are not interactive process sessions and should not be treated as the owner of OS process handles.
+Background tool calls are engine/worker tasks or runtime-control background operations whose completion can be injected into the parent session. They are not interactive processes and should not be treated as the owner of OS process handles.
 
 ## Target State
 
@@ -74,17 +74,17 @@ Background tool calls are engine/worker tasks or runtime-control background oper
 The runtime toolkit exposes these process tools instead of `bash`:
 
 ```text
-exec_command(command, workdir?, yield_time_ms?, max_output_tokens?)
-write_stdin(session_id, chars = "", yield_time_ms?, max_output_tokens?)
+exec_command(command, workdir?, yield_time_ms?, max_output_bytes?)
+write_stdin(process_id, chars = "", yield_time_ms?, max_output_bytes?)
 ```
 
-`exec_command` starts a process. If the process exits within the yield window, the tool result includes final output and exit code. If the process is still running, the tool result includes collected output and the process session id.
+`exec_command` starts a process. If the process exits within the yield window, the tool result includes final output and exit code. If the process is still running, the tool result includes collected output and the process id.
 
 `write_stdin` writes `chars` to the process. When `chars` is empty, it polls and drains unread output without sending input.
 
 ### Model-visible result shape
 
-Tool output remains model-readable text. It includes status information such as wall time, running session id, exit code, truncation facts, missing reason, and the collected output snapshot. The exact text format is owned by the runtime toolkit layer, not the engine core.
+Tool output remains model-readable text. It includes status information such as wall time, running process id, exit code, truncation facts, missing reason, and the collected output snapshot. The exact text format is owned by the runtime toolkit layer, not the engine core.
 
 Each tool call appends one `function_call_output` item. Live stdout/stderr deltas are UI/runtime events, not repeated model-visible outputs for the same call id.
 
@@ -129,7 +129,7 @@ Processes are ephemeral AgentSession-owned resources scoped to an AgentRuntime R
 - `terminated`
 - `expired`
 
-Runner restart or generation mismatch means previous process sessions are gone. A later `write_stdin` returns a missing-process observation.
+Runner restart or generation mismatch means previous processes are gone. A later `write_stdin` returns a missing-process observation.
 
 ## User-visible Behavior
 
@@ -137,11 +137,11 @@ Runner restart or generation mismatch means previous process sessions are gone. 
 
 When the model calls `exec_command` for a quick command, the user sees a normal tool result with output and exit code.
 
-When the command keeps running past the yield window, the model receives a result explaining that the process is still running and includes a session id. The UI can show live output associated with the process.
+When the command keeps running past the yield window, the model receives a result explaining that the process is still running and includes a process id. The UI can show live output associated with the process.
 
 ### Polling output
 
-The model calls `write_stdin` with empty `chars` to retrieve newly unread output. If the process exited, the result includes final output and exit code. If the process is still running, the result includes output collected so far and keeps the session id available.
+The model calls `write_stdin` with empty `chars` to retrieve newly unread output. If the process exited, the result includes final output and exit code. If the process is still running, the result includes output collected so far and keeps the process id available.
 
 ### Sending input
 
@@ -178,7 +178,7 @@ The runtime toolkit replaces the `bash` tool with `exec_command` and `write_stdi
 
 ### Event transcript and UI projection
 
-Client tool result events preserve generic metadata. UI projection may use metadata and live process events to correlate process output with the originating tool call and session id. The durable model-visible transcript remains a sequence of tool call/result events plus live/projection events as appropriate.
+Client tool result events preserve generic metadata. UI projection may use metadata and live process events to correlate process output with the originating tool call and process id. The durable model-visible transcript remains a sequence of tool call/result events plus live/projection events as appropriate.
 
 ## Permission and Ownership Model
 
@@ -190,7 +190,7 @@ Client tool result events preserve generic metadata. UI projection may use metad
 
 ## Operational Prerequisites
 
-- Runtime Runner must support concurrent process sessions without blocking unrelated runner operations beyond configured capacity.
+- Runtime Runner must support concurrent processes without blocking unrelated runner operations beyond configured capacity.
 - Runner must continuously drain stdout/stderr to avoid pipe backpressure.
 - Runner must enforce process quotas, output caps, idle timeout, max lifetime, and exited-unread TTL.
 - Runtime-control must keep operation deadlines and generation fencing.
@@ -320,7 +320,7 @@ Rejected. The engine must remain a generic tool execution loop. Runtime toolkit 
 
 ### Use background-tool-call framework
 
-Rejected. Background tool calls inject completion results and are not interactive stdin/process sessions. Exec process sessions need a separate runner-owned model.
+Rejected. Background tool calls inject completion results and are not interactive stdin/processes. Exec processes need a separate runner-owned model.
 
 ### Implement PTY immediately
 
@@ -402,9 +402,9 @@ Required product scenarios must not be marked complete with only unit/static evi
 - What to check: A command can keep running after `exec_command` returns, and `write_stdin(chars="")` can retrieve later output.
 - Why it matters: This is the core behavior missing from current `bash`.
 - How to check: E2E scenario using a deterministic long-running command.
-- Expected result: First tool result includes running session id; later poll returns new output and final exit.
-- Execution result: PASS — Runner process manager tests and Phase 4 toolkit tests verify `exec_command` returns running process session metadata and empty `write_stdin` polls process output. Phase 5 PR #65 verifies product-level process metadata persistence.
-- Fixes applied: Added runner-owned process sessions, unread output buffers, and polling through `write_stdin(chars="")`.
+- Expected result: First tool result includes running process id; later poll returns new output and final exit.
+- Execution result: PASS — Runner process manager tests and Phase 4 toolkit tests verify `exec_command` returns running process metadata and empty `write_stdin` polls process output. Phase 5 PR #65 verifies product-level process metadata persistence.
+- Fixes applied: Added runner-owned processes, unread output buffers, and polling through `write_stdin(chars="")`.
 
 ### QC4. Stdin interaction
 
@@ -413,7 +413,7 @@ Required product scenarios must not be marked complete with only unit/static evi
 - How to check: E2E scenario with a command waiting for stdin.
 - Expected result: Sent input changes process output, and output is returned in a later tool result.
 - Execution result: PASS — Runner process manager tests verify stdin writes through `process.write`; Phase 4 toolkit tests verify `write_stdin` forwards input and renders the returned process snapshot.
-- Fixes applied: Added `write_stdin(session_id, chars, yield_time_ms, max_output_tokens)` and runtime I/O adapters for process writes.
+- Fixes applied: Added `write_stdin(process_id, chars, yield_time_ms, max_output_bytes)` and runtime I/O adapters for process writes.
 
 ### QC5. Runner-owned bounded output
 
@@ -422,7 +422,7 @@ Required product scenarios must not be marked complete with only unit/static evi
 - How to check: Runner/integration test plus E2E-visible truncation evidence where feasible.
 - Expected result: Memory remains bounded and tool result/events report truncation/omitted facts.
 - Execution result: PASS — Runner process manager tests cover continuous stdout/stderr drain, bounded unread buffers, output caps, and truncation metadata; Phase 4 toolkit tests verify truncation facts are rendered in model-visible output and metadata.
-- Fixes applied: Added bounded per-stream buffers in Runtime Runner and `max_output_tokens` bounded rendering in the runtime toolkit.
+- Fixes applied: Added bounded per-stream buffers in Runtime Runner and `max_output_bytes` bounded rendering in the runtime toolkit.
 
 ### QC6. Missing-process observation
 
@@ -436,8 +436,8 @@ Required product scenarios must not be marked complete with only unit/static evi
 ### QC7. No background completion injection
 
 - What to check: A running exec process does not use `BackgroundHandle` and does not inject a background completion message into the parent session when it exits.
-- Why it matters: Runtime process sessions and background tool calls are separate models.
+- Why it matters: Runtime processes and background tool calls are separate models.
 - How to check: Integration/E2E event transcript inspection after process exit.
 - Expected result: Completion is visible through process events and later `write_stdin`, not background completion injection.
 - Execution result: PASS — Phase 4 toolkit tests verify `exec_command` returns `FunctionToolResult` rather than `BackgroundHandle`; Phase 5 E2E history evidence verifies process results are normal client tool results without background completion injection.
-- Fixes applied: Kept runtime process sessions separate from background tool calls and omitted background completion publication for process exits.
+- Fixes applied: Kept runtime processes separate from background tool calls and omitted background completion publication for process exits.
