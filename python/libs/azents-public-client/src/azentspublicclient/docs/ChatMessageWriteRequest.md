@@ -6,10 +6,10 @@ REST message write request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**agent_id** | **str** | Agent ID | 
-**client_request_id** | **str** | Client-generated idempotency key | 
-**message** | **str** | Message content | 
-**attachments** | **List[str]** |  | [optional] 
+**agent_id** | **str** | Agent ID |
+**client_request_id** | **str** | Client-generated idempotency key |
+**message** | **str** | Message content |
+**attachments** | **List[str]** |  | [optional]
 
 ## Example
 

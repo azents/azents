@@ -6,7 +6,7 @@ Existing Agent Workspace folder Project registration request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**path** | **str** | Existing directory path under /workspace/agent | 
+**path** | **str** | Existing directory path under /workspace/agent |
 
 ## Example
 

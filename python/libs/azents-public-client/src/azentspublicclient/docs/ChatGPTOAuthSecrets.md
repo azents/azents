@@ -7,10 +7,10 @@ ChatGPT OAuth token secrets.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'chatgpt_oauth']
-**access_token** | **str** | ChatGPT access token | 
-**refresh_token** | **str** | ChatGPT refresh token | 
-**id_token** | **str** |  | [optional] 
-**expires_at** | **datetime** | Access token expiration time | 
+**access_token** | **str** | ChatGPT access token |
+**refresh_token** | **str** | ChatGPT refresh token |
+**id_token** | **str** |  | [optional]
+**expires_at** | **datetime** | Access token expiration time |
 
 ## Example
 

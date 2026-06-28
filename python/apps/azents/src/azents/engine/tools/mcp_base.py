@@ -53,7 +53,6 @@ from azents.engine.run.types import (
     FunctionToolResult,
     FunctionToolSpec,
 )
-from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tooling.toolkit_state import (
     ToolkitStateHandle,
     ToolkitStateIdentity,
@@ -570,7 +569,6 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     # Background connection status
     _bg_task: asyncio.Task[None] | None
-    _bg_tools: list[FunctionTool] | None
     _bg_error: str | None
     _artifact_sink: McpArtifactSink | None
     _entered: bool
@@ -581,7 +579,6 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         Must be called at end of subclass __init__.
         """
         self._bg_task = None
-        self._bg_tools = None
         self._bg_error = None
         self._artifact_sink = None
         self._entered = False
@@ -696,7 +693,6 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._bg_error = (
             None  # Clear previous error when reconnection succeeds after retry
         )
-        self._bg_tools = self._tools_from_snapshot(snapshot)
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return current toolkit state immediately based on internal state.
@@ -708,22 +704,8 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._refresh_artifact_sink(context)
         snapshot = await self._load_tool_snapshot()
         tools = self._tools_from_snapshot(snapshot) if snapshot is not None else []
-        if snapshot is None and self._session_manager is None:
-            tools = self._bg_tools or []
-        self._bg_tools = tools or self._bg_tools
         if self._entered:
             self._ensure_refresh_task()
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt="")
-
-    async def _sync_connect(self) -> ToolkitState:
-        """Return the latest successful snapshot without synchronous discovery.
-
-        Used when update_context() is called without __aenter__.
-
-        :return: Current state (tools + prompt)
-        """
-        snapshot = await self._load_tool_snapshot()
-        tools = self._tools_from_snapshot(snapshot) if snapshot is not None else []
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt="")
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
@@ -800,42 +782,3 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 )
             tools.append(tool)
         return tools
-
-    def _make_retry_tool(self) -> FunctionTool:
-        """Tool provided on connection failure. Attempts reconnect on call.
-
-        :return: retry FunctionTool
-        """
-
-        class RetryInput(BaseModel):
-            timeout: float = Field(
-                default=60.0,
-                description="Maximum time to wait for reconnection in seconds",
-            )
-
-        async def retry(args: RetryInput) -> str:
-            """Retry connecting to the toolkit after a connection failure."""
-            try:
-                await self.__aexit__(None, None, None)
-                await self.__aenter__()
-            except Exception:
-                logger.exception("Failed to restart toolkit")
-                return "Failed to restart toolkit. The error persists."
-
-            elapsed = 0.0
-            while elapsed < args.timeout:
-                await asyncio.sleep(0.5)
-                elapsed += 0.5
-                if self._bg_task is None or self._bg_task.done():
-                    if self._bg_tools is not None:
-                        names = [t.spec.name for t in self._bg_tools]
-                        return (
-                            "Reconnected successfully. "
-                            f"Available tools: {', '.join(names)}"
-                        )
-                    if self._bg_error is not None:
-                        return f"Failed to reconnect: {self._bg_error}"
-                    return "Toolkit reconnection completed with no result."
-            return f"Toolkit is still loading after {args.timeout}s. Try again later."
-
-        return make_tool(retry)

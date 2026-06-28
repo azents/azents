@@ -37,11 +37,11 @@ class TestJoinRequestListResponse(unittest.TestCase):
             return JoinRequestListResponse(
                 items = [
                     azentspublicclient.models.join_request_response.JoinRequestResponse(
-                        id = '', 
-                        workspace_id = '', 
-                        user_id = '', 
-                        message = '', 
-                        status = 'pending', 
+                        id = '',
+                        workspace_id = '',
+                        user_id = '',
+                        message = '',
+                        status = 'pending',
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56
@@ -50,11 +50,11 @@ class TestJoinRequestListResponse(unittest.TestCase):
             return JoinRequestListResponse(
                 items = [
                     azentspublicclient.models.join_request_response.JoinRequestResponse(
-                        id = '', 
-                        workspace_id = '', 
-                        user_id = '', 
-                        message = '', 
-                        status = 'pending', 
+                        id = '',
+                        workspace_id = '',
+                        user_id = '',
+                        message = '',
+                        status = 'pending',
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56,

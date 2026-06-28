@@ -6,8 +6,8 @@ Join request list response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[JoinRequestResponse]**](JoinRequestResponse.md) | Join request list | 
-**total** | **int** | Total count | 
+**items** | [**List[JoinRequestResponse]**](JoinRequestResponse.md) | Join request list |
+**total** | **int** | Total count |
 
 ## Example
 

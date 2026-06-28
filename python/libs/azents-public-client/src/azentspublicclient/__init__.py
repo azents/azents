@@ -23,7 +23,6 @@ __all__ = [
     "AuthV1Api",
     "ChatGPTOAuthV1Api",
     "ChatV1Api",
-    "GitHubPATV1Api",
     "HealthV1Api",
     "InvitationV1Api",
     "JoinRequestV1Api",
@@ -80,16 +79,26 @@ __all__ = [
     "AgentUpdateRequest",
     "AgentWorkspaceActionResponse",
     "AgentWorkspaceActionsResponse",
+    "AgentWorkspaceBulkDeleteRequest",
+    "AgentWorkspaceBulkDeleteResponse",
+    "AgentWorkspaceBulkMoveRequest",
+    "AgentWorkspaceBulkMoveResponse",
     "AgentWorkspaceConnectingAccessResponse",
     "AgentWorkspaceControlUnavailableAccessResponse",
+    "AgentWorkspaceDeleteRequest",
     "AgentWorkspaceDirectoryResponse",
     "AgentWorkspaceEntryResponse",
     "AgentWorkspaceFileResponse",
     "AgentWorkspaceManifestResponse",
+    "AgentWorkspaceMkdirRequest",
+    "AgentWorkspaceMoveRequest",
+    "AgentWorkspaceMoveResponse",
+    "AgentWorkspaceMutationResponse",
     "AgentWorkspaceReadFailedAccessResponse",
     "AgentWorkspaceReadyAccessResponse",
     "AgentWorkspaceResponse",
     "AgentWorkspaceRuntimeResponse",
+    "AgentWorkspaceStatResponse",
     "AgentWorkspaceUnavailableAccessResponse",
     "ApiKeySecrets",
     "AuthMethod",
@@ -175,7 +184,6 @@ __all__ = [
     "MyJoinRequestResponse",
     "OAuthAuthorizeResponse",
     "OAuthExchangeRequest",
-    "PATStatusResponse",
     "PartialHistoryResponse",
     "PasswordLoginRequest",
     "PasswordLoginResponse",
@@ -191,8 +199,6 @@ __all__ = [
     "RedeemSignupTokenResponse",
     "RefreshTokenRequest",
     "RefreshTokenResponse",
-    "RegisterPATRequest",
-    "RegisterPATResponse",
     "RequestSignupEmailRequest",
     "RequestSignupEmailResponse",
     "ResetAgentRuntimeRequest",
@@ -221,7 +227,6 @@ __all__ = [
     "SessionWorkspaceProjectRegistrationRequestResponse",
     "SessionWorkspaceProjectResponse",
     "SetPasswordRequest",
-    "SetupStatusResponse",
     "SignupStatusResponse",
     "SlashCommandListResponse",
     "SlashCommandResponse",
@@ -265,7 +270,6 @@ from azentspublicclient.api.agent_v1_api import AgentV1Api as AgentV1Api
 from azentspublicclient.api.auth_v1_api import AuthV1Api as AuthV1Api
 from azentspublicclient.api.chat_gpto_auth_v1_api import ChatGPTOAuthV1Api as ChatGPTOAuthV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api as ChatV1Api
-from azentspublicclient.api.git_hub_patv1_api import GitHubPATV1Api as GitHubPATV1Api
 from azentspublicclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api as JoinRequestV1Api
@@ -326,16 +330,26 @@ from azentspublicclient.models.agent_type import AgentType as AgentType
 from azentspublicclient.models.agent_update_request import AgentUpdateRequest as AgentUpdateRequest
 from azentspublicclient.models.agent_workspace_action_response import AgentWorkspaceActionResponse as AgentWorkspaceActionResponse
 from azentspublicclient.models.agent_workspace_actions_response import AgentWorkspaceActionsResponse as AgentWorkspaceActionsResponse
+from azentspublicclient.models.agent_workspace_bulk_delete_request import AgentWorkspaceBulkDeleteRequest as AgentWorkspaceBulkDeleteRequest
+from azentspublicclient.models.agent_workspace_bulk_delete_response import AgentWorkspaceBulkDeleteResponse as AgentWorkspaceBulkDeleteResponse
+from azentspublicclient.models.agent_workspace_bulk_move_request import AgentWorkspaceBulkMoveRequest as AgentWorkspaceBulkMoveRequest
+from azentspublicclient.models.agent_workspace_bulk_move_response import AgentWorkspaceBulkMoveResponse as AgentWorkspaceBulkMoveResponse
 from azentspublicclient.models.agent_workspace_connecting_access_response import AgentWorkspaceConnectingAccessResponse as AgentWorkspaceConnectingAccessResponse
 from azentspublicclient.models.agent_workspace_control_unavailable_access_response import AgentWorkspaceControlUnavailableAccessResponse as AgentWorkspaceControlUnavailableAccessResponse
+from azentspublicclient.models.agent_workspace_delete_request import AgentWorkspaceDeleteRequest as AgentWorkspaceDeleteRequest
 from azentspublicclient.models.agent_workspace_directory_response import AgentWorkspaceDirectoryResponse as AgentWorkspaceDirectoryResponse
 from azentspublicclient.models.agent_workspace_entry_response import AgentWorkspaceEntryResponse as AgentWorkspaceEntryResponse
 from azentspublicclient.models.agent_workspace_file_response import AgentWorkspaceFileResponse as AgentWorkspaceFileResponse
 from azentspublicclient.models.agent_workspace_manifest_response import AgentWorkspaceManifestResponse as AgentWorkspaceManifestResponse
+from azentspublicclient.models.agent_workspace_mkdir_request import AgentWorkspaceMkdirRequest as AgentWorkspaceMkdirRequest
+from azentspublicclient.models.agent_workspace_move_request import AgentWorkspaceMoveRequest as AgentWorkspaceMoveRequest
+from azentspublicclient.models.agent_workspace_move_response import AgentWorkspaceMoveResponse as AgentWorkspaceMoveResponse
+from azentspublicclient.models.agent_workspace_mutation_response import AgentWorkspaceMutationResponse as AgentWorkspaceMutationResponse
 from azentspublicclient.models.agent_workspace_read_failed_access_response import AgentWorkspaceReadFailedAccessResponse as AgentWorkspaceReadFailedAccessResponse
 from azentspublicclient.models.agent_workspace_ready_access_response import AgentWorkspaceReadyAccessResponse as AgentWorkspaceReadyAccessResponse
 from azentspublicclient.models.agent_workspace_response import AgentWorkspaceResponse as AgentWorkspaceResponse
 from azentspublicclient.models.agent_workspace_runtime_response import AgentWorkspaceRuntimeResponse as AgentWorkspaceRuntimeResponse
+from azentspublicclient.models.agent_workspace_stat_response import AgentWorkspaceStatResponse as AgentWorkspaceStatResponse
 from azentspublicclient.models.agent_workspace_unavailable_access_response import AgentWorkspaceUnavailableAccessResponse as AgentWorkspaceUnavailableAccessResponse
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets as ApiKeySecrets
 from azentspublicclient.models.auth_method import AuthMethod as AuthMethod
@@ -421,7 +435,6 @@ from azentspublicclient.models.model_tool_calling_capabilities import ModelToolC
 from azentspublicclient.models.my_join_request_response import MyJoinRequestResponse as MyJoinRequestResponse
 from azentspublicclient.models.o_auth_authorize_response import OAuthAuthorizeResponse as OAuthAuthorizeResponse
 from azentspublicclient.models.o_auth_exchange_request import OAuthExchangeRequest as OAuthExchangeRequest
-from azentspublicclient.models.pat_status_response import PATStatusResponse as PATStatusResponse
 from azentspublicclient.models.partial_history_response import PartialHistoryResponse as PartialHistoryResponse
 from azentspublicclient.models.password_login_request import PasswordLoginRequest as PasswordLoginRequest
 from azentspublicclient.models.password_login_response import PasswordLoginResponse as PasswordLoginResponse
@@ -437,8 +450,6 @@ from azentspublicclient.models.redeem_signup_token_request import RedeemSignupTo
 from azentspublicclient.models.redeem_signup_token_response import RedeemSignupTokenResponse as RedeemSignupTokenResponse
 from azentspublicclient.models.refresh_token_request import RefreshTokenRequest as RefreshTokenRequest
 from azentspublicclient.models.refresh_token_response import RefreshTokenResponse as RefreshTokenResponse
-from azentspublicclient.models.register_pat_request import RegisterPATRequest as RegisterPATRequest
-from azentspublicclient.models.register_pat_response import RegisterPATResponse as RegisterPATResponse
 from azentspublicclient.models.request_signup_email_request import RequestSignupEmailRequest as RequestSignupEmailRequest
 from azentspublicclient.models.request_signup_email_response import RequestSignupEmailResponse as RequestSignupEmailResponse
 from azentspublicclient.models.reset_agent_runtime_request import ResetAgentRuntimeRequest as ResetAgentRuntimeRequest
@@ -467,7 +478,6 @@ from azentspublicclient.models.session_workspace_project_registration_request_li
 from azentspublicclient.models.session_workspace_project_registration_request_response import SessionWorkspaceProjectRegistrationRequestResponse as SessionWorkspaceProjectRegistrationRequestResponse
 from azentspublicclient.models.session_workspace_project_response import SessionWorkspaceProjectResponse as SessionWorkspaceProjectResponse
 from azentspublicclient.models.set_password_request import SetPasswordRequest as SetPasswordRequest
-from azentspublicclient.models.setup_status_response import SetupStatusResponse as SetupStatusResponse
 from azentspublicclient.models.signup_status_response import SignupStatusResponse as SignupStatusResponse
 from azentspublicclient.models.slash_command_list_response import SlashCommandListResponse as SlashCommandListResponse
 from azentspublicclient.models.slash_command_response import SlashCommandResponse as SlashCommandResponse

@@ -51,11 +51,9 @@ from azents.engine.run.types import (
 )
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.builtin_agents import (
-    AGENTS_LIVE_READ_INTERVAL_TURNS,
-    AgentsInstructionStateStore,
-    ProjectAgentsPromptMixin,
-    RootAgentsPromptMixin,
-    ToolkitAgentsInstructionStateStore,
+    AgentsAppendixDedupeStateStore,
+    AgentsAppendixMixin,
+    ToolkitAgentsAppendixDedupeStateStore,
 )
 from azents.engine.tools.delete_file import make_delete_file_tool
 from azents.engine.tools.edit import make_edit_tool
@@ -350,7 +348,7 @@ class WriteStdinInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class BuiltinToolkit(RootAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
+class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
     """Default builtin tool execution instance independent of Runtime Runner.
 
     Currently responsible for persistent memory tools and memory prompt. Tools
@@ -365,7 +363,6 @@ class BuiltinToolkit(RootAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
         session_manager: SessionManager[AsyncSession] | None = None,
         memory_repo: MemoryRepository | None = None,
         agent_runtime_repo: AgentRuntimeRepository | None = None,
-        agents_store: AgentsInstructionStateStore | None = None,
     ) -> None:
         self._config = config
         self._agent_id = agent_id
@@ -373,7 +370,6 @@ class BuiltinToolkit(RootAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
         self._session_manager = session_manager
         self._memory_repo = memory_repo
         self._agent_runtime_repo = agent_runtime_repo
-        self._agents_store = agents_store
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id.
@@ -452,17 +448,7 @@ class BuiltinToolkit(RootAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
                 ]
             )
 
-        root_agents_prompt = await self._load_root_agents_prompt(
-            workspace_id=context.workspace_id,
-            domain_config=RuntimeDomainConfig(
-                allowed_domains=tuple(config.allowed_domains),
-                denied_domains=tuple(config.denied_domains),
-            ),
-            user_id=user_id,
-        )
-        prompt = "\n\n".join(
-            part for part in [memory_prompt, root_agents_prompt] if part
-        )
+        prompt = memory_prompt
 
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
@@ -479,7 +465,7 @@ class RuntimeEnvProvider(Protocol):
         ...
 
 
-class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
+class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     """Runtime Runner dependent shell/file tool execution instance."""
 
     # Tool names to exclude from Subagent (DP4 C: Toolkit-defined).
@@ -497,7 +483,7 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
         session_manager: SessionManager[AsyncSession] | None = None,
         agent_runtime_repo: AgentRuntimeRepository | None = None,
         project_repo: SessionWorkspaceProjectRepository | None = None,
-        agents_store: AgentsInstructionStateStore | None = None,
+        agents_store: AgentsAppendixDedupeStateStore | None = None,
     ) -> None:
         self._config = config
         self._runner_operations = runner_operations
@@ -514,11 +500,7 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
         self._agent_runtime_repo = agent_runtime_repo
         self._project_repo = project_repo
         self._agents_store = agents_store
-        self._active_agents_paths: set[str] = set()
-        self._agents_turns_since_live_read = AGENTS_LIVE_READ_INTERVAL_TURNS
         self._last_projects: list[SessionWorkspaceProject] = []
-        self._agents_refresh_task = None
-        self._pending_agents_refresh_paths = set()
         self._agents_file_storage = None
 
     def set_peer_toolkits(self, peers: Sequence[RuntimeEnvProvider]) -> None:
@@ -696,15 +678,12 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
             await self._load_projects(session_id=self._session_id),
             key=lambda project: project.path,
         )
-        self._last_projects = projects
-        agents_prompt = await self._load_project_agents_prompt(file_ss, projects)
+        self.register_agents_context(file_storage=file_ss, projects=projects)
         prompt = self._render_config_prompt(
             has_agent_id=has_agent_id,
             user_id=user_id,
             projects=projects,
         )
-        if agents_prompt:
-            prompt = f"{prompt}\n\n{agents_prompt}"
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt=prompt)
 
     async def _load_projects(
@@ -858,7 +837,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self._runner_operations = runner_operations
         self._project_repo = project_repo
         if session_manager is not None:
-            self._agents_store = ToolkitAgentsInstructionStateStore(
+            self._agents_store = ToolkitAgentsAppendixDedupeStateStore(
                 session_manager=session_manager,
             )
         else:
@@ -889,7 +868,6 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             session_manager=self._session_manager,
             agent_runtime_repo=self._agent_runtime_repo,
             project_repo=self._project_repo,
-            agents_store=self._agents_store,
         )
 
     async def resolve_builtin(
@@ -909,7 +887,6 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             session_manager=self._session_manager,
             memory_repo=self._memory_repo,
             agent_runtime_repo=self._agent_runtime_repo,
-            agents_store=self._agents_store,
         )
 
 

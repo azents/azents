@@ -7,7 +7,6 @@ import { agentRouter } from "./agent";
 import { agentSubagentRouter } from "./agentSubagent";
 import { authRouter } from "./auth";
 import { chatRouter } from "./chat";
-import { githubPatRouter } from "./github-pat";
 import { invitationRouter } from "./invitation";
 import { joinRequestRouter } from "./joinRequest";
 import { llmProviderIntegrationRouter } from "./llm-provider-integration";
@@ -26,7 +25,6 @@ export const appRouter = router({
   agentSubagent: agentSubagentRouter,
   auth: authRouter,
   chat: chatRouter,
-  githubPat: githubPatRouter,
   invitation: invitationRouter,
   joinRequest: joinRequestRouter,
   llmProviderIntegration: llmProviderIntegrationRouter,

@@ -6,7 +6,7 @@ Chat live todo state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[TodoItemResponse]**](TodoItemResponse.md) | Todo item list | 
+**items** | [**List[TodoItemResponse]**](TodoItemResponse.md) | Todo item list |
 
 ## Example
 

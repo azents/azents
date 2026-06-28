@@ -6,7 +6,7 @@ AgentAdmin add request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**workspace_user_id** | **str** | Workspace member ID to add | 
+**workspace_user_id** | **str** | Workspace member ID to add |
 
 ## Example
 

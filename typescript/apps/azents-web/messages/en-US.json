@@ -720,8 +720,6 @@
         "selectInstallationDescription": "Select every account or organization this toolkit may access.",
         "noInstallationsFound": "No installations found. Install the GitHub App to a new organization first.",
         "installNewOrg": "Install to new organization",
-        "authTypePerUserPat": "Per-User PAT",
-        "perUserPatDescription": "Each user registers their own GitHub Personal Access Token. No workspace-level credentials are needed.",
         "runtimeEnvironmentWarningTitle": "Runtime environment variables — long-lived credential risk",
         "runtimeEnvironmentWarningBody": "When enabled, GitHub tokens are injected into the agent runtime environment. Single-installation credentials also set GH_TOKEN/GITHUB_TOKEN; multi-installation credentials set GITHUB_TOKEN_INSTALLATION_<id> plus a routing map used by the git credential helper. Full isolation is not possible — tokens can be read by any process the agent runs. Only enable if you accept this exposure risk.",
         "runtimeEnvironmentAcknowledge": "I understand the exposure risk",
@@ -764,24 +762,6 @@
         "reconnect": "Reconnect",
         "disconnect": "Disconnect"
       }
-    },
-    "githubPat": {
-      "setupTitle": "GitHub Setup",
-      "registerTitle": "Register GitHub Personal Access Token",
-      "step1Title": "Step 1. Create a PAT on GitHub",
-      "createOnGitHub": "Create on GitHub Settings →",
-      "step2Title": "Step 2. Paste the token below",
-      "register": "Register",
-      "replace": "Replace",
-      "delete": "Delete",
-      "invalidToken": "Invalid token",
-      "tokenSecurityNote": "Your token is encrypted and stored securely. Not even the Azents team can view the raw token.",
-      "setupComplete": "GitHub Connected",
-      "connectedAs": "Connected as @{username}.",
-      "returnToChat": "Return to your chat and try again.",
-      "manageTitle": "GitHub PAT",
-      "notRegistered": "No GitHub PAT registered.",
-      "error": "Error"
     },
     "dashboard": {
       "headline": "Workspace",
@@ -918,14 +898,7 @@
     "updateSuccess": "Profile saved",
     "nameRequired": "Please enter a name",
     "connectedAccounts": "Connected Accounts",
-    "noInstalledPlatforms": "No chat platforms connected to this workspace.",
-    "githubPat": "GitHub PAT",
-    "githubPatConnected": "Connected",
-    "githubPatNotConnected": "Not connected",
-    "githubPatRegister": "Register",
-    "githubPatReplace": "Replace",
-    "githubPatDelete": "Delete",
-    "githubPatDeleteConfirm": "Are you sure you want to delete your GitHub PAT?"
+    "noInstalledPlatforms": "No chat platforms connected to this workspace."
   },
   "chat": {
     "inheritModelProvider": "Inherits",

@@ -720,8 +720,6 @@
         "selectInstallationDescription": "Sélectionnez tous les comptes ou organisations auxquels ce Toolkit peut accéder.",
         "noInstallationsFound": "Aucune installation trouvée. Installez d'abord la GitHub App sur une nouvelle organisation.",
         "installNewOrg": "Installer sur une nouvelle organisation",
-        "authTypePerUserPat": "PAT par utilisateur",
-        "perUserPatDescription": "Chaque utilisateur enregistre son propre GitHub Personal Access Token. Aucune authentification au niveau de l'espace de travail n'est requise.",
         "runtimeEnvironmentWarningTitle": "Variables d'environnement Runtime — risque d'exposition du credential",
         "runtimeEnvironmentWarningBody": "Une fois activé, les tokens GitHub sont injectés dans l'environnement runtime de l'agent. Les credentials à installation unique définissent aussi GH_TOKEN/GITHUB_TOKEN ; les credentials multi-installation définissent GITHUB_TOKEN_INSTALLATION_<id> avec une table de routage utilisée par le helper git. L'isolation complète est impossible — tout processus lancé par l'agent peut lire les tokens. N'activez que si vous acceptez ce risque d'exposition.",
         "runtimeEnvironmentAcknowledge": "Je comprends le risque d'exposition",
@@ -764,24 +762,6 @@
         "reconnect": "Reconnecter",
         "disconnect": "Déconnecter"
       }
-    },
-    "githubPat": {
-      "setupTitle": "Configuration GitHub",
-      "registerTitle": "Enregistrer un GitHub Personal Access Token",
-      "step1Title": "Étape 1. Créer un PAT sur GitHub",
-      "createOnGitHub": "Créer dans les paramètres GitHub →",
-      "step2Title": "Étape 2. Collez le jeton ci-dessous",
-      "register": "Enregistrer",
-      "replace": "Remplacer",
-      "delete": "Supprimer",
-      "invalidToken": "Jeton invalide",
-      "tokenSecurityNote": "Votre jeton est chiffré et stocké en toute sécurité. Même l'équipe Azents ne peut pas consulter le jeton brut.",
-      "setupComplete": "GitHub connecté",
-      "connectedAs": "Connecté en tant que @{username}.",
-      "returnToChat": "Retournez dans votre conversation et réessayez.",
-      "manageTitle": "GitHub PAT",
-      "notRegistered": "Aucun GitHub PAT enregistré.",
-      "error": "Erreur"
     },
     "dashboard": {
       "headline": "Espace de travail",
@@ -918,14 +898,7 @@
     "updateSuccess": "Profil enregistré",
     "nameRequired": "Veuillez saisir un nom",
     "connectedAccounts": "Comptes connectés",
-    "noInstalledPlatforms": "Aucune plateforme de chat connectée à cet espace de travail.",
-    "githubPat": "GitHub PAT",
-    "githubPatConnected": "Connecté",
-    "githubPatNotConnected": "Non connecté",
-    "githubPatRegister": "Enregistrer",
-    "githubPatReplace": "Remplacer",
-    "githubPatDelete": "Supprimer",
-    "githubPatDeleteConfirm": "Voulez-vous vraiment supprimer votre GitHub PAT ?"
+    "noInstalledPlatforms": "Aucune plateforme de chat connectée à cet espace de travail."
   },
   "chat": {
     "inheritModelProvider": "Hérite",

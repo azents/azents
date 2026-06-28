@@ -6,8 +6,8 @@ Built-in tool setting to enable on an Agent.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Built-in tool name, for example web_search | 
-**config** | **Dict[str, object]** | Per-tool options | [optional] 
+**name** | **str** | Built-in tool name, for example web_search |
+**config** | **Dict[str, object]** | Per-tool options | [optional]
 
 ## Example
 

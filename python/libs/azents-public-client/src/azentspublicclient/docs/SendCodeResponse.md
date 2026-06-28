@@ -6,7 +6,7 @@ Authentication code send response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**csrf_token** | **str** | CSRF token (used on verification) | 
+**csrf_token** | **str** | CSRF token (used on verification) |
 
 ## Example
 

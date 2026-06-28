@@ -6,7 +6,7 @@ Join request creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**message** | **str** |  | [optional] 
+**message** | **str** |  | [optional]
 
 ## Example
 

@@ -493,12 +493,9 @@ class GitHubToolkitConfig(BaseModel):
     Same delegation pattern as Sentry/Notion.
     """
 
-    github_auth_type: Literal[
-        "pat",
-        "github_app",
-        "github_app_platform",
-        "per_user_pat",
-    ] = Field(description="GitHub authentication method")
+    github_auth_type: Literal["pat", "github_app", "github_app_platform"] = Field(
+        description="GitHub authentication method"
+    )
     toolsets: list[str] = Field(
         default=["repos", "issues", "pull_requests", "users"],
         description="GitHub MCP tool groups to enable",

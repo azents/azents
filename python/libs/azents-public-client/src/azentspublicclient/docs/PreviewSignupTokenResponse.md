@@ -6,9 +6,9 @@ Signup token preview response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**valid** | **bool** | Usability flag | 
-**email** | **str** |  | 
-**expires_at** | **datetime** |  | 
+**valid** | **bool** | Usability flag |
+**email** | **str** |  |
+**expires_at** | **datetime** |  |
 
 ## Example
 

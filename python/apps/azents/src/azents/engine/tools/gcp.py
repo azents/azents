@@ -7,8 +7,10 @@ and provides integrated tools by connecting to multiple service-specific MCP ser
 
 import asyncio
 import dataclasses
+import hashlib
+import json
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from textwrap import dedent
 from typing import ClassVar
 
@@ -19,6 +21,9 @@ from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.mcp_transport import (
+    call_tool as mcp_call_tool,
+)
 from azents.core.mcp_transport import (
     extract_network_error,
 )
@@ -36,16 +41,32 @@ from azents.core.tools import (
     ToolkitStatus,
     TurnContext,
 )
-from azents.engine.run.types import FunctionTool
+from azents.engine.run.types import (
+    FunctionTool,
+    FunctionToolError,
+    FunctionToolResult,
+    FunctionToolSpec,
+)
+from azents.engine.tooling.toolkit_state import (
+    ToolkitStateHandle,
+    ToolkitStateIdentity,
+    ToolkitStateStore,
+)
 from azents.engine.tools.mcp_base import (
     ArtifactSinkGetter,
     McpArtifactSink,
+    McpToolSnapshotItem,
+    McpToolSnapshotState,
+    _extract_tool_result,  # pyright: ignore[reportPrivateUsage] -- reuse common MCP result extraction for GCP wrapper.
+    _is_http_401,  # pyright: ignore[reportPrivateUsage] -- reuse common MCP 401 retry detection.
     build_mcp_artifact_sink,
-    wrap_mcp_tool,
 )
+from azents.rdb.session import SessionManager
 from azents.services.artifact import ArtifactService
 
 logger = logging.getLogger(__name__)
+
+_GCP_TOOLKIT_STATE_NAMESPACE = "gcp"
 
 
 # ---------------------------------------------------------------------------
@@ -227,19 +248,7 @@ class _GcpServerConfig:
 
 
 class GcpToolkit(Toolkit[GcpToolkitConfig]):
-    """Provide integrated tools from multiple GCP MCP servers.
-
-    **Dynamic status transition (state machine)**:
-    - ``__aenter__``: Start per-service background parallel connection
-    - ``update_context()``: Return ready service tools; others get loading prompt
-    - ``__aexit__``: Cancel all background tasks
-
-    :param token_provider: access_token issuer
-    :param server_configs: Per-service MCP server settings
-    :param project_id: GCP project ID for x-goog-user-project header
-    :param writable_services: Service set allowing write access
-    :param proxy_url: MCP egress proxy URL
-    """
+    """Provide GCP MCP tools from Toolkit State snapshots."""
 
     def __init__(
         self,
@@ -249,8 +258,12 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         server_configs: list[_GcpServerConfig],
         project_id: str,
         writable_services: set[GcpService],
-        proxy_url: str | None = None,
-        artifact_service: ArtifactService | None = None,
+        proxy_url: str | None,
+        artifact_service: ArtifactService | None,
+        session_manager: SessionManager[AsyncSession] | None,
+        agent_id: str,
+        session_id: str,
+        state_name: str,
     ) -> None:
         self._config = config
         self._token_provider = token_provider
@@ -259,10 +272,11 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         self._writable_services = writable_services
         self._proxy_url = proxy_url
         self._artifact_service = artifact_service
-        # Background connection status
-        self._bg_tasks: dict[GcpService, asyncio.Task[None]] = {}
-        self._bg_results: dict[GcpService, list[FunctionTool]] = {}
-        self._bg_errors: dict[GcpService, str] = {}
+        self._session_manager = session_manager
+        self._agent_id = agent_id
+        self._session_id = session_id
+        self._state_name = state_name
+        self._bg_task: asyncio.Task[None] | None = None
         self._artifact_sink: McpArtifactSink | None = None
         self._entered = False
 
@@ -278,180 +292,184 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         )
 
     async def __aenter__(self) -> GcpToolkit:
-        """Start per-service background parallel MCP connections."""
+        """Start GCP MCP snapshot refresh in background."""
         self._entered = True
-        for server in sorted(self._server_configs, key=lambda item: item.service.value):
-            task = asyncio.create_task(self._connect_service(server))
-            self._bg_tasks[server.service] = task
+        self._ensure_refresh_task()
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        """Cancel all background connection tasks."""
-        for task in self._bg_tasks.values():
-            if not task.done():
-                task.cancel()
-        for task in self._bg_tasks.values():
+        """Cancel background refresh task."""
+        if self._bg_task is not None and not self._bg_task.done():
+            self._bg_task.cancel()
             try:
-                await task
+                await self._bg_task
             except asyncio.CancelledError:
                 pass
-        self._bg_tasks.clear()
+        self._bg_task = None
 
-    async def _connect_service(self, server: _GcpServerConfig) -> None:
-        """Connect to MCP server for a single service and collect tools.
-
-        :param server: Per-service MCP server settings
-        """
-        try:
-            access_token = await self._token_provider.get_token()
-        except Exception:
-            logger.exception(
-                "Failed to get GCP access token",
-                extra={"service": server.service.value},
-            )
-            self._bg_errors[server.service] = (
-                f"GCP token acquisition failed for {server.service.value}"
-            )
+    def _ensure_refresh_task(self) -> None:
+        """Start background refresh unless one is already running."""
+        if self._bg_task is not None and not self._bg_task.done():
             return
+        self._bg_task = asyncio.create_task(self._refresh_tool_snapshot())
 
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "x-goog-user-project": self._project_id,
-        }
-
-        try:
-            mcp_tools, use_streamable_http = await mcp_list_tools(
-                server.endpoint,
-                headers,
-                server.timeout,
-                proxy_url=self._proxy_url,
-            )
-        except Exception as exc:
-            logger.exception(
-                "Failed to list tools from GCP MCP server",
-                extra={
-                    "service": server.service.value,
-                    "endpoint": server.endpoint,
-                },
-            )
-            self._bg_errors[server.service] = (
-                f"GCP {server.service.value} connection failed: {exc}"
-            )
-            return
-
-        is_writable = server.service in self._writable_services
-        tools: list[FunctionTool] = []
-        for mcp_tool in sorted(mcp_tools, key=lambda tool: tool.name):
-            if not is_writable and not _is_read_only_tool(mcp_tool):
-                continue
-            tools.append(
-                _wrap_gcp_tool(
-                    mcp_tool=mcp_tool,
-                    server_url=server.endpoint,
-                    headers=headers,
-                    timeout=server.timeout,
-                    use_streamable_http=use_streamable_http,
-                    token_provider=self._token_provider,
-                    project_id=self._project_id,
-                    proxy_url=self._proxy_url,
-                    artifact_sink_getter=self._current_artifact_sink,
-                )
-            )
-        self._bg_results[server.service] = tools
-
-    async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Collect and return tools from enabled per-service MCP servers.
-
-        After __aenter__: return ready service tools; others get loading prompt.
-        Without __aenter__: parallel collection in sync mode (backward compatibility).
-        """
-        self._refresh_artifact_sink(context)
-        if not self._entered:
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=[],
-                prompt=self._render_config_prompt(),
-            )
-
-        # Collect from background status
-        tools: list[FunctionTool] = []
-
+    async def _refresh_tool_snapshot(self) -> None:
+        """Refresh the GCP MCP tool snapshot in the background."""
+        previous = await self._load_tool_snapshot()
+        previous_by_endpoint = _gcp_snapshot_items_by_endpoint(previous)
+        refreshed_by_endpoint: dict[str, list[McpToolSnapshotItem]] = {}
+        success_count = 0
         for server in sorted(self._server_configs, key=lambda item: item.service.value):
-            svc = server.service
+            try:
+                items = await self._refresh_service_items(server)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Failed to refresh GCP MCP service snapshot",
+                    extra={
+                        "service": server.service.value,
+                        "endpoint": server.endpoint,
+                    },
+                )
+                continue
+            refreshed_by_endpoint[server.endpoint] = items
+            success_count += 1
 
-            if svc in self._bg_results:
-                # Connection complete: collect tools
-                tools.extend(self._bg_results[svc])
-            elif svc in self._bg_errors:
-                # Connection failure: skip (error already logged)
-                pass
+        if success_count == 0 and previous is None:
+            return
 
-        prompt = self._render_config_prompt()
-        return ToolkitState(
-            status=ToolkitStatus.ENABLED,
-            tools=sorted(tools, key=lambda tool: tool.spec.name),
-            prompt=prompt,
+        merged: list[McpToolSnapshotItem] = []
+        for server in sorted(self._server_configs, key=lambda item: item.service.value):
+            items = refreshed_by_endpoint.get(server.endpoint)
+            if items is None:
+                items = previous_by_endpoint.get(server.endpoint, [])
+            merged.extend(items)
+        if not merged:
+            return
+
+        snapshot = _build_gcp_tool_snapshot(items=merged, project_id=self._project_id)
+        await self._save_tool_snapshot(snapshot)
+        logger.info(
+            "GCP MCP tool snapshot refreshed",
+            extra={
+                "tool_count": len(snapshot.tools),
+                "tool_hash": snapshot.tool_hash,
+                "refreshed_service_count": success_count,
+            },
         )
 
-    async def _sync_update_context(self) -> ToolkitState:
-        """Collect tools synchronously in parallel from per-service MCP servers."""
+    async def _refresh_service_items(
+        self,
+        server: _GcpServerConfig,
+    ) -> list[McpToolSnapshotItem]:
+        """Refresh one GCP service and return snapshot items."""
         access_token = await self._token_provider.get_token()
         headers = {
             "Authorization": f"Bearer {access_token}",
             "x-goog-user-project": self._project_id,
         }
-
-        async def _fetch_tools(
-            server: _GcpServerConfig,
-        ) -> tuple[_GcpServerConfig, list[McpBaseTool], bool]:
-            mcp_tools, use_streamable_http = await mcp_list_tools(
-                server.endpoint,
-                headers,
-                server.timeout,
-                proxy_url=self._proxy_url,
-            )
-            return server, mcp_tools, use_streamable_http
-
-        tasks = [_fetch_tools(s) for s in self._server_configs]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        tools: list[FunctionTool] = []
-        for result in results:
-            if isinstance(result, BaseException):
-                logger.exception(
-                    "Failed to list tools from GCP MCP server",
-                    exc_info=result,
-                )
+        mcp_tools, use_streamable_http = await mcp_list_tools(
+            server.endpoint,
+            headers,
+            server.timeout,
+            proxy_url=self._proxy_url,
+        )
+        writable = server.service in self._writable_services
+        items: list[McpToolSnapshotItem] = []
+        for tool in sorted(mcp_tools, key=lambda item: item.name):
+            if not writable and not _is_read_only_tool(tool):
                 continue
-
-            server, mcp_tools, use_streamable_http = result
-            is_writable = server.service in self._writable_services
-            for mcp_tool in sorted(mcp_tools, key=lambda tool: tool.name):
-                if not is_writable and not _is_read_only_tool(mcp_tool):
-                    continue
-
-                tools.append(
-                    _wrap_gcp_tool(
-                        mcp_tool=mcp_tool,
-                        server_url=server.endpoint,
-                        headers=headers,
-                        timeout=server.timeout,
-                        use_streamable_http=use_streamable_http,
-                        token_provider=self._token_provider,
-                        project_id=self._project_id,
-                        proxy_url=self._proxy_url,
-                        artifact_sink_getter=self._current_artifact_sink,
-                    )
+            items.append(
+                McpToolSnapshotItem(
+                    raw_name=tool.name,
+                    model_name=tool.name,
+                    description=tool.description or "",
+                    input_schema=tool.inputSchema,
+                    server_url=server.endpoint,
+                    use_streamable_http=use_streamable_http,
                 )
+            )
+        return items
 
-        prompt = self._render_config_prompt()
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt=prompt)
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return GCP tools from the latest successful Toolkit State snapshot."""
+        self._refresh_artifact_sink(context)
+        snapshot = await self._load_tool_snapshot()
+        tools = self._tools_from_snapshot(snapshot) if snapshot is not None else []
+        if self._entered:
+            self._ensure_refresh_task()
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=tools,
+            prompt=self._render_config_prompt(),
+        )
+
+    async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
+        """Load the latest successful GCP MCP tool snapshot."""
+        if self._session_manager is None:
+            return None
+        async with self._session_manager() as session:
+            handle = self._tool_snapshot_handle(session)
+            if handle is None:
+                return None
+            snapshot = await handle.load(default_factory=McpToolSnapshotState)
+        if not snapshot.tools or snapshot.server_url != self._project_id:
+            return None
+        return snapshot
+
+    async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
+        """Atomically save a successful GCP MCP tool snapshot."""
+        if self._session_manager is None:
+            return
+        async with self._session_manager() as session:
+            handle = self._tool_snapshot_handle(session)
+            if handle is None:
+                return
+            await handle.load(default_factory=McpToolSnapshotState)
+            await handle.save(snapshot)
+
+    def _tool_snapshot_handle(
+        self,
+        session: AsyncSession,
+    ) -> ToolkitStateHandle[McpToolSnapshotState] | None:
+        """Create Toolkit State handle for the GCP MCP snapshot."""
+        if not self._agent_id or not self._session_id:
+            return None
+        identity = ToolkitStateIdentity(
+            agent_id=self._agent_id,
+            session_id=self._session_id,
+            toolkit_namespace=_GCP_TOOLKIT_STATE_NAMESPACE,
+            state_name=self._state_name,
+        )
+        return ToolkitStateStore(session=session).handle(identity, McpToolSnapshotState)
+
+    def _tools_from_snapshot(
+        self, snapshot: McpToolSnapshotState
+    ) -> list[FunctionTool]:
+        """Rebuild GCP tool wrappers from a stored snapshot."""
+        server_timeout = {
+            server.endpoint: server.timeout for server in self._server_configs
+        }
+        tools = [
+            _wrap_gcp_snapshot_tool(
+                item=item,
+                timeout=server_timeout[item.server_url],
+                token_provider=self._token_provider,
+                project_id=self._project_id,
+                proxy_url=self._proxy_url,
+                artifact_sink_getter=self._current_artifact_sink,
+            )
+            for item in sorted(snapshot.tools, key=lambda tool: tool.model_name)
+            if item.server_url in server_timeout
+        ]
+        return sorted(tools, key=lambda tool: tool.spec.name)
 
     def _render_config_prompt(self) -> str:
         """Provide enabled service list as prompt."""
         config = self._config
         service_lines = []
-        for svc in config.services:
+        for svc in sorted(config.services):
             meta = GCP_SERVICE_CONFIG[svc]
             writable = svc in self._writable_services
             mode = "read+write" if writable else "read-only"
@@ -473,38 +491,116 @@ def _is_read_only_tool(tool: McpBaseTool) -> bool:
     return read_only_hint
 
 
-def _wrap_gcp_tool(
+def _wrap_gcp_snapshot_tool(
     *,
-    mcp_tool: McpBaseTool,
-    server_url: str,
-    headers: dict[str, str],
+    item: McpToolSnapshotItem,
     timeout: float,
-    use_streamable_http: bool,
     token_provider: GcpAccessTokenProvider,
     project_id: str,
     proxy_url: str | None,
     artifact_sink_getter: ArtifactSinkGetter | None,
 ) -> FunctionTool:
-    """Wrap GCP MCP tool as azents Tool.
-
-    Refresh token and retry once on 401 response.
-    """
-
-    async def on_auth_failure() -> str | None:
-        """Return new token after refresh."""
-        new_token = await token_provider.get_token()
-        return new_token
-
-    return wrap_mcp_tool(
-        mcp_tool=mcp_tool,
-        server_url=server_url,
-        headers=headers,
-        timeout=timeout,
-        use_streamable_http=use_streamable_http,
-        on_auth_failure=on_auth_failure,
-        proxy_url=proxy_url,
-        artifact_sink_getter=artifact_sink_getter,
+    """Wrap a GCP MCP snapshot item as a FunctionTool."""
+    spec = FunctionToolSpec(
+        name=item.model_name,
+        description=item.description,
+        input_schema=item.input_schema,
     )
+
+    async def handler(arguments_json: str) -> str | FunctionToolResult:
+        try:
+            args: dict[str, object] = (
+                json.loads(arguments_json) if arguments_json else {}
+            )
+        except json.JSONDecodeError as exc:
+            raise FunctionToolError(f"Invalid JSON in tool arguments: {exc}") from None
+        access_token = await token_provider.get_token()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "x-goog-user-project": project_id,
+        }
+        try:
+            result = await mcp_call_tool(
+                item.server_url,
+                headers,
+                timeout,
+                item.raw_name,
+                args,
+                use_streamable_http=item.use_streamable_http,
+                proxy_url=proxy_url,
+            )
+        except Exception as exc:
+            if _is_http_401(exc):
+                refreshed_token = await token_provider.get_token()
+                retry_headers = {
+                    "Authorization": f"Bearer {refreshed_token}",
+                    "x-goog-user-project": project_id,
+                }
+                result = await mcp_call_tool(
+                    item.server_url,
+                    retry_headers,
+                    timeout,
+                    item.raw_name,
+                    args,
+                    use_streamable_http=item.use_streamable_http,
+                    proxy_url=proxy_url,
+                )
+            else:
+                raise
+        return await _extract_tool_result(
+            result,
+            tool_name=item.raw_name,
+            artifact_sink=(
+                artifact_sink_getter() if artifact_sink_getter is not None else None
+            ),
+        )
+
+    return FunctionTool(spec=spec, handler=handler)
+
+
+def _gcp_snapshot_items_by_endpoint(
+    snapshot: McpToolSnapshotState | None,
+) -> dict[str, list[McpToolSnapshotItem]]:
+    """Group a previous GCP snapshot by endpoint."""
+    grouped: dict[str, list[McpToolSnapshotItem]] = {}
+    if snapshot is None:
+        return grouped
+    for item in snapshot.tools:
+        grouped.setdefault(item.server_url, []).append(item)
+    return grouped
+
+
+def _build_gcp_tool_snapshot(
+    *,
+    items: list[McpToolSnapshotItem],
+    project_id: str,
+) -> McpToolSnapshotState:
+    """Build a deterministic GCP MCP tool snapshot."""
+    ordered = sorted(items, key=lambda item: (item.server_url, item.model_name))
+    payload = [item.model_dump(mode="json") for item in ordered]
+    tool_hash = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return McpToolSnapshotState(
+        loaded_at=datetime.now(UTC).isoformat(),
+        server_url=project_id,
+        tool_hash=tool_hash,
+        tools=ordered,
+    )
+
+
+def _gcp_snapshot_state_name(*, toolkit_id: str, config: GcpToolkitConfig) -> str:
+    """Return stable Toolkit State name for a GCP MCP tool snapshot."""
+    payload = {
+        "toolkit_id": toolkit_id,
+        "project_id": config.project_id,
+        "services": sorted(config.services),
+        "writable_services": sorted(config.writable_services),
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:16]
+    return f"tool_snapshot:{digest}"
 
 
 # ---------------------------------------------------------------------------
@@ -531,9 +627,15 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
         VM instances, and other GCP infrastructure from the configured project.""")
     config_model: ClassVar[type[BaseModel]] = GcpToolkitConfig
 
-    def __init__(self, artifact_service: ArtifactService | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        artifact_service: ArtifactService | None = None,
+        session_manager: SessionManager[AsyncSession] | None = None,
+    ) -> None:
         """Initialize GcpToolkitProvider."""
         self._artifact_service = artifact_service
+        self._session_manager = session_manager
 
     async def resolve(
         self,
@@ -574,6 +676,13 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
             writable_services=set(config.writable_services),
             proxy_url=context.mcp_proxy_url,
             artifact_service=self._artifact_service,
+            session_manager=self._session_manager,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            state_name=_gcp_snapshot_state_name(
+                toolkit_id=context.toolkit_id,
+                config=config,
+            ),
         )
 
     async def validate_credentials(

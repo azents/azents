@@ -6,7 +6,7 @@ Authentication code send request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Email address | 
+**email** | **str** | Email address |
 
 ## Example
 

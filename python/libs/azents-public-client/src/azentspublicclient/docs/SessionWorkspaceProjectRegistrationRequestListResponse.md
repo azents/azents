@@ -6,7 +6,7 @@ Agent Workspace Project registration request list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SessionWorkspaceProjectRegistrationRequestResponse]**](SessionWorkspaceProjectRegistrationRequestResponse.md) | Project registration request list | 
+**items** | [**List[SessionWorkspaceProjectRegistrationRequestResponse]**](SessionWorkspaceProjectRegistrationRequestResponse.md) | Project registration request list |
 
 ## Example
 

@@ -6,8 +6,8 @@ Finalize request after upload completion.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**upload_key** | **str** | Upload key from issue-ticket, subject to scope revalidation | 
-**filename** | **str** | Original filename, kept in response metadata | 
+**upload_key** | **str** | Upload key from issue-ticket, subject to scope revalidation |
+**filename** | **str** | Original filename, kept in response metadata |
 
 ## Example
 

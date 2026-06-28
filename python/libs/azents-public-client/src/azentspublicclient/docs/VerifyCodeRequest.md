@@ -6,9 +6,9 @@ Authentication code verification request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Email address | 
-**code** | **str** | 6-digit authentication code | 
-**csrf_token** | **str** | CSRF token | 
+**email** | **str** | Email address |
+**code** | **str** | 6-digit authentication code |
+**csrf_token** | **str** | CSRF token |
 
 ## Example
 

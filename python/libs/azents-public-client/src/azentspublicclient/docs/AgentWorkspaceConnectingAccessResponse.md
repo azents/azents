@@ -6,7 +6,7 @@ Workspace connecting response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type | 
+**type** | **str** | Response type |
 
 ## Example
 

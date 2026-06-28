@@ -6,13 +6,13 @@ AgentSubagent link response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  | 
-**agent_id** | **str** |  | 
-**subagent_id** | **str** |  | 
-**description** | **str** |  | 
-**enabled** | **bool** |  | 
-**created_at** | **datetime** |  | 
-**updated_at** | **datetime** |  | 
+**id** | **str** |  |
+**agent_id** | **str** |  |
+**subagent_id** | **str** |  |
+**description** | **str** |  |
+**enabled** | **bool** |  |
+**created_at** | **datetime** |  |
+**updated_at** | **datetime** |  |
 
 ## Example
 

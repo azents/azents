@@ -40,6 +40,27 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_bulk_delete_agent_workspace_paths(self) -> None:
+        """Test case for chat_v1_bulk_delete_agent_workspace_paths
+
+        Bulk Delete Agent Workspace Paths
+        """
+        pass
+
+    def test_chat_v1_bulk_move_agent_workspace_paths(self) -> None:
+        """Test case for chat_v1_bulk_move_agent_workspace_paths
+
+        Bulk Move Agent Workspace Paths
+        """
+        pass
+
+    def test_chat_v1_create_agent_workspace_directory(self) -> None:
+        """Test case for chat_v1_create_agent_workspace_directory
+
+        Create Agent Workspace Directory
+        """
+        pass
+
     def test_chat_v1_create_command(self) -> None:
         """Test case for chat_v1_create_command
 
@@ -72,6 +93,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_delete_agent_project
 
         Delete Agent Project
+        """
+        pass
+
+    def test_chat_v1_delete_agent_workspace_path(self) -> None:
+        """Test case for chat_v1_delete_agent_workspace_path
+
+        Delete Agent Workspace Path
         """
         pass
 
@@ -201,6 +229,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_move_agent_workspace_path(self) -> None:
+        """Test case for chat_v1_move_agent_workspace_path
+
+        Move Agent Workspace Path
+        """
+        pass
+
     def test_chat_v1_read_agent_workspace_path(self) -> None:
         """Test case for chat_v1_read_agent_workspace_path
 
@@ -219,6 +254,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_reject_agent_project_registration_request
 
         Reject Agent Project Registration Request
+        """
+        pass
+
+    def test_chat_v1_stat_agent_workspace_path(self) -> None:
+        """Test case for chat_v1_stat_agent_workspace_path
+
+        Stat Agent Workspace Path
         """
         pass
 

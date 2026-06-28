@@ -6,8 +6,8 @@ Invitation creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Invitation target email | 
-**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Invitation role (member, manager) | [optional] 
+**email** | **str** | Invitation target email |
+**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Invitation role (member, manager) | [optional]
 
 ## Example
 

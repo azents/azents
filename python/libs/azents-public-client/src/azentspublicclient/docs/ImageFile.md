@@ -6,9 +6,9 @@ Single image for API response — resolved URL + resolution.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**url** | **str** | CDN URL or 1-hour presigned GET URL | 
-**width** | **int** | Width pixels | 
-**height** | **int** | Height pixels | 
+**url** | **str** | CDN URL or 1-hour presigned GET URL |
+**width** | **int** | Width pixels |
+**height** | **int** | Height pixels |
 
 ## Example
 

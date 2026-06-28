@@ -6,15 +6,15 @@ Model catalog sync response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**provider** | [**LLMProvider**](LLMProvider.md) |  | 
-**catalog_id** | **str** |  | 
-**snapshot_id** | **str** |  | 
-**visible_count** | **int** |  | 
-**hidden_count** | **int** |  | 
-**status** | **str** |  | 
-**failure_code** | **str** |  | 
-**failure_message** | **str** |  | 
-**action_hint** | **str** |  | 
+**provider** | [**LLMProvider**](LLMProvider.md) |  |
+**catalog_id** | **str** |  |
+**snapshot_id** | **str** |  |
+**visible_count** | **int** |  |
+**hidden_count** | **int** |  |
+**status** | **str** |  |
+**failure_code** | **str** |  |
+**failure_message** | **str** |  |
+**action_hint** | **str** |  |
 
 ## Example
 

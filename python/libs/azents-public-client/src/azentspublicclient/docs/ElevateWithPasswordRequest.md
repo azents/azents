@@ -6,7 +6,7 @@ Password elevation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**password** | **str** | Password | 
+**password** | **str** | Password |
 
 ## Example
 

@@ -6,7 +6,7 @@ Slash command list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SlashCommandResponse]**](SlashCommandResponse.md) | Available slash command list | 
+**items** | [**List[SlashCommandResponse]**](SlashCommandResponse.md) | Available slash command list |
 
 ## Example
 

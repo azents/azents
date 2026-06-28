@@ -37,9 +37,9 @@ class TestAgentAdminListResponse(unittest.TestCase):
             return AgentAdminListResponse(
                 items = [
                     azentspublicclient.models.agent_admin_response.AgentAdminResponse(
-                        id = '', 
-                        agent_id = '', 
-                        workspace_user_id = '', 
+                        id = '',
+                        agent_id = '',
+                        workspace_user_id = '',
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -47,9 +47,9 @@ class TestAgentAdminListResponse(unittest.TestCase):
             return AgentAdminListResponse(
                 items = [
                     azentspublicclient.models.agent_admin_response.AgentAdminResponse(
-                        id = '', 
-                        agent_id = '', 
-                        workspace_user_id = '', 
+                        id = '',
+                        agent_id = '',
+                        workspace_user_id = '',
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

@@ -6,9 +6,9 @@ REST slash command request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**agent_id** | **str** | Agent ID | 
-**client_request_id** | **str** | Client-generated idempotency key | 
-**command** | **str** | Command name, for example compact | 
+**agent_id** | **str** | Agent ID |
+**client_request_id** | **str** | Client-generated idempotency key |
+**command** | **str** | Command name, for example compact |
 
 ## Example
 

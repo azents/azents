@@ -26,7 +26,6 @@ import { useTranslations } from "next-intl";
  * Provides name and locale edit form.
  */
 import { useEffect, useState } from "react";
-import { GitHubPATSection } from "./GitHubPATSection";
 import type { MemberProfileContainerProps } from "../containers/useMemberProfileContainer";
 import type { FormState } from "../types";
 
@@ -39,7 +38,6 @@ const LOCALE_OPTIONS = [
 ];
 
 export function MemberProfileEdit({
-  handle,
   state,
   onSubmit,
   onResetForm,
@@ -74,7 +72,6 @@ export function MemberProfileEdit({
               onResetForm={onResetForm}
             />
           </Paper>
-          <GitHubPATSection handle={handle} />
         </Container>
       );
   }

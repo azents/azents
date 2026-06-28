@@ -37,10 +37,10 @@ class TestToolkitScopeListResponse(unittest.TestCase):
             return ToolkitScopeListResponse(
                 items = [
                     azentspublicclient.models.toolkit_scope_response.ToolkitScopeResponse(
-                        id = '', 
-                        toolkit_id = '', 
-                        scope_type = 'workspace', 
-                        scope_id = '', 
+                        id = '',
+                        toolkit_id = '',
+                        scope_type = 'workspace',
+                        scope_id = '',
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -48,10 +48,10 @@ class TestToolkitScopeListResponse(unittest.TestCase):
             return ToolkitScopeListResponse(
                 items = [
                     azentspublicclient.models.toolkit_scope_response.ToolkitScopeResponse(
-                        id = '', 
-                        toolkit_id = '', 
-                        scope_type = 'workspace', 
-                        scope_id = '', 
+                        id = '',
+                        toolkit_id = '',
+                        scope_type = 'workspace',
+                        scope_id = '',
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

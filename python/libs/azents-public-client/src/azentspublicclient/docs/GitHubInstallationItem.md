@@ -6,10 +6,10 @@ GitHub App installation item.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **int** | Installation ID | 
-**account_login** | **str** | Installed account/organization name | 
-**account_type** | **str** | Account type (User/Organization) | 
-**account_avatar_url** | **str** | Account avatar URL | 
+**id** | **int** | Installation ID |
+**account_login** | **str** | Installed account/organization name |
+**account_type** | **str** | Account type (User/Organization) |
+**account_avatar_url** | **str** | Account avatar URL |
 
 ## Example
 

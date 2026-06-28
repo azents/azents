@@ -6,7 +6,7 @@ REST stop response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**session_id** | **str** | AgentSession ID | 
+**session_id** | **str** | AgentSession ID |
 
 ## Example
 

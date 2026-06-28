@@ -6,11 +6,11 @@ AgentToolkit response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  | 
-**agent_id** | **str** |  | 
-**toolkit_id** | **str** |  | 
-**toolkit_type** | **str** |  | 
-**created_at** | **datetime** |  | 
+**id** | **str** |  |
+**agent_id** | **str** |  |
+**toolkit_id** | **str** |  |
+**toolkit_type** | **str** |  |
+**created_at** | **datetime** |  |
 
 ## Example
 

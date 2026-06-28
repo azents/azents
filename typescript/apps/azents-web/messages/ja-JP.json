@@ -720,8 +720,6 @@
         "selectInstallationDescription": "このToolkitがアクセスするアカウントまたは組織をすべて選択してください。",
         "noInstallationsFound": "インストール済みのGitHub Appがありません。まず新しい組織にインストールしてください。",
         "installNewOrg": "新しい組織にインストール",
-        "authTypePerUserPat": "ユーザー別PAT",
-        "perUserPatDescription": "各ユーザーが自分のGitHub Personal Access Tokenを登録して使用します。ワークスペース単位の認証情報は不要です。",
         "runtimeEnvironmentWarningTitle": "Runtime environment variables 注入 — 長期認証情報の漏洩リスク",
         "runtimeEnvironmentWarningBody": "有効化すると、GitHubトークンがagent runtime環境変数として注入されます。単一インストールcredentialではGH_TOKEN/GITHUB_TOKENも設定され、複数インストールcredentialではGITHUB_TOKEN_INSTALLATION_<id>とgit credential helperが使うrouting mapが設定されます。完全な隔離は不可能で、agentが実行するすべてのプロセスがトークンを読み取れます。漏洩リスクを受け入れる場合のみ有効化してください。",
         "runtimeEnvironmentAcknowledge": "漏洩リスクを理解しました",
@@ -764,24 +762,6 @@
         "reconnect": "再接続",
         "disconnect": "切断"
       }
-    },
-    "githubPat": {
-      "setupTitle": "GitHub設定",
-      "registerTitle": "GitHub Personal Access Tokenの登録",
-      "step1Title": "ステップ1. GitHubでPATを作成",
-      "createOnGitHub": "GitHub Settingsで作成する →",
-      "step2Title": "ステップ2. 作成したトークンを入力",
-      "register": "登録",
-      "replace": "変更",
-      "delete": "削除",
-      "invalidToken": "無効なトークン",
-      "tokenSecurityNote": "トークンは暗号化して保存されます。Azents運営チームもトークンの原文を確認できません。",
-      "setupComplete": "GitHub接続完了",
-      "connectedAs": "@{username} アカウントで接続されました。",
-      "returnToChat": "チャットに戻ってもう一度お試しください。",
-      "manageTitle": "GitHub PAT",
-      "notRegistered": "GitHub PATが登録されていません。",
-      "error": "エラー"
     },
     "dashboard": {
       "headline": "ワークスペース",
@@ -918,14 +898,7 @@
     "updateSuccess": "プロフィールを保存しました",
     "nameRequired": "名前を入力してください",
     "connectedAccounts": "接続済みアカウント",
-    "noInstalledPlatforms": "このワークスペースに接続されたチャットプラットフォームがありません。",
-    "githubPat": "GitHub PAT",
-    "githubPatConnected": "接続済み",
-    "githubPatNotConnected": "未接続",
-    "githubPatRegister": "登録",
-    "githubPatReplace": "変更",
-    "githubPatDelete": "削除",
-    "githubPatDeleteConfirm": "GitHub PATを削除しますか？"
+    "noInstalledPlatforms": "このワークスペースに接続されたチャットプラットフォームがありません。"
   },
   "chat": {
     "inheritModelProvider": "継承",

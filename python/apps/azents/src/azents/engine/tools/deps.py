@@ -22,7 +22,6 @@ from azents.engine.tools.sentry import SentryToolkitProvider
 from azents.engine.tools.todo import TodoStateStore, TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.github_pat import GitHubPATRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.services.artifact import ArtifactService
 from azents.testing.runtime_hooks import TestenvRuntimeHookQAProvider
@@ -56,7 +55,6 @@ def get_toolkit_registry(
             platform_private_key=(
                 github_config.platform_private_key if github_config else None
             ),
-            pat_repo=GitHubPATRepository(cipher),
             session_manager=session_manager,
         ),
         "notion": NotionToolkitProvider(
@@ -69,8 +67,14 @@ def get_toolkit_registry(
             session_manager=session_manager,
             artifact_service=artifact_service,
         ),
-        "gcp": GcpToolkitProvider(artifact_service=artifact_service),
-        "aws": AwsToolkitProvider(artifact_service=artifact_service),
+        "gcp": GcpToolkitProvider(
+            artifact_service=artifact_service,
+            session_manager=session_manager,
+        ),
+        "aws": AwsToolkitProvider(
+            artifact_service=artifact_service,
+            session_manager=session_manager,
+        ),
         "google_analytics": GoogleAnalyticsToolkitProvider(),
         "kubernetes": KubernetesToolkitProvider(),
         "envvar": EnvVarToolkitProvider(),

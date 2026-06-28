@@ -6,13 +6,13 @@ Agent Workspace Project registration request response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Request ID | 
-**path** | **str** | Requested Project path | 
-**reason** | **str** | Request reason provided by the Agent | 
-**status** | **str** | Request status | 
-**project_id** | **str** |  | [optional] 
-**created_at** | **datetime** | Created time | 
-**updated_at** | **datetime** | Updated time | 
+**id** | **str** | Request ID |
+**path** | **str** | Requested Project path |
+**reason** | **str** | Request reason provided by the Agent |
+**status** | **str** | Request status |
+**project_id** | **str** |  | [optional]
+**created_at** | **datetime** | Created time |
+**updated_at** | **datetime** | Updated time |
 
 ## Example
 

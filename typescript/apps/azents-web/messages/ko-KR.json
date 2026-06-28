@@ -720,8 +720,6 @@
         "selectInstallationDescription": "이 Toolkit이 접근할 계정 또는 조직을 모두 선택하세요.",
         "noInstallationsFound": "설치된 GitHub App이 없습니다. 먼저 새 조직에 설치하세요.",
         "installNewOrg": "새 조직에 설치",
-        "authTypePerUserPat": "유저별 PAT",
-        "perUserPatDescription": "각 유저가 자신의 GitHub Personal Access Token을 등록하여 사용합니다. 워크스페이스 레벨 credential은 필요하지 않습니다.",
         "runtimeEnvironmentWarningTitle": "Runtime 환경변수 — 유출 위험",
         "runtimeEnvironmentWarningBody": "활성화 시 GitHub 토큰이 agent runtime 환경변수로 주입됩니다. 단일 설치 credential은 GH_TOKEN/GITHUB_TOKEN도 설정하고, 다중 설치 credential은 GITHUB_TOKEN_INSTALLATION_<id>와 git credential helper가 사용하는 routing map을 설정합니다. 완전 격리는 불가하며 agent가 실행하는 모든 프로세스가 토큰을 읽을 수 있습니다. 유출 위험을 감수할 때만 활성화하세요.",
         "runtimeEnvironmentAcknowledge": "유출 위험을 인지합니다",
@@ -764,24 +762,6 @@
         "reconnect": "다시 연결",
         "disconnect": "연결 해제"
       }
-    },
-    "githubPat": {
-      "setupTitle": "GitHub 설정",
-      "registerTitle": "GitHub Personal Access Token 등록",
-      "step1Title": "Step 1. GitHub에서 PAT 생성",
-      "createOnGitHub": "GitHub Settings에서 생성하기 →",
-      "step2Title": "Step 2. 생성한 토큰 입력",
-      "register": "등록",
-      "replace": "교체",
-      "delete": "삭제",
-      "invalidToken": "유효하지 않은 토큰",
-      "tokenSecurityNote": "토큰은 암호화되어 저장됩니다. Azents 운영진도 토큰 원문을 확인할 수 없습니다.",
-      "setupComplete": "GitHub 연결 완료",
-      "connectedAs": "@{username} 계정으로 연결되었습니다.",
-      "returnToChat": "채팅으로 돌아가서 다시 요청해주세요.",
-      "manageTitle": "GitHub PAT",
-      "notRegistered": "GitHub PAT이 등록되지 않았습니다.",
-      "error": "오류"
     },
     "dashboard": {
       "headline": "워크스페이스",
@@ -918,14 +898,7 @@
     "updateSuccess": "프로필이 저장되었습니다",
     "nameRequired": "이름을 입력해 주세요",
     "connectedAccounts": "연결된 계정",
-    "noInstalledPlatforms": "이 워크스페이스에 연결된 채팅 플랫폼이 없습니다.",
-    "githubPat": "GitHub PAT",
-    "githubPatConnected": "연결됨",
-    "githubPatNotConnected": "연결되지 않음",
-    "githubPatRegister": "등록",
-    "githubPatReplace": "교체",
-    "githubPatDelete": "삭제",
-    "githubPatDeleteConfirm": "GitHub PAT을 삭제하시겠습니까?"
+    "noInstalledPlatforms": "이 워크스페이스에 연결된 채팅 플랫폼이 없습니다."
   },
   "chat": {
     "inheritModelProvider": "상속",

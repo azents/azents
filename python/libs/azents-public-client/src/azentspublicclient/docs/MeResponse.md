@@ -6,8 +6,8 @@ Current user information response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Primary email address | 
-**created_at** | **datetime** | Signup time | 
+**email** | **str** | Primary email address |
+**created_at** | **datetime** | Signup time |
 
 ## Example
 
