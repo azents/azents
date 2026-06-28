@@ -17,6 +17,7 @@ from azents.engine.hooks.types import (
     BeforeToolCallHookContext,
     RuntimeHooks,
     SessionCompactHookContext,
+    ToolOutputReplace,
 )
 from azents.engine.tooling.toolkit_state import (
     ToolkitStateHandle,
@@ -42,6 +43,7 @@ AGENTS_BACKGROUND_REFRESH_WARN_SECONDS = 10.0
 AGENTS_TOOLKIT_NAMESPACE = "builtin"
 ROOT_AGENTS_TOOLKIT_STATE_NAME = "root_agents_instruction"
 PROJECT_AGENTS_TOOLKIT_STATE_NAME = "project_agents_instructions"
+AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME = "agents_md_appendix_dedupe"
 
 
 class RootAgentsInstructionState(ToolkitStateModel):
@@ -57,6 +59,13 @@ class ProjectAgentsInstructionState(ToolkitStateModel):
     schema_version: int = 1
     project_contents: dict[str, str] = Field(default_factory=dict)
     active_project_paths: set[str] = Field(default_factory=set)
+
+
+class AgentsAppendixDedupeState(ToolkitStateModel):
+    """AGENTS.md read-result appendix dedupe Toolkit State payload."""
+
+    schema_version: int = 1
+    appended_paths: list[str] = Field(default_factory=list)
 
 
 class AgentsInstructionStateStore(Protocol):
@@ -104,6 +113,21 @@ class AgentsInstructionStateStore(Protocol):
         ],
     ) -> None:
         """Retry-apply mutator to latest Project AGENTS.md state."""
+        ...
+
+    async def load_appendix_dedupe(
+        self, agent_id: str, session_id: str
+    ) -> AgentsAppendixDedupeState:
+        """Fetch AGENTS.md appendix dedupe state."""
+        ...
+
+    async def update_appendix_dedupe(
+        self,
+        agent_id: str,
+        session_id: str,
+        mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
+    ) -> None:
+        """Retry-apply mutator to latest appendix dedupe state."""
         ...
 
 
@@ -194,6 +218,32 @@ class ToolkitAgentsInstructionStateStore:
                 mutator=mutator,
             )
 
+    async def load_appendix_dedupe(
+        self, agent_id: str, session_id: str
+    ) -> AgentsAppendixDedupeState:
+        """Fetch AGENTS.md appendix dedupe state."""
+        async with self._session_manager() as session:
+            handle = self._make_appendix_dedupe_handle(session, agent_id, session_id)
+            if handle is None:
+                return AgentsAppendixDedupeState()
+            return await handle.load(default_factory=AgentsAppendixDedupeState)
+
+    async def update_appendix_dedupe(
+        self,
+        agent_id: str,
+        session_id: str,
+        mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
+    ) -> None:
+        """Retry-apply mutator to latest appendix dedupe state."""
+        async with self._session_manager() as session:
+            handle = self._make_appendix_dedupe_handle(session, agent_id, session_id)
+            if handle is None:
+                return
+            await handle.update(
+                default_factory=AgentsAppendixDedupeState,
+                mutator=mutator,
+            )
+
     def _make_project_handle(
         self,
         session: AsyncSession,
@@ -232,6 +282,26 @@ class ToolkitAgentsInstructionStateStore:
         return ToolkitStateStore(session=session).handle(
             identity,
             RootAgentsInstructionState,
+        )
+
+    def _make_appendix_dedupe_handle(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+    ) -> ToolkitStateHandle[AgentsAppendixDedupeState] | None:
+        """Create AGENTS.md appendix dedupe handle for agent/session identity."""
+        if not agent_id or not session_id:
+            return None
+        identity = ToolkitStateIdentity(
+            agent_id=agent_id,
+            session_id=session_id,
+            toolkit_namespace=AGENTS_TOOLKIT_NAMESPACE,
+            state_name=AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
+        )
+        return ToolkitStateStore(session=session).handle(
+            identity,
+            AgentsAppendixDedupeState,
         )
 
 
@@ -461,16 +531,9 @@ class RootAgentsPromptMixin:
         domain_config: RuntimeDomainConfig,
         user_id: str | None,
     ) -> str:
-        """Read root AGENTS.md prompt from persistent store."""
+        """Do not inject root AGENTS.md into Toolkit prompts."""
         del workspace_id, domain_config, user_id
-        state = await self._load_root_agents_state()
-        content = state.root_content
-        if not content:
-            return ""
-        return render_agents_block(
-            "Session Workspace Instructions",
-            [(ROOT_AGENTS_PATH, content)],
-        )
+        return ""
 
     async def _load_root_agents_state(self) -> RootAgentsInstructionState:
         """Fetch persistent root AGENTS.md instruction state."""
@@ -512,22 +575,14 @@ class ProjectAgentsPromptMixin:
     async def _on_before_tool_call_hook(
         self, context: BeforeToolCallHookContext
     ) -> None:
-        """Connect runtime hook context to existing AGENTS.md before observer."""
-        await self.on_before_tool_call(
-            ToolCallHookContext(
-                tool_name=context.tool_name,
-                toolkit_slug=context.toolkit_slug,
-                args_json=context.args_json,
-                session_id=context.session_id,
-                agent_id=context.agent_id,
-                workspace_id=context.workspace_id,
-                run_id=context.run_id,
-            )
-        )
+        """AGENTS.md discovery is not performed before tool execution."""
+        del context
 
-    async def _on_after_tool_call_hook(self, context: AfterToolCallHookContext) -> None:
-        """Connect runtime hook context to existing AGENTS.md after observer."""
-        await self.on_after_tool_call(
+    async def _on_after_tool_call_hook(
+        self, context: AfterToolCallHookContext
+    ) -> ToolOutputReplace | None:
+        """Append applicable AGENTS.md instructions after successful read."""
+        return await self.append_agents_after_read(
             ToolCallHookContext(
                 tool_name=context.tool_name,
                 toolkit_slug=context.toolkit_slug,
@@ -545,124 +600,92 @@ class ProjectAgentsPromptMixin:
     async def _on_session_compact_hook(
         self, context: SessionCompactHookContext
     ) -> None:
-        """Clear all Project AGENTS.md active/cache on compaction."""
+        """Clear AGENTS.md appendix dedupe on compaction."""
         del context
         self._active_agents_paths = set()
         self._pending_agents_refresh_paths = set()
-        await self._update_project_agents_state(
-            lambda state: state.model_copy(
-                update={"project_contents": {}, "active_project_paths": set()}
-            )
+        await self._update_appendix_dedupe_state(
+            lambda state: state.model_copy(update={"appended_paths": []})
         )
 
     async def on_before_tool_call(self, context: ToolCallHookContext) -> None:
-        """Enable existing Project AGENTS.md candidates for file target path."""
-        candidates: set[str] = set()
-        for ref in extract_tool_path_refs(context.tool_name, context.args_json):
-            candidates.update(
-                agents_candidates_for_path(
-                    ref.path,
-                    self._last_projects,
-                    directory=ref.directory,
-                )
-            )
-        file_storage = self._agents_file_storage
-        if file_storage is None:
-            return
-        self._schedule_project_agents_refresh(
-            file_storage=file_storage,
-            paths=candidates,
-        )
+        """Do not live-discover AGENTS.md before tool execution."""
+        del context
 
-    async def on_after_tool_call(
+    async def append_agents_after_read(
         self,
         context: ToolCallHookContext,
         outcome: ToolCallHookOutcome,
-    ) -> None:
-        """Update persistent instruction state after AGENTS.md write/delete."""
-        if outcome.error is not None:
-            return
-        paths = [
+    ) -> ToolOutputReplace | None:
+        """Append applicable AGENTS.md instructions to successful read results."""
+        if outcome.error is not None or outcome.output is None:
+            return None
+        tool_name = _base_tool_name(context.tool_name)
+        if tool_name != "read":
+            return None
+        refs = extract_tool_path_refs(tool_name, context.args_json)
+        if not refs:
+            return None
+        target_path = refs[0].path
+        if not _is_under_workspace_root(target_path):
+            return None
+        file_storage = self._agents_file_storage
+        if file_storage is None:
+            return None
+        dedupe = await self._load_appendix_dedupe_state()
+        already_appended = set(dedupe.appended_paths)
+        candidates = _agents_appendix_candidates_for_path(
+            target_path,
+            self._last_projects,
+            directory=refs[0].directory,
+        )
+        candidates = [
             path
-            for path in extract_tool_paths(context.tool_name, context.args_json)
-            if posixpath.basename(path) == AGENTS_FILENAME
+            for path in candidates
+            if path != target_path and path not in already_appended
         ]
-        if not paths:
-            return
-        root_paths = [path for path in paths if path == ROOT_AGENTS_PATH]
-        project_paths = [path for path in paths if path != ROOT_AGENTS_PATH]
-        if root_paths:
-            await self._update_root_agents_state(
-                lambda state: apply_root_agents_tool_update(
-                    state,
-                    context.tool_name,
-                    context.args_json,
-                )
-            )
-        if project_paths:
-
-            def _mutate(
-                state: ProjectAgentsInstructionState,
-            ) -> ProjectAgentsInstructionState:
-                active_project_paths = set(state.active_project_paths)
-                for path in project_paths:
-                    state = apply_project_agents_tool_update(
-                        state,
-                        path,
-                        context.tool_name,
-                        context.args_json,
-                    )
-                    if project_for_path(path, self._last_projects) is None:
-                        continue
-                    if context.tool_name == "delete":
-                        active_project_paths.discard(path)
-                    else:
-                        active_project_paths.add(path)
-                return state.model_copy(
-                    update={"active_project_paths": active_project_paths}
-                )
-
-            await self._update_project_agents_state(_mutate)
+        files = await self._read_existing_agents_files(file_storage, candidates)
+        if not files:
+            return None
+        appended_paths = sorted(already_appended | {path for path, _ in files})
+        await self._update_appendix_dedupe_state(
+            lambda state: state.model_copy(update={"appended_paths": appended_paths})
+        )
+        logger.info(
+            "Appended AGENTS.md instructions to read result",
+            extra={
+                "agent_id": self._runtime_agent_id,
+                "session_id": self._runtime_session_id,
+                "appended_path_count": len(files),
+                "dedupe_skipped_path_count": len(candidates) - len(files),
+            },
+        )
+        return ToolOutputReplace(
+            output_text=f"{outcome.output}\n\n{render_agents_appendix(files)}"
+        )
 
     async def _load_project_agents_prompt(
         self,
         file_storage: FileStorage,
         projects: list[SessionWorkspaceProject],
     ) -> str:
-        """Render active Project-scoped AGENTS.md prompt from cache."""
+        """Register storage/projects without injecting AGENTS.md into prompt."""
         self._agents_file_storage = file_storage
-        state = await self._load_project_agents_state()
-        self._active_agents_paths.update(state.active_project_paths)
-        valid_paths = {
-            path
-            for path in self._active_agents_paths
-            if project_for_path(path, projects) is not None
-        }
-        self._active_agents_paths = valid_paths
-        should_read_live = (
-            self._agents_turns_since_live_read >= AGENTS_LIVE_READ_INTERVAL_TURNS
-        )
-        if should_read_live:
-            self._agents_turns_since_live_read = 0
-        else:
-            self._agents_turns_since_live_read += 1
+        self._last_projects = sorted(projects, key=lambda project: project.path)
+        return ""
 
-        project_contents = dict(state.project_contents)
-        rendered = [
-            (path, content)
-            for path in sorted(valid_paths)
-            if (content := project_contents.get(path)) is not None
-        ]
-        await self._update_project_agents_state(
-            lambda state: state.model_copy(update={"active_project_paths": valid_paths})
-        )
-        missing_paths = {path for path in valid_paths if path not in project_contents}
-        refresh_paths = valid_paths if should_read_live else missing_paths
-        self._schedule_project_agents_refresh(
-            file_storage=file_storage,
-            paths=refresh_paths,
-        )
-        return render_project_agents_block(rendered)
+    async def _read_existing_agents_files(
+        self,
+        file_storage: FileStorage,
+        paths: Sequence[str],
+    ) -> list[tuple[str, str]]:
+        """Read existing AGENTS.md files in deterministic order."""
+        files: list[tuple[str, str]] = []
+        for path in paths:
+            content = await self._read_agents_file(file_storage, path, fallback=None)
+            if content is not None:
+                files.append((path, content))
+        return files
 
     def _schedule_project_agents_refresh(
         self,
@@ -815,6 +838,81 @@ class ProjectAgentsPromptMixin:
             self._runtime_session_id,
             mutator,
         )
+
+    async def _load_appendix_dedupe_state(self) -> AgentsAppendixDedupeState:
+        """Fetch persistent AGENTS.md appendix dedupe state."""
+        if self._agents_store is None:
+            return AgentsAppendixDedupeState()
+        return await self._agents_store.load_appendix_dedupe(
+            self._runtime_agent_id,
+            self._runtime_session_id,
+        )
+
+    async def _update_appendix_dedupe_state(
+        self,
+        mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
+    ) -> None:
+        """Retry-update persistent AGENTS.md appendix dedupe state."""
+        if self._agents_store is None:
+            return
+        await self._agents_store.update_appendix_dedupe(
+            self._runtime_agent_id,
+            self._runtime_session_id,
+            mutator,
+        )
+
+
+def render_agents_appendix(files: Sequence[tuple[str, str]]) -> str:
+    """Render AGENTS.md instructions as a read result appendix."""
+    if not files:
+        return ""
+    parts = [
+        "<system-reminder>",
+        "Relevant AGENTS.md instructions for the accessed path:",
+    ]
+    for path, content in files:
+        parts.extend(["", f"### {path}", "", content])
+    parts.append("</system-reminder>")
+    return "\n".join(parts)
+
+
+def _agents_appendix_candidates_for_path(
+    path: str,
+    projects: Sequence[SessionWorkspaceProject],
+    *,
+    directory: bool = False,
+) -> list[str]:
+    """Return root/project AGENTS.md candidates applicable to target path."""
+    normalized = _normalize_runtime_path(path)
+    if normalized is None or not _is_under_workspace_root(normalized):
+        return []
+    candidates = [ROOT_AGENTS_PATH]
+    candidates.extend(
+        agents_candidates_for_path(normalized, projects, directory=directory)
+    )
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        ordered.append(candidate)
+    return ordered
+
+
+def _base_tool_name(tool_name: str) -> str:
+    """Return unprefixed tool name."""
+    if "__" not in tool_name:
+        return tool_name
+    return tool_name.split("__", 1)[1]
+
+
+def _is_under_workspace_root(path: str) -> bool:
+    """Return whether path is inside the agent workspace root."""
+    normalized = posixpath.normpath(path)
+    return normalized == SESSION_WORKSPACE_ROOT or normalized.startswith(
+        f"{SESSION_WORKSPACE_ROOT}/"
+    )
 
 
 def _normalize_runtime_path(path: str) -> str | None:

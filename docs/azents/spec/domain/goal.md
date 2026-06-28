@@ -15,8 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-06-23
-spec_version: 6
+last_verified_at: 2026-06-29
+spec_version: 7
 ---
 
 # Goal Domain Spec
@@ -61,6 +61,8 @@ Goal Toolkit exposes these unprefixed tools in turns that have session context:
 - `get_goal`: read the current session Goal.
 - `create_goal`: create a new Goal when no unfinished Goal exists.
 - `update_goal`: mark the active Goal `complete` or `blocked`.
+
+The exposed Goal tool set is fixed across empty, active, blocked, paused, and complete state. Goal state changes must not add or remove model-visible Goal tools.
 
 Creation and update rules:
 
@@ -166,6 +168,11 @@ Forbidden behavior:
 
 Goal control prompts are not stored as frontend-only copy or WebSocket-only payloads. The runtime
 stores normalized state and metadata, then materializes model-visible prompt prose at lowering time.
+
+The Goal Toolkit prompt itself is fixed instruction text. It does not include the current Goal
+objective or status. A model that needs exact current state must call `get_goal`; active-goal idle
+continuation carries the objective through continuation metadata instead of duplicating it in the
+Toolkit prompt.
 
 Lowering rules:
 

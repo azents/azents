@@ -640,24 +640,18 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 return ToolkitState(
                     status=ToolkitStatus.ENABLED,
                     tools=[],
-                    prompt=(
-                        f"GitHub tools for {binding.target.account_login} are still "
-                        "loading. Try again shortly."
-                    ),
+                    prompt="",
                 )
             if binding.lazy_mcp_error is not None:
                 return ToolkitState(
                     status=ToolkitStatus.ENABLED,
                     tools=[],
-                    prompt=(
-                        f"GitHub toolkit for {binding.target.account_login} "
-                        f"unavailable: {binding.lazy_mcp_error}"
-                    ),
+                    prompt="",
                 )
             return ToolkitState(
                 status=ToolkitStatus.ENABLED,
                 tools=[],
-                prompt=f"GitHub setup required for {binding.target.account_login}.",
+                prompt="",
             )
         return await binding.mcp_toolkit.update_context(context)
 
@@ -713,7 +707,13 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         """Merge and return MCP state for all installations."""
         tools: list[FunctionTool] = []
         prompts: list[str] = []
-        for binding in self._installation_bindings:
+        for binding in sorted(
+            self._installation_bindings,
+            key=lambda item: (
+                item.target.account_login,
+                item.target.installation_id,
+            ),
+        ):
             state = await self._installation_update_context(binding, context)
             if state.status != ToolkitStatus.ENABLED:
                 continue
@@ -738,7 +738,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         )
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
-            tools=tools,
+            tools=sorted(tools, key=lambda tool: tool.spec.name),
             prompt="\n\n".join(
                 prompt for prompt in [mapping_prompt, *prompts] if prompt
             ),
@@ -784,18 +784,18 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 return ToolkitState(
                     status=ToolkitStatus.ENABLED,
                     tools=[],
-                    prompt="GitHub tools are still loading. Try again shortly.",
+                    prompt="",
                 )
             if self._lazy_mcp_error is not None:
                 return ToolkitState(
                     status=ToolkitStatus.ENABLED,
                     tools=[],
-                    prompt=f"GitHub toolkit unavailable: {self._lazy_mcp_error}",
+                    prompt="",
                 )
             return ToolkitState(
                 status=ToolkitStatus.ENABLED,
                 tools=[],
-                prompt="GitHub setup required.",
+                prompt="",
             )
         return await self._mcp.update_context(context)
 

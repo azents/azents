@@ -5,6 +5,7 @@ Connect to MCP server, fetch tool list, and wrap each as azents Tool.
 """
 
 import datetime
+import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -68,6 +69,10 @@ class McpToolkit(McpBasedToolkit[McpToolkitConfig]):
         proxy_url: str | None = None,
         session_type: SessionType = SessionType.USER,
         artifact_service: ArtifactService | None = None,
+        session_manager: SessionManager[AsyncSession] | None = None,
+        agent_id: str = "",
+        session_id: str = "",
+        state_name: str = "tool_snapshot",
     ) -> None:
         """Initialize McpToolkit.
 
@@ -84,6 +89,11 @@ class McpToolkit(McpBasedToolkit[McpToolkitConfig]):
         self._proxy_url = proxy_url
         self._session_type = session_type
         self._artifact_service = artifact_service
+        self._session_manager = session_manager
+        self._agent_id = agent_id
+        self._session_id = session_id
+        self._state_namespace = "mcp"
+        self._state_name = state_name
         self._init_bg_state()
 
 
@@ -193,6 +203,13 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
             if context.user_id is None
             else SessionType.USER,
             artifact_service=self._artifact_service,
+            session_manager=self._session_manager,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            state_name=_mcp_snapshot_state_name(
+                toolkit_id=context.toolkit_id,
+                server_url=config.server_url,
+            ),
         )
 
 
@@ -234,6 +251,13 @@ def _make_oauth_refresh_callback(
             return connection.access_token
 
     return _refresh
+
+
+def _mcp_snapshot_state_name(*, toolkit_id: str, server_url: str) -> str:
+    """Return stable Toolkit State name for an MCP tool snapshot."""
+    raw = toolkit_id or server_url
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f"tool_snapshot:{digest}"
 
 
 def _extract_static_secret(

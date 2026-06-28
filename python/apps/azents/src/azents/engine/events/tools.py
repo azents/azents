@@ -53,7 +53,7 @@ class ToolCatalog:
                 "parameters": tool.spec.input_schema,
                 "strict": False,
             }
-            for tool in self.tools.values()
+            for tool in sorted(self.tools.values(), key=lambda item: item.spec.name)
         ]
 
 

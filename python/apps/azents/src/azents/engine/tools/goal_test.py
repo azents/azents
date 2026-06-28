@@ -8,7 +8,12 @@ import pytest
 from azents.core.tools import TurnContext
 from azents.engine.hooks.types import SessionIdleHookContext
 from azents.engine.run.types import FunctionToolError
-from azents.engine.tools.goal import GoalState, GoalStatus, GoalToolkit
+from azents.engine.tools.goal import (
+    GoalState,
+    GoalStatus,
+    GoalToolkit,
+    render_goal_prompt,
+)
 
 
 async def test_goal_toolkit_exposes_goal_tools() -> None:
@@ -33,8 +38,18 @@ async def test_goal_toolkit_exposes_goal_tools() -> None:
         "create_goal",
         "update_goal",
     ]
-    assert "Ship goal" in state.prompt
-    store.load.assert_awaited_once_with("agent-1", "session-1")
+    assert "Ship goal" not in state.prompt
+    store.load.assert_not_awaited()
+
+
+def test_goal_prompt_is_stable_across_state() -> None:
+    """Current Goal state does not change the toolkit prompt."""
+    assert render_goal_prompt(GoalState()) == render_goal_prompt(
+        GoalState(objective="Ship goal", status="active")
+    )
+    assert render_goal_prompt(GoalState()) == render_goal_prompt(
+        GoalState(objective="Done goal", status="complete")
+    )
 
 
 async def test_goal_idle_hook_returns_continuation_for_active_goal() -> None:

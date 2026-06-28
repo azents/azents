@@ -1,6 +1,5 @@
 """Session-scoped todo Toolkit State tools."""
 
-import json
 from collections.abc import Awaitable, Callable
 from typing import Literal, Self
 
@@ -180,7 +179,6 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
                 tools=[],
                 prompt="",
             )
-        todo_state = await self._store.load(self._agent_id, self._session_id)
 
         async def publish_todo_changed(snapshot: TodoStateSnapshot) -> None:
             await context.publish_event(
@@ -197,7 +195,7 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
                     publish_changed=publish_todo_changed,
                 )
             ],
-            prompt=render_todo_prompt(todo_state),
+            prompt=render_todo_prompt(),
         )
 
 
@@ -223,14 +221,10 @@ class TodoToolkitProvider(ToolkitProvider[TodoToolkitConfig]):
         return TodoToolkit(store=self._store)
 
 
-def render_todo_prompt(state: TodoState) -> str:
-    """Render prompt fragment containing current todo state."""
-    if not state.items:
-        return _TODO_PROMPT
-    lines = [_TODO_PROMPT.rstrip(), "", "Current todo list:"]
-    for item in state.items:
-        lines.append(f"- [{item.status}] {item.content}")
-    return "\n".join(lines)
+def render_todo_prompt(state: TodoState | None = None) -> str:
+    """Render stable prompt fragment for todo tools."""
+    del state
+    return _TODO_PROMPT
 
 
 def make_update_todo_tool(
@@ -254,7 +248,7 @@ def make_update_todo_tool(
         snapshot = TodoStateSnapshot.from_state(updated)
         if publish_changed is not None:
             await publish_changed(snapshot)
-        return json.dumps(updated.model_dump(mode="json"), ensure_ascii=False)
+        return "Done"
 
     return make_tool(update_todo, input_model=UpdateTodoInput)
 

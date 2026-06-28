@@ -692,7 +692,10 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
         if self._excluded_tools:
             tools = [t for t in tools if t.spec.name not in self._excluded_tools]
 
-        projects = await self._load_projects(session_id=self._session_id)
+        projects = sorted(
+            await self._load_projects(session_id=self._session_id),
+            key=lambda project: project.path,
+        )
         self._last_projects = projects
         agents_prompt = await self._load_project_agents_prompt(file_ss, projects)
         prompt = self._render_config_prompt(
@@ -746,6 +749,9 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
             "possible. Use `exec_command` for command execution, package "
             "installation, and cases where no dedicated tool fits. Use "
             "`write_stdin` with empty chars to poll a running process.",
+            "Tool results may include `<system-reminder>` blocks with relevant "
+            "AGENTS.md instructions for files you read. Follow those instructions "
+            "for the paths they apply to.",
             "Recommended locations:",
             "- `/workspace/agent/` — Durable working files for this agent runtime",
             "- `/tmp/` — Temporary scratch space for the current runtime instance",
@@ -781,9 +787,11 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
 
         config = self._config
         if config.allowed_domains:
-            parts.append(f"Allowed domains: {', '.join(config.allowed_domains)}")
+            parts.append(
+                f"Allowed domains: {', '.join(sorted(config.allowed_domains))}"
+            )
         if config.denied_domains:
-            parts.append(f"Denied domains: {', '.join(config.denied_domains)}")
+            parts.append(f"Denied domains: {', '.join(sorted(config.denied_domains))}")
         return "\n".join(parts)
 
 

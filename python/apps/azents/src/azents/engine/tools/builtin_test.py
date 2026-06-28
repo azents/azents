@@ -19,7 +19,12 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
-from azents.core.tools import ShellToolkitConfig, ToolkitState, TurnContext
+from azents.core.tools import (
+    ShellToolkitConfig,
+    ToolCallHookOutcome,
+    ToolkitState,
+    TurnContext,
+)
 from azents.engine.events.engine_events import (
     RuntimeProcessOutputDeltaEvent,
     RuntimeReadyEvent,
@@ -36,7 +41,7 @@ from azents.engine.run.types import (
 from azents.engine.tools import builtin as builtin_module
 from azents.engine.tools.builtin import BuiltinToolkit, RuntimeToolkit
 from azents.engine.tools.builtin_agents import (
-    AGENTS_LIVE_READ_INTERVAL_TURNS,
+    AgentsAppendixDedupeState,
     ProjectAgentsInstructionState,
     RootAgentsInstructionState,
 )
@@ -153,6 +158,7 @@ class _FakeAgentsInstructionStateStore:
     def __init__(self) -> None:
         self.root_states: dict[tuple[str, str], RootAgentsInstructionState] = {}
         self.project_states: dict[tuple[str, str], ProjectAgentsInstructionState] = {}
+        self.dedupe_states: dict[tuple[str, str], AgentsAppendixDedupeState] = {}
 
     async def load_root(
         self, agent_id: str, session_id: str
@@ -206,6 +212,24 @@ class _FakeAgentsInstructionStateStore:
         """Apply project state update."""
         state = await self.load_project(agent_id, session_id)
         await self.save_project(agent_id, session_id, mutator(state))
+
+    async def load_appendix_dedupe(
+        self, agent_id: str, session_id: str
+    ) -> AgentsAppendixDedupeState:
+        """Return stored appendix dedupe state."""
+        return self.dedupe_states.get(
+            (agent_id, session_id), AgentsAppendixDedupeState()
+        )
+
+    async def update_appendix_dedupe(
+        self,
+        agent_id: str,
+        session_id: str,
+        mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
+    ) -> None:
+        """Apply appendix dedupe state update."""
+        state = await self.load_appendix_dedupe(agent_id, session_id)
+        self.dedupe_states[(agent_id, session_id)] = mutator(state)
 
 
 class _FakeRunnerOperations:
@@ -582,13 +606,6 @@ def _make_toolkit(
     return toolkit
 
 
-async def _drain_agents_refresh(toolkit: RuntimeToolkit) -> None:
-    """Wait until AGENTS.md background refresh task completes for tests."""
-    task = cast(Any, toolkit)._agents_refresh_task
-    if task is not None:
-        await task
-
-
 def _make_project(*, path: str) -> SessionWorkspaceProject:
     """Create SessionWorkspaceProject for tests."""
     now = datetime.now(UTC)
@@ -728,242 +745,75 @@ class TestRuntimeToolkitUpdateContext:
         assert "Registered Projects" not in state.prompt
 
     @pytest.mark.asyncio
-    async def test_project_agents_loaded_after_project_file_access(self) -> None:
-        """Project AGENTS is included after loaded Project file access."""
+    async def test_read_appends_root_and_project_agents(self) -> None:
+        """Successful read appends applicable AGENTS.md files parent-to-child."""
         toolkit = _make_toolkit(
             projects=[_make_project(path="/workspace/agent/app")],
             storage_files={
-                "/workspace/agent/app/AGENTS.md": b"PROJECT_AGENT_RULE",
-                "/workspace/agent/app/src/file.py": b"print('hi')",
-            },
-        )
-        await toolkit.update_context(_make_context())
-
-        await toolkit.on_before_tool_call(
-            MagicMock(
-                tool_name="read",
-                args_json='{"path": "/workspace/agent/app/src/file.py"}',
-            )
-        )
-        state = await toolkit.update_context(_make_context())
-        assert "Project Instructions" not in state.prompt
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
-
-        assert "Project Instructions" in state.prompt
-        assert "/workspace/agent/app/AGENTS.md" in state.prompt
-        assert "PROJECT_AGENT_RULE" in state.prompt
-
-    @pytest.mark.asyncio
-    async def test_project_agents_cache_miss_refresh_does_not_block_prompt(
-        self,
-    ) -> None:
-        """Cache miss live read runs in background and does not block update_context."""
-        toolkit = _make_toolkit(
-            projects=[_make_project(path="/workspace/agent/app")],
-            storage_files={
-                "/workspace/agent/app/AGENTS.md": b"PROJECT_AGENT_RULE",
-                "/workspace/agent/app/src/file.py": b"print('hi')",
-            },
-        )
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
-        )
-        stat_started = asyncio.Event()
-        stat_continue = asyncio.Event()
-        runner_operations.stat_started_event = stat_started
-        runner_operations.stat_continue_event = stat_continue
-        await toolkit.update_context(_make_context())
-        await toolkit.on_before_tool_call(
-            MagicMock(
-                tool_name="read",
-                args_json='{"path": "/workspace/agent/app/src/file.py"}',
-            )
-        )
-
-        state = await toolkit.update_context(_make_context())
-        await asyncio.wait_for(stat_started.wait(), timeout=1)
-
-        assert "Project Instructions" not in state.prompt
-        assert cast(Any, toolkit)._agents_refresh_task is not None
-
-        stat_continue.set()
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
-
-        assert "PROJECT_AGENT_RULE" in state.prompt
-
-    @pytest.mark.asyncio
-    async def test_project_agents_ignores_directory_named_agents_md(self) -> None:
-        """Do not read AGENTS.md candidate when it is not a file."""
-        toolkit = _make_toolkit(
-            projects=[_make_project(path="/workspace/agent/app")],
-            storage_files={
-                "/workspace/agent/app/AGENTS.md/nested.txt": b"NOT_A_RULE",
-                "/workspace/agent/app/src/file.py": b"print('hi')",
-            },
-        )
-        await toolkit.update_context(_make_context())
-
-        await toolkit.on_before_tool_call(
-            MagicMock(
-                tool_name="read",
-                args_json='{"path": "/workspace/agent/app/src/file.py"}',
-            )
-        )
-        state = await toolkit.update_context(_make_context())
-        assert "NOT_A_RULE" not in state.prompt
-        assert "Project Instructions" not in state.prompt
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
-
-        assert "NOT_A_RULE" not in state.prompt
-        assert "Project Instructions" not in state.prompt
-
-    @pytest.mark.asyncio
-    async def test_project_agents_prunes_missing_candidates_from_active_state(
-        self,
-    ) -> None:
-        """Do not leave nonexistent AGENTS candidate in active/cache state."""
-        toolkit = _make_toolkit(
-            projects=[_make_project(path="/workspace/agent/app")],
-            storage_files={
-                "/workspace/agent/app/src/file.py": b"print('hi')",
-            },
-        )
-        await toolkit.update_context(_make_context())
-
-        await toolkit.on_before_tool_call(
-            MagicMock(
-                tool_name="read",
-                args_json='{"path": "/workspace/agent/app/src/file.py"}',
-            )
-        )
-        await _drain_agents_refresh(toolkit)
-
-        store = cast(_FakeAgentsInstructionStateStore, cast(Any, toolkit)._agents_store)
-        state = await store.load_project("agent-1", "session-1")
-        assert state.active_project_paths == set()
-        assert state.project_contents == {}
-
-    @pytest.mark.asyncio
-    async def test_project_agents_ignores_not_directory_stat_failures(
-        self,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        """Silently ignore not-directory stat failure for AGENTS candidate."""
-        toolkit = _make_toolkit(
-            projects=[_make_project(path="/workspace/agent/app")],
-            storage_files={
+                "/workspace/agent/AGENTS.md": b"ROOT_RULE",
                 "/workspace/agent/app/AGENTS.md": b"PROJECT_RULE",
-                "/workspace/agent/app/frontend/src/file.py": b"print('hi')",
+                "/workspace/agent/app/src/AGENTS.md": b"SRC_RULE",
+                "/workspace/agent/app/src/file.py": b"print('hi')",
             },
         )
-        await toolkit.update_context(_make_context())
+        state = await toolkit.update_context(_make_context())
+        assert "ROOT_RULE" not in state.prompt
+        assert "PROJECT_RULE" not in state.prompt
 
-        await toolkit.on_before_tool_call(
+        decision = await toolkit.append_agents_after_read(
             MagicMock(
-                tool_name="grep",
-                args_json=(
-                    '{"path": "/workspace/agent/app/frontend/src/file.py", '
-                    '"pattern": "hi"}'
-                ),
-            )
-        )
-        state = await toolkit.update_context(_make_context())
-        assert "Project Instructions" not in state.prompt
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
-        runner_operations = cast(
-            _FakeRunnerOperations,
-            cast(Any, toolkit)._test_runner_operations,
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/app/src/file.py"}',
+            ),
+            ToolCallHookOutcome(output="FILE_CONTENT", error=None),
         )
 
-        assert "PROJECT_RULE" in state.prompt
-        assert "file.py/AGENTS.md" not in state.prompt
-        assert "/workspace/agent/app/frontend/src/file.py/AGENTS.md" in (
-            runner_operations.stat_calls
+        assert decision is not None
+        assert decision.output_text.startswith("FILE_CONTENT")
+        assert decision.output_text.index("ROOT_RULE") < decision.output_text.index(
+            "PROJECT_RULE"
         )
-        assert "Failed to read project AGENTS.md" not in caplog.text
+        assert decision.output_text.index("PROJECT_RULE") < decision.output_text.index(
+            "SRC_RULE"
+        )
 
     @pytest.mark.asyncio
-    async def test_project_agents_ignored_outside_loaded_project(self) -> None:
-        """AGENTS in unregistered folder is not included in prompt."""
+    async def test_read_appends_agents_only_once_until_compaction(self) -> None:
+        """AGENTS.md appendix is deduped by path until compaction clears state."""
+        agents_store = _FakeAgentsInstructionStateStore()
         toolkit = _make_toolkit(
+            agents_store=agents_store,
             projects=[_make_project(path="/workspace/agent/app")],
             storage_files={
-                "/workspace/agent/unregistered/AGENTS.md": b"SHOULD_NOT_APPEAR",
-                "/workspace/agent/unregistered/file.py": b"print('hi')",
+                "/workspace/agent/AGENTS.md": b"ROOT_RULE",
+                "/workspace/agent/app/AGENTS.md": b"PROJECT_RULE",
+                "/workspace/agent/app/file.py": b"print('hi')",
             },
         )
         await toolkit.update_context(_make_context())
 
-        await toolkit.on_before_tool_call(
-            MagicMock(
-                tool_name="read",
-                args_json='{"path": "/workspace/agent/unregistered/file.py"}',
-            )
-        )
-        state = await toolkit.update_context(_make_context())
-
-        assert "SHOULD_NOT_APPEAR" not in state.prompt
-
-    @pytest.mark.asyncio
-    async def test_project_agents_refresh_existing_active_file(self) -> None:
-        """Active AGENTS file reflects changed content on next turn refresh."""
-        files = {"/workspace/agent/app/AGENTS.md": b"OLD_RULE"}
-        toolkit = _make_toolkit(
-            projects=[_make_project(path="/workspace/agent/app")],
-            storage_files=files,
-        )
-        await toolkit.update_context(_make_context())
-        await toolkit.on_before_tool_call(
+        first = await toolkit.append_agents_after_read(
             MagicMock(
                 tool_name="read",
                 args_json='{"path": "/workspace/agent/app/file.py"}',
-            )
+            ),
+            ToolCallHookOutcome(output="ONE", error=None),
         )
-        state = await toolkit.update_context(_make_context())
-        assert "OLD_RULE" not in state.prompt
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
-        assert "OLD_RULE" in state.prompt
-
-        cast(Any, toolkit)._test_runner_operations.files[
-            "/workspace/agent/app/AGENTS.md"
-        ] = b"NEW_RULE"
-        cast(
-            Any, toolkit
-        )._agents_turns_since_live_read = AGENTS_LIVE_READ_INTERVAL_TURNS
-        state = await toolkit.update_context(_make_context())
-        assert "OLD_RULE" in state.prompt
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
-
-        assert "NEW_RULE" in state.prompt
-        assert "OLD_RULE" not in state.prompt
-
-    @pytest.mark.asyncio
-    async def test_project_agents_compaction_clears_project_instruction_state(
-        self,
-    ) -> None:
-        """compaction hook clears all Project AGENTS active/cache state."""
-        files = {"/workspace/agent/app/AGENTS.md": b"OLD_RULE"}
-        toolkit = _make_toolkit(
-            projects=[_make_project(path="/workspace/agent/app")],
-            storage_files=files,
-        )
-        await toolkit.update_context(_make_context())
-        await toolkit.on_before_tool_call(
+        second = await toolkit.append_agents_after_read(
             MagicMock(
                 tool_name="read",
-                args_json='{"path": "/workspace/agent/app/file.py"}',
-            )
+                args_json='{"path": "/workspace/agent/app/other.py"}',
+            ),
+            ToolCallHookOutcome(output="TWO", error=None),
         )
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
-        assert "OLD_RULE" in state.prompt
+
+        assert first is not None
+        assert second is None
+        dedupe = await agents_store.load_appendix_dedupe("agent-1", "session-1")
+        assert dedupe.appended_paths == [
+            "/workspace/agent/AGENTS.md",
+            "/workspace/agent/app/AGENTS.md",
+        ]
 
         hook = toolkit.hooks().get("on_session_compact")
         assert hook is not None
@@ -975,83 +825,84 @@ class TestRuntimeToolkitUpdateContext:
                 run_id="run-1",
             )
         )
-        state = await toolkit.update_context(_make_context())
-
-        assert "OLD_RULE" not in state.prompt
-        store = cast(_FakeAgentsInstructionStateStore, cast(Any, toolkit)._agents_store)
-        saved_state = await store.load_project("agent-1", "session-1")
-        assert saved_state.active_project_paths == set()
-        assert saved_state.project_contents == {}
-
-        await toolkit.on_before_tool_call(
+        third = await toolkit.append_agents_after_read(
             MagicMock(
                 tool_name="read",
-                args_json='{"path": "/workspace/agent/app/file.py"}',
-            )
+                args_json='{"path": "/workspace/agent/app/again.py"}',
+            ),
+            ToolCallHookOutcome(output="THREE", error=None),
         )
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
-        assert "OLD_RULE" in state.prompt
+
+        assert third is not None
+        assert "ROOT_RULE" in third.output_text
 
     @pytest.mark.asyncio
-    async def test_directory_tool_activates_nested_agents(self) -> None:
-        """directory tool enables ancestor AGENTS up to target directory."""
+    async def test_reading_agents_file_does_not_append_itself(self) -> None:
+        """Reading AGENTS.md itself does not append the same file as appendix."""
         toolkit = _make_toolkit(
             projects=[_make_project(path="/workspace/agent/app")],
             storage_files={
+                "/workspace/agent/AGENTS.md": b"ROOT_RULE",
                 "/workspace/agent/app/AGENTS.md": b"PROJECT_RULE",
-                "/workspace/agent/app/frontend/AGENTS.md": b"FRONTEND_RULE",
-                "/workspace/agent/app/frontend/src/AGENTS.md": b"SRC_RULE",
             },
         )
         await toolkit.update_context(_make_context())
 
-        await toolkit.on_before_tool_call(
+        decision = await toolkit.append_agents_after_read(
             MagicMock(
-                tool_name="grep",
-                args_json=(
-                    '{"path": "/workspace/agent/app/frontend/src", "pattern": "TODO"}'
-                ),
-            )
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/app/AGENTS.md"}',
+            ),
+            ToolCallHookOutcome(output="PROJECT_RULE", error=None),
         )
-        state = await toolkit.update_context(_make_context())
-        assert "Project Instructions" not in state.prompt
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
 
-        assert "PROJECT_RULE" in state.prompt
-        assert "FRONTEND_RULE" in state.prompt
-        assert "SRC_RULE" in state.prompt
+        assert decision is not None
+        assert "ROOT_RULE" in decision.output_text
+        assert decision.output_text.count("PROJECT_RULE") == 1
 
     @pytest.mark.asyncio
-    async def test_project_agents_prompt_omits_over_budget_files(self) -> None:
-        """Items exceeding Project AGENTS prompt budget are omitted from prompt."""
-        storage_files = {
-            f"/workspace/agent/app/dir-{index}/AGENTS.md": f"RULE_{index}".encode()
-            for index in range(25)
-        }
+    async def test_non_read_tools_do_not_append_agents(self) -> None:
+        """AGENTS.md appendix is limited to successful read results."""
         toolkit = _make_toolkit(
             projects=[_make_project(path="/workspace/agent/app")],
-            storage_files=storage_files,
+            storage_files={
+                "/workspace/agent/AGENTS.md": b"ROOT_RULE",
+                "/workspace/agent/app/AGENTS.md": b"PROJECT_RULE",
+            },
         )
         await toolkit.update_context(_make_context())
 
-        for index in range(25):
-            await toolkit.on_before_tool_call(
-                MagicMock(
-                    tool_name="read",
-                    args_json=json.dumps(
-                        {"path": f"/workspace/agent/app/dir-{index}/file.py"}
-                    ),
-                )
-            )
-        state = await toolkit.update_context(_make_context())
-        assert "Project Instructions" not in state.prompt
-        await _drain_agents_refresh(toolkit)
-        state = await toolkit.update_context(_make_context())
+        decision = await toolkit.append_agents_after_read(
+            MagicMock(
+                tool_name="write",
+                args_json='{"path": "/workspace/agent/app/file.py", "content": "x"}',
+            ),
+            ToolCallHookOutcome(output="WROTE", error=None),
+        )
 
-        assert "RULE_0" in state.prompt
-        assert "additional AGENTS.md instruction file(s) were omitted" in state.prompt
+        assert decision is None
+
+    @pytest.mark.asyncio
+    async def test_missing_or_non_file_agents_candidates_are_ignored(self) -> None:
+        """Missing and non-file AGENTS.md candidates are not appended."""
+        toolkit = _make_toolkit(
+            projects=[_make_project(path="/workspace/agent/app")],
+            storage_files={
+                "/workspace/agent/app/AGENTS.md/nested.txt": b"NOT_A_RULE",
+                "/workspace/agent/app/file.py": b"print('hi')",
+            },
+        )
+        await toolkit.update_context(_make_context())
+
+        decision = await toolkit.append_agents_after_read(
+            MagicMock(
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/app/file.py"}',
+            ),
+            ToolCallHookOutcome(output="FILE", error=None),
+        )
+
+        assert decision is None
 
 
 # ---------------------------------------------------------------------------
@@ -1134,7 +985,7 @@ class TestBuiltinToolkitMemoryPrompt:
 
     @pytest.mark.asyncio
     async def test_root_agents_loaded_from_persistent_state(self) -> None:
-        """persistent root AGENTS.md state is included in prompt."""
+        """persistent root AGENTS.md state is not included in prompt."""
         agents_store = _FakeAgentsInstructionStateStore()
         await agents_store.save_root(
             "agent-root-state-test",
@@ -1151,75 +1002,7 @@ class TestBuiltinToolkitMemoryPrompt:
 
         state = await toolkit.update_context(_make_context())
 
-        assert "SNAPSHOT_ROOT_RULE" in state.prompt
-
-    @pytest.mark.asyncio
-    async def test_root_agents_snapshot_updated_by_write_with_size_cap(self) -> None:
-        """root AGENTS write hook updates snapshot after applying size cap."""
-        agents_store = _FakeAgentsInstructionStateStore()
-        toolkit = _make_builtin_toolkit(
-            config=ShellToolkitConfig(memory_enabled=False),
-            agent_id="agent-snapshot-test",
-            agents_store=agents_store,
-        )
-        big_content = "x" * (70 * 1024)
-
-        runtime_toolkit = _make_toolkit(
-            agent_id="agent-snapshot-test",
-            agents_store=agents_store,
-        )
-        await runtime_toolkit.on_after_tool_call(
-            MagicMock(
-                tool_name="write",
-                args_json=json.dumps(
-                    {"path": "/workspace/agent/AGENTS.md", "content": big_content}
-                ),
-            ),
-            MagicMock(error=None),
-        )
-        state = await toolkit.update_context(_make_context())
-
-        assert "Session Workspace Instructions" in state.prompt
-        assert "... (truncated)" in state.prompt
-
-    @pytest.mark.asyncio
-    async def test_root_agents_snapshot_updated_by_edit(self) -> None:
-        """root AGENTS edit hook does not leave existing snapshot stale."""
-        agent_id = "agent-edit-snapshot-test"
-        agents_store = _FakeAgentsInstructionStateStore()
-        runtime_toolkit = _make_toolkit(agent_id=agent_id, agents_store=agents_store)
-        await runtime_toolkit.on_after_tool_call(
-            MagicMock(
-                tool_name="write",
-                args_json=json.dumps(
-                    {"path": "/workspace/agent/AGENTS.md", "content": "OLD_RULE"}
-                ),
-            ),
-            MagicMock(error=None),
-        )
-        await runtime_toolkit.on_after_tool_call(
-            MagicMock(
-                tool_name="edit",
-                args_json=json.dumps(
-                    {
-                        "path": "/workspace/agent/AGENTS.md",
-                        "old_string": "OLD",
-                        "new_string": "NEW",
-                    }
-                ),
-            ),
-            MagicMock(error=None),
-        )
-        toolkit = _make_builtin_toolkit(
-            config=ShellToolkitConfig(memory_enabled=False),
-            agent_id=agent_id,
-            agents_store=agents_store,
-        )
-
-        state = await toolkit.update_context(_make_context())
-
-        assert "NEW_RULE" in state.prompt
-        assert "OLD_RULE" not in state.prompt
+        assert "SNAPSHOT_ROOT_RULE" not in state.prompt
 
 
 # ---------------------------------------------------------------------------

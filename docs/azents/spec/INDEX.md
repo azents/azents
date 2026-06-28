@@ -14,10 +14,10 @@ Details of all living specs. Synchronized from frontmatter.
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-06-18 | 35 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-06-28 | 75 |
-| goal | [Goal Domain Spec](domain/goal.md) | - | 2026-06-23 | 6 |
+| goal | [Goal Domain Spec](domain/goal.md) | - | 2026-06-29 | 7 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-05-10 | 1 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-06-28 | 37 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-06-29 | 38 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-06-18 | 4 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-06-27 | 21 |
 
@@ -33,7 +33,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-06-27 | 12 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-06-27 | 8 |
-| [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-23 | 3 |
+| [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-06-25 | 7 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-06-27 | 9 |

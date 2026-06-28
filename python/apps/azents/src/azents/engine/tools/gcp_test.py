@@ -168,7 +168,9 @@ class TestGcpToolkitUpdateContext:
             "azents.engine.tools.gcp.mcp_list_tools",
             side_effect=mock_list_tools,
         ):
-            state = await toolkit.update_context(ctx)
+            async with toolkit:
+                await _wait_gcp_tasks(toolkit)
+                state = await toolkit.update_context(ctx)
 
         names = {t.spec.name for t in state.tools}
         assert "log_query" in names
@@ -230,7 +232,9 @@ class TestGcpToolkitReadOnlyFiltering:
             new_callable=AsyncMock,
             return_value=([read_tool, write_tool], False),
         ):
-            state = await toolkit.update_context(ctx)
+            async with toolkit:
+                await _wait_gcp_tasks(toolkit)
+                state = await toolkit.update_context(ctx)
 
         names = {t.spec.name for t in state.tools}
         assert "log_query" in names
@@ -253,7 +257,9 @@ class TestGcpToolkitReadOnlyFiltering:
             new_callable=AsyncMock,
             return_value=([read_tool, write_tool], False),
         ):
-            state = await toolkit.update_context(ctx)
+            async with toolkit:
+                await _wait_gcp_tasks(toolkit)
+                state = await toolkit.update_context(ctx)
 
         names = {t.spec.name for t in state.tools}
         assert "log_query" in names
@@ -316,7 +322,9 @@ class TestGcpToolkitConnectionFailure:
             "azents.engine.tools.gcp.mcp_list_tools",
             side_effect=mock_list_tools,
         ):
-            state = await toolkit.update_context(ctx)
+            async with toolkit:
+                await _wait_gcp_tasks(toolkit)
+                state = await toolkit.update_context(ctx)
 
         # Only logging service tools are returned
         assert len(state.tools) == 1
@@ -344,6 +352,12 @@ def _make_call_tool_result(text: str) -> MagicMock:
     result.content = [TextContent(type="text", text=text)]
     result.isError = False
     return result
+
+
+async def _wait_gcp_tasks(toolkit: GcpToolkit) -> None:
+    """Wait for background GCP MCP discovery tasks."""
+    for task in toolkit._bg_tasks.values():  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+        await task
 
 
 # ---------------------------------------------------------------------------
@@ -374,11 +388,13 @@ class TestGcpToolHandlers:
                 return_value=mock_success,
             ) as mock_call,
         ):
-            state = await toolkit.update_context(ctx)
-            assert len(state.tools) == 1
-            tool = _find_tool(state.tools, "log_query")
+            async with toolkit:
+                await _wait_gcp_tasks(toolkit)
+                state = await toolkit.update_context(ctx)
+                assert len(state.tools) == 1
+                tool = _find_tool(state.tools, "log_query")
 
-            result = await tool.handler('{"filter": "severity=ERROR"}')
+                result = await tool.handler('{"filter": "severity=ERROR"}')
 
         assert result == "log query result"
         mock_call.assert_awaited_once()
@@ -408,9 +424,11 @@ class TestGcpToolHandlers:
                 side_effect=[http_401, mock_success],
             ) as mock_call,
         ):
-            state = await toolkit.update_context(ctx)
-            tool = _find_tool(state.tools, "log_query")
-            result = await tool.handler("{}")
+            async with toolkit:
+                await _wait_gcp_tasks(toolkit)
+                state = await toolkit.update_context(ctx)
+                tool = _find_tool(state.tools, "log_query")
+                result = await tool.handler("{}")
 
         assert result == "retried result"
         # Two calls: first (401) + retry (success)
@@ -460,7 +478,7 @@ class TestGcpToolkitBackgroundConnect:
                 # Both services connecting -> loading
                 state = await toolkit.update_context(ctx)
                 assert state.tools == []
-                assert "Loading" in state.prompt
+                assert "Loading" not in state.prompt
 
                 # Only logging complete
                 connect_events["logging"].set()
@@ -474,7 +492,7 @@ class TestGcpToolkitBackgroundConnect:
                 # Return only logging tools; monitoring still loading
                 assert len(state.tools) == 1
                 assert state.tools[0].spec.name == "log_query"
-                assert "Loading" in state.prompt
+                assert "Loading" not in state.prompt
 
                 # monitoring also complete
                 connect_events["monitoring"].set()
@@ -548,8 +566,8 @@ class TestGcpToolkitBackgroundConnect:
         assert len(toolkit._bg_tasks) == 0  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate task cleanup in tests
 
     @pytest.mark.asyncio
-    async def test_fallback_sync_without_aenter(self) -> None:
-        """Synchronous parallel collection fallback when called without __aenter__."""
+    async def test_without_aenter_does_not_sync_discover_tools(self) -> None:
+        """update_context without __aenter__ does not synchronously list tools."""
         toolkit = _make_toolkit(services=[GcpService.LOGGING])
         ctx = _make_context()
 
@@ -560,5 +578,4 @@ class TestGcpToolkitBackgroundConnect:
         ):
             state = await toolkit.update_context(ctx)
 
-        assert len(state.tools) == 1
-        assert state.tools[0].spec.name == "log_query"
+        assert state.tools == []

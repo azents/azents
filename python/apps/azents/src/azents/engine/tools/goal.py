@@ -208,7 +208,6 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         del context
         if not self._session_id:
             return ToolkitState(status=ToolkitStatus.ENABLED, tools=[], prompt="")
-        goal_state = await self._store.load(self._agent_id, self._session_id)
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
@@ -228,7 +227,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
                     session_id=self._session_id,
                 ),
             ],
-            prompt=render_goal_prompt(goal_state),
+            prompt=render_goal_prompt(),
         )
 
     def hooks(self) -> RuntimeHooks:
@@ -285,19 +284,10 @@ class GoalToolkitProvider(ToolkitProvider[GoalToolkitConfig]):
         return GoalToolkit(store=self._store)
 
 
-def render_goal_prompt(state: GoalState) -> str:
-    """Render prompt fragment containing current goal state."""
-    if not state.objective or state.status is None:
-        return _GOAL_PROMPT
-    return "\n".join(
-        [
-            _GOAL_PROMPT.rstrip(),
-            "",
-            "Current goal:",
-            f"- status: {state.status}",
-            f"- objective: {state.objective}",
-        ]
-    )
+def render_goal_prompt(state: GoalState | None = None) -> str:
+    """Render stable prompt fragment for goal tools."""
+    del state
+    return _GOAL_PROMPT
 
 
 def _now_iso() -> str:
