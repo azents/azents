@@ -1,7 +1,6 @@
 """Shared failed-run finalization helpers."""
 
 import dataclasses
-import datetime
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
@@ -9,18 +8,15 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import PublishedEvent
-from azents.core.enums import AgentRunStatus, EventKind
 from azents.engine.events.engine_events import RunComplete
-from azents.engine.events.types import Event, RunMarkerPayload, SystemErrorPayload
+from azents.engine.events.finalization import FailedRunEventStore
+from azents.engine.events.types import Event
 from azents.engine.run.failure import (
-    FailedRunFailureMetadata,
     FailedRunFinalizationReason,
     FailedRunRetryState,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -51,10 +47,7 @@ class FailedRunErrorFinalizer:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
-    event_transcript_repository: Annotated[
-        EventTranscriptRepository, Depends(EventTranscriptRepository)
-    ]
-    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    event_store: Annotated[FailedRunEventStore, Depends(FailedRunEventStore)]
     session_lifecycle: Annotated[
         SessionLifecycleService, Depends(SessionLifecycleService)
     ]
@@ -66,46 +59,18 @@ class FailedRunErrorFinalizer:
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> FailedRunFinalizationResult:
         """Append terminal failed-run output and close the run as failed."""
-        metadata = FailedRunFailureMetadata.from_retry_state(
-            input.retry_state,
-            finalization_reason=input.reason,
-            action_hint=input.action_hint,
-        )
         async with self.session_manager() as session:
-            error_event = await self.event_transcript_repository.append(
+            finalized = await self.event_store.append_terminal_failed_run(
                 session,
-                EventCreate(
-                    session_id=input.session_id,
-                    kind=EventKind.SYSTEM_ERROR,
-                    payload=SystemErrorPayload(
-                        content=input.user_message,
-                        severity="error",
-                        recoverable=True,
-                        failure=metadata,
-                    ).model_dump(mode="json", exclude_none=True),
-                    external_id=f"failed-run:{input.run_id}:system-error",
-                ),
+                session_id=input.session_id,
+                run_id=input.run_id,
+                user_message=input.user_message,
+                retry_state=input.retry_state,
+                reason=input.reason,
+                action_hint=input.action_hint,
             )
-            run_marker = await self.event_transcript_repository.append(
-                session,
-                EventCreate(
-                    session_id=input.session_id,
-                    kind=EventKind.RUN_MARKER,
-                    payload=RunMarkerPayload(
-                        run_id=input.run_id,
-                        status="failed",
-                        error=input.user_message,
-                    ).model_dump(mode="json", exclude_none=True),
-                    external_id=f"failed-run:{input.run_id}:run-marker",
-                ),
-            )
-            await self.agent_run_repository.mark_terminal_if_running(
-                session,
-                input.run_id,
-                AgentRunStatus.FAILED,
-                ended_at=datetime.datetime.now(datetime.UTC),
-                last_completed_event_id=run_marker.id,
-            )
+            error_event = finalized.error_event
+            run_marker = finalized.run_marker
         await dispatch_event(input.session_id, error_event)
         await dispatch_event(input.session_id, run_marker)
         await dispatch_event(input.session_id, RunComplete())

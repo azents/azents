@@ -8,12 +8,20 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import PublishedEvent
-from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.enums import EventKind
 from azents.engine.events.engine_events import RunComplete
+from azents.engine.events.finalization import (
+    FailedRunEventStore,
+    FailedRunEventStoreResult,
+)
 from azents.engine.events.types import Event, RunMarkerPayload, SystemErrorPayload
-from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
+from azents.engine.run.failure import (
+    FailedRunAttempt,
+    FailedRunFailureMetadata,
+    FailedRunFinalizationReason,
+    FailedRunRetryState,
+)
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.worker.run.finalizer import (
     FailedRunErrorFinalizer,
@@ -41,44 +49,80 @@ class _SessionManager:
         return _SessionScope()
 
 
-class _TranscriptRepository:
-    """EventTranscriptRepository test double."""
+class _FailedRunEventStore:
+    """FailedRunEventStore test double."""
 
     def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
         self.creates: list[EventCreate] = []
 
-    async def append(self, session: AsyncSession, create: EventCreate) -> Event:
-        """Record event creation and return a matching event."""
-        del session
-        self.creates.append(create)
-        return Event(
-            id=f"{len(self.creates):032d}",
-            session_id=create.session_id,
-            kind=create.kind,
-            payload=_payload_from_create(create),
-            external_id=create.external_id,
-            created_at=datetime.datetime.now(datetime.UTC),
-        )
-
-
-class _AgentRunRepository:
-    """AgentRunRepository test double."""
-
-    def __init__(self) -> None:
-        self.terminal_calls: list[tuple[str, AgentRunStatus, str | None]] = []
-
-    async def mark_terminal_if_running(
+    async def append_terminal_failed_run(
         self,
         session: AsyncSession,
-        run_id: str,
-        status: AgentRunStatus,
         *,
-        ended_at: datetime.datetime,
-        last_completed_event_id: str | None = None,
-    ) -> None:
-        """Record terminal transition request."""
-        del session, ended_at
-        self.terminal_calls.append((run_id, status, last_completed_event_id))
+        session_id: str,
+        run_id: str,
+        user_message: str,
+        retry_state: FailedRunRetryState,
+        reason: FailedRunFinalizationReason,
+        action_hint: str | None = None,
+    ) -> FailedRunEventStoreResult:
+        """Record finalization request and return matching events."""
+        del session
+        self.calls.append(
+            {
+                "session_id": session_id,
+                "run_id": run_id,
+                "user_message": user_message,
+                "retry_state": retry_state,
+                "reason": reason,
+                "action_hint": action_hint,
+            }
+        )
+        error_create = EventCreate(
+            session_id=session_id,
+            kind=EventKind.SYSTEM_ERROR,
+            payload=SystemErrorPayload(
+                content=user_message,
+                severity="error",
+                recoverable=True,
+                failure=FailedRunFailureMetadata.from_retry_state(
+                    retry_state,
+                    finalization_reason=reason,
+                    action_hint=action_hint,
+                ),
+            ).model_dump(mode="json", exclude_none=True),
+            external_id=f"failed-run:{run_id}:system-error",
+        )
+        marker_create = EventCreate(
+            session_id=session_id,
+            kind=EventKind.RUN_MARKER,
+            payload=RunMarkerPayload(
+                run_id=run_id,
+                status="failed",
+                error=user_message,
+            ).model_dump(mode="json", exclude_none=True),
+            external_id=f"failed-run:{run_id}:run-marker",
+        )
+        self.creates.extend([error_create, marker_create])
+        return FailedRunEventStoreResult(
+            error_event=Event(
+                id="1".rjust(32, "0"),
+                session_id=session_id,
+                kind=EventKind.SYSTEM_ERROR,
+                payload=_payload_from_create(error_create),
+                external_id=error_create.external_id,
+                created_at=datetime.datetime.now(datetime.UTC),
+            ),
+            run_marker=Event(
+                id="2".rjust(32, "0"),
+                session_id=session_id,
+                kind=EventKind.RUN_MARKER,
+                payload=_payload_from_create(marker_create),
+                external_id=marker_create.external_id,
+                created_at=datetime.datetime.now(datetime.UTC),
+            ),
+        )
 
 
 class _SessionLifecycle:
@@ -121,17 +165,12 @@ def _retry_state() -> FailedRunRetryState:
 @pytest.mark.asyncio
 async def test_failed_run_finalizer_appends_error_marker_and_run_complete() -> None:
     """Finalizer promotes latest retry state to durable failed-run output."""
-    transcript_repository = _TranscriptRepository()
-    agent_run_repository = _AgentRunRepository()
+    event_store = _FailedRunEventStore()
     lifecycle = _SessionLifecycle()
     dispatched: list[tuple[str, PublishedEvent]] = []
     finalizer = FailedRunErrorFinalizer(
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
-        event_transcript_repository=cast(
-            EventTranscriptRepository,
-            transcript_repository,
-        ),
-        agent_run_repository=cast(AgentRunRepository, agent_run_repository),
+        event_store=cast(FailedRunEventStore, event_store),
         session_lifecycle=cast(SessionLifecycleService, lifecycle),
     )
 
@@ -149,10 +188,11 @@ async def test_failed_run_finalizer_appends_error_marker_and_run_complete() -> N
         dispatch_event=dispatch_event,
     )
 
-    assert [create.kind for create in transcript_repository.creates] == [
+    assert [create.kind for create in event_store.creates] == [
         EventKind.SYSTEM_ERROR,
         EventKind.RUN_MARKER,
     ]
+    assert event_store.calls[0]["reason"] == "retry_exhausted"
     error_payload = result.error_event.payload
     assert isinstance(error_payload, SystemErrorPayload)
     assert error_payload.content == "temporary failure"
@@ -163,8 +203,5 @@ async def test_failed_run_finalizer_appends_error_marker_and_run_complete() -> N
     marker_payload = result.run_marker.payload
     assert isinstance(marker_payload, RunMarkerPayload)
     assert marker_payload.status == "failed"
-    assert agent_run_repository.terminal_calls == [
-        ("run-001".rjust(32, "0"), AgentRunStatus.FAILED, result.run_marker.id)
-    ]
     assert isinstance(dispatched[-1][1], RunComplete)
     assert lifecycle.cleared_session_ids == ["session-001"]
