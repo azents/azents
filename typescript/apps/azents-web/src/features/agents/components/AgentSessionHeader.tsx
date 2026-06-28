@@ -261,9 +261,20 @@ export function AgentSessionHeader({
           />
           <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
             <Group gap="xs" wrap="wrap">
-              <Text fw={600} size="md">
-                {sessionTitle}
-              </Text>
+              <Group gap={4} wrap="nowrap" style={{ minWidth: 0 }}>
+                <Text fw={600} size="md" truncate>
+                  {sessionTitle}
+                </Text>
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  onClick={handleOpenRename}
+                  aria-label={t("sessions.rename")}
+                  style={{ flexShrink: 0 }}
+                >
+                  <IconPencil size={rem(14)} />
+                </ActionIcon>
+              </Group>
               <Badge
                 size="sm"
                 variant="dot"
@@ -290,16 +301,9 @@ export function AgentSessionHeader({
               </Text>
             )}
           </Stack>
-          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-            {activeTab === "chat" && chatControls && <Box>{chatControls}</Box>}
-            <ActionIcon
-              variant="subtle"
-              onClick={handleOpenRename}
-              aria-label={t("sessions.rename")}
-            >
-              <IconPencil size={rem(18)} />
-            </ActionIcon>
-          </Group>
+          {activeTab === "chat" && chatControls && (
+            <Box style={{ flexShrink: 0 }}>{chatControls}</Box>
+          )}
         </Group>
         <Group
           hiddenFrom="lg"
@@ -321,18 +325,22 @@ export function AgentSessionHeader({
             avatar={agent.avatar ?? null}
             size={24}
           />
-          <Text fw={600} size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
-            {sessionTitle}
-          </Text>
-          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-            {activeTab === "chat" && onOpenRuntime && chatControls}
+          <Group gap={4} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+            <Text fw={600} size="sm" truncate style={{ minWidth: 0 }}>
+              {sessionTitle}
+            </Text>
             <ActionIcon
               variant="subtle"
+              size="sm"
               onClick={handleOpenRename}
               aria-label={t("sessions.rename")}
+              style={{ flexShrink: 0 }}
             >
-              <IconPencil size="1rem" />
+              <IconPencil size="0.875rem" />
             </ActionIcon>
+          </Group>
+          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+            {activeTab === "chat" && onOpenRuntime && chatControls}
             {activeTab === "chat" && onOpenRuntime && (
               <ActionIcon
                 variant="subtle"
