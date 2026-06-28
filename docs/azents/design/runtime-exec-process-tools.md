@@ -137,7 +137,7 @@ Runner restart or generation mismatch means previous processes are gone. A later
 
 When the model calls `exec_command` for a quick command, the user sees a normal tool result with output and exit code.
 
-When the command keeps running past the yield window, the model receives a result explaining that the process is still running and includes a process id. The UI can show live output associated with the process. `exec_command` defaults to a 10000 ms yield window clamped to 250-30000 ms.
+When the command keeps running past the yield window, the model receives a result explaining that the process is still running and includes a process id. The UI can show live output associated with the process. `exec_command` defaults to a 10000 ms yield window accepted in the 250-30000 ms range.
 
 ### Polling output
 

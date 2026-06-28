@@ -17,7 +17,7 @@ from textwrap import dedent
 from typing import NoReturn, Protocol
 
 from azcommon.types import JSONObject
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -284,7 +284,7 @@ class ExecCommandInput(BaseModel):
         le=_MAX_PROCESS_YIELD_TIME_MS,
         description=(
             "How long to wait for process output before yielding, in milliseconds. "
-            "Defaults to 10000 ms; effective range is 250-30000 ms."
+            "Defaults to 10000 ms; accepted range is 250-30000 ms."
         ),
     )
     max_output_bytes: int = Field(
@@ -319,6 +319,30 @@ class WriteStdinInput(BaseModel):
         le=_MAX_PROCESS_MAX_OUTPUT_BYTES,
         description="Maximum stdout/stderr bytes to return in this tool result.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_empty_poll_yield_time(cls, data: object) -> object:
+        if not isinstance(data, dict) or "yield_time_ms" in data:
+            return data
+        if data.get("chars", "") != "":
+            return data
+        return {**data, "yield_time_ms": _DEFAULT_PROCESS_EMPTY_POLL_YIELD_TIME_MS}
+
+    @model_validator(mode="after")
+    def _validate_yield_time_range(self) -> "WriteStdinInput":
+        if self.chars == "":
+            if self.yield_time_ms < _MIN_PROCESS_EMPTY_POLL_YIELD_TIME_MS:
+                msg = "empty poll yield_time_ms must be at least 5000"
+                raise ValueError(msg)
+            return self
+        if self.yield_time_ms < _MIN_PROCESS_YIELD_TIME_MS:
+            msg = "non-empty write yield_time_ms must be at least 250"
+            raise ValueError(msg)
+        if self.yield_time_ms > _MAX_PROCESS_YIELD_TIME_MS:
+            msg = "non-empty write yield_time_ms must be at most 30000"
+            raise ValueError(msg)
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -1269,17 +1293,16 @@ def make_exec_command_tool(
                 agent_id=agent_id,
             )
             await publish_event(RuntimeReadyEvent())
-            yield_time_ms = _exec_process_yield_time_ms(args)
             result = await runner_operations.start_process(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 command=args.command,
                 workdir=args.workdir,
-                yield_time_ms=yield_time_ms,
+                yield_time_ms=args.yield_time_ms,
                 max_output_bytes=args.max_output_bytes,
                 env=secret_env or None,
                 owner_session_id=owner_session_id,
-                deadline_at=_runtime_process_operation_deadline(yield_time_ms),
+                deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
                 process_output_callback=_publish_process_output_delta(publish_event),
             )
         except (
@@ -1307,7 +1330,7 @@ def make_exec_command_tool(
             "Start a shell process in the Agent Runtime workspace. Returns output "
             "and exit_code when it exits within yield_time_ms; otherwise returns a "
             "running process_id for write_stdin polling or input. yield_time_ms "
-            "defaults to 10000 ms and is clamped to 250-30000 ms."
+            "defaults to 10000 ms and accepts 250-30000 ms."
         ),
     )
     return dataclasses.replace(
@@ -1341,16 +1364,15 @@ def make_write_stdin_tool(
                 agent_id=agent_id,
             )
             await publish_event(RuntimeReadyEvent())
-            yield_time_ms = _write_process_yield_time_ms(args)
             result = await runner_operations.write_process_stdin(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 process_id=args.process_id,
                 stdin=args.chars,
-                yield_time_ms=yield_time_ms,
+                yield_time_ms=args.yield_time_ms,
                 max_output_bytes=args.max_output_bytes,
                 owner_session_id=owner_session_id,
-                deadline_at=_runtime_process_operation_deadline(yield_time_ms),
+                deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
                 process_output_callback=_publish_process_output_delta(publish_event),
             )
         except (
@@ -1451,31 +1473,6 @@ def _publish_process_output_delta(
         )
 
     return callback
-
-
-def _exec_process_yield_time_ms(args: ExecCommandInput) -> int:
-    """Return Codex-style effective exec yield window."""
-    return max(
-        _MIN_PROCESS_YIELD_TIME_MS,
-        min(args.yield_time_ms, _MAX_PROCESS_YIELD_TIME_MS),
-    )
-
-
-def _write_process_yield_time_ms(args: WriteStdinInput) -> int:
-    """Return Codex-style effective write/poll yield window."""
-    explicit = "yield_time_ms" in args.model_fields_set
-    if args.chars == "":
-        requested = args.yield_time_ms
-        if not explicit:
-            requested = _DEFAULT_PROCESS_EMPTY_POLL_YIELD_TIME_MS
-        return max(
-            _MIN_PROCESS_EMPTY_POLL_YIELD_TIME_MS,
-            min(requested, _MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS),
-        )
-    return max(
-        _MIN_PROCESS_YIELD_TIME_MS,
-        min(args.yield_time_ms, _MAX_PROCESS_YIELD_TIME_MS),
-    )
 
 
 def _runtime_process_operation_deadline(yield_time_ms: int) -> datetime:
