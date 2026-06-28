@@ -10,6 +10,7 @@ import { trpc } from "@/trpc/client";
 import {
   mapWorkspaceManifest,
   mapWorkspacePathResult,
+  mapWorkspacePathStat,
   type WorkspaceEntry,
   type WorkspacePanelState,
   type WorkspaceProjectPanelState,
@@ -33,6 +34,10 @@ export interface WorkspacePanelContainerOutput {
   onOpenDirectory: (path: string) => void;
   onOpenFile: (path: string) => void;
   onRefresh: () => void;
+  onCreateDirectory: (path: string) => void;
+  onRenamePath: (sourcePath: string, newName: string) => void;
+  onMovePath: (sourcePath: string, destinationPath: string) => void;
+  onDeletePath: (path: string, recursive: boolean) => void;
   getDownloadHref: (path: string) => string;
   onRegisterProjectPathChange: (path: string) => void;
   onRegisterProject: () => void;
@@ -147,6 +152,19 @@ export function useWorkspacePanelContainer({
     },
   );
 
+  const selectedEntry = useMemo(() => {
+    if (!selectedFilePath) {
+      return null;
+    }
+    for (const entries of Object.values(directoryEntriesByPath)) {
+      const found = entries.find((entry) => entry.path === selectedFilePath);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }, [directoryEntriesByPath, selectedFilePath]);
+
   const fileQuery = trpc.chat.readAgentWorkspacePath.useQuery(
     {
       agentId,
@@ -156,9 +174,63 @@ export function useWorkspacePanelContainer({
     {
       enabled:
         workspaceQuery.data?.workspace.type === "READY" &&
+        selectedFilePath !== null &&
+        selectedEntry?.kind === "file",
+    },
+  );
+
+  const statQuery = trpc.chat.statAgentWorkspacePath.useQuery(
+    {
+      agentId,
+      path: selectedFilePath ?? "",
+    },
+    {
+      enabled:
+        workspaceQuery.data?.workspace.type === "READY" &&
         selectedFilePath !== null,
     },
   );
+
+  const invalidateWorkspaceFiles = useCallback(
+    async (path?: string) => {
+      await Promise.all([
+        utils.chat.getAgentWorkspace.invalidate({ agentId }),
+        utils.chat.readAgentWorkspacePath.invalidate({ agentId }),
+        utils.chat.statAgentWorkspacePath.invalidate({ agentId, path }),
+      ]);
+    },
+    [
+      agentId,
+      utils.chat.getAgentWorkspace,
+      utils.chat.readAgentWorkspacePath,
+      utils.chat.statAgentWorkspacePath,
+    ],
+  );
+
+  const createDirectoryMutation =
+    trpc.chat.createAgentWorkspaceDirectory.useMutation({
+      onSuccess: async () => {
+        await invalidateWorkspaceFiles();
+      },
+    });
+
+  const deletePathMutation = trpc.chat.deleteAgentWorkspacePath.useMutation({
+    onSuccess: async (_data, variables) => {
+      if (selectedFilePath === variables.path) {
+        setSelectedFilePath(null);
+      }
+      await invalidateWorkspaceFiles(variables.path);
+    },
+  });
+
+  const movePathMutation = trpc.chat.moveAgentWorkspacePath.useMutation({
+    onSuccess: async (_data, variables) => {
+      if (selectedFilePath === variables.sourcePath) {
+        setSelectedFilePath(variables.destinationPath);
+      }
+      await invalidateWorkspaceFiles(variables.destinationPath);
+    },
+  });
 
   const startRuntimeMutation = trpc.chat.startAgentRuntime.useMutation({
     onSuccess: async (_data, variables) => {
@@ -280,6 +352,49 @@ export function useWorkspacePanelContainer({
     setSelectedFilePath(path);
   }, []);
 
+  const onCreateDirectory = useCallback(
+    (path: string) => {
+      createDirectoryMutation.mutate({ agentId, path, parents: false });
+    },
+    [agentId, createDirectoryMutation],
+  );
+
+  const onRenamePath = useCallback(
+    (sourcePath: string, newName: string) => {
+      const parent = sourcePath.slice(
+        0,
+        Math.max(0, sourcePath.lastIndexOf("/")),
+      );
+      const destinationPath = `${parent}/${newName}`;
+      movePathMutation.mutate({
+        agentId,
+        sourcePath,
+        destinationPath,
+        overwrite: false,
+      });
+    },
+    [agentId, movePathMutation],
+  );
+
+  const onMovePath = useCallback(
+    (sourcePath: string, destinationPath: string) => {
+      movePathMutation.mutate({
+        agentId,
+        sourcePath,
+        destinationPath,
+        overwrite: false,
+      });
+    },
+    [agentId, movePathMutation],
+  );
+
+  const onDeletePath = useCallback(
+    (path: string, recursive: boolean) => {
+      deletePathMutation.mutate({ agentId, path, recursive });
+    },
+    [agentId, deletePathMutation],
+  );
+
   const onRefresh = useCallback(() => {
     setIsManualRefreshing(true);
     void Promise.all([
@@ -390,16 +505,16 @@ export function useWorkspacePanelContainer({
           };
 
     const fileState = (() => {
-      if (!selectedFilePath) {
+      if (!selectedFilePath || selectedEntry?.kind !== "file") {
         return { type: "IDLE" } as const;
       }
       if (fileQuery.isLoading) {
         return { type: "LOADING", path: selectedFilePath } as const;
       }
-      if (fileQuery.isError || directoryQuery.isError) {
+      if (fileQuery.isError) {
         return {
           type: "ERROR",
-          message: getErrorMessage(fileQuery.error ?? directoryQuery.error),
+          message: getErrorMessage(fileQuery.error),
         } as const;
       }
       if (!fileQuery.data) {
@@ -420,7 +535,33 @@ export function useWorkspacePanelContainer({
       directoryEntriesByPath,
       fileState,
       selectedFilePath,
+      selectedEntry,
+      inspectorState: (() => {
+        if (!selectedFilePath) {
+          return { type: "IDLE" } as const;
+        }
+        if (statQuery.isLoading) {
+          return { type: "LOADING", path: selectedFilePath } as const;
+        }
+        if (statQuery.isError) {
+          return {
+            type: "ERROR",
+            message: getErrorMessage(statQuery.error),
+          } as const;
+        }
+        if (!statQuery.data) {
+          return { type: "LOADING", path: selectedFilePath } as const;
+        }
+        return {
+          type: "LOADED",
+          stat: mapWorkspacePathStat(statQuery.data),
+        } as const;
+      })(),
       isRefreshing: isManualRefreshing || directoryQuery.isFetching,
+      isMutating:
+        createDirectoryMutation.isPending ||
+        deletePathMutation.isPending ||
+        movePathMutation.isPending,
       isStarting:
         startRuntimeMutation.isPending ||
         restartRuntimeMutation.isPending ||
@@ -432,8 +573,6 @@ export function useWorkspacePanelContainer({
   }, [
     activeDirectoryPath,
     directoryQuery.data,
-    directoryQuery.error,
-    directoryQuery.isError,
     directoryQuery.isFetching,
     directoryEntriesByPath,
     fileQuery.data,
@@ -442,7 +581,15 @@ export function useWorkspacePanelContainer({
     fileQuery.isLoading,
     isManualRefreshing,
     manifest,
+    selectedEntry,
     selectedFilePath,
+    statQuery.data,
+    statQuery.error,
+    statQuery.isError,
+    statQuery.isLoading,
+    createDirectoryMutation.isPending,
+    deletePathMutation.isPending,
+    movePathMutation.isPending,
     restartRuntimeMutation.isPending,
     startRuntimeMutation.isPending,
     stopRuntimeMutation.isPending,
@@ -504,6 +651,10 @@ export function useWorkspacePanelContainer({
     onOpenDirectory,
     onOpenFile,
     onRefresh,
+    onCreateDirectory,
+    onRenamePath,
+    onMovePath,
+    onDeletePath,
     getDownloadHref,
     onRegisterProjectPathChange: setRegisterProjectPath,
     onRegisterProject,

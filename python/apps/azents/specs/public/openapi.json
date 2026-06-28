@@ -3494,6 +3494,244 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Delete Agent Workspace Path",
+        "description": "Delete an Agent Workspace file or directory.",
+        "operationId": "chat_v1_delete_agent_workspace_path",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWorkspaceDeleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWorkspaceMutationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/workspace/stat": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Stat Agent Workspace Path",
+        "description": "Get Agent Workspace file or directory metadata.",
+        "operationId": "chat_v1_stat_agent_workspace_path",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Agent Workspace path to inspect",
+              "title": "Path"
+            },
+            "description": "Agent Workspace path to inspect"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWorkspaceStatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/workspace/directories": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Create Agent Workspace Directory",
+        "description": "Create an Agent Workspace directory.",
+        "operationId": "chat_v1_create_agent_workspace_directory",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWorkspaceMkdirRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWorkspaceMutationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/workspace/move": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Move Agent Workspace Path",
+        "description": "Move or rename an Agent Workspace file or directory.",
+        "operationId": "chat_v1_move_agent_workspace_path",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWorkspaceMoveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWorkspaceMoveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/chat/v1/agents/{agent_id}/workspace/download": {
@@ -8478,6 +8716,27 @@
         "title": "AgentWorkspaceControlUnavailableAccessResponse",
         "description": "Runner route/stream unavailable response."
       },
+      "AgentWorkspaceDeleteRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "File or directory path to delete"
+          },
+          "recursive": {
+            "type": "boolean",
+            "title": "Recursive",
+            "description": "Delete directories recursively",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "AgentWorkspaceDeleteRequest",
+        "description": "Agent Workspace delete request."
+      },
       "AgentWorkspaceDirectoryResponse": {
         "properties": {
           "type": {
@@ -8672,6 +8931,90 @@
         "title": "AgentWorkspaceManifestResponse",
         "description": "Agent Workspace manifest response."
       },
+      "AgentWorkspaceMkdirRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Directory path to create"
+          },
+          "parents": {
+            "type": "boolean",
+            "title": "Parents",
+            "description": "Create parent directories",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "AgentWorkspaceMkdirRequest",
+        "description": "Agent Workspace mkdir request."
+      },
+      "AgentWorkspaceMoveRequest": {
+        "properties": {
+          "source_path": {
+            "type": "string",
+            "title": "Source Path",
+            "description": "Source path"
+          },
+          "destination_path": {
+            "type": "string",
+            "title": "Destination Path",
+            "description": "Destination path"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "description": "Overwrite existing destination",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_path",
+          "destination_path"
+        ],
+        "title": "AgentWorkspaceMoveRequest",
+        "description": "Agent Workspace move request."
+      },
+      "AgentWorkspaceMoveResponse": {
+        "properties": {
+          "source_path": {
+            "type": "string",
+            "title": "Source Path",
+            "description": "Moved source path"
+          },
+          "destination_path": {
+            "type": "string",
+            "title": "Destination Path",
+            "description": "Move destination path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_path",
+          "destination_path"
+        ],
+        "title": "AgentWorkspaceMoveResponse",
+        "description": "Agent Workspace move response."
+      },
+      "AgentWorkspaceMutationResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Affected path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "AgentWorkspaceMutationResponse",
+        "description": "Agent Workspace mutation response."
+      },
       "AgentWorkspaceReadFailedAccessResponse": {
         "properties": {
           "type": {
@@ -8817,6 +9160,114 @@
         ],
         "title": "AgentWorkspaceRuntimeResponse",
         "description": "Server-computed Agent Runtime status response."
+      },
+      "AgentWorkspaceStatResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Agent Workspace path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Path basename"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "file",
+              "directory",
+              "symlink",
+              "other",
+              "missing"
+            ],
+            "title": "Kind",
+            "description": "Path kind"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size",
+            "description": "File size in bytes"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type",
+            "description": "MIME type"
+          },
+          "modified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified At",
+            "description": "Modified time"
+          },
+          "symlink": {
+            "type": "boolean",
+            "title": "Symlink",
+            "description": "Whether the path itself is a symlink"
+          },
+          "real_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Real Path",
+            "description": "Symlink target path"
+          },
+          "resolved_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "file",
+                  "directory",
+                  "symlink",
+                  "other",
+                  "missing"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Kind",
+            "description": "Symlink target kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "name",
+          "kind",
+          "symlink"
+        ],
+        "title": "AgentWorkspaceStatResponse",
+        "description": "Agent Workspace path metadata response."
       },
       "AgentWorkspaceUnavailableAccessResponse": {
         "properties": {

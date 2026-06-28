@@ -5,7 +5,7 @@ import datetime
 from collections.abc import AsyncGenerator
 
 import pytest
-from azcommon.result import Success
+from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -21,8 +21,11 @@ from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.control_protocol.runner_operations import (
+    RuntimeFileDeleteResult,
     RuntimeFileListEntry,
     RuntimeFileListResult,
+    RuntimeFileMkdirResult,
+    RuntimeFileMoveResult,
     RuntimeFileReadResult,
     RuntimeFileStatResult,
     RuntimeRunnerOperationFailedError,
@@ -103,6 +106,9 @@ class _FakeRunnerOperations:
         self.list_calls: list[tuple[str, int, str]] = []
         self.read_calls: list[tuple[str, int, str]] = []
         self.stat_calls: list[tuple[str, int, str]] = []
+        self.delete_calls: list[tuple[str, int, str, bool]] = []
+        self.mkdir_calls: list[tuple[str, int, str, bool]] = []
+        self.move_calls: list[tuple[str, int, str, str, bool]] = []
 
     async def list_files(
         self,
@@ -123,6 +129,7 @@ class _FakeRunnerOperations:
                         path=file_path,
                         type="file",
                         size_bytes=len(data),
+                        modified_at="2026-05-24T00:00:00+00:00",
                     )
                     for file_path, data in self.files.items()
                 ),
@@ -167,6 +174,7 @@ class _FakeRunnerOperations:
                 symlink=False,
                 real_path=None,
                 resolved_kind=None,
+                modified_at="2026-05-24T00:00:00+00:00",
                 final_cursor="0-1",
             )
         if path == AGENT_WORKSPACE_ROOT.as_posix():
@@ -177,9 +185,67 @@ class _FakeRunnerOperations:
                 symlink=False,
                 real_path=None,
                 resolved_kind=None,
+                modified_at="2026-05-24T00:00:00+00:00",
                 final_cursor="0-1",
             )
         raise RuntimeRunnerOperationFailedError(f"NOT_FOUND: No such file: {path}")
+
+    async def delete_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        path: str,
+        recursive: bool,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileDeleteResult:
+        """Record a fake delete file operation."""
+        del deadline_at
+        self.delete_calls.append((runtime_id, runner_generation, path, recursive))
+        if path not in self.files:
+            raise RuntimeRunnerOperationFailedError(f"NOT_FOUND: No such file: {path}")
+        del self.files[path]
+        return RuntimeFileDeleteResult(path=path, final_cursor="0-1")
+
+    async def mkdir_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        path: str,
+        parents: bool,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileMkdirResult:
+        """Record a fake mkdir file operation."""
+        del deadline_at
+        self.mkdir_calls.append((runtime_id, runner_generation, path, parents))
+        return RuntimeFileMkdirResult(path=path, final_cursor="0-1")
+
+    async def move_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        source_path: str,
+        destination_path: str,
+        overwrite: bool,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileMoveResult:
+        """Record a fake move file operation."""
+        del deadline_at
+        self.move_calls.append(
+            (runtime_id, runner_generation, source_path, destination_path, overwrite)
+        )
+        if source_path not in self.files:
+            raise RuntimeRunnerOperationFailedError(
+                f"NOT_FOUND: No such file: {source_path}"
+            )
+        self.files[destination_path] = self.files.pop(source_path)
+        return RuntimeFileMoveResult(
+            source_path=source_path,
+            destination_path=destination_path,
+            final_cursor="0-1",
+        )
 
 
 @contextlib.asynccontextmanager
@@ -392,6 +458,130 @@ async def test_read_path_uses_stat_to_return_directory_listing() -> None:
     assert runner_operations.read_calls == []
     assert runner_operations.list_calls == [
         ("runtime-1", 1, AGENT_WORKSPACE_ROOT.as_posix())
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stat_path_returns_inspector_metadata() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        session_manager=_session_manager,
+    )
+    file_path = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
+
+    result = await service.stat_path("agent-1", "user-1", file_path)
+
+    assert isinstance(result, Success)
+    assert result.value.path == file_path
+    assert result.value.name == "README.md"
+    assert result.value.kind == "file"
+    assert result.value.size == 12
+    assert result.value.media_type == "text/markdown"
+    assert result.value.modified_at == datetime.datetime(
+        2026, 5, 24, tzinfo=datetime.UTC
+    )
+
+
+@pytest.mark.asyncio
+async def test_mkdir_path_calls_runner_with_normalized_path() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.mkdir_path("agent-1", "user-1", "reports", parents=False)
+
+    assert isinstance(result, Success)
+    assert result.value.path == (AGENT_WORKSPACE_ROOT / "reports").as_posix()
+    assert runner_operations.mkdir_calls == [
+        ("runtime-1", 1, (AGENT_WORKSPACE_ROOT / "reports").as_posix(), False)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_path_rejects_workspace_root() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.delete_path(
+        "agent-1",
+        "user-1",
+        AGENT_WORKSPACE_ROOT.as_posix(),
+        recursive=True,
+    )
+
+    assert isinstance(result, Failure)
+    assert runner_operations.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_move_path_rejects_destination_outside_workspace_root() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.move_path(
+        "agent-1",
+        "user-1",
+        (AGENT_WORKSPACE_ROOT / "README.md").as_posix(),
+        "/etc/passwd",
+        overwrite=False,
+    )
+
+    assert isinstance(result, Failure)
+    assert runner_operations.move_calls == []
+
+
+@pytest.mark.asyncio
+async def test_move_path_calls_runner_for_rename() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        session_manager=_session_manager,
+    )
+    source = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
+    destination = (AGENT_WORKSPACE_ROOT / "README-renamed.md").as_posix()
+
+    result = await service.move_path(
+        "agent-1",
+        "user-1",
+        source,
+        destination,
+        overwrite=False,
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.source_path == source
+    assert result.value.destination_path == destination
+    assert runner_operations.move_calls == [
+        ("runtime-1", 1, source, destination, False)
     ]
 
 

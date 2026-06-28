@@ -191,6 +191,36 @@ class AgentWorkspaceFile:
     truncated: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class AgentWorkspacePathStat:
+    """Agent Workspace stat metadata for inspector UI."""
+
+    path: str
+    name: str
+    kind: Literal["file", "directory", "symlink", "other", "missing"]
+    size: int | None
+    media_type: str | None
+    modified_at: datetime | None
+    symlink: bool
+    real_path: str | None
+    resolved_kind: Literal["file", "directory", "symlink", "other", "missing"] | None
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentWorkspaceMutationResult:
+    """Agent Workspace mutation result."""
+
+    path: str
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentWorkspaceMoveResult:
+    """Agent Workspace move result."""
+
+    source_path: str
+    destination_path: str
+
+
 AgentWorkspaceFileResult = AgentWorkspaceDirectory | AgentWorkspaceFile
 
 
@@ -225,6 +255,13 @@ class AgentWorkspaceFileTooLarge:
     limit: int
 
 
+@dataclasses.dataclass(frozen=True)
+class AgentWorkspaceInvalidOperation:
+    """Invalid Agent Workspace file operation request."""
+
+    detail: str
+
+
 class AgentWorkspacePathUnavailable(RuntimeError):
     """Provider has not reported Agent Workspace path yet."""
 
@@ -239,6 +276,7 @@ AgentWorkspaceError = (
     | AgentWorkspaceFileNotFound
     | AgentWorkspaceFileReadError
     | AgentWorkspaceFileTooLarge
+    | AgentWorkspaceInvalidOperation
     | AgentWorkspacePathUnavailable
 )
 
@@ -659,6 +697,169 @@ class AgentWorkspaceFileService:
                     )
                 )
 
+    async def stat_path(
+        self,
+        agent_id: str,
+        user_id: str,
+        raw_path: str | None,
+    ) -> Result[AgentWorkspacePathStat, AgentWorkspaceError]:
+        """Fetch Agent Workspace path metadata for inspector UI."""
+        prepared = await self._prepare_workspace_path(agent_id, user_id, raw_path)
+        match prepared:
+            case Success((runtime, path, _workspace_root)):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(prepared)
+        stat_result = await self._stat_path(runtime, path)
+        match stat_result:
+            case Success(stat):
+                return Success(_path_stat_from_runner(stat))
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(stat_result)
+
+    async def mkdir_path(
+        self,
+        agent_id: str,
+        user_id: str,
+        raw_path: str,
+        *,
+        parents: bool,
+    ) -> Result[AgentWorkspaceMutationResult, AgentWorkspaceError]:
+        """Create a directory in Agent Workspace."""
+        prepared = await self._prepare_workspace_path(agent_id, user_id, raw_path)
+        match prepared:
+            case Success((runtime, path, workspace_root)):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(prepared)
+        if path == workspace_root:
+            return Failure(
+                AgentWorkspaceInvalidOperation(
+                    detail="Agent Workspace root already exists."
+                )
+            )
+        try:
+            result = await self._runner_operations.mkdir_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                path=path.as_posix(),
+                parents=parents,
+                deadline_at=_runner_file_operation_deadline(),
+            )
+            return Success(AgentWorkspaceMutationResult(path=result.path))
+        except RuntimeRunnerOperationUnavailable as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationGenerationError as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationFailedError as error:
+            return _runner_file_error(error)
+
+    async def delete_path(
+        self,
+        agent_id: str,
+        user_id: str,
+        raw_path: str,
+        *,
+        recursive: bool,
+    ) -> Result[AgentWorkspaceMutationResult, AgentWorkspaceError]:
+        """Delete a file or directory in Agent Workspace."""
+        prepared = await self._prepare_workspace_path(agent_id, user_id, raw_path)
+        match prepared:
+            case Success((runtime, path, workspace_root)):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(prepared)
+        if path == workspace_root:
+            return Failure(
+                AgentWorkspaceInvalidOperation(
+                    detail="Agent Workspace root cannot be deleted."
+                )
+            )
+        try:
+            result = await self._runner_operations.delete_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                path=path.as_posix(),
+                recursive=recursive,
+                deadline_at=_runner_file_operation_deadline(),
+            )
+            return Success(AgentWorkspaceMutationResult(path=result.path))
+        except RuntimeRunnerOperationUnavailable as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationGenerationError as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationFailedError as error:
+            return _runner_file_error(error)
+
+    async def move_path(
+        self,
+        agent_id: str,
+        user_id: str,
+        raw_source_path: str,
+        raw_destination_path: str,
+        *,
+        overwrite: bool,
+    ) -> Result[AgentWorkspaceMoveResult, AgentWorkspaceError]:
+        """Move or rename a file or directory in Agent Workspace."""
+        prepared_source = await self._prepare_workspace_path(
+            agent_id, user_id, raw_source_path
+        )
+        match prepared_source:
+            case Success((runtime, source_path, workspace_root)):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(prepared_source)
+        try:
+            destination_path = normalize_agent_workspace_path(
+                raw_destination_path,
+                workspace_root=workspace_root,
+            )
+        except AgentWorkspacePathDenied as error:
+            return Failure(error)
+        if source_path == workspace_root:
+            return Failure(
+                AgentWorkspaceInvalidOperation(
+                    detail="Agent Workspace root cannot be moved."
+                )
+            )
+        if destination_path == workspace_root:
+            return Failure(
+                AgentWorkspaceInvalidOperation(
+                    detail="Move destination cannot be Agent Workspace root."
+                )
+            )
+        try:
+            result = await self._runner_operations.move_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                source_path=source_path.as_posix(),
+                destination_path=destination_path.as_posix(),
+                overwrite=overwrite,
+                deadline_at=_runner_file_operation_deadline(),
+            )
+            return Success(
+                AgentWorkspaceMoveResult(
+                    source_path=result.source_path,
+                    destination_path=result.destination_path,
+                )
+            )
+        except RuntimeRunnerOperationUnavailable as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationGenerationError as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
+        except RuntimeRunnerOperationFailedError as error:
+            return _runner_file_error(error)
+
     async def download_file(
         self,
         agent_id: str,
@@ -695,6 +896,33 @@ class AgentWorkspaceFileService:
             case _:
                 assert_never(read_result)
         return Success((path, data, _guess_media_type(path)))
+
+    async def _prepare_workspace_path(
+        self,
+        agent_id: str,
+        user_id: str,
+        raw_path: str | None,
+    ) -> Result[tuple[AgentRuntime, PurePosixPath, PurePosixPath], AgentWorkspaceError]:
+        """Verify active Runtime and normalize an Agent Workspace path."""
+        access = await self._ensure_active_runtime(agent_id, user_id)
+        match access:
+            case Success(runtime):
+                try:
+                    workspace_root = agent_workspace_root(runtime.workspace_path)
+                except AgentWorkspacePathUnavailable as error:
+                    return Failure(error)
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(access)
+        try:
+            path = normalize_agent_workspace_path(
+                raw_path,
+                workspace_root=workspace_root,
+            )
+        except AgentWorkspacePathDenied as error:
+            return Failure(error)
+        return Success((runtime, path, workspace_root))
 
     async def _ready_access(
         self,
@@ -879,6 +1107,8 @@ def _runner_file_error(
     message = str(error)
     if _is_not_found_detail(message):
         return Failure(AgentWorkspaceFileNotFound())
+    if _is_invalid_operation_detail(message):
+        return Failure(AgentWorkspaceInvalidOperation(detail=message))
     return Failure(AgentWorkspaceFileReadError(detail=message))
 
 
@@ -903,6 +1133,21 @@ def _is_not_found_detail(detail: str) -> bool:
         "no such file" in lowered
         or "not found" in lowered
         or "does not exist" in lowered
+    )
+
+
+def _is_invalid_operation_detail(detail: str) -> bool:
+    """Return whether a Runner error means the request is invalid."""
+    lowered = detail.lower()
+    return any(
+        token in lowered
+        for token in (
+            "already_exists",
+            "destination_exists",
+            "directory_recursive_required",
+            "parent_not_found",
+            "invalid_path",
+        )
     )
 
 
@@ -933,7 +1178,34 @@ def _list_entries_from_runner(
                 kind="directory" if item.type == "directory" else "file",
                 size=item.size_bytes if item.type == "file" else None,
                 media_type=_guess_media_type(child) if item.type == "file" else None,
-                modified_at=None,
+                modified_at=_parse_runner_datetime(item.modified_at),
             )
         )
     return sorted(entries, key=lambda entry: (entry.kind != "directory", entry.name))
+
+
+def _path_stat_from_runner(stat: RuntimeFileStatResult) -> AgentWorkspacePathStat:
+    """Build inspector metadata from a Runner stat result."""
+    path = PurePosixPath(stat.path)
+    media_type = _guess_media_type(path) if stat.kind == "file" else None
+    return AgentWorkspacePathStat(
+        path=path.as_posix(),
+        name=path.name or path.as_posix(),
+        kind=stat.kind,
+        size=stat.size_bytes if stat.kind == "file" else None,
+        media_type=media_type,
+        modified_at=_parse_runner_datetime(stat.modified_at),
+        symlink=stat.symlink,
+        real_path=stat.real_path,
+        resolved_kind=stat.resolved_kind,
+    )
+
+
+def _parse_runner_datetime(value: str | None) -> datetime | None:
+    """Parse a Runner ISO-8601 datetime string."""
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None

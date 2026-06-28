@@ -6,6 +6,7 @@ import contextlib
 import fnmatch
 import os
 import re
+import shutil
 import stat as stat_module
 import time
 import uuid
@@ -199,6 +200,15 @@ class RunnerOperations:
             if operation.operation_type == "process.write":
                 await self._process_write(operation)
                 return
+            if operation.operation_type == "file.delete":
+                await self._file_delete(operation)
+                return
+            if operation.operation_type == "file.mkdir":
+                await self._file_mkdir(operation)
+                return
+            if operation.operation_type == "file.move":
+                await self._file_move(operation)
+                return
             await self._final_error(
                 operation,
                 "UNSUPPORTED_OPERATION",
@@ -310,6 +320,7 @@ class RunnerOperations:
                     "path": self._workspace.display_path(child),
                     "type": _entry_type(child),
                     "size_bytes": _file_size(child),
+                    "modified_at": _modified_at(child),
                 }
             )
         await self._final_success(operation, {"entries": entries})
@@ -332,6 +343,143 @@ class RunnerOperations:
             await self._final_error(operation, "STAT_FAILED", str(exc))
             return
         await self._final_success(operation, _stat_payload(path, self._workspace))
+
+    async def _file_delete(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            path = _resolve_lexical_path(
+                operation.payload.get("path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        recursive = _bool_payload(operation.payload, "recursive", default=False)
+        try:
+            stat_result = path.lstat()
+        except FileNotFoundError:
+            await self._final_error(operation, "NOT_FOUND", f"No such file: {path}")
+            return
+        except OSError as exc:
+            await self._final_error(operation, "DELETE_FAILED", str(exc))
+            return
+        try:
+            if stat_module.S_ISDIR(stat_result.st_mode) and not stat_module.S_ISLNK(
+                stat_result.st_mode
+            ):
+                if not recursive:
+                    await self._final_error(
+                        operation,
+                        "DIRECTORY_RECURSIVE_REQUIRED",
+                        f"Directory delete requires recursive=true: {path}",
+                    )
+                    return
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except FileNotFoundError:
+            await self._final_error(operation, "NOT_FOUND", f"No such file: {path}")
+            return
+        except OSError as exc:
+            await self._final_error(operation, "DELETE_FAILED", str(exc))
+            return
+        await self._final_success(
+            operation,
+            {"deleted_path": self._workspace.display_path(path)},
+        )
+
+    async def _file_mkdir(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            path = _resolve_lexical_path(
+                operation.payload.get("path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        parents = _bool_payload(operation.payload, "parents", default=False)
+        try:
+            path.mkdir(parents=parents, exist_ok=False)
+        except FileExistsError:
+            await self._final_error(operation, "ALREADY_EXISTS", f"Path exists: {path}")
+            return
+        except FileNotFoundError:
+            await self._final_error(
+                operation,
+                "PARENT_NOT_FOUND",
+                f"Parent directory does not exist: {path.parent}",
+            )
+            return
+        except OSError as exc:
+            await self._final_error(operation, "MKDIR_FAILED", str(exc))
+            return
+        await self._final_success(
+            operation,
+            {"created_path": self._workspace.display_path(path)},
+        )
+
+    async def _file_move(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            source_path = _resolve_lexical_path(
+                operation.payload.get("source_path"),
+                workspace=self._workspace,
+            )
+            destination_path = _resolve_lexical_path(
+                operation.payload.get("destination_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        overwrite = _bool_payload(operation.payload, "overwrite", default=False)
+        if not source_path.exists() and not source_path.is_symlink():
+            await self._final_error(
+                operation, "NOT_FOUND", f"No such file: {source_path}"
+            )
+            return
+        if destination_path.exists() or destination_path.is_symlink():
+            if not overwrite:
+                await self._final_error(
+                    operation,
+                    "DESTINATION_EXISTS",
+                    f"Destination already exists: {destination_path}",
+                )
+                return
+            try:
+                if destination_path.is_dir() and not destination_path.is_symlink():
+                    shutil.rmtree(destination_path)
+                else:
+                    destination_path.unlink()
+            except OSError as exc:
+                await self._final_error(operation, "MOVE_FAILED", str(exc))
+                return
+        if not destination_path.parent.exists():
+            await self._final_error(
+                operation,
+                "PARENT_NOT_FOUND",
+                f"Parent directory does not exist: {destination_path.parent}",
+            )
+            return
+        if not destination_path.parent.is_dir():
+            await self._final_error(
+                operation,
+                "PARENT_NOT_DIRECTORY",
+                f"Parent path is not a directory: {destination_path.parent}",
+            )
+            return
+        try:
+            shutil.move(str(source_path), str(destination_path))
+        except OSError as exc:
+            await self._final_error(operation, "MOVE_FAILED", str(exc))
+            return
+        await self._final_success(
+            operation,
+            {
+                "moved_source_path": self._workspace.display_path(source_path),
+                "moved_destination_path": self._workspace.display_path(
+                    destination_path
+                ),
+            },
+        )
 
     async def _file_grep(self, operation: RunnerOperationEnvelope) -> None:
         try:
@@ -1092,7 +1240,6 @@ def _lexical_relative_path(path: Path, base: Path) -> str:
 def _stat_payload(path: Path, workspace: Workspace) -> dict[str, JsonValue]:
     """Build a file.stat payload from lstat."""
     stat_result = path.lstat()
-    del workspace
     size_bytes: int | None = None
     if stat_module.S_ISREG(stat_result.st_mode):
         size_bytes = stat_result.st_size
@@ -1101,6 +1248,7 @@ def _stat_payload(path: Path, workspace: Workspace) -> dict[str, JsonValue]:
         "kind": _mode_kind(stat_result.st_mode),
         "size_bytes": size_bytes,
         "symlink": stat_module.S_ISLNK(stat_result.st_mode),
+        "modified_at": datetime.fromtimestamp(stat_result.st_mtime, UTC).isoformat(),
     }
     if stat_module.S_ISLNK(stat_result.st_mode):
         resolved = path.resolve(strict=False)
@@ -1129,6 +1277,14 @@ def _file_size(path: Path) -> int | None:
         return None
     try:
         return path.stat().st_size
+    except OSError:
+        return None
+
+
+def _modified_at(path: Path) -> str | None:
+    """Return lstat modified time as an ISO-8601 UTC string."""
+    try:
+        return datetime.fromtimestamp(path.lstat().st_mtime, UTC).isoformat()
     except OSError:
         return None
 
