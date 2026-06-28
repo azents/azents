@@ -759,6 +759,39 @@ async def test_write_process_stdin_dispatches_empty_poll_and_missing_result() ->
 
 
 @pytest.mark.asyncio
+async def test_terminate_session_processes_dispatches_runner_operation() -> None:
+    """Session process termination is dispatched as a runner operation."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.terminate_session_processes(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "process.terminate_session"
+    assert request.payload["payload"] == {"owner_session_id": "session-1"}
+
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {"terminated_count": 2},
+        final=True,
+    )
+
+    await asyncio.wait_for(task, timeout=1)
+
+
+@pytest.mark.asyncio
 async def test_resume_process_uses_output_deltas_when_final_snapshot_is_empty() -> None:
     """Process output deltas can be folded when final payload omits text."""
     harness = await _make_harness()

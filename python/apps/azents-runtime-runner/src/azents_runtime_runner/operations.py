@@ -209,6 +209,9 @@ class RunnerOperations:
             if operation.operation_type == "file.move":
                 await self._file_move(operation)
                 return
+            if operation.operation_type == "process.terminate_session":
+                await self._process_terminate_session(operation)
+                return
             await self._final_error(
                 operation,
                 "UNSUPPORTED_OPERATION",
@@ -612,6 +615,34 @@ class RunnerOperations:
                 record,
                 max_output_bytes=_max_output_bytes(operation.payload),
             )
+
+    async def _process_terminate_session(
+        self,
+        operation: RunnerOperationEnvelope,
+    ) -> None:
+        owner_session_id = _str_payload(operation.payload, "owner_session_id")
+        if not owner_session_id:
+            await self._final_error(
+                operation,
+                "INVALID_PAYLOAD",
+                "owner_session_id is required",
+            )
+            return
+        records = [
+            record
+            for record in tuple(self._processes.values())
+            if record.owner_session_id == owner_session_id
+        ]
+        for record in records:
+            await self._terminate_process(
+                record,
+                status="terminated",
+                reason="user_stop",
+            )
+        await self._final_success(
+            operation,
+            {"terminated_count": len(records)},
+        )
 
     async def _process_write(self, operation: RunnerOperationEnvelope) -> None:
         process_id = _str_payload(operation.payload, "process_id")

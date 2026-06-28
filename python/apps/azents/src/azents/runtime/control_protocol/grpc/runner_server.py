@@ -558,6 +558,11 @@ def _copy_operation_payload(
         message.file_move.destination_path = _str_payload(payload, "destination_path")
         message.file_move.overwrite = _bool_payload(payload, "overwrite")
         return
+    if operation_type == "process.terminate_session":
+        message.process_terminate_session.owner_session_id = _str_payload(
+            payload, "owner_session_id"
+        )
+        return
 
 
 def _str_payload(payload: dict[str, JsonValue], key: str) -> str:

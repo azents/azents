@@ -96,6 +96,7 @@ message RunnerOperationRequest {
     FileDeleteOperationPayload file_delete = 28;
     FileMkdirOperationPayload file_mkdir = 29;
     FileMoveOperationPayload file_move = 30;
+    ProcessTerminateSessionOperationPayload process_terminate_session = 31;
   }
 }
 
@@ -166,6 +167,10 @@ message FileMoveOperationPayload {
   string source_path = 1;
   string destination_path = 2;
   bool overwrite = 3;
+}
+
+message ProcessTerminateSessionOperationPayload {
+  string owner_session_id = 1;
 }
 
 message RunnerBodyChunk {

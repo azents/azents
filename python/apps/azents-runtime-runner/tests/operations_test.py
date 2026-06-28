@@ -583,6 +583,75 @@ async def test_process_quota_prunes_oldest_process(tmp_path: Path) -> None:
     assert final["missing_reason"] == "runtime_quota_pruned"
 
 
+@pytest.mark.asyncio
+async def test_process_terminate_session_terminates_only_owned_processes(
+    tmp_path: Path,
+) -> None:
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={
+                "command": "sleep 10",
+                "yield_time_ms": 0,
+                "owner_session_id": "session-1",
+            },
+        )
+    )
+    owned_process_id = client.events[-1].payload["process_id"]
+    assert isinstance(owned_process_id, str)
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={
+                "command": "sleep 10",
+                "yield_time_ms": 0,
+                "owner_session_id": "session-2",
+            },
+        )
+    )
+    other_process_id = client.events[-1].payload["process_id"]
+    assert isinstance(other_process_id, str)
+
+    await operations.handle(
+        _operation(
+            operation_type="process.terminate_session",
+            payload={"owner_session_id": "session-1"},
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    assert client.events[-1].payload == {"terminated_count": 1}
+    await operations.handle(
+        _operation(
+            operation_type="process.write",
+            payload={
+                "process_id": owned_process_id,
+                "stdin": "",
+                "yield_time_ms": 0,
+                "owner_session_id": "session-1",
+            },
+        )
+    )
+    assert client.events[-1].payload["status"] == "terminated"
+    assert client.events[-1].payload["missing_reason"] == "user_stop"
+
+    await operations.handle(
+        _operation(
+            operation_type="process.write",
+            payload={
+                "process_id": other_process_id,
+                "stdin": "",
+                "yield_time_ms": 0,
+                "owner_session_id": "session-2",
+            },
+        )
+    )
+    assert client.events[-1].payload["status"] == "running"
+
+
 def _operation(
     *,
     operation_type: str,
