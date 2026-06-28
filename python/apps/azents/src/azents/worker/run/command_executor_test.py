@@ -20,6 +20,7 @@ from azents.engine.events.engine_events import (
 from azents.engine.run.commands import CommandHandler, SlashCommandDefinition
 from azents.engine.run.contracts import AgentEngineProtocol, RunRequest
 from azents.engine.run.emit import Emit, ephemeral
+from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -29,6 +30,7 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.command_executor import CommandExecutor
+from azents.worker.run.finalizer import FailedRunFinalizationInput
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -163,14 +165,50 @@ class _CommandHandler:
             yield ephemeral(event)
 
 
+class _FailingCommandHandler(_CommandHandler):
+    """Command handler that raises a user-visible error."""
+
+    async def execute(
+        self,
+        engine: AgentEngineProtocol,
+        request: RunRequest,
+    ) -> AsyncIterator[Emit]:
+        """Raise while executing command."""
+        del engine
+        self.requests.append(request)
+        raise UserVisibleRuntimeError("command failed")
+        yield  # pragma: no cover
+
+
+class _FailedRunFinalizer:
+    """Failed-run finalizer test double."""
+
+    def __init__(self) -> None:
+        self.inputs: list[FailedRunFinalizationInput] = []
+
+    async def finalize(
+        self,
+        input: FailedRunFinalizationInput,
+        *,
+        dispatch_event: object,
+    ) -> object:
+        """Record failed-run finalization input."""
+        del dispatch_event
+        self.inputs.append(input)
+        return object()
+
+
 def _executor(
     *,
     handler: CommandHandler,
     session_lifecycle: _SessionLifecycle,
     agent_session_repository: _AgentSessionRepository,
     live_event_projector: _LiveEventProjector,
+    failed_run_finalizer: object | None = None,
 ) -> CommandExecutor:
     """Create CommandExecutor under test."""
+    if failed_run_finalizer is None:
+        failed_run_finalizer = _FailedRunFinalizer()
     return CommandExecutor(
         command_registry={"compact": handler},
         session_manager=cast(Any, _SessionManager()),
@@ -182,6 +220,7 @@ def _executor(
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
         live_event_projector=cast(LiveEventProjector, live_event_projector),
+        failed_run_finalizer=cast(Any, failed_run_finalizer),
     )
 
 
@@ -303,3 +342,65 @@ async def test_execute_ignores_unknown_command() -> None:
     assert session_lifecycle.terminal_runs == []
     assert session_repository.cleared_commands == [("session-001", "command-001")]
     assert live_event_projector.flushed_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_execute_finalizes_command_error_through_failed_run_finalizer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Command run-stopping errors use shared failed-run finalization."""
+    dispatched: list[tuple[str, PublishedEvent]] = []
+    session_lifecycle = _SessionLifecycle()
+    session_repository = _AgentSessionRepository()
+    live_event_projector = _LiveEventProjector()
+    finalizer = _FailedRunFinalizer()
+    handler = _FailingCommandHandler([])
+
+    async def resolve_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return Success(cast(RunRequest, object()))
+
+    monkeypatch.setattr(
+        command_executor_module,
+        "resolve_invoke_input",
+        resolve_success,
+    )
+
+    async def dispatch_event(
+        session_id: str,
+        event: PublishedEvent,
+    ) -> None:
+        dispatched.append((session_id, event))
+
+    executor = _executor(
+        handler=cast(CommandHandler, handler),
+        session_lifecycle=session_lifecycle,
+        agent_session_repository=session_repository,
+        live_event_projector=live_event_projector,
+        failed_run_finalizer=finalizer,
+    )
+
+    result = await executor.execute(
+        agent_id="agent-001",
+        session_id="session-001",
+        command=PendingSessionCommand(
+            id="command-001",
+            name="compact",
+            payload={},
+            user_id="user-001",
+            created_at=datetime.datetime.now(datetime.UTC),
+        ),
+        dispatch_event=dispatch_event,
+    )
+
+    assert [type(event).__name__ for _, event in dispatched] == ["RunStarted"]
+    assert len(finalizer.inputs) == 1
+    finalization_input = finalizer.inputs[0]
+    assert finalization_input.session_id == "session-001"
+    assert finalization_input.run_id == session_lifecycle.created[0].id
+    assert finalization_input.user_message == "command failed"
+    assert finalization_input.retry_state.last_source == "command"
+    assert finalization_input.retry_state.last_error_type == "UserVisibleRuntimeError"
+    assert finalization_input.reason == "retry_exhausted"
+    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert session_repository.cleared_commands == [("session-001", "command-001")]
