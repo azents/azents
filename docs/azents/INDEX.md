@@ -133,8 +133,9 @@ _14 documents_
 - [ADR-0081: Runtime Exec Process Tools](adr/0081-runtime-exec-process.md)
 - [ADR-0082: Add Agent Workspace File Management Operations](adr/0082-agent-workspace-file-management.md)
 - [ADR-0083: User Stop Terminates Session-Owned Runtime Exec Processes](adr/0083-runtime-exec-user-stop-termination.md)
+- [ADR-0084: Failed-run Error Retry and Finalization](adr/0084-failed-run-error-retry.md)
 
-_84 documents_
+_85 documents_
 
 ## Issues (Bug Tracking)
 
@@ -164,4 +165,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 316
+- Total documents: 318
