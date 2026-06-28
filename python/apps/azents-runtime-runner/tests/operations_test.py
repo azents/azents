@@ -402,7 +402,11 @@ async def test_process_start_quick_command_returns_exit_snapshot(
     await operations.handle(
         _operation(
             operation_type="process.start",
-            payload={"command": "printf hello", "yield_time_ms": 1000},
+            payload={
+                "command": "printf hello",
+                "yield_time_ms": 1000,
+                "owner_session_id": "session-1",
+            },
         )
     )
 
@@ -414,7 +418,7 @@ async def test_process_start_quick_command_returns_exit_snapshot(
     assert client.events[1].payload["stream"] == "stdout"
     assert client.events[1].payload["text"] == "hello"
     final = client.events[-1].payload
-    assert final["status"] == "exited"
+    assert final["status"] == "exited_unread"
     assert final["exit_code"] == 0
     assert final["stdout"] == "hello"
     assert final["stderr"] == ""
@@ -436,6 +440,7 @@ async def test_process_write_empty_stdin_polls_running_process(tmp_path: Path) -
                     'print(f"echo:{line}", flush=True)\''
                 ),
                 "yield_time_ms": 100,
+                "owner_session_id": "session-1",
             },
         )
     )
@@ -452,26 +457,32 @@ async def test_process_write_empty_stdin_polls_running_process(tmp_path: Path) -
                 "process_id": process_id,
                 "stdin": "world\n",
                 "yield_time_ms": 1000,
+                "owner_session_id": "session-1",
             },
         )
     )
 
     write_final = client.events[-1].payload
     assert write_final["process_id"] == process_id
-    assert write_final["status"] == "exited"
+    assert write_final["status"] == "exited_unread"
     assert write_final["exit_code"] == 0
     assert write_final["stdout"] == "echo:world\n"
 
     await operations.handle(
         _operation(
             operation_type="process.write",
-            payload={"process_id": process_id, "stdin": "", "yield_time_ms": 0},
+            payload={
+                "process_id": process_id,
+                "stdin": "",
+                "yield_time_ms": 0,
+                "owner_session_id": "session-1",
+            },
         )
     )
 
     missing_final = client.events[-1].payload
     assert missing_final["process_id"] == process_id
-    assert missing_final["status"] == "missing"
+    assert missing_final["status"] == "consumed"
     assert missing_final["missing_reason"] == "consumed"
 
 
@@ -491,12 +502,13 @@ async def test_process_output_is_bounded_and_reports_truncation(tmp_path: Path) 
                 "command": 'python -c \'print("0123456789abcdef", end="")\'',
                 "yield_time_ms": 1000,
                 "max_output_bytes": 4,
+                "owner_session_id": "session-1",
             },
         )
     )
 
     final = client.events[-1].payload
-    assert final["status"] == "exited"
+    assert final["status"] == "exited_unread"
     assert final["stdout"] == "cdef"
     assert final["stdout_truncated"] is True
     assert final["stdout_omitted_bytes"] == 12
@@ -508,13 +520,17 @@ async def test_process_quota_prunes_oldest_process(tmp_path: Path) -> None:
     operations = RunnerOperations(
         client=client,
         workspace=Workspace(str(tmp_path)),
-        max_process_count=1,
+        max_runtime_process_count=1,
     )
 
     await operations.handle(
         _operation(
             operation_type="process.start",
-            payload={"command": "sleep 10", "yield_time_ms": 0},
+            payload={
+                "command": "sleep 10",
+                "yield_time_ms": 0,
+                "owner_session_id": "session-1",
+            },
         )
     )
     process_id = client.events[-1].payload["process_id"]
@@ -523,20 +539,29 @@ async def test_process_quota_prunes_oldest_process(tmp_path: Path) -> None:
     await operations.handle(
         _operation(
             operation_type="process.start",
-            payload={"command": "printf second", "yield_time_ms": 1000},
+            payload={
+                "command": "printf second",
+                "yield_time_ms": 1000,
+                "owner_session_id": "session-1",
+            },
         )
     )
     await operations.handle(
         _operation(
             operation_type="process.write",
-            payload={"process_id": process_id, "stdin": "", "yield_time_ms": 0},
+            payload={
+                "process_id": process_id,
+                "stdin": "",
+                "yield_time_ms": 0,
+                "owner_session_id": "session-1",
+            },
         )
     )
 
     final = client.events[-1].payload
     assert final["process_id"] == process_id
     assert final["status"] == "terminated"
-    assert final["missing_reason"] == "quota_pruned"
+    assert final["missing_reason"] == "runtime_quota_pruned"
 
 
 def _operation(

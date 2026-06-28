@@ -38,6 +38,7 @@ from azents.core.tools import (
 )
 from azents.engine.events.engine_events import (
     EngineEvent,
+    RuntimeProcessOutputDeltaEvent,
     RuntimeReadyEvent,
 )
 from azents.engine.io.attachments import RuntimeAttachment
@@ -70,6 +71,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeFileStatResult,
     RuntimeGrepFileMatch,
     RuntimeGrepLineMatch,
+    RuntimeProcessOutputDelta,
     RuntimeProcessResult,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
@@ -247,9 +249,8 @@ _RUNTIME_OPERATION_RESULT_GRACE_SECONDS = 10
 _RUNTIME_FILE_OPERATION_TIMEOUT_SECONDS = 120
 _DEFAULT_PROCESS_YIELD_TIME_MS = 10_000
 _MAX_PROCESS_YIELD_TIME_MS = 300_000
-_DEFAULT_PROCESS_MAX_OUTPUT_TOKENS = 10_000
-_MAX_PROCESS_MAX_OUTPUT_TOKENS = 100_000
-_PROCESS_BYTES_PER_OUTPUT_TOKEN = 4
+_DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 64 * 1024
+_MAX_PROCESS_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -274,18 +275,18 @@ class ExecCommandInput(BaseModel):
             f"(max {_MAX_PROCESS_YIELD_TIME_MS})."
         ),
     )
-    max_output_tokens: int = Field(
-        default=_DEFAULT_PROCESS_MAX_OUTPUT_TOKENS,
+    max_output_bytes: int = Field(
+        default=_DEFAULT_PROCESS_MAX_OUTPUT_BYTES,
         ge=1,
-        le=_MAX_PROCESS_MAX_OUTPUT_TOKENS,
-        description="Maximum stdout/stderr tokens to return in this tool result.",
+        le=_MAX_PROCESS_MAX_OUTPUT_BYTES,
+        description="Maximum stdout/stderr bytes to return in this tool result.",
     )
 
 
 class WriteStdinInput(BaseModel):
     """write_stdin tool input."""
 
-    session_id: str = Field(description="Process session_id returned by exec_command")
+    process_id: str = Field(description="Process ID returned by exec_command")
     chars: str = Field(
         default="",
         description="Characters to write to stdin. Empty string polls for output.",
@@ -299,11 +300,11 @@ class WriteStdinInput(BaseModel):
             f"(max {_MAX_PROCESS_YIELD_TIME_MS})."
         ),
     )
-    max_output_tokens: int = Field(
-        default=_DEFAULT_PROCESS_MAX_OUTPUT_TOKENS,
+    max_output_bytes: int = Field(
+        default=_DEFAULT_PROCESS_MAX_OUTPUT_BYTES,
         ge=1,
-        le=_MAX_PROCESS_MAX_OUTPUT_TOKENS,
-        description="Maximum stdout/stderr tokens to return in this tool result.",
+        le=_MAX_PROCESS_MAX_OUTPUT_BYTES,
+        description="Maximum stdout/stderr bytes to return in this tool result.",
     )
 
 
@@ -585,6 +586,7 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
                 session_manager=self._session_manager,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
+                owner_session_id=self._session_id,
                 peer_toolkits=self._peer_toolkits,
             ),
             make_write_stdin_tool(
@@ -593,6 +595,7 @@ class RuntimeToolkit(ProjectAgentsPromptMixin, Toolkit[ShellToolkitConfig]):
                 session_manager=self._session_manager,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
+                owner_session_id=self._session_id,
             ),
             make_read_image_tool(
                 session_storage=file_ss,
@@ -1239,6 +1242,7 @@ def make_exec_command_tool(
     session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
+    owner_session_id: str,
     peer_toolkits: Sequence[RuntimeEnvProvider] = (),
 ) -> FunctionTool:
     """Create an exec_command tool backed by Runtime Runner process operations."""
@@ -1258,9 +1262,11 @@ def make_exec_command_tool(
                 command=args.command,
                 workdir=args.workdir,
                 yield_time_ms=args.yield_time_ms,
-                max_output_bytes=_max_output_bytes_from_tokens(args.max_output_tokens),
+                max_output_bytes=args.max_output_bytes,
                 env=secret_env or None,
+                owner_session_id=owner_session_id,
                 deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
+                process_output_callback=_publish_process_output_delta(publish_event),
             )
         except (
             RuntimeRunnerOperationUnavailable,
@@ -1286,7 +1292,7 @@ def make_exec_command_tool(
         description=(
             "Start a shell process in the Agent Runtime workspace. Returns output "
             "and exit_code when it exits within yield_time_ms; otherwise returns a "
-            "running session_id for write_stdin polling or input."
+            "running process_id for write_stdin polling or input."
         ),
     )
 
@@ -1298,6 +1304,7 @@ def make_write_stdin_tool(
     session_manager: SessionManager[AsyncSession] | None,
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
+    owner_session_id: str,
 ) -> FunctionTool:
     """Create a write_stdin tool backed by Runtime Runner process operations."""
 
@@ -1312,11 +1319,13 @@ def make_write_stdin_tool(
             result = await runner_operations.write_process_stdin(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
-                process_id=args.session_id,
+                process_id=args.process_id,
                 stdin=args.chars,
                 yield_time_ms=args.yield_time_ms,
-                max_output_bytes=_max_output_bytes_from_tokens(args.max_output_tokens),
+                max_output_bytes=args.max_output_bytes,
+                owner_session_id=owner_session_id,
                 deadline_at=_runtime_process_operation_deadline(args.yield_time_ms),
+                process_output_callback=_publish_process_output_delta(publish_event),
             )
         except (
             RuntimeRunnerOperationUnavailable,
@@ -1340,10 +1349,30 @@ def make_write_stdin_tool(
         handler,
         name="write_stdin",
         description=(
-            "Write characters to a running exec_command process session. Pass "
-            "an empty chars string to poll for unread output without sending input."
+            "Write characters to a running exec_command process. Pass an empty "
+            "chars string to poll for unread output without sending input."
         ),
     )
+
+
+def _publish_process_output_delta(
+    publish_event: Callable[[EngineEvent], Awaitable[None]],
+) -> Callable[[RuntimeProcessOutputDelta], Awaitable[None]]:
+    """Return callback that publishes Runtime process live output deltas."""
+
+    async def callback(delta: RuntimeProcessOutputDelta) -> None:
+        await publish_event(
+            RuntimeProcessOutputDeltaEvent(
+                process_id=delta.process_id,
+                stream=delta.stream,
+                chunk_id=delta.chunk_id,
+                text=delta.text,
+                truncated=delta.truncated,
+                omitted_bytes=delta.omitted_bytes,
+            )
+        )
+
+    return callback
 
 
 def _runtime_process_operation_deadline(yield_time_ms: int) -> datetime:
@@ -1351,11 +1380,6 @@ def _runtime_process_operation_deadline(yield_time_ms: int) -> datetime:
     return datetime.now(UTC) + timedelta(
         seconds=yield_time_ms / 1000 + _RUNTIME_OPERATION_RESULT_GRACE_SECONDS
     )
-
-
-def _max_output_bytes_from_tokens(max_output_tokens: int) -> int:
-    """Convert user-visible output token budget to Runner byte budget."""
-    return max_output_tokens * _PROCESS_BYTES_PER_OUTPUT_TOKEN
 
 
 def _process_result_metadata(
@@ -1366,7 +1390,6 @@ def _process_result_metadata(
     """Build generic tool-result metadata for process snapshots."""
     metadata: JSONObject = {
         "kind": kind,
-        "session_id": result.process_id,
         "process_id": result.process_id,
         "status": result.status,
         "exit_code": result.exit_code,
@@ -1384,7 +1407,7 @@ def _format_process_result(result: RuntimeProcessResult) -> str:
     """Render process snapshot as model-visible tool output text."""
     parts: list[str] = [
         f"status: {result.status}",
-        f"session_id: {result.process_id}",
+        f"process_id: {result.process_id}",
     ]
     if result.exit_code is not None:
         parts.append(f"exit_code: {result.exit_code}")

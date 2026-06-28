@@ -20,7 +20,10 @@ from azents.core.enums import (
     RuntimeRunnerState,
 )
 from azents.core.tools import ShellToolkitConfig, ToolkitState, TurnContext
-from azents.engine.events.engine_events import RuntimeReadyEvent
+from azents.engine.events.engine_events import (
+    RuntimeProcessOutputDeltaEvent,
+    RuntimeReadyEvent,
+)
 from azents.engine.events.types import ClientToolResultPayload, Event
 from azents.engine.hooks.types import SessionCompactHookContext
 from azents.engine.run.emit import PublishedEvent, durable, handle_engine_event
@@ -48,6 +51,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeGrepFileMatch,
     RuntimeGrepLineMatch,
     RuntimeGrepResult,
+    RuntimeProcessOutputDelta,
     RuntimeProcessResult,
     RuntimeRunnerOperationFailedError,
     RuntimeRunnerOperationUnavailable,
@@ -216,7 +220,7 @@ class _FakeRunnerOperations:
         self.process_unavailable_message: str | None = None
         self.next_process_start_result = RuntimeProcessResult(
             process_id="proc-1",
-            status="exited",
+            status="exited_unread",
             exit_code=0,
             stdout="hello\n",
             stderr="",
@@ -298,7 +302,9 @@ class _FakeRunnerOperations:
         yield_time_ms: int,
         max_output_bytes: int,
         env: dict[str, str] | None,
+        owner_session_id: str,
         deadline_at: datetime,
+        process_output_callback: object | None = None,
     ) -> RuntimeProcessResult:
         del runtime_id, runner_generation, deadline_at
         self.process_start_calls.append(
@@ -308,6 +314,8 @@ class _FakeRunnerOperations:
                 "yield_time_ms": yield_time_ms,
                 "max_output_bytes": max_output_bytes,
                 "env": env,
+                "owner_session_id": owner_session_id,
+                "process_output_callback": process_output_callback,
             }
         )
         if self.process_unavailable_message is not None:
@@ -323,7 +331,9 @@ class _FakeRunnerOperations:
         stdin: str,
         yield_time_ms: int,
         max_output_bytes: int,
+        owner_session_id: str,
         deadline_at: datetime,
+        process_output_callback: object | None = None,
     ) -> RuntimeProcessResult:
         del runtime_id, runner_generation, deadline_at
         self.process_write_calls.append(
@@ -332,6 +342,8 @@ class _FakeRunnerOperations:
                 "stdin": stdin,
                 "yield_time_ms": yield_time_ms,
                 "max_output_bytes": max_output_bytes,
+                "owner_session_id": owner_session_id,
+                "process_output_callback": process_output_callback,
             }
         )
         if self.process_unavailable_message is not None:
@@ -1269,20 +1281,43 @@ class TestProcessToolHandler:
         assert isinstance(result, FunctionToolResult)
         assert "stdout:\nhello" in result.output
         assert result.metadata["kind"] == "exec_command_result"
-        assert result.metadata["session_id"] == "proc-1"
+        assert "session_id" not in result.metadata
+        assert result.metadata["process_id"] == "proc-1"
         assert runner_operations.process_start_calls == [
             {
                 "command": "echo hello",
                 "workdir": None,
                 "yield_time_ms": 10000,
-                "max_output_bytes": 40000,
+                "max_output_bytes": 65536,
                 "env": None,
+                "owner_session_id": "session-1",
+                "process_output_callback": runner_operations.process_start_calls[0][
+                    "process_output_callback"
+                ],
             }
         ]
         published_event_types = [
             type(call.args[0]) for call in publish_event.await_args_list
         ]
         assert published_event_types == [RuntimeReadyEvent]
+        callback = cast(
+            Any,
+            runner_operations.process_start_calls[0]["process_output_callback"],
+        )
+        assert callback is not None
+        await callback(
+            RuntimeProcessOutputDelta(
+                process_id="proc-1",
+                stream="stdout",
+                chunk_id=1,
+                text="live\n",
+                truncated=False,
+                omitted_bytes=0,
+            )
+        )
+        assert isinstance(
+            publish_event.await_args_list[-1].args[0], RuntimeProcessOutputDeltaEvent
+        )
 
     @pytest.mark.asyncio
     async def test_exec_command_injects_envvar_peer_toolkit(self) -> None:
@@ -1323,7 +1358,7 @@ class TestProcessToolHandler:
 
     @pytest.mark.asyncio
     async def test_write_stdin_calls_runtime_runner_process_write(self) -> None:
-        """write_stdin writes to an existing Runner process session."""
+        """write_stdin writes to an existing Runner process."""
         toolkit = _make_toolkit()
         runner_operations = cast(
             _FakeRunnerOperations,
@@ -1334,7 +1369,7 @@ class TestProcessToolHandler:
         tool = _find_tool(state.tools, "write_stdin")
 
         result = await tool.handler(
-            json.dumps({"session_id": "proc-1", "chars": "input\n"})
+            json.dumps({"process_id": "proc-1", "chars": "input\n"})
         )
 
         assert isinstance(result, FunctionToolResult)
@@ -1345,7 +1380,11 @@ class TestProcessToolHandler:
                 "process_id": "proc-1",
                 "stdin": "input\n",
                 "yield_time_ms": 10000,
-                "max_output_bytes": 40000,
+                "max_output_bytes": 65536,
+                "owner_session_id": "session-1",
+                "process_output_callback": runner_operations.process_write_calls[0][
+                    "process_output_callback"
+                ],
             }
         ]
 

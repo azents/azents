@@ -138,6 +138,7 @@ message ProcessStartOperationPayload {
   uint32 yield_time_ms = 3;
   uint32 max_output_bytes = 4;
   map<string, string> env = 5;
+  string owner_session_id = 6;
 }
 
 message ProcessWriteOperationPayload {
@@ -145,6 +146,7 @@ message ProcessWriteOperationPayload {
   string stdin = 2;
   uint32 yield_time_ms = 3;
   uint32 max_output_bytes = 4;
+  string owner_session_id = 5;
 }
 
 message RunnerBodyChunk {

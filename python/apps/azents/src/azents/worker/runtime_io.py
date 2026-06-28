@@ -16,6 +16,8 @@ from azents.engine.tools.runtime_io import (
     RuntimeGrepLineMatch,
     RuntimeGrepResult,
     RuntimeOperationCancelCheck,
+    RuntimeProcessOutputCallback,
+    RuntimeProcessOutputDelta,
     RuntimeProcessResult,
 )
 from azents.runtime.control_protocol import (
@@ -75,7 +77,9 @@ class RuntimeRunnerOperationAdapter:
         yield_time_ms: int,
         max_output_bytes: int,
         env: dict[str, str] | None,
+        owner_session_id: str,
         deadline_at: datetime,
+        process_output_callback: RuntimeProcessOutputCallback | None = None,
     ) -> RuntimeProcessResult:
         """Start process operation and convert to engine result."""
         result = await _translate_runtime_errors(
@@ -87,7 +91,11 @@ class RuntimeRunnerOperationAdapter:
                 yield_time_ms=yield_time_ms,
                 max_output_bytes=max_output_bytes,
                 env=env,
+                owner_session_id=owner_session_id,
                 deadline_at=deadline_at,
+                process_output_callback=_control_process_output_callback(
+                    process_output_callback
+                ),
             )
         )
         return _process_result(result)
@@ -101,7 +109,9 @@ class RuntimeRunnerOperationAdapter:
         stdin: str,
         yield_time_ms: int,
         max_output_bytes: int,
+        owner_session_id: str,
         deadline_at: datetime,
+        process_output_callback: RuntimeProcessOutputCallback | None = None,
     ) -> RuntimeProcessResult:
         """Write process stdin or poll, and convert to engine result."""
         result = await _translate_runtime_errors(
@@ -112,7 +122,11 @@ class RuntimeRunnerOperationAdapter:
                 stdin=stdin,
                 yield_time_ms=yield_time_ms,
                 max_output_bytes=max_output_bytes,
+                owner_session_id=owner_session_id,
                 deadline_at=deadline_at,
+                process_output_callback=_control_process_output_callback(
+                    process_output_callback
+                ),
             )
         )
         return _process_result(result)
@@ -288,6 +302,30 @@ async def _translate_runtime_errors(awaitable: Awaitable[_T]) -> _T:
         raise engine_runtime_io.RuntimeRunnerOperationGenerationError(str(exc)) from exc
     except control_runner_operations.RuntimeRunnerOperationFailedError as exc:
         raise engine_runtime_io.RuntimeRunnerOperationFailedError(str(exc)) from exc
+
+
+def _control_process_output_callback(
+    callback: RuntimeProcessOutputCallback | None,
+) -> control_runner_operations.RuntimeProcessOutputCallback | None:
+    """Convert control process output callback to engine callback."""
+    if callback is None:
+        return None
+
+    async def converted(
+        delta: control_runner_operations.RuntimeProcessOutputDelta,
+    ) -> None:
+        await callback(
+            RuntimeProcessOutputDelta(
+                process_id=delta.process_id,
+                stream=delta.stream,
+                chunk_id=delta.chunk_id,
+                text=delta.text,
+                truncated=delta.truncated,
+                omitted_bytes=delta.omitted_bytes,
+            )
+        )
+
+    return converted
 
 
 def _process_result(

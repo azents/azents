@@ -567,7 +567,7 @@ class TestLiteLLMResponsesLowerer:
                     name="read_text",
                     status="completed",
                     output=[OutputTextPart(text="file content")],
-                    metadata={"process_id": "proc_123", "status": "exited"},
+                    metadata={"process_id": "proc_123", "status": "exited_unread"},
                 ),
             ),
         ]

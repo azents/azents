@@ -34,7 +34,7 @@
             "arguments": {
               "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
               "yield_time_ms": 10000,
-              "max_output_tokens": 1000
+              "max_output_bytes": 1000
             }
           }
         ]
@@ -62,7 +62,7 @@
             "arguments": {
               "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
               "yield_time_ms": 10000,
-              "max_output_tokens": 1000
+              "max_output_bytes": 1000
             }
           }
         ]
@@ -81,7 +81,7 @@
             "arguments": {
               "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
               "yield_time_ms": 10000,
-              "max_output_tokens": 1000
+              "max_output_bytes": 1000
             }
           }
         ]
@@ -100,7 +100,7 @@
             "arguments": {
               "command": "mkdir -p /workspace/agent && printf '%s' 'FILE_RESOURCE_LIFECYCLE_E2E_PREVIEW_MARKER' > /workspace/agent/lifecycle-report.txt",
               "yield_time_ms": 10000,
-              "max_output_tokens": 1000
+              "max_output_bytes": 1000
             }
           }
         ]
@@ -259,7 +259,7 @@
             "arguments": {
               "command": "printf '%s' 'RUNTIME_EXEC_QUICK_MARKER'",
               "yield_time_ms": 10000,
-              "max_output_tokens": 1000
+              "max_output_bytes": 1000
             }
           }
         ]
@@ -286,10 +286,10 @@
             "id": "call_runtime_exec_missing",
             "name": "write_stdin",
             "arguments": {
-              "session_id": "proc-does-not-exist",
               "chars": "",
               "yield_time_ms": 0,
-              "max_output_tokens": 1000
+              "max_output_bytes": 1000,
+              "process_id": "proc-does-not-exist"
             }
           }
         ]
