@@ -1035,6 +1035,7 @@
       "selectedCount": "{count} selected",
       "clearSelection": "Clear selection",
       "bulkDeleteConfirm": "Delete {count} selected items? This cannot be undone.",
+      "bulkDeleteConfirmTitle": "Delete selected items",
       "newFolder": "New folder",
       "rename": "Rename",
       "move": "Move",
@@ -1054,6 +1055,7 @@
       "newFolderPrompt": "Folder name",
       "renamePrompt": "New name",
       "movePrompt": "Destination path",
+      "deleteConfirmTitle": "Delete file or folder",
       "deleteConfirm": "Delete {path}? This cannot be undone."
     },
     "toolCall": {

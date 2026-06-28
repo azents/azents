@@ -1035,6 +1035,7 @@
       "selectedCount": "{count} 件選択中",
       "clearSelection": "選択を解除",
       "bulkDeleteConfirm": "選択した {count} 件を削除しますか？この操作は元に戻せません。",
+      "bulkDeleteConfirmTitle": "選択項目を削除",
       "newFolder": "新しいフォルダー",
       "rename": "名前を変更",
       "move": "移動",
@@ -1054,6 +1055,7 @@
       "newFolderPrompt": "フォルダー名",
       "renamePrompt": "新しい名前",
       "movePrompt": "移動先パス",
+      "deleteConfirmTitle": "ファイルまたはフォルダーを削除",
       "deleteConfirm": "{path} を削除しますか？この操作は元に戻せません。"
     },
     "toolCall": {

@@ -15,6 +15,7 @@ import {
   Tabs,
   Text,
 } from "@mantine/core";
+import { useModals } from "@mantine/modals";
 import {
   IconAlertCircle,
   IconFolderOpen,
@@ -77,10 +78,36 @@ export function WorkspacePanel({
   getDownloadHref,
 }: WorkspacePanelProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
+  const modals = useModals();
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const handleConfirmReset = (): void => {
     setResetConfirmOpen(false);
     onResetRuntime();
+  };
+
+  const openDeleteConfirm = (path: string, onConfirm: () => void): void => {
+    modals.openConfirmModal({
+      title: t("deleteConfirmTitle"),
+      children: <Text size="sm">{t("deleteConfirm", { path })}</Text>,
+      labels: { confirm: t("delete"), cancel: t("cancel") },
+      confirmProps: { color: "red" },
+      centered: true,
+      onConfirm,
+    });
+  };
+
+  const openBulkDeleteConfirm = (
+    count: number,
+    onConfirm: () => void,
+  ): void => {
+    modals.openConfirmModal({
+      title: t("bulkDeleteConfirmTitle"),
+      children: <Text size="sm">{t("bulkDeleteConfirm", { count })}</Text>,
+      labels: { confirm: t("delete"), cancel: t("cancel") },
+      confirmProps: { color: "red" },
+      centered: true,
+      onConfirm,
+    });
   };
 
   const renderSettingsPanel = (): React.ReactElement => {
@@ -468,13 +495,11 @@ export function WorkspacePanel({
                         onMovePath(entry.path, destination.trim());
                       }
                     }}
-                    onDelete={(entry) => {
-                      if (
-                        window.confirm(t("deleteConfirm", { path: entry.path }))
-                      ) {
-                        onDeletePath(entry.path, entry.kind === "directory");
-                      }
-                    }}
+                    onDelete={(entry) =>
+                      openDeleteConfirm(entry.path, () =>
+                        onDeletePath(entry.path, entry.kind === "directory"),
+                      )
+                    }
                   />
                 ) : (
                   <FileBrowser
@@ -502,17 +527,11 @@ export function WorkspacePanel({
                         onBulkMovePaths(destination.trim());
                       }
                     }}
-                    onBulkDelete={() => {
-                      if (
-                        window.confirm(
-                          t("bulkDeleteConfirm", {
-                            count: state.selectedPaths.length,
-                          }),
-                        )
-                      ) {
-                        onBulkDeletePaths(true);
-                      }
-                    }}
+                    onBulkDelete={() =>
+                      openBulkDeleteConfirm(state.selectedPaths.length, () =>
+                        onBulkDeletePaths(true),
+                      )
+                    }
                     onCreateDirectory={(basePath) => {
                       const name = window.prompt(t("newFolderPrompt"));
                       if (name?.trim()) {
@@ -537,13 +556,11 @@ export function WorkspacePanel({
                         onMovePath(entry.path, destination.trim());
                       }
                     }}
-                    onDeletePath={(entry) => {
-                      if (
-                        window.confirm(t("deleteConfirm", { path: entry.path }))
-                      ) {
-                        onDeletePath(entry.path, entry.kind === "directory");
-                      }
-                    }}
+                    onDeletePath={(entry) =>
+                      openDeleteConfirm(entry.path, () =>
+                        onDeletePath(entry.path, entry.kind === "directory"),
+                      )
+                    }
                     onRefresh={onRefresh}
                   />
                 )}

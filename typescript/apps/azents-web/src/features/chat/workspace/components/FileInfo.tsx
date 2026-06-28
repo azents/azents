@@ -2,6 +2,7 @@
 
 /** Agent Workspace file information page component. */
 import {
+  ActionIcon,
   Alert,
   Button,
   Divider,
@@ -14,6 +15,8 @@ import {
   Text,
 } from "@mantine/core";
 import {
+  IconArrowLeft,
+  IconArrowRight,
   IconDotsVertical,
   IconDownload,
   IconEdit,
@@ -97,7 +100,12 @@ export function FileInfo({
   if (entry === null) {
     return (
       <Stack gap="md" p="md">
-        <Button variant="subtle" onClick={onBack} w="fit-content">
+        <Button
+          variant="subtle"
+          leftSection={<IconArrowLeft size="1rem" />}
+          onClick={onBack}
+          w="fit-content"
+        >
           {t("backToBrowser")}
         </Button>
         <Text size="sm" c="dimmed">
@@ -111,15 +119,19 @@ export function FileInfo({
     <Stack gap="md" p="md" h="100%" mih={0} style={{ overflow: "auto" }}>
       <Group justify="space-between" align="center" wrap="nowrap">
         <Group gap="xs" miw={0} wrap="nowrap">
+          <ActionIcon
+            variant="subtle"
+            aria-label={t("backToBrowser")}
+            onClick={onBack}
+          >
+            <IconArrowLeft size="1rem" />
+          </ActionIcon>
           <IconInfoCircle size="1rem" />
           <Text size="md" fw={700} truncate>
             {t("fileInfo")}
           </Text>
         </Group>
         <Group gap="xs" wrap="nowrap">
-          <Button size="xs" variant="subtle" onClick={onBack}>
-            {t("backToBrowser")}
-          </Button>
           <Menu withinPortal position="bottom-end">
             <Menu.Target>
               <Button
@@ -152,7 +164,12 @@ export function FileInfo({
               >
                 {t("rename")}
               </Menu.Item>
-              <Menu.Item onClick={() => onMove(entry)}>{t("move")}</Menu.Item>
+              <Menu.Item
+                leftSection={<IconArrowRight size="0.875rem" />}
+                onClick={() => onMove(entry)}
+              >
+                {t("move")}
+              </Menu.Item>
               <Menu.Divider />
               <Menu.Item
                 color="red"
