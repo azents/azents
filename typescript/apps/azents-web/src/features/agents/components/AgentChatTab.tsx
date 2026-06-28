@@ -76,6 +76,7 @@ export function AgentChatTab(
         handle={props.handle}
         sessionId={mountSessionId}
         agent={agent}
+        session={sessionState.session}
         onConnectionStatusChange={onConnectionStatusChange}
       />
     </Box>
