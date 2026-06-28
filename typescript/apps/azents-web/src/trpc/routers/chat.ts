@@ -10,11 +10,13 @@ import {
   agentRuntimeV1StopAgentRuntime,
   chatV1ApproveAgentProjectRegistrationRequest,
   chatV1ArchiveAgentSession,
+  chatV1CreateAgentWorkspaceDirectory,
   chatV1CreateCommand,
   chatV1CreateMessage,
   chatV1CreateTeamAgentSession,
   chatV1CreateTeamAgentSessionMessage,
   chatV1DeleteAgentProject,
+  chatV1DeleteAgentWorkspacePath,
   chatV1DeleteInputBuffer,
   chatV1EditMessage,
   chatV1GetAgentSession,
@@ -27,9 +29,11 @@ import {
   chatV1ListHistoryEvents,
   chatV1ListLiveEvents,
   chatV1ListSlashCommands,
+  chatV1MoveAgentWorkspacePath,
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
   chatV1RejectAgentProjectRegistrationRequest,
+  chatV1StatAgentWorkspacePath,
   chatV1StopSessionRun,
   chatV1UpdateAgentSessionTitle,
   chatV1UpdateSessionGoal,
@@ -770,6 +774,122 @@ export const chatRouter = router({
           404: "NOT_FOUND",
           409: "CONFLICT",
           413: "PAYLOAD_TOO_LARGE",
+        });
+      }
+    }),
+
+  statAgentWorkspacePath: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        path: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1StatAgentWorkspacePath({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          query: { path: input.path },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  createAgentWorkspaceDirectory: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        path: z.string().min(1),
+        parents: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1CreateAgentWorkspaceDirectory({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          body: { path: input.path, parents: input.parents },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  deleteAgentWorkspacePath: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        path: z.string().min(1),
+        recursive: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1DeleteAgentWorkspacePath({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          body: { path: input.path, recursive: input.recursive },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  moveAgentWorkspacePath: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sourcePath: z.string().min(1),
+        destinationPath: z.string().min(1),
+        overwrite: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1MoveAgentWorkspacePath({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          body: {
+            source_path: input.sourcePath,
+            destination_path: input.destinationPath,
+            overwrite: input.overwrite,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

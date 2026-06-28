@@ -138,7 +138,10 @@ const readyState: WorkspacePanelState = {
   },
   fileState: { type: "IDLE" },
   selectedFilePath: null,
+  selectedEntry: null,
+  inspectorState: { type: "IDLE" },
   isRefreshing: false,
+  isMutating: false,
   isStarting: false,
   isStopping: false,
   isResetting: false,
@@ -157,6 +160,28 @@ const fileState: WorkspacePanelState = {
     },
   },
   selectedFilePath: "/workspace/agent/project/README.md",
+  selectedEntry: {
+    name: "README.md",
+    path: "/workspace/agent/project/README.md",
+    kind: "file",
+    size: 2048,
+    mediaType: "text/markdown",
+    modifiedAt: "2026-05-01T10:00:00.000Z",
+  },
+  inspectorState: {
+    type: "LOADED",
+    stat: {
+      path: "/workspace/agent/project/README.md",
+      name: "README.md",
+      kind: "file",
+      size: 2048,
+      mediaType: "text/markdown",
+      modifiedAt: "2026-05-01T10:00:00.000Z",
+      symlink: false,
+      realPath: null,
+      resolvedKind: null,
+    },
+  },
 };
 
 const meta = {
@@ -176,6 +201,10 @@ const meta = {
     onOpenDirectory: noop,
     onOpenFile: noop,
     onRefresh: noop,
+    onCreateDirectory: noop,
+    onRenamePath: noop,
+    onMovePath: noop,
+    onDeletePath: noop,
     getDownloadHref: (path: string): string => `/download?path=${path}`,
   },
 } satisfies Meta<typeof WorkspacePanel>;
@@ -219,6 +248,8 @@ export const SettingsRuntimeInactive = {
         },
       },
       manifest: null,
+      selectedEntry: null,
+      inspectorState: { type: "IDLE" },
     },
     defaultTab: "settings",
   },
@@ -252,6 +283,8 @@ export const RuntimeInactive = {
         },
       },
       manifest: null,
+      selectedEntry: null,
+      inspectorState: { type: "IDLE" },
     },
   },
 } satisfies Story;
@@ -278,6 +311,8 @@ export const RuntimeRestoreFailed = {
         },
       },
       manifest: null,
+      selectedEntry: null,
+      inspectorState: { type: "IDLE" },
     },
   },
 } satisfies Story;
@@ -301,6 +336,8 @@ export const RuntimeStarting = {
         },
       },
       manifest: null,
+      selectedEntry: null,
+      inspectorState: { type: "IDLE" },
     },
   },
 } satisfies Story;
@@ -324,6 +361,8 @@ export const RuntimeRestoring = {
         },
       },
       manifest: null,
+      selectedEntry: null,
+      inspectorState: { type: "IDLE" },
     },
   },
 } satisfies Story;
@@ -352,6 +391,8 @@ export const RuntimeError = {
         },
       },
       manifest: null,
+      selectedEntry: null,
+      inspectorState: { type: "IDLE" },
     },
   },
 } satisfies Story;

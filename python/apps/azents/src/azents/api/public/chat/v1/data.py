@@ -45,6 +45,9 @@ from azents.services.chat.workspace import (
     AgentWorkspaceEntry,
     AgentWorkspaceFile,
     AgentWorkspaceManifest,
+    AgentWorkspaceMoveResult,
+    AgentWorkspaceMutationResult,
+    AgentWorkspacePathStat,
     AgentWorkspaceReadFailed,
     AgentWorkspaceReady,
     AgentWorkspaceRuntime,
@@ -643,6 +646,90 @@ class AgentWorkspaceFileResponse(BaseModel):
 AgentWorkspaceFileResponseUnion = (
     AgentWorkspaceDirectoryResponse | AgentWorkspaceFileResponse
 )
+
+
+class AgentWorkspaceStatResponse(BaseModel):
+    """Agent Workspace path metadata response."""
+
+    path: str = Field(description="Agent Workspace path")
+    name: str = Field(description="Path basename")
+    kind: Literal["file", "directory", "symlink", "other", "missing"] = Field(
+        description="Path kind"
+    )
+    size: int | None = Field(default=None, description="File size in bytes")
+    media_type: str | None = Field(default=None, description="MIME type")
+    modified_at: datetime.datetime | None = Field(
+        default=None,
+        description="Modified time",
+    )
+    symlink: bool = Field(description="Whether the path itself is a symlink")
+    real_path: str | None = Field(default=None, description="Symlink target path")
+    resolved_kind: (
+        Literal["file", "directory", "symlink", "other", "missing"] | None
+    ) = Field(default=None, description="Symlink target kind")
+
+    @classmethod
+    def from_domain(cls, stat: AgentWorkspacePathStat) -> Self:
+        """Convert from service model."""
+        return cls(
+            path=stat.path,
+            name=stat.name,
+            kind=stat.kind,
+            size=stat.size,
+            media_type=stat.media_type,
+            modified_at=stat.modified_at,
+            symlink=stat.symlink,
+            real_path=stat.real_path,
+            resolved_kind=stat.resolved_kind,
+        )
+
+
+class AgentWorkspaceMkdirRequest(BaseModel):
+    """Agent Workspace mkdir request."""
+
+    path: str = Field(description="Directory path to create")
+    parents: bool = Field(default=False, description="Create parent directories")
+
+
+class AgentWorkspaceDeleteRequest(BaseModel):
+    """Agent Workspace delete request."""
+
+    path: str = Field(description="File or directory path to delete")
+    recursive: bool = Field(default=False, description="Delete directories recursively")
+
+
+class AgentWorkspaceMoveRequest(BaseModel):
+    """Agent Workspace move request."""
+
+    source_path: str = Field(description="Source path")
+    destination_path: str = Field(description="Destination path")
+    overwrite: bool = Field(default=False, description="Overwrite existing destination")
+
+
+class AgentWorkspaceMutationResponse(BaseModel):
+    """Agent Workspace mutation response."""
+
+    path: str = Field(description="Affected path")
+
+    @classmethod
+    def from_domain(cls, result: AgentWorkspaceMutationResult) -> Self:
+        """Convert from service model."""
+        return cls(path=result.path)
+
+
+class AgentWorkspaceMoveResponse(BaseModel):
+    """Agent Workspace move response."""
+
+    source_path: str = Field(description="Moved source path")
+    destination_path: str = Field(description="Move destination path")
+
+    @classmethod
+    def from_domain(cls, result: AgentWorkspaceMoveResult) -> Self:
+        """Convert from service model."""
+        return cls(
+            source_path=result.source_path,
+            destination_path=result.destination_path,
+        )
 
 
 class AgentWorkspaceInactiveErrorResponse(BaseModel):

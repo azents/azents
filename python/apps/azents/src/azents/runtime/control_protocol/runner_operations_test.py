@@ -14,7 +14,10 @@ from azents.runtime.control_protocol.data import (
 )
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeBashResult,
+    RuntimeFileDeleteResult,
     RuntimeFileListResult,
+    RuntimeFileMkdirResult,
+    RuntimeFileMoveResult,
     RuntimeFileReadResult,
     RuntimeFileStatResult,
     RuntimeGrepResult,
@@ -437,6 +440,133 @@ async def test_stat_file_returns_final_metadata() -> None:
         symlink=False,
         real_path=None,
         resolved_kind=None,
+        modified_at=None,
+        final_cursor="1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_file_returns_final_path() -> None:
+    """File delete operation returns final deleted path."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.delete_file(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            path="/workspace/agent/old.txt",
+            recursive=False,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "file.delete"
+    assert request.payload["payload"] == {
+        "path": "/workspace/agent/old.txt",
+        "recursive": False,
+    }
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {"deleted_path": "/workspace/agent/old.txt"},
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result == RuntimeFileDeleteResult(
+        path="/workspace/agent/old.txt",
+        final_cursor="1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_mkdir_file_returns_final_path() -> None:
+    """File mkdir operation returns final created path."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.mkdir_file(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            path="/workspace/agent/reports",
+            parents=True,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "file.mkdir"
+    assert request.payload["payload"] == {
+        "path": "/workspace/agent/reports",
+        "parents": True,
+    }
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {"created_path": "/workspace/agent/reports"},
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result == RuntimeFileMkdirResult(
+        path="/workspace/agent/reports",
+        final_cursor="1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_move_file_returns_final_paths() -> None:
+    """File move operation returns final source and destination paths."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.move_file(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            source_path="/workspace/agent/a.txt",
+            destination_path="/workspace/agent/b.txt",
+            overwrite=False,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "file.move"
+    assert request.payload["payload"] == {
+        "source_path": "/workspace/agent/a.txt",
+        "destination_path": "/workspace/agent/b.txt",
+        "overwrite": False,
+    }
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "moved_source_path": "/workspace/agent/a.txt",
+            "moved_destination_path": "/workspace/agent/b.txt",
+        },
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result == RuntimeFileMoveResult(
+        source_path="/workspace/agent/a.txt",
+        destination_path="/workspace/agent/b.txt",
         final_cursor="1",
     )
 

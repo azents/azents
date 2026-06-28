@@ -94,6 +94,7 @@ from azents.services.chat.workspace import (
     AgentWorkspaceFileResult,
     AgentWorkspaceFileService,
     AgentWorkspaceFileTooLarge,
+    AgentWorkspaceInvalidOperation,
     AgentWorkspacePathDenied,
     AgentWorkspacePathUnavailable,
     AgentWorkspaceRuntimeInactive,
@@ -140,11 +141,17 @@ from .data import (
     AgentSessionResponse,
     AgentSessionTitleUpdateRequest,
     AgentWorkspaceActionResponse,
+    AgentWorkspaceDeleteRequest,
     AgentWorkspaceDirectoryResponse,
     AgentWorkspaceFileResponse,
     AgentWorkspaceFileResponseUnion,
     AgentWorkspaceInactiveErrorResponse,
+    AgentWorkspaceMkdirRequest,
+    AgentWorkspaceMoveRequest,
+    AgentWorkspaceMoveResponse,
+    AgentWorkspaceMutationResponse,
     AgentWorkspaceResponse,
+    AgentWorkspaceStatResponse,
     ChatCommandWriteRequest,
     ChatEditMessageWriteRequest,
     ChatEventPageResponse,
@@ -1767,6 +1774,109 @@ async def read_agent_workspace_path(
             assert_never(result)
 
 
+@router.get("/agents/{agent_id}/workspace/stat")
+async def stat_agent_workspace_path(
+    agent_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_service: Annotated[AgentWorkspaceFileService, Depends()],
+    path: Annotated[
+        str | None,
+        Query(description="Agent Workspace path to inspect"),
+    ] = None,
+) -> AgentWorkspaceStatResponse:
+    """Get Agent Workspace file or directory metadata."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await workspace_service.stat_path(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        raw_path=path,
+    )
+    match result:
+        case Success(value):
+            return AgentWorkspaceStatResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_error(error)
+            raise AssertionError("unreachable")
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/workspace/directories")
+async def create_agent_workspace_directory(
+    agent_id: str,
+    request: AgentWorkspaceMkdirRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_service: Annotated[AgentWorkspaceFileService, Depends()],
+) -> AgentWorkspaceMutationResponse:
+    """Create an Agent Workspace directory."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await workspace_service.mkdir_path(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        raw_path=request.path,
+        parents=request.parents,
+    )
+    match result:
+        case Success(value):
+            return AgentWorkspaceMutationResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_error(error)
+            raise AssertionError("unreachable")
+        case _:
+            assert_never(result)
+
+
+@router.delete("/agents/{agent_id}/workspace/files")
+async def delete_agent_workspace_path(
+    agent_id: str,
+    request: AgentWorkspaceDeleteRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_service: Annotated[AgentWorkspaceFileService, Depends()],
+) -> AgentWorkspaceMutationResponse:
+    """Delete an Agent Workspace file or directory."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await workspace_service.delete_path(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        raw_path=request.path,
+        recursive=request.recursive,
+    )
+    match result:
+        case Success(value):
+            return AgentWorkspaceMutationResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_error(error)
+            raise AssertionError("unreachable")
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/workspace/move")
+async def move_agent_workspace_path(
+    agent_id: str,
+    request: AgentWorkspaceMoveRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_service: Annotated[AgentWorkspaceFileService, Depends()],
+) -> AgentWorkspaceMoveResponse:
+    """Move or rename an Agent Workspace file or directory."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await workspace_service.move_path(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        raw_source_path=request.source_path,
+        raw_destination_path=request.destination_path,
+        overwrite=request.overwrite,
+    )
+    match result:
+        case Success(value):
+            return AgentWorkspaceMoveResponse.from_domain(value)
+        case Failure(error):
+            _raise_workspace_error(error)
+            raise AssertionError("unreachable")
+        case _:
+            assert_never(result)
+
+
 @router.get("/agents/{agent_id}/workspace/download")
 async def download_agent_workspace_file(
     agent_id: str,
@@ -1843,6 +1953,8 @@ def _raise_workspace_error(error: AgentWorkspaceError) -> None:
         case AgentWorkspaceFileNotFound():
             raise HTTPException(status_code=404, detail="File not found.")
         case AgentWorkspaceFileReadError():
+            raise HTTPException(status_code=400, detail=error.detail)
+        case AgentWorkspaceInvalidOperation():
             raise HTTPException(status_code=400, detail=error.detail)
         case AgentWorkspaceFileTooLarge():
             raise HTTPException(

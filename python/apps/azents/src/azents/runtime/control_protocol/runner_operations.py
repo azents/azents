@@ -79,6 +79,7 @@ class RuntimeFileListEntry:
     path: str
     type: Literal["file", "directory", "symlink", "other"]
     size_bytes: int | None
+    modified_at: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,6 +100,7 @@ class RuntimeFileStatResult:
     symlink: bool
     real_path: str | None
     resolved_kind: Literal["file", "directory", "symlink", "other", "missing"] | None
+    modified_at: str | None
     final_cursor: str
 
 
@@ -176,6 +178,31 @@ class RuntimeProcessResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeFileDeleteResult:
+    """Completed file delete operation result."""
+
+    path: str
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileMkdirResult:
+    """Completed file mkdir operation result."""
+
+    path: str
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileMoveResult:
+    """Completed file move operation result."""
+
+    source_path: str
+    destination_path: str
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeOperationReceipt:
     """Background Runner operation receipt."""
 
@@ -192,6 +219,9 @@ type RuntimeForegroundResult = (
     | RuntimeGrepResult
     | RuntimeFileWriteResult
     | RuntimeProcessResult
+    | RuntimeFileDeleteResult
+    | RuntimeFileMkdirResult
+    | RuntimeFileMoveResult
 )
 
 
@@ -322,6 +352,104 @@ class RuntimeRunnerOperationClient:
             )
         )
         return await self.resume_file_write(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
+    async def delete_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        path: str,
+        recursive: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileDeleteResult:
+        """Run a foreground file delete operation and wait for final result."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="file.delete",
+                payload={"path": path, "recursive": recursive},
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_file_delete(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
+    async def mkdir_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        path: str,
+        parents: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileMkdirResult:
+        """Run a foreground file mkdir operation and wait for final result."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="file.mkdir",
+                payload={"path": path, "parents": parents},
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_file_mkdir(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
+    async def move_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        source_path: str,
+        destination_path: str,
+        overwrite: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileMoveResult:
+        """Run a foreground file move operation and wait for final result."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="file.move",
+                payload={
+                    "source_path": source_path,
+                    "destination_path": destination_path,
+                    "overwrite": overwrite,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_file_move(
             reply_stream_id=dispatch.reply_stream_id,
             after_cursor=None,
             request_id=dispatch.request_id,
@@ -681,6 +809,90 @@ class RuntimeRunnerOperationClient:
         )
         return RuntimeFileWriteResult(
             bytes_written=_int_payload(final.event.payload, "bytes_written", default=0),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_file_delete(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileDeleteResult:
+        """Resume reading a file delete reply stream until final result."""
+        folder = _ReplyFolder(after_cursor=after_cursor)
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeFileDeleteResult(
+            path=_str_payload(final.event.payload, "deleted_path"),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_file_mkdir(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileMkdirResult:
+        """Resume reading a file mkdir reply stream until final result."""
+        folder = _ReplyFolder(after_cursor=after_cursor)
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeFileMkdirResult(
+            path=_str_payload(final.event.payload, "created_path"),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_file_move(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileMoveResult:
+        """Resume reading a file move reply stream until final result."""
+        folder = _ReplyFolder(after_cursor=after_cursor)
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeFileMoveResult(
+            source_path=_str_payload(final.event.payload, "moved_source_path"),
+            destination_path=_str_payload(
+                final.event.payload, "moved_destination_path"
+            ),
             final_cursor=final.cursor,
         )
 
@@ -1048,6 +1260,7 @@ def _file_list_entries(
                 path=path,
                 type=parsed_type,
                 size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+                modified_at=_optional_str_payload(raw_entry, "modified_at"),
             )
         )
     return entries
@@ -1073,6 +1286,7 @@ def _file_stat_result(
         symlink=_bool_payload(payload, "symlink", default=False),
         real_path=_optional_str_payload(payload, "real_path"),
         resolved_kind=resolved_kind,
+        modified_at=_optional_str_payload(payload, "modified_at"),
         final_cursor=final_cursor,
     )
 

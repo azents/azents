@@ -1,16 +1,15 @@
-import type { AppRouter } from "../../../trpc/routers/_app";
 import type {
   AgentWorkspaceDirectoryResponse,
   AgentWorkspaceEntryResponse,
   AgentWorkspaceFileResponse,
   AgentWorkspaceManifestResponse,
+  AgentWorkspaceResponse,
+  AgentWorkspaceStatResponse,
   SessionWorkspaceProjectRegistrationRequestResponse,
   SessionWorkspaceProjectResponse,
 } from "@azents/public-client";
-import type { inferRouterOutputs } from "@trpc/server";
 
-export type AgentWorkspaceServerState =
-  inferRouterOutputs<AppRouter>["chat"]["getAgentWorkspace"];
+export type AgentWorkspaceServerState = AgentWorkspaceResponse;
 
 export type WorkspaceEntry = {
   name: string;
@@ -33,6 +32,18 @@ export type WorkspaceFile = {
   size: number;
   text: string | null;
   truncated: boolean;
+};
+
+export type WorkspacePathStat = {
+  path: string;
+  name: string;
+  kind: "file" | "directory" | "symlink" | "other" | "missing";
+  size: number | null;
+  mediaType: string | null;
+  modifiedAt: string | null;
+  symlink: boolean;
+  realPath: string | null;
+  resolvedKind: "file" | "directory" | "symlink" | "other" | "missing" | null;
 };
 
 export type WorkspacePathResult =
@@ -71,7 +82,14 @@ export type WorkspacePanelState =
       directoryEntriesByPath: Record<string, WorkspaceEntry[]>;
       fileState: WorkspaceFileState;
       selectedFilePath: string | null;
+      selectedEntry: WorkspaceEntry | null;
+      inspectorState:
+        | { type: "IDLE" }
+        | { type: "LOADING"; path: string }
+        | { type: "ERROR"; message: string }
+        | { type: "LOADED"; stat: WorkspacePathStat };
       isRefreshing: boolean;
+      isMutating: boolean;
       isStarting: boolean;
       isStopping: boolean;
       isResetting: boolean;
@@ -122,4 +140,20 @@ export function mapWorkspacePathResult(
         },
       };
   }
+}
+
+export function mapWorkspacePathStat(
+  result: AgentWorkspaceStatResponse,
+): WorkspacePathStat {
+  return {
+    path: result.path,
+    name: result.name,
+    kind: result.kind,
+    size: result.size ?? null,
+    mediaType: result.media_type ?? null,
+    modifiedAt: result.modified_at ?? null,
+    symlink: result.symlink,
+    realPath: result.real_path ?? null,
+    resolvedKind: result.resolved_kind ?? null,
+  };
 }

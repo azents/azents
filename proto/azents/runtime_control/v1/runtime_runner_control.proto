@@ -93,6 +93,9 @@ message RunnerOperationRequest {
     FileStatOperationPayload file_stat = 25;
     ProcessStartOperationPayload process_start = 26;
     ProcessWriteOperationPayload process_write = 27;
+    FileDeleteOperationPayload file_delete = 28;
+    FileMkdirOperationPayload file_mkdir = 29;
+    FileMoveOperationPayload file_move = 30;
   }
 }
 
@@ -147,6 +150,22 @@ message ProcessWriteOperationPayload {
   uint32 yield_time_ms = 3;
   uint32 max_output_bytes = 4;
   string owner_session_id = 5;
+}
+
+message FileDeleteOperationPayload {
+  string path = 1;
+  bool recursive = 2;
+}
+
+message FileMkdirOperationPayload {
+  string path = 1;
+  bool parents = 2;
+}
+
+message FileMoveOperationPayload {
+  string source_path = 1;
+  string destination_path = 2;
+  bool overwrite = 3;
 }
 
 message RunnerBodyChunk {
@@ -204,6 +223,9 @@ message RunnerOperationFinalSuccessPayload {
     FileGrepFinalSuccess file_grep = 5;
     FileStatFinalSuccess file_stat = 6;
     ProcessOperationFinalSuccess process = 7;
+    FileDeleteFinalSuccess file_delete = 8;
+    FileMkdirFinalSuccess file_mkdir = 9;
+    FileMoveFinalSuccess file_move = 10;
   }
 }
 
@@ -232,6 +254,7 @@ message RuntimeFileListEntry {
   string path = 1;
   string type = 2;
   optional uint64 size_bytes = 3;
+  optional string modified_at = 4;
 }
 
 message FileStatFinalSuccess {
@@ -241,6 +264,20 @@ message FileStatFinalSuccess {
   bool symlink = 4;
   optional string real_path = 5;
   optional string resolved_kind = 6;
+  optional string modified_at = 7;
+}
+
+message FileDeleteFinalSuccess {
+  string path = 1;
+}
+
+message FileMkdirFinalSuccess {
+  string path = 1;
+}
+
+message FileMoveFinalSuccess {
+  string source_path = 1;
+  string destination_path = 2;
 }
 
 message FileGrepFinalSuccess {

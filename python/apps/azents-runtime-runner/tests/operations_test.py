@@ -77,15 +77,20 @@ async def test_file_write_read_and_list_stay_in_workspace(tmp_path: Path) -> Non
     ]
     assert final_payloads[0] == {"bytes_written": 5}
     assert final_payloads[1] == {"bytes_read": 5}
-    assert final_payloads[2] == {
-        "entries": [
-            {
-                "path": f"{tmp_path}/nested/report.txt",
-                "type": "file",
-                "size_bytes": 5,
-            }
-        ]
-    }
+    entries = final_payloads[2].get("entries")
+    assert isinstance(entries, list)
+    entry = entries[0]
+    assert isinstance(entry, dict)
+    modified_at = entry.get("modified_at")
+    assert isinstance(modified_at, str)
+    assert entries == [
+        {
+            "path": f"{tmp_path}/nested/report.txt",
+            "type": "file",
+            "size_bytes": 5,
+            "modified_at": modified_at,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -104,15 +109,21 @@ async def test_file_list_supports_file_path(tmp_path: Path) -> None:
     )
 
     assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
-    assert client.events[-1].payload == {
-        "entries": [
-            {
-                "path": f"{tmp_path}/nested/report.txt",
-                "type": "file",
-                "size_bytes": 5,
-            }
-        ]
-    }
+    payload = client.events[-1].payload
+    entries = payload.get("entries")
+    assert isinstance(entries, list)
+    entry = entries[0]
+    assert isinstance(entry, dict)
+    modified_at = entry.get("modified_at")
+    assert isinstance(modified_at, str)
+    assert entries == [
+        {
+            "path": f"{tmp_path}/nested/report.txt",
+            "type": "file",
+            "size_bytes": 5,
+            "modified_at": modified_at,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -166,11 +177,15 @@ async def test_file_stat_reports_regular_file(tmp_path: Path) -> None:
     )
 
     assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
-    assert client.events[-1].payload == {
+    payload = client.events[-1].payload
+    modified_at = payload.get("modified_at")
+    assert isinstance(modified_at, str)
+    assert payload == {
         "path": str(file_path),
         "kind": "file",
         "size_bytes": 5,
         "symlink": False,
+        "modified_at": modified_at,
     }
 
 
@@ -191,13 +206,17 @@ async def test_file_stat_reports_symlink_without_following_it(tmp_path: Path) ->
     )
 
     assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
-    assert client.events[-1].payload == {
+    payload = client.events[-1].payload
+    modified_at = payload.get("modified_at")
+    assert isinstance(modified_at, str)
+    assert payload == {
         "path": str(link_path),
         "kind": "symlink",
         "size_bytes": None,
         "symlink": True,
         "real_path": str(target_path),
         "resolved_kind": "file",
+        "modified_at": modified_at,
     }
 
 

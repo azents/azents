@@ -445,6 +445,22 @@ def _operation_payload(
             "max_output_bytes": payload.max_output_bytes,
             "owner_session_id": payload.owner_session_id,
         }
+    if payload_kind == "file_delete":
+        return {
+            "path": operation.file_delete.path,
+            "recursive": operation.file_delete.recursive,
+        }
+    if payload_kind == "file_mkdir":
+        return {
+            "path": operation.file_mkdir.path,
+            "parents": operation.file_mkdir.parents,
+        }
+    if payload_kind == "file_move":
+        return {
+            "source_path": operation.file_move.source_path,
+            "destination_path": operation.file_move.destination_path,
+            "overwrite": operation.file_move.overwrite,
+        }
     return {}
 
 
@@ -531,6 +547,21 @@ def _copy_final_success(
         resolved_kind = _optional_str_payload(payload, "resolved_kind")
         if resolved_kind is not None:
             stat.resolved_kind = resolved_kind
+        modified_at = _optional_str_payload(payload, "modified_at")
+        if modified_at is not None:
+            stat.modified_at = modified_at
+        return
+    if "deleted_path" in payload:
+        message.file_delete.path = _str_payload(payload, "deleted_path")
+        return
+    if "created_path" in payload:
+        message.file_mkdir.path = _str_payload(payload, "created_path")
+        return
+    if "moved_source_path" in payload or "moved_destination_path" in payload:
+        message.file_move.source_path = _str_payload(payload, "moved_source_path")
+        message.file_move.destination_path = _str_payload(
+            payload, "moved_destination_path"
+        )
         return
 
 
@@ -584,6 +615,9 @@ def _final_success_payload(
                     "size_bytes": (
                         entry.size_bytes if entry.HasField("size_bytes") else None
                     ),
+                    "modified_at": (
+                        entry.modified_at if entry.HasField("modified_at") else None
+                    ),
                 }
                 for entry in message.file_list.entries
             ]
@@ -620,6 +654,8 @@ def _final_success_payload(
             payload["real_path"] = message.file_stat.real_path
         if message.file_stat.HasField("resolved_kind"):
             payload["resolved_kind"] = message.file_stat.resolved_kind
+        if message.file_stat.HasField("modified_at"):
+            payload["modified_at"] = message.file_stat.modified_at
         return payload
     if result_kind == "process":
         payload: dict[str, JsonValue] = {
@@ -636,6 +672,15 @@ def _final_success_payload(
         if message.process.HasField("exit_code"):
             payload["exit_code"] = message.process.exit_code
         return payload
+    if result_kind == "file_delete":
+        return {"deleted_path": message.file_delete.path}
+    if result_kind == "file_mkdir":
+        return {"created_path": message.file_mkdir.path}
+    if result_kind == "file_move":
+        return {
+            "moved_source_path": message.file_move.source_path,
+            "moved_destination_path": message.file_move.destination_path,
+        }
     return {}
 
 
@@ -660,6 +705,9 @@ def _file_list_entries(
         size_bytes = _optional_int_payload(raw_entry, "size_bytes")
         if size_bytes is not None:
             entry.size_bytes = size_bytes
+        modified_at = _optional_str_payload(raw_entry, "modified_at")
+        if modified_at is not None:
+            entry.modified_at = modified_at
         entries.append(entry)
     return entries
 

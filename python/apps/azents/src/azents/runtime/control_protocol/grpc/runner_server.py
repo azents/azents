@@ -544,6 +544,20 @@ def _copy_operation_payload(
         message.process_write.owner_session_id = _str_payload(
             payload, "owner_session_id"
         )
+        return
+    if operation_type == "file.delete":
+        message.file_delete.path = _str_payload(payload, "path")
+        message.file_delete.recursive = _bool_payload(payload, "recursive")
+        return
+    if operation_type == "file.mkdir":
+        message.file_mkdir.path = _str_payload(payload, "path")
+        message.file_mkdir.parents = _bool_payload(payload, "parents")
+        return
+    if operation_type == "file.move":
+        message.file_move.source_path = _str_payload(payload, "source_path")
+        message.file_move.destination_path = _str_payload(payload, "destination_path")
+        message.file_move.overwrite = _bool_payload(payload, "overwrite")
+        return
 
 
 def _str_payload(payload: dict[str, JsonValue], key: str) -> str:
