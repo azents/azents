@@ -11,7 +11,7 @@
 
 import { Box, Drawer } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
 import { formatModelSelectionSummary } from "@/features/agents/model-selection";
 import { useChatSessionContainer } from "../containers/useChatSessionContainer";
@@ -20,7 +20,10 @@ import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspace
 import { ChatView } from "./ChatView";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import type { ConnectionStatus } from "../types";
-import type { AgentResponse } from "@azents/public-client";
+import type {
+  AgentResponse,
+  AgentSessionResponse,
+} from "@azents/public-client";
 
 interface ChatSessionViewProps {
   handle: string;
@@ -28,6 +31,8 @@ interface ChatSessionViewProps {
   sessionId: string;
   /** this session agent */
   agent: AgentResponse;
+  /** Loaded AgentSession metadata */
+  session: AgentSessionResponse;
   /** connection status parent to push (for sidebar badge) */
   onConnectionStatusChange: (status: ConnectionStatus) => void;
 }
@@ -36,10 +41,16 @@ export function ChatSessionView({
   handle,
   sessionId,
   agent,
+  session,
   onConnectionStatusChange,
 }: ChatSessionViewProps): React.ReactElement {
   const t = useTranslations("chat");
   const [runtimeDrawerOpened, setRuntimeDrawerOpened] = useState(false);
+  const [headerSession, setHeaderSession] =
+    useState<AgentSessionResponse>(session);
+  useEffect(() => {
+    setHeaderSession(session);
+  }, [session]);
   const output = useChatSessionContainer({
     sessionId,
     agent,
@@ -60,6 +71,8 @@ export function ChatSessionView({
         handle={handle}
         agent={agent}
         sessionId={sessionId}
+        session={headerSession}
+        onSessionTitleChange={setHeaderSession}
         onOpenRuntime={() => setRuntimeDrawerOpened(true)}
         chatControls={
           <TokenUsageIndicator

@@ -166,7 +166,9 @@ The resulting concise `auto_generated` title only replaces the deterministic tit
 event. Manual title updates or clears therefore remain authoritative, while long-running first turns
 do not delay automatic title generation. Title generation failures must not affect run execution.
 Clients display `title` when present and otherwise fall back to a contextual label such as "Team
-primary" or "Session".
+primary" or "Session". Concrete session route top bars show this session title while preserving the
+Agent avatar/icon affordance, and expose an inline title edit action that calls the manual title update
+endpoint.
 
 `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/archive` archives an active non-primary
 AgentSession. Archive is a soft lifecycle transition: durable transcript data, run rows, exchange
