@@ -226,7 +226,7 @@ async def test_execute_runs_command_and_marks_terminal(
         live_event_projector=live_event_projector,
     )
 
-    await executor.execute(
+    result = await executor.execute(
         agent_id="agent-001",
         session_id="session-001",
         command=PendingSessionCommand(
@@ -258,6 +258,7 @@ async def test_execute_runs_command_and_marks_terminal(
     assert live_event_projector.flushed_session_ids == ["session-001"]
     assert session_lifecycle.cleared_session_ids == ["session-001"]
     assert session_lifecycle.terminal_runs == [(run_id, AgentRunStatus.COMPLETED)]
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
     assert session_repository.cleared_commands == [("session-001", "command-001")]
 
 

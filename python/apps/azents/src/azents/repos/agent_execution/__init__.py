@@ -33,6 +33,7 @@ from azents.engine.events.types import (
     UnknownAdapterOutputPayload,
     UserMessagePayload,
 )
+from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import JSONValue, RDBEvent
@@ -486,6 +487,7 @@ class AgentRunRepository:
                 status=status,
                 phase=AgentRunPhase.IDLE,
                 active_tool_calls=[],
+                retry_state=None,
                 ended_at=ended_at,
             )
         )
@@ -553,6 +555,12 @@ class AgentRunRepository:
                 call.model_dump(mode="json", exclude_none=True)
                 for call in patch.active_tool_calls or []
             ]
+        if "retry_state" in values:
+            values["retry_state"] = (
+                patch.retry_state.model_dump(mode="json", exclude_none=True)
+                if patch.retry_state is not None
+                else None
+            )
         if values:
             for key, value in values.items():
                 setattr(rdb, key, value)
@@ -575,6 +583,19 @@ class AgentRunRepository:
             patch = AgentRunPatch(phase=phase, active_tool_calls=active_tool_calls)
         return await self.update(session, run_id, patch)
 
+    async def update_retry_state(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        retry_state: FailedRunRetryState | None,
+    ) -> AgentRunState:
+        """Set or clear durable failed-run retry state."""
+        return await self.update(
+            session,
+            run_id,
+            AgentRunPatch(retry_state=retry_state),
+        )
+
     async def mark_terminal(
         self,
         session: AsyncSession,
@@ -592,6 +613,7 @@ class AgentRunRepository:
                 status=status,
                 phase=AgentRunPhase.IDLE,
                 active_tool_calls=[],
+                retry_state=None,
                 ended_at=ended_at,
                 last_completed_event_id=last_completed_event_id,
             ),
@@ -615,6 +637,7 @@ class AgentRunRepository:
         rdb.status = status
         rdb.phase = AgentRunPhase.IDLE
         rdb.active_tool_calls = []
+        rdb.retry_state = None
         rdb.ended_at = ended_at
         rdb.last_completed_event_id = last_completed_event_id
         await session.flush()
@@ -633,6 +656,9 @@ class AgentRunRepository:
             phase=rdb.phase,
             status=rdb.status,
             active_tool_calls=active_tool_calls,
+            retry_state=FailedRunRetryState.model_validate(rdb.retry_state)
+            if rdb.retry_state is not None
+            else None,
             last_completed_event_id=rdb.last_completed_event_id,
             stop_requested_at=rdb.stop_requested_at,
             started_at=rdb.started_at,

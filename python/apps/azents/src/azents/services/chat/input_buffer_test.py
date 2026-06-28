@@ -1,5 +1,7 @@
 """ChatSessionService InputBuffer tests."""
 
+import datetime
+
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +14,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.engine.events.types import UserMessagePayload
+from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
@@ -222,6 +225,26 @@ class TestChatSessionInputBuffer:
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                 ),
             )
+            now = datetime.datetime.now(datetime.UTC)
+            retry_state = FailedRunRetryState.from_attempt(
+                FailedRunAttempt(
+                    user_message="temporary failure",
+                    internal_message=None,
+                    error_type="RuntimeError",
+                    source="engine",
+                    visibility="internal",
+                    attempt_number=2,
+                    occurred_at=now,
+                ),
+                max_retries=10,
+                backoff_seconds=2,
+                next_retry_at=now + datetime.timedelta(seconds=2),
+            )
+            run = await AgentRunRepository().update_retry_state(
+                session,
+                run.id,
+                retry_state,
+            )
 
         result = await _service(rdb_session_manager).list_live_events(
             session_id,
@@ -233,6 +256,15 @@ class TestChatSessionInputBuffer:
         assert result.value.run.run_id == run.id
         assert result.value.run.phase == AgentRunPhase.WAITING_FOR_MODEL
         assert result.value.run.status == AgentRunStatus.RUNNING
+        assert result.value.run.retry is not None
+        assert result.value.run.retry.status == "waiting"
+        assert result.value.run.retry.last_error_message == "temporary failure"
+        assert result.value.run.retry.failed_attempt_count == 2
+        assert result.value.run.retry.max_retries == 10
+        assert result.value.run.retry.backoff_seconds == 2
+        assert result.value.run.retry.next_retry_at == (
+            run.retry_state.next_retry_at.isoformat() if run.retry_state else None
+        )
         assert result.value.session_run_state == AgentSessionRunState.RUNNING
 
     async def test_flushed_input_buffer_remains_in_message_history(

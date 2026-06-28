@@ -84,6 +84,11 @@ class RDBAgentRun(RDBModel):
         default_factory=list,
         server_default=sa.text("'[]'::jsonb"),
     )
+    retry_state: Mapped[dict[str, JSONValue] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
     last_completed_event_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         nullable=True,

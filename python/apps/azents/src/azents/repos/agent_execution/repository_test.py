@@ -15,6 +15,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.engine.events.types import ActiveToolCall, UserMessagePayload
+from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -380,6 +381,63 @@ class TestEventExecutionRepositories:
             )
             is None
         )
+
+    async def test_agent_run_retry_state_updates_and_clears_on_terminal(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """AgentRun retry_state is persisted while running and cleared at terminal."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-retry-state",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(session_id=event_session.id),
+        )
+        now = datetime.datetime.now(datetime.UTC)
+        retry_state = FailedRunRetryState.from_attempt(
+            FailedRunAttempt(
+                user_message="temporary failure",
+                internal_message="RuntimeError('temporary failure')",
+                error_type="RuntimeError",
+                source="engine",
+                visibility="internal",
+                attempt_number=1,
+                occurred_at=now,
+            ),
+            max_retries=10,
+            backoff_seconds=1,
+            next_retry_at=now + datetime.timedelta(seconds=1),
+        )
+
+        updated = await repo.update_retry_state(rdb_session, run.id, retry_state)
+
+        assert updated.retry_state == retry_state
+        running = await repo.get_running_by_session_id(
+            rdb_session,
+            session_id=event_session.id,
+        )
+        assert running is not None
+        assert running.retry_state == retry_state
+
+        completed = await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.FAILED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        assert completed.retry_state is None
 
     async def test_agent_run_create_closes_stale_running_runs(
         self,

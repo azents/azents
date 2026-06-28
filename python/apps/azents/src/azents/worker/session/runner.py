@@ -14,6 +14,7 @@ from azents.broker.types import (
     SessionStopSignal,
     SessionWakeUp,
 )
+from azents.core.enums import AgentRunStatus
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.contracts import AgentEngineProtocol, ToolkitBinding
 from azents.engine.run.errors import UserVisibleRuntimeError
@@ -65,6 +66,7 @@ class _PendingIdleBoundary:
     message: SessionWakeUp
     toolkits: list[ToolkitBinding]
     run_id: str | None
+    run_status: AgentRunStatus | None
 
 
 class SessionRunner:
@@ -279,7 +281,10 @@ class SessionRunner:
         """terminal boundary 를 idle transition 과 idle hook 으로 닫는다."""
         logger.info(
             "Session runner marking session idle after terminal run",
-            extra={"session_id": boundary.message.session_id},
+            extra={
+                "session_id": boundary.message.session_id,
+                "run_status": boundary.run_status,
+            },
         )
         marked_idle = await self.session_lifecycle.mark_session_idle(
             boundary.message.session_id
@@ -287,11 +292,21 @@ class SessionRunner:
         if not marked_idle:
             return False
         await self.session_lifecycle.clear_session_activity(boundary.message.session_id)
-        await self.idle_continuation_service.enqueue(
-            boundary.message,
-            toolkits=boundary.toolkits,
-            run_id=boundary.run_id,
-        )
+        if boundary.run_status == AgentRunStatus.COMPLETED:
+            await self.idle_continuation_service.enqueue(
+                boundary.message,
+                toolkits=boundary.toolkits,
+                run_id=boundary.run_id,
+            )
+        else:
+            logger.info(
+                "Skipped idle continuation because terminal run did not complete",
+                extra={
+                    "session_id": boundary.message.session_id,
+                    "run_id": boundary.run_id,
+                    "run_status": boundary.run_status,
+                },
+            )
         return True
 
     async def _release_current_session(self) -> None:
@@ -409,6 +424,7 @@ class SessionRunner:
                             message=message,
                             toolkits=result.toolkits,
                             run_id=result.run_id,
+                            run_status=result.terminal_run_status,
                         )
                         if await self._has_follow_up_work(message.session_id):
                             self.pending_idle_boundary = boundary

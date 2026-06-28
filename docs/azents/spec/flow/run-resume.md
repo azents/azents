@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-06-25
-spec_version: 7
+last_verified_at: 2026-06-28
+spec_version: 8
 ---
 
 # Run Resume
@@ -33,7 +33,7 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Broker wake-up | New session wake-up signal | Live sticky owner receives the wake-up directly; otherwise a worker can take over after owner heartbeat expiry |
 | Broker redelivery | Unacked session wake-up signal | Another worker receives and resumes from durable DB state |
 | Stale session activity | Worker recovery scan of `agent_sessions.run_state` | Worker enqueues a wake-up signal for the affected session |
-| Active event run | `agent_runs.phase` and `active_tool_calls` | Runtime reconciles phase/tool state and repairs missing interrupted results |
+| Active event run | `agent_runs.phase`, `active_tool_calls`, and `retry_state` | Runtime reconciles phase/tool/retry state and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime executes or interrupts the missing result path without duplicating completed results |
 
 ## Ownership Lease
@@ -58,8 +58,9 @@ The sticky lease and heartbeat timeout intentionally have different meanings:
 ## Worker State And Routing
 
 `AgentSession.run_state` remains a coarse session execution recovery signal (`idle` / `running`).
-Detailed execution state lives in `agent_runs.phase`. `AgentRuntime` owns shared sandbox lifecycle and
-runner/provider state, not session run ownership.
+Detailed execution state lives in `agent_runs.phase`, `active_tool_calls`, and nullable
+`retry_state`. `AgentRuntime` owns shared sandbox lifecycle and runner/provider state, not session
+run ownership.
 
 Worker shutdown must not partially process a new message. If shutdown wins before processing, the
 message is left for broker redelivery or ownership takeover.
@@ -162,6 +163,13 @@ The takeover path must preserve single-session execution:
   them. Model input payloads and control state remain durable in Postgres.
 - Durable transcript and `agent_runs` remain the execution source of truth after takeover.
 
+## Failed-run Retry Recovery
+
+When a running `agent_runs` row has non-null `retry_state`, that state is the durable retry resume
+source. Recovery and handover must preserve the failed attempt count and `next_retry_at`; a worker
+restart must not reset the retry budget or bypass exponential backoff. If a terminal transition closes
+the run, terminal helpers clear `retry_state` so stale retry state cannot be resumed.
+
 ## Tool Recovery
 
 If a foreground tool call has no corresponding result after interruption, the runtime appends a
@@ -187,6 +195,7 @@ that next run to observe `check_stop()` as true.
 ## Invariants
 
 - Durable transcript and `agent_runs` are the resume source of truth.
+- `agent_runs.retry_state` is the resume source for failed-run retry progress while a run remains running.
 - A live sticky owner must receive follow-up broker wake-ups directly.
 - A non-owner worker must not process a session while the owner heartbeat is live.
 - A stale owner heartbeat revokes the sticky owner even if the 30-minute lease key has not expired.
