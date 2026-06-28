@@ -2,6 +2,7 @@
 
 import dataclasses
 
+from azents.core.enums import AgentRunStatus
 from azents.engine.run.contracts import ToolkitBinding
 
 
@@ -13,3 +14,4 @@ class RunExecutionResult:
     terminal_event_observed: bool
     no_actionable_work: bool
     run_id: str | None = None
+    terminal_run_status: AgentRunStatus | None = None

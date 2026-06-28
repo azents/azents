@@ -311,6 +311,7 @@ class RunExecutor:
                 terminal_event_observed=True,
                 no_actionable_work=False,
                 run_id=run_id,
+                terminal_run_status=AgentRunStatus.FAILED,
             )
 
         run_request = resolved.value
@@ -807,6 +808,7 @@ class RunExecutor:
             terminal_event_observed=terminal_event_observed,
             no_actionable_work=False,
             run_id=run_id,
+            terminal_run_status=terminal_run_status,
         )
 
     def _schedule_initial_prompt_title_generation(

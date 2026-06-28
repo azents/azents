@@ -33,7 +33,7 @@ from azents.services.chat.context import (
     SessionContextSystemPrompt,
     SessionContextSystemPromptFragment,
 )
-from azents.services.chat.data import ChatLiveRunState
+from azents.services.chat.data import ChatLiveRunRetryState, ChatLiveRunState
 from azents.services.chat.workspace import (
     AgentWorkspaceAccessConnecting,
     AgentWorkspaceAccessState,
@@ -1052,17 +1052,52 @@ class ChatEventPageResponse(BaseModel):
     )
 
 
+class ChatLiveRunRetryStateResponse(BaseModel):
+    """Current live failed-run retry state response."""
+
+    status: str = Field(description="Current retry status")
+    last_error_message: str = Field(description="Latest user-safe error message")
+    failed_attempt_count: int = Field(description="Failed attempt count")
+    max_retries: int = Field(description="Maximum retry count")
+    backoff_seconds: int = Field(description="Current backoff duration in seconds")
+    next_retry_at: str = Field(description="Absolute next retry timestamp")
+
+    @classmethod
+    def from_domain(cls, retry: ChatLiveRunRetryState) -> Self:
+        """Convert from live run retry state domain model."""
+        return cls(
+            status=retry.status,
+            last_error_message=retry.last_error_message,
+            failed_attempt_count=retry.failed_attempt_count,
+            max_retries=retry.max_retries,
+            backoff_seconds=retry.backoff_seconds,
+            next_retry_at=retry.next_retry_at,
+        )
+
+
 class ChatLiveRunStateResponse(BaseModel):
     """Current live run state response."""
 
     run_id: str = Field(description="AgentRun ID")
     phase: AgentRunPhase = Field(description="Current run phase")
     status: AgentRunStatus = Field(description="Current run status")
+    retry: ChatLiveRunRetryStateResponse | None = Field(
+        default=None,
+        description="Current failed-run retry state",
+        exclude_if=lambda value: value is None,
+    )
 
     @classmethod
     def from_domain(cls, run: ChatLiveRunState) -> Self:
         """Convert from live run state domain model."""
-        return cls(run_id=run.run_id, phase=run.phase, status=run.status)
+        return cls(
+            run_id=run.run_id,
+            phase=run.phase,
+            status=run.status,
+            retry=None
+            if run.retry is None
+            else ChatLiveRunRetryStateResponse.from_domain(run.retry),
+        )
 
 
 class LiveEventListResponse(BaseModel):

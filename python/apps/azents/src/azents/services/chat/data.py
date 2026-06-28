@@ -22,12 +22,25 @@ class PaginatedEvents:
 
 
 @dataclasses.dataclass(frozen=True)
+class ChatLiveRunRetryState:
+    """Current live failed-run retry state."""
+
+    status: str
+    last_error_message: str
+    failed_attempt_count: int
+    max_retries: int
+    backoff_seconds: int
+    next_retry_at: str
+
+
+@dataclasses.dataclass(frozen=True)
 class ChatLiveRunState:
     """Current live execution state."""
 
     run_id: str
     phase: AgentRunPhase
     status: AgentRunStatus
+    retry: ChatLiveRunRetryState | None = None
 
 
 @dataclasses.dataclass(frozen=True)

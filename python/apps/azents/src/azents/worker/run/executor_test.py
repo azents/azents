@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import azents.worker.run.executor as run_executor_module
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
-from azents.core.enums import EventKind
+from azents.core.enums import AgentRunStatus, EventKind
 from azents.core.tools import ToolkitProvider
 from azents.engine.events.engine_events import RunComplete
 from azents.engine.events.types import (
@@ -292,6 +292,7 @@ async def test_execute_reports_resolve_failure(
     assert result.toolkits == []
     assert result.terminal_event_observed is True
     assert result.run_id is not None
+    assert result.terminal_run_status == AgentRunStatus.FAILED
     error_event = dispatched[0]
     assert isinstance(error_event, Event)
     assert error_event.kind == EventKind.SYSTEM_ERROR
@@ -436,6 +437,7 @@ async def test_execute_clears_activity_after_run_complete(
     assert result.toolkits == []
     assert result.terminal_event_observed is True
     assert result.run_id is not None
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
     assert any(isinstance(event, RunComplete) for event in dispatched)
     assert order == ["clear_session_activity"]
 

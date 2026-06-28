@@ -218,12 +218,20 @@ project prompt selection fall back to a parent, team-primary, or runtime session
 | --- | --- | --- |
 | `id` | `str(32)` | UUID7 hex run id |
 | `session_id` | FK `agent_sessions` | Owning conversation |
+| `run_index` | int | Session-scoped monotonic run index |
 | `phase` | enum | UI activity source |
+| `status` | enum | `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled` |
 | `active_tool_calls` | JSONB array | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, `background` |
+| `retry_state` | JSONB \| null | Durable failed-run retry state while the run remains `running`; cleared on terminal transition |
+| `last_completed_event_id` | `str(32)` \| null | Terminal run boundary event id when available |
 | `created_at` / `updated_at` | timestamptz | Durable lifecycle timestamps |
 
 Phase values are `idle`, `preparing_input`, `waiting_for_model`, `streaming_model`,
 `normalizing_output`, `executing_tools`, `appending_events`, `compacting`, and `stopping`.
+
+`retry_state` is the source of truth for failed-run retry progress. While present, the run remains
+`running` and live run state may expose a retry projection. Terminal run updates clear `retry_state`
+so stale retry progress cannot leak into completed, stopped, failed, interrupted, or cancelled runs.
 
 ## 4. Event Transcript Events
 
@@ -253,6 +261,11 @@ Event kinds:
 - `goal_briefing`
 - `system_error`
 - `unknown_adapter_output`
+
+`system_error` payloads may include optional user-safe failed-run metadata under `failure`. The
+metadata identifies terminal failed-run output, finalization reason, retry counts, last error type,
+and future retry classification fields. Stack traces, raw provider response bodies, and credential
+details are not stored in durable transcript payloads.
 
 Attachments are payload-specific, not event-common. Tool result output is always a part array using
 `output_text`, `output_image`, `output_file`, `output_audio`, or `output_video`.

@@ -336,6 +336,7 @@ class _CommandExecutor:
             toolkits=[],
             terminal_event_observed=True,
             no_actionable_work=False,
+            terminal_run_status=AgentRunStatus.COMPLETED,
         )
 
 
@@ -466,14 +467,18 @@ class _Host:
         if self.shutdown_before_message_returns:
             self.shutdown_event.set()
         message_number = len(self.processed_messages)
+        terminal_event_observed = (
+            self.terminal_event_observed
+            and message_number not in self.no_actionable_message_numbers
+        )
         return RunExecutionResult(
             toolkits=[],
-            terminal_event_observed=(
-                self.terminal_event_observed
-                and message_number not in self.no_actionable_message_numbers
-            ),
+            terminal_event_observed=terminal_event_observed,
             no_actionable_work=message_number in self.no_actionable_message_numbers,
             run_id="run-001",
+            terminal_run_status=AgentRunStatus.COMPLETED
+            if terminal_event_observed
+            else None,
         )
 
     async def dispatch_event(
@@ -758,6 +763,47 @@ async def test_terminal_run_marks_idle_before_idle_continuation() -> None:
         "mark_session_idle",
         "clear_session_activity",
         "idle_continuation",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_failed_terminal_run_marks_idle_without_goal_continuation() -> None:
+    """Failed terminal runs become idle but do not enqueue Goal continuation."""
+    host = _Host()
+
+    async def failed_run(
+        message: SessionWakeUp,
+        *,
+        poll_fn: PollMessages | None,
+        check_stop: CheckStop | None,
+        prepare_toolkits: PrepareToolkits | None,
+    ) -> RunExecutionResult:
+        del poll_fn, check_stop, prepare_toolkits
+        host.processed_messages.append(message)
+        host.message_started.set()
+        return RunExecutionResult(
+            toolkits=[],
+            terminal_event_observed=True,
+            no_actionable_work=False,
+            run_id="run-001",
+            terminal_run_status=AgentRunStatus.FAILED,
+        )
+
+    host.process_message = failed_run
+    runner = _start_session_runner(host)
+    message = _wake_up()
+
+    try:
+        runner.enqueue(message)
+        await _wait_until(lambda: bool(host.idle_session_ids))
+    finally:
+        await runner.shutdown()
+
+    assert host.idle_session_ids == ["session-001"]
+    assert host.idle_continuation_calls == []
+    assert host.lifecycle_events == [
+        "mark_session_idle",
+        "clear_session_activity",
     ]
 
 

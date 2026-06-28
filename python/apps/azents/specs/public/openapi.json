@@ -10058,6 +10058,51 @@
         "title": "ChatGPTOAuthSessionStatus",
         "description": "ChatGPT OAuth session status."
       },
+      "ChatLiveRunRetryStateResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Current retry status"
+          },
+          "last_error_message": {
+            "type": "string",
+            "title": "Last Error Message",
+            "description": "Latest user-safe error message"
+          },
+          "failed_attempt_count": {
+            "type": "integer",
+            "title": "Failed Attempt Count",
+            "description": "Failed attempt count"
+          },
+          "max_retries": {
+            "type": "integer",
+            "title": "Max Retries",
+            "description": "Maximum retry count"
+          },
+          "backoff_seconds": {
+            "type": "integer",
+            "title": "Backoff Seconds",
+            "description": "Current backoff duration in seconds"
+          },
+          "next_retry_at": {
+            "type": "string",
+            "title": "Next Retry At",
+            "description": "Absolute next retry timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "last_error_message",
+          "failed_attempt_count",
+          "max_retries",
+          "backoff_seconds",
+          "next_retry_at"
+        ],
+        "title": "ChatLiveRunRetryStateResponse",
+        "description": "Current live failed-run retry state response."
+      },
       "ChatLiveRunStateResponse": {
         "properties": {
           "run_id": {
@@ -10072,6 +10117,17 @@
           "status": {
             "$ref": "#/components/schemas/AgentRunStatus",
             "description": "Current run status"
+          },
+          "retry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatLiveRunRetryStateResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current failed-run retry state"
           }
         },
         "type": "object",
