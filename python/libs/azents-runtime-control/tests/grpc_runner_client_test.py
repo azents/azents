@@ -52,6 +52,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
                     workdir="/workspace/agent",
                     yield_time_ms=1000,
                     max_output_bytes=4096,
+                    owner_session_id="session-1",
                     env={"PYTHONUNBUFFERED": "1"},
                 ),
                 reply_stream_id="reply:req-1",
@@ -90,6 +91,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
         "workdir": "/workspace/agent",
         "yield_time_ms": 1000,
         "max_output_bytes": 4096,
+        "owner_session_id": "session-1",
         "env": {"PYTHONUNBUFFERED": "1"},
     }
     assert await client.heartbeat_runner(
