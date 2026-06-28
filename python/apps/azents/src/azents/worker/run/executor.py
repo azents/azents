@@ -53,7 +53,12 @@ from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.contracts import AgentEngineProtocol, RunContext, ToolkitBinding
 from azents.engine.run.emit import handle_engine_event
 from azents.engine.run.errors import UserVisibleRuntimeError
-from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
+from azents.engine.run.failure import (
+    FailedRunAttempt,
+    FailedRunFinalizationReason,
+    FailedRunRetryability,
+    FailedRunRetryState,
+)
 from azents.engine.run.input import InvokeInput
 from azents.engine.run.resolve import (
     resolve_agent_tools,
@@ -132,6 +137,7 @@ _FAILED_RUN_BASE_BACKOFF_SECONDS = 1
 _FAILED_RUN_BACKOFF_MULTIPLIER = 2
 _FAILED_RUN_MAX_BACKOFF_SECONDS = 60
 _FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
+_FAILED_RUN_NO_FIXTURE_MATCH_CODE = "no_fixture_match"
 _NON_ACTIONABLE_TAIL_EVENT_KINDS = {
     EventKind.RUN_MARKER,
     EventKind.TURN_MARKER,
@@ -717,17 +723,13 @@ class RunExecutor:
                     retry_state = await self._record_failed_run_attempt(
                         session_id=message.session_id,
                         run_id=run_id,
-                        attempt=FailedRunAttempt(
-                            user_message=exc.user_message,
-                            internal_message=str(exc),
-                            error_type=exc.__class__.__name__,
-                            source="model",
-                            visibility="user_visible",
+                        attempt=self._failed_run_attempt_from_user_visible_error(
+                            exc,
                             attempt_number=attempt_number,
-                            occurred_at=datetime.datetime.now(datetime.UTC),
                         ),
                     )
-                    if retry_state.failed_attempt_count >= retry_state.max_retries:
+                    finalization_reason = _failed_run_finalization_reason(retry_state)
+                    if finalization_reason is not None:
                         run_end_reason = "error"
                         terminal_run_status = AgentRunStatus.FAILED
                         await self.failed_run_finalizer.finalize(
@@ -736,7 +738,7 @@ class RunExecutor:
                                 run_id=run_id,
                                 user_message=retry_state.last_user_message,
                                 retry_state=retry_state,
-                                reason="retry_exhausted",
+                                reason=finalization_reason,
                             ),
                             dispatch_event=dispatch_event,
                         )
@@ -787,7 +789,8 @@ class RunExecutor:
                             "error_type": exc.__class__.__name__,
                         },
                     )
-                    if retry_state.failed_attempt_count >= retry_state.max_retries:
+                    finalization_reason = _failed_run_finalization_reason(retry_state)
+                    if finalization_reason is not None:
                         run_end_reason = "error"
                         terminal_run_status = AgentRunStatus.FAILED
                         await self.failed_run_finalizer.finalize(
@@ -796,7 +799,7 @@ class RunExecutor:
                                 run_id=run_id,
                                 user_message=retry_state.last_user_message,
                                 retry_state=retry_state,
-                                reason="retry_exhausted",
+                                reason=finalization_reason,
                             ),
                             dispatch_event=dispatch_event,
                         )
@@ -885,6 +888,31 @@ class RunExecutor:
             terminal_run_status=terminal_run_status,
         )
 
+    def _failed_run_attempt_from_user_visible_error(
+        self,
+        exc: UserVisibleRuntimeError,
+        *,
+        attempt_number: int,
+    ) -> FailedRunAttempt:
+        """Convert a user-visible exception into a failed-run attempt."""
+        message = str(exc)
+        retryability: FailedRunRetryability = "unknown"
+        failure_code: str | None = None
+        if _FAILED_RUN_NO_FIXTURE_MATCH_CODE in message:
+            retryability = "non_retryable"
+            failure_code = _FAILED_RUN_NO_FIXTURE_MATCH_CODE
+        return FailedRunAttempt(
+            user_message=exc.user_message,
+            internal_message=message,
+            error_type=exc.__class__.__name__,
+            source="model",
+            visibility="user_visible",
+            attempt_number=attempt_number,
+            occurred_at=datetime.datetime.now(datetime.UTC),
+            retryability=retryability,
+            failure_code=failure_code,
+        )
+
     async def _record_failed_run_attempt(
         self,
         *,
@@ -893,7 +921,11 @@ class RunExecutor:
         attempt: FailedRunAttempt,
     ) -> FailedRunRetryState:
         """Persist retry state for a failed run attempt."""
-        backoff_seconds = _failed_run_backoff_seconds(attempt.attempt_number)
+        backoff_seconds = (
+            0
+            if attempt.retryability == "non_retryable"
+            else _failed_run_backoff_seconds(attempt.attempt_number)
+        )
         next_retry_at = attempt.occurred_at + datetime.timedelta(
             seconds=backoff_seconds
         )
@@ -1103,6 +1135,17 @@ def has_actionable_tail(events: Sequence[Event]) -> bool:
         else events
     )
     return any(event.kind not in _NON_ACTIONABLE_TAIL_EVENT_KINDS for event in tail)
+
+
+def _failed_run_finalization_reason(
+    retry_state: FailedRunRetryState,
+) -> FailedRunFinalizationReason | None:
+    """Return terminal retry finalization reason, if retry should stop."""
+    if retry_state.retryability == "non_retryable":
+        return "non_retryable"
+    if retry_state.failed_attempt_count >= retry_state.max_retries:
+        return "retry_exhausted"
+    return None
 
 
 def _failed_run_backoff_seconds(attempt_number: int) -> int:

@@ -252,6 +252,7 @@ This makes retry responsible for recovering failed attempts and Goal continuatio
 - Preserve durable history until terminal failure.
 - Ensure event execution propagates run-stopping model/runtime failures to the worker retry boundary instead of writing immediate failed durable output.
 - Reuse the same `agent_runs` row and `run_id` across attempts so retry state and eventual terminal status remain attached to one run.
+- Finalize known non-retryable failures immediately with `finalization_reason = non_retryable`; deterministic fixture `no_fixture_match` is the first concrete classifier.
 
 ### Phase 2: command and session-runner convergence
 

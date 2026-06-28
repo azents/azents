@@ -100,7 +100,10 @@ same `run_id`. This keeps the run `running` and prevents durable failed history 
 finalized.
 
 When the next attempt succeeds, the normal terminal completed path closes the same `agent_runs` row
-and clears `retry_state`. When retry is exhausted, or when stop is requested while retry is waiting,
+and clears `retry_state`. Known non-retryable failures, such as deterministic fixture strict-mode
+`no_fixture_match`, are classified with `retryability = non_retryable`, receive `backoff_seconds = 0`,
+and are finalized on the first failed attempt instead of waiting for the retry budget. When retry is
+exhausted, when a non-retryable failure is observed, or when stop is requested while retry is waiting,
 `FailedRunErrorFinalizer` promotes the latest attempt to durable failed-run output by appending the
 terminal `system_error` with failed-run metadata, appending the failed run marker, marking the run
 `failed`, clearing retry state, and emitting `RunComplete`.
