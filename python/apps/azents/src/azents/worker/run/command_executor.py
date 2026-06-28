@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+import datetime
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Annotated
@@ -26,6 +27,11 @@ from azents.engine.events.types import ActiveToolCall
 from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import AgentEngineProtocol
 from azents.engine.run.errors import UserVisibleRuntimeError
+from azents.engine.run.failure import (
+    FailedRunAttempt,
+    FailedRunAttemptVisibility,
+    FailedRunRetryState,
+)
 from azents.engine.run.input import InvokeInput
 from azents.engine.run.resolve import resolve_invoke_input
 from azents.rdb.deps import get_session_manager
@@ -44,6 +50,10 @@ from azents.worker.deps import (
     get_exchange_file_service,
 )
 from azents.worker.live.event_projector import LiveEventProjector
+from azents.worker.run.finalizer import (
+    FailedRunErrorFinalizer,
+    FailedRunFinalizationInput,
+)
 from azents.worker.run.helpers import (
     apply_active_tool_call_event,
     format_resolve_error,
@@ -82,6 +92,9 @@ class CommandExecutor:
     ]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
+    failed_run_finalizer: Annotated[
+        FailedRunErrorFinalizer, Depends(FailedRunErrorFinalizer)
+    ]
 
     async def execute(
         self,
@@ -207,14 +220,15 @@ class CommandExecutor:
                     "error": exc.user_message,
                 },
             )
-            await dispatch_event(
-                session_id,
-                make_system_error_event(
-                    session_id=session_id,
-                    content=exc.user_message,
-                ),
+            await self._finalize_failed_command_run(
+                session_id=session_id,
+                run_id=run_id,
+                user_message=exc.user_message,
+                internal_message=str(exc),
+                error_type=exc.__class__.__name__,
+                visibility="user_visible",
+                dispatch_event=dispatch_event,
             )
-            await dispatch_event(session_id, RunComplete())
         except Exception as exc:
             terminal_run_status = AgentRunStatus.FAILED
             logger.exception(
@@ -225,14 +239,15 @@ class CommandExecutor:
                     "error_type": exc.__class__.__name__,
                 },
             )
-            await dispatch_event(
-                session_id,
-                make_system_error_event(
-                    session_id=session_id,
-                    content=_INTERNAL_ERROR_MESSAGE,
-                ),
+            await self._finalize_failed_command_run(
+                session_id=session_id,
+                run_id=run_id,
+                user_message=_INTERNAL_ERROR_MESSAGE,
+                internal_message=str(exc),
+                error_type=exc.__class__.__name__,
+                visibility="internal",
+                dispatch_event=dispatch_event,
             )
-            await dispatch_event(session_id, RunComplete())
         finally:
             await self.live_event_projector.flush_session(session_id)
             await self.session_lifecycle.clear_session_activity(session_id)
@@ -249,6 +264,45 @@ class CommandExecutor:
             no_actionable_work=False,
             run_id=run_id,
             terminal_run_status=terminal_run_status,
+        )
+
+    async def _finalize_failed_command_run(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        user_message: str,
+        internal_message: str,
+        error_type: str,
+        visibility: FailedRunAttemptVisibility,
+        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+    ) -> None:
+        """Finalize a command run through the shared failed-run finalizer."""
+        occurred_at = datetime.datetime.now(datetime.UTC)
+        attempt = FailedRunAttempt(
+            user_message=user_message,
+            internal_message=internal_message,
+            error_type=error_type,
+            source="command",
+            visibility=visibility,
+            attempt_number=1,
+            occurred_at=occurred_at,
+        )
+        retry_state = FailedRunRetryState.from_attempt(
+            attempt,
+            max_retries=1,
+            backoff_seconds=0,
+            next_retry_at=occurred_at,
+        )
+        await self.failed_run_finalizer.finalize(
+            FailedRunFinalizationInput(
+                session_id=session_id,
+                run_id=run_id,
+                user_message=user_message,
+                retry_state=retry_state,
+                reason="retry_exhausted",
+            ),
+            dispatch_event=dispatch_event,
         )
 
     async def clear_pending_command(self, session_id: str, *, command_id: str) -> None:

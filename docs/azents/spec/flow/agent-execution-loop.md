@@ -104,9 +104,17 @@ and clears `retry_state`. Known non-retryable failures, such as deterministic fi
 `no_fixture_match`, are classified with `retryability = non_retryable`, receive `backoff_seconds = 0`,
 and are finalized on the first failed attempt instead of waiting for the retry budget. When retry is
 exhausted, when a non-retryable failure is observed, or when stop is requested while retry is waiting,
-`FailedRunErrorFinalizer` promotes the latest attempt to durable failed-run output by appending the
-terminal `system_error` with failed-run metadata, appending the failed run marker, marking the run
-`failed`, clearing retry state, and emitting `RunComplete`.
+`FailedRunErrorFinalizer` promotes the latest attempt to durable failed-run output by delegating
+durable append and terminal run updates to the engine failed-run event store. That event-store
+boundary appends the terminal `system_error` with failed-run metadata, appends the failed run marker,
+and marks the run `failed` while clearing retry state. The worker finalizer then emits `RunComplete`
+and clears live activity.
+
+Command run-stopping failures use the same failed-run finalizer boundary once a command run has been
+created. Command resolve failures that happen before an `agent_runs` row exists remain direct
+message-processing failures. `SessionRunner` top-level message-processing errors also remain outside
+the failed-run scope unless they are already inside a concrete run boundary such as `RunExecutor` or
+`CommandExecutor`.
 
 ## 3. Event Transcript
 

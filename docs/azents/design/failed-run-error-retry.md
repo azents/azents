@@ -256,9 +256,10 @@ This makes retry responsible for recovering failed attempts and Goal continuatio
 
 ### Phase 2: command and session-runner convergence
 
-- Route command failures through the same finalizer/retry controller.
-- Route session runner run-stopping failures through the same finalizer when they terminate run progress.
-- Keep message-processing errors that do not represent a run-stopping failure outside the failed-run scope.
+- Route command handler run-stopping failures through the same failed-run finalizer once a command run exists.
+- Keep command resolve failures that occur before an `agent_runs` row exists outside failed-run finalization.
+- Route session runner run-stopping failures through the same finalizer when they happen inside a concrete run boundary.
+- Keep top-level session-runner message-processing errors that do not represent a run-stopping failure outside the failed-run scope.
 
 ### Phase 3: UX recovery improvements
 
