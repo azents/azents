@@ -250,12 +250,16 @@ This makes retry responsible for recovering failed attempts and Goal continuatio
 - Persist retry state and project it to live run state.
 - Honor stop/shutdown during retry wait.
 - Preserve durable history until terminal failure.
+- Ensure event execution propagates run-stopping model/runtime failures to the worker retry boundary instead of writing immediate failed durable output.
+- Reuse the same `agent_runs` row and `run_id` across attempts so retry state and eventual terminal status remain attached to one run.
+- Finalize known non-retryable failures immediately with `finalization_reason = non_retryable`; deterministic fixture `no_fixture_match` is the first concrete classifier.
 
 ### Phase 2: command and session-runner convergence
 
-- Route command failures through the same finalizer/retry controller.
-- Route session runner run-stopping failures through the same finalizer when they terminate run progress.
-- Keep message-processing errors that do not represent a run-stopping failure outside the failed-run scope.
+- Route command handler run-stopping failures through the same failed-run finalizer once a command run exists.
+- Keep command resolve failures that occur before an `agent_runs` row exists outside failed-run finalization.
+- Route session runner run-stopping failures through the same finalizer when they happen inside a concrete run boundary.
+- Keep top-level session-runner message-processing errors that do not represent a run-stopping failure outside the failed-run scope.
 
 ### Phase 3: UX recovery improvements
 

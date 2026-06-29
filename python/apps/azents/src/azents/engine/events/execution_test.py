@@ -115,6 +115,16 @@ class _RunRepo:
         self.active_tool_calls = []
         return object()
 
+    async def update_retry_state(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        retry_state: object | None,
+    ) -> object:
+        """No-op retry-state update for execution tests."""
+        del session, run_id, retry_state
+        return object()
+
 
 class _TranscriptRepo:
     """Transcript repository for tests."""
@@ -1363,8 +1373,8 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     assert lowerer.transcripts[0] == transcript_repo.events[:1]
 
 
-async def test_empty_model_output_marks_run_failed_and_reraises() -> None:
-    """Empty model turn propagates as failure instead of pretending completed."""
+async def test_empty_model_output_propagates_for_retry() -> None:
+    """Empty model turn propagates without finalizing before retry."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
@@ -1387,15 +1397,12 @@ async def test_empty_model_output_marks_run_failed_and_reraises() -> None:
             ),
         )
 
-    assert run_repo.terminal == AgentRunStatus.FAILED
-    assert [event.kind for event in transcript_repo.events] == [EventKind.RUN_MARKER]
-    marker = transcript_repo.events[-1].payload
-    assert isinstance(marker, RunMarkerPayload)
-    assert marker.status == "failed"
+    assert run_repo.terminal is None
+    assert transcript_repo.events == []
 
 
-async def test_blank_assistant_message_marks_run_failed_and_reraises() -> None:
-    """Blank assistant message is not treated as completed response."""
+async def test_blank_assistant_message_propagates_for_retry() -> None:
+    """Blank assistant message propagates without finalizing before retry."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     blank_message = _event(
@@ -1423,12 +1430,12 @@ async def test_blank_assistant_message_marks_run_failed_and_reraises() -> None:
             ),
         )
 
-    assert run_repo.terminal == AgentRunStatus.FAILED
-    assert [event.kind for event in transcript_repo.events] == [EventKind.RUN_MARKER]
+    assert run_repo.terminal is None
+    assert transcript_repo.events == []
 
 
-async def test_model_call_error_marks_run_failed_and_reraises() -> None:
-    """LLM call error leaves failed run marker and propagates as user-visible error."""
+async def test_model_call_error_propagates_for_retry() -> None:
+    """LLM call error propagates to the worker retry boundary."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
@@ -1451,8 +1458,5 @@ async def test_model_call_error_marks_run_failed_and_reraises() -> None:
             ),
         )
 
-    assert run_repo.terminal == AgentRunStatus.FAILED
-    assert transcript_repo.events[-1].kind == EventKind.RUN_MARKER
-    marker = transcript_repo.events[-1].payload
-    assert isinstance(marker, RunMarkerPayload)
-    assert marker.status == "failed"
+    assert run_repo.terminal is None
+    assert transcript_repo.events == []

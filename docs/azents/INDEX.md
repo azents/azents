@@ -30,7 +30,7 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-06-28 | 47 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-06-28 | 48 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-06-28 | 5 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-06-27 | 2 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |

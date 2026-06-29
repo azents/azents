@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import dataclasses
+import datetime
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any
@@ -52,6 +53,12 @@ from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.contracts import AgentEngineProtocol, RunContext, ToolkitBinding
 from azents.engine.run.emit import handle_engine_event
 from azents.engine.run.errors import UserVisibleRuntimeError
+from azents.engine.run.failure import (
+    FailedRunAttempt,
+    FailedRunFinalizationReason,
+    FailedRunRetryability,
+    FailedRunRetryState,
+)
 from azents.engine.run.input import InvokeInput
 from azents.engine.run.resolve import (
     resolve_agent_tools,
@@ -107,6 +114,10 @@ from azents.worker.deps import (
     get_worker_config,
 )
 from azents.worker.live.event_projector import LiveEventProjector
+from azents.worker.run.finalizer import (
+    FailedRunErrorFinalizer,
+    FailedRunFinalizationInput,
+)
 from azents.worker.run.helpers import (
     apply_active_tool_call_event,
     format_resolve_error,
@@ -121,6 +132,12 @@ from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 logger = logging.getLogger(__name__)
 _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
 _RUN_HEARTBEAT_INTERVAL_SECONDS = 30.0
+_FAILED_RUN_MAX_RETRIES = 10
+_FAILED_RUN_BASE_BACKOFF_SECONDS = 1
+_FAILED_RUN_BACKOFF_MULTIPLIER = 2
+_FAILED_RUN_MAX_BACKOFF_SECONDS = 60
+_FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
+_FAILED_RUN_NO_FIXTURE_MATCH_CODE = "no_fixture_match"
 _NON_ACTIONABLE_TAIL_EVENT_KINDS = {
     EventKind.RUN_MARKER,
     EventKind.TURN_MARKER,
@@ -215,6 +232,9 @@ class RunExecutor:
         GoalToolkitProvider, Depends(get_goal_toolkit_provider)
     ]
     broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)]
+    failed_run_finalizer: Annotated[
+        FailedRunErrorFinalizer, Depends(FailedRunErrorFinalizer)
+    ]
     _session_title_tasks: set[asyncio.Task[object]] = dataclasses.field(
         default_factory=set,
         init=False,
@@ -653,46 +673,160 @@ class RunExecutor:
         )
 
         try:
-            boundary_poll = self.make_boundary_poll(
-                session_id=message.session_id,
-                model=run_request.model,
-                poll_fn=poll_fn,
-            )
-            engine_iter = self.engine.run(
-                run_request,
-                run_context,
-                poll_messages=boundary_poll,
-                check_stop=check_stop,
-            )
-
-            async for item in engine_iter:
-                match item.event:
-                    case RunComplete():
-                        run_completed = True
-                        run_end_reason = "completed"
-                        terminal_run_status = AgentRunStatus.COMPLETED
-                    case RunStopped():
-                        run_end_reason = "cancelled"
-                        terminal_run_status = AgentRunStatus.STOPPED
-                    case RunPhaseChanged(phase=phase):
-                        active_phase = phase
-                        await refresh_session_activity()
-                    case _:
-                        pass
-                updated_tool_calls = apply_active_tool_call_event(
-                    active_tool_calls, item.event
-                )
-                if updated_tool_calls != active_tool_calls:
-                    active_tool_calls = updated_tool_calls
-                    await refresh_session_activity()
-                    await self.live_event_projector.replace_active_tool_calls(
-                        message.session_id,
-                        active_tool_calls,
+            attempt_number = 1
+            while True:
+                try:
+                    boundary_poll = self.make_boundary_poll(
+                        session_id=message.session_id,
+                        model=run_request.model,
+                        poll_fn=poll_fn,
                     )
-                await handle_engine_event(
-                    item,
-                    publish=lambda ev: dispatch_event(message.session_id, ev),
-                )
+                    engine_iter = self.engine.run(
+                        run_request,
+                        run_context,
+                        poll_messages=boundary_poll,
+                        check_stop=check_stop,
+                    )
+
+                    async for item in engine_iter:
+                        match item.event:
+                            case RunStarted():
+                                continue
+                            case RunComplete():
+                                run_completed = True
+                                run_end_reason = "completed"
+                                terminal_run_status = AgentRunStatus.COMPLETED
+                            case RunStopped():
+                                run_end_reason = "cancelled"
+                                terminal_run_status = AgentRunStatus.STOPPED
+                            case RunPhaseChanged(phase=phase):
+                                active_phase = phase
+                                await refresh_session_activity()
+                            case _:
+                                pass
+                        updated_tool_calls = apply_active_tool_call_event(
+                            active_tool_calls, item.event
+                        )
+                        if updated_tool_calls != active_tool_calls:
+                            active_tool_calls = updated_tool_calls
+                            await refresh_session_activity()
+                            await self.live_event_projector.replace_active_tool_calls(
+                                message.session_id,
+                                active_tool_calls,
+                            )
+                        await handle_engine_event(
+                            item,
+                            publish=lambda ev: dispatch_event(message.session_id, ev),
+                        )
+                    break
+                except UserVisibleRuntimeError as exc:
+                    retry_state = await self._record_failed_run_attempt(
+                        session_id=message.session_id,
+                        run_id=run_id,
+                        attempt=self._failed_run_attempt_from_user_visible_error(
+                            exc,
+                            attempt_number=attempt_number,
+                        ),
+                    )
+                    finalization_reason = _failed_run_finalization_reason(retry_state)
+                    if finalization_reason is not None:
+                        run_end_reason = "error"
+                        terminal_run_status = AgentRunStatus.FAILED
+                        await self.failed_run_finalizer.finalize(
+                            FailedRunFinalizationInput(
+                                session_id=message.session_id,
+                                run_id=run_id,
+                                user_message=retry_state.last_user_message,
+                                retry_state=retry_state,
+                                reason=finalization_reason,
+                            ),
+                            dispatch_event=dispatch_event,
+                        )
+                        run_completed = True
+                        break
+                    retry_stopped = await self._wait_for_failed_run_retry(
+                        session_id=message.session_id,
+                        retry_state=retry_state,
+                        check_stop=check_stop,
+                        shutdown_event=shutdown_event,
+                    )
+                    if retry_stopped:
+                        run_end_reason = "error"
+                        terminal_run_status = AgentRunStatus.FAILED
+                        await self.failed_run_finalizer.finalize(
+                            FailedRunFinalizationInput(
+                                session_id=message.session_id,
+                                run_id=run_id,
+                                user_message=retry_state.last_user_message,
+                                retry_state=retry_state,
+                                reason="retry_stopped_by_user",
+                            ),
+                            dispatch_event=dispatch_event,
+                        )
+                        run_completed = True
+                        break
+                    attempt_number += 1
+                except Exception as exc:
+                    retry_state = await self._record_failed_run_attempt(
+                        session_id=message.session_id,
+                        run_id=run_id,
+                        attempt=FailedRunAttempt(
+                            user_message=_INTERNAL_ERROR_MESSAGE,
+                            internal_message=str(exc),
+                            error_type=exc.__class__.__name__,
+                            source="engine",
+                            visibility="internal",
+                            attempt_number=attempt_number,
+                            occurred_at=datetime.datetime.now(datetime.UTC),
+                        ),
+                    )
+                    logger.exception(
+                        "Internal error during engine run attempt",
+                        extra={
+                            "session_id": message.session_id,
+                            "run_id": run_id,
+                            "attempt_number": attempt_number,
+                            "error_type": exc.__class__.__name__,
+                        },
+                    )
+                    finalization_reason = _failed_run_finalization_reason(retry_state)
+                    if finalization_reason is not None:
+                        run_end_reason = "error"
+                        terminal_run_status = AgentRunStatus.FAILED
+                        await self.failed_run_finalizer.finalize(
+                            FailedRunFinalizationInput(
+                                session_id=message.session_id,
+                                run_id=run_id,
+                                user_message=retry_state.last_user_message,
+                                retry_state=retry_state,
+                                reason=finalization_reason,
+                            ),
+                            dispatch_event=dispatch_event,
+                        )
+                        run_completed = True
+                        break
+                    retry_stopped = await self._wait_for_failed_run_retry(
+                        session_id=message.session_id,
+                        retry_state=retry_state,
+                        check_stop=check_stop,
+                        shutdown_event=shutdown_event,
+                    )
+                    if retry_stopped:
+                        run_end_reason = "error"
+                        terminal_run_status = AgentRunStatus.FAILED
+                        await self.failed_run_finalizer.finalize(
+                            FailedRunFinalizationInput(
+                                session_id=message.session_id,
+                                run_id=run_id,
+                                user_message=retry_state.last_user_message,
+                                retry_state=retry_state,
+                                reason="retry_stopped_by_user",
+                            ),
+                            dispatch_event=dispatch_event,
+                        )
+                        run_completed = True
+                        break
+                    attempt_number += 1
         except asyncio.CancelledError as exc:
             run_end_reason = "cancelled"
             if user_stop_cancelled(exc):
@@ -704,63 +838,6 @@ class RunExecutor:
             else:
                 terminal_run_status = AgentRunStatus.CANCELLED
             raise
-        except UserVisibleRuntimeError as exc:
-            run_end_reason = "error"
-            terminal_run_status = AgentRunStatus.FAILED
-            error_msg = exc.user_message
-            logger.warning(
-                "Engine run failed with user-visible error",
-                extra={
-                    "session_id": message.session_id,
-                    "error": error_msg,
-                    "error_type": exc.__class__.__name__,
-                },
-            )
-            try:
-                error_event = await self.engine.save_error_message(
-                    message.session_id,
-                    error_msg,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to save compaction error message",
-                    extra={"session_id": message.session_id},
-                )
-                error_event = make_system_error_event(
-                    session_id=message.session_id,
-                    content=error_msg,
-                )
-            await dispatch_event(message.session_id, error_event)
-            await dispatch_event(message.session_id, RunComplete())
-            run_completed = True
-        except Exception as exc:
-            run_end_reason = "error"
-            terminal_run_status = AgentRunStatus.FAILED
-            error_msg = _INTERNAL_ERROR_MESSAGE
-            logger.exception(
-                "Internal error during engine run",
-                extra={
-                    "session_id": message.session_id,
-                    "error_type": exc.__class__.__name__,
-                },
-            )
-            try:
-                error_event = await self.engine.save_error_message(
-                    message.session_id,
-                    error_msg,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to save error message",
-                    extra={"session_id": message.session_id},
-                )
-                error_event = make_system_error_event(
-                    session_id=message.session_id,
-                    content=error_msg,
-                )
-            await dispatch_event(message.session_id, error_event)
-            await dispatch_event(message.session_id, RunComplete())
-            run_completed = True
         finally:
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -810,6 +887,87 @@ class RunExecutor:
             run_id=run_id,
             terminal_run_status=terminal_run_status,
         )
+
+    def _failed_run_attempt_from_user_visible_error(
+        self,
+        exc: UserVisibleRuntimeError,
+        *,
+        attempt_number: int,
+    ) -> FailedRunAttempt:
+        """Convert a user-visible exception into a failed-run attempt."""
+        message = str(exc)
+        retryability: FailedRunRetryability = "unknown"
+        failure_code: str | None = None
+        if _FAILED_RUN_NO_FIXTURE_MATCH_CODE in message:
+            retryability = "non_retryable"
+            failure_code = _FAILED_RUN_NO_FIXTURE_MATCH_CODE
+        return FailedRunAttempt(
+            user_message=exc.user_message,
+            internal_message=message,
+            error_type=exc.__class__.__name__,
+            source="model",
+            visibility="user_visible",
+            attempt_number=attempt_number,
+            occurred_at=datetime.datetime.now(datetime.UTC),
+            retryability=retryability,
+            failure_code=failure_code,
+        )
+
+    async def _record_failed_run_attempt(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        attempt: FailedRunAttempt,
+    ) -> FailedRunRetryState:
+        """Persist retry state for a failed run attempt."""
+        backoff_seconds = (
+            0
+            if attempt.retryability == "non_retryable"
+            else _failed_run_backoff_seconds(attempt.attempt_number)
+        )
+        next_retry_at = attempt.occurred_at + datetime.timedelta(
+            seconds=backoff_seconds
+        )
+        retry_state = FailedRunRetryState.from_attempt(
+            attempt,
+            max_retries=_FAILED_RUN_MAX_RETRIES,
+            backoff_seconds=backoff_seconds,
+            next_retry_at=next_retry_at,
+        )
+        await self.session_lifecycle.update_agent_run_retry_state(
+            session_id,
+            run_id=run_id,
+            retry_state=retry_state,
+        )
+        await self.session_lifecycle.set_session_activity(
+            session_id,
+            run_id=run_id,
+            phase=None,
+            active_tool_calls=[],
+        )
+        return retry_state
+
+    async def _wait_for_failed_run_retry(
+        self,
+        *,
+        session_id: str,
+        retry_state: FailedRunRetryState,
+        check_stop: CheckStop | None,
+        shutdown_event: asyncio.Event,
+    ) -> bool:
+        """Wait until retry time. Return True if the user requested stop."""
+        while True:
+            if shutdown_event.is_set():
+                raise asyncio.CancelledError
+            if check_stop is not None and await check_stop():
+                return True
+            delay = (
+                retry_state.next_retry_at - datetime.datetime.now(datetime.UTC)
+            ).total_seconds()
+            if delay <= 0:
+                return False
+            await asyncio.sleep(min(delay, _FAILED_RUN_RETRY_WAIT_POLL_SECONDS))
 
     def _schedule_initial_prompt_title_generation(
         self,
@@ -977,3 +1135,22 @@ def has_actionable_tail(events: Sequence[Event]) -> bool:
         else events
     )
     return any(event.kind not in _NON_ACTIONABLE_TAIL_EVENT_KINDS for event in tail)
+
+
+def _failed_run_finalization_reason(
+    retry_state: FailedRunRetryState,
+) -> FailedRunFinalizationReason | None:
+    """Return terminal retry finalization reason, if retry should stop."""
+    if retry_state.retryability == "non_retryable":
+        return "non_retryable"
+    if retry_state.failed_attempt_count >= retry_state.max_retries:
+        return "retry_exhausted"
+    return None
+
+
+def _failed_run_backoff_seconds(attempt_number: int) -> int:
+    """Return bounded exponential failed-run retry backoff."""
+    raw = _FAILED_RUN_BASE_BACKOFF_SECONDS * (
+        _FAILED_RUN_BACKOFF_MULTIPLIER ** (attempt_number - 1)
+    )
+    return min(_FAILED_RUN_MAX_BACKOFF_SECONDS, raw)
