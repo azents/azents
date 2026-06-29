@@ -1049,7 +1049,8 @@
       "renamePrompt": "새 이름",
       "movePrompt": "이동할 경로",
       "deleteConfirmTitle": "파일 또는 폴더 삭제",
-      "deleteConfirm": "{path}을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+      "deleteConfirm": "{path}을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
+      "registerProjectBrowse": "폴더 찾아보기"
     },
     "toolCall": {
       "preparing": "명령어 작성 중...",
@@ -1266,7 +1267,8 @@
       "retryExhaustedTitle": "재시도 후 실행 실패",
       "nonRetryableTitle": "재시도하지 않고 실행 실패",
       "attempts": "실패한 시도: {failedAttemptCount} / {maxRetries}"
-    }
+    },
+    "projectPickerSelectDirectory": "선택"
   },
   "oauth": {
     "title": "인증",

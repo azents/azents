@@ -1,6 +1,7 @@
 import { Box, rem } from "@mantine/core";
 import { createChatMessage, storySessionId } from "../story-fixtures";
 import { ChatView } from "./ChatView";
+import type { ProjectDirectoryPickerState } from "../workspace/components/WorkspaceDirectoryPickerModal";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type {
   WorkspacePanelState,
@@ -10,6 +11,10 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import type { ReactElement } from "react";
 
 const noop = (): void => {};
+const noopPath = (): void => {};
+const closedProjectPickerState: ProjectDirectoryPickerState = {
+  type: "CLOSED",
+};
 const sendMessage = (): Promise<boolean> => Promise.resolve(true);
 
 const readyWorkspaceState: WorkspacePanelState = {
@@ -126,7 +131,6 @@ const workspacePanel: WorkspacePanelContainerOutput = {
     type: "READY",
     projects: [],
     registrationRequests: [],
-    registerProjectPath: "/workspace/agent/example",
     isRegisteringProject: false,
     registerProjectError: null,
     pendingApproveRequestId: null,
@@ -151,8 +155,14 @@ const workspacePanel: WorkspacePanelContainerOutput = {
   onBulkMovePaths: noop,
   onBulkDeletePaths: noop,
   getDownloadHref: (path: string): string => `/download?path=${path}`,
-  onRegisterProjectPathChange: noop,
-  onRegisterProject: noop,
+  projectPickerState: closedProjectPickerState,
+  isProjectPickerOpen: false,
+  onOpenProjectPicker: noop,
+  onCloseProjectPicker: noop,
+  onOpenProjectPickerDirectory: noopPath,
+  onSelectProjectPickerDirectory: noopPath,
+  onRefreshProjectPicker: noop,
+  onStartRuntimeForProjectPicker: noop,
   onApproveRegistrationRequest: noop,
   onRejectRegistrationRequest: noop,
   onDeleteProject: noop,

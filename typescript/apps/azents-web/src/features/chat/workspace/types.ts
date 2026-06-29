@@ -63,7 +63,6 @@ export type WorkspaceProjectPanelState =
       type: "READY";
       projects: SessionWorkspaceProjectResponse[];
       registrationRequests: SessionWorkspaceProjectRegistrationRequestResponse[];
-      registerProjectPath: string;
       isRegisteringProject: boolean;
       registerProjectError: string | null;
       pendingApproveRequestId: string | null;

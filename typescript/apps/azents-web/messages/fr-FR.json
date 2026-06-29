@@ -1049,7 +1049,8 @@
       "renamePrompt": "Nouveau nom",
       "movePrompt": "Chemin de destination",
       "deleteConfirmTitle": "Supprimer le fichier ou le dossier",
-      "deleteConfirm": "Supprimer {path} ? Cette action est irréversible."
+      "deleteConfirm": "Supprimer {path} ? Cette action est irréversible.",
+      "registerProjectBrowse": "Parcourir les dossiers"
     },
     "toolCall": {
       "preparing": "Rédaction de la commande...",
@@ -1266,7 +1267,8 @@
       "retryExhaustedTitle": "Exécution échouée après les nouvelles tentatives",
       "nonRetryableTitle": "Exécution échouée sans nouvelle tentative",
       "attempts": "Tentatives échouées : {failedAttemptCount} / {maxRetries}"
-    }
+    },
+    "projectPickerSelectDirectory": "Sélectionner"
   },
   "oauth": {
     "title": "Autorisation",

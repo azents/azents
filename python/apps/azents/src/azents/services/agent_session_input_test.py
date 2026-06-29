@@ -19,6 +19,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
@@ -264,6 +265,7 @@ class TestAgentSessionInputService:
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=runtime_repository,
             agent_session_repository=session_repository,
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -329,6 +331,7 @@ class TestAgentSessionInputService:
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -370,6 +373,10 @@ class TestAgentSessionInputService:
                 session,
                 session_id=created.id,
             )
+            defaults = await AgentProjectDefaultRepository().list_defaults(
+                session,
+                agent_id=agent_id,
+            )
             updated = await AgentSessionRepository().get_by_id(session, created.id)
 
         assert [item.primary_kind for item in sessions] == [
@@ -377,6 +384,9 @@ class TestAgentSessionInputService:
             None,
         ]
         assert [project.path for project in projects] == [
+            "/workspace/agent/project-a/nested"
+        ]
+        assert [default.path for default in defaults] == [
             "/workspace/agent/project-a/nested"
         ]
         assert updated is not None
@@ -410,6 +420,7 @@ class TestAgentSessionInputService:
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -463,6 +474,7 @@ class TestAgentSessionInputService:
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -518,6 +530,7 @@ class TestAgentSessionInputService:
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),

@@ -11,17 +11,24 @@ import {
   Paper,
   Stack,
   Text,
-  TextInput,
 } from "@mantine/core";
 import { IconAlertCircle, IconFolderOpen } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { WorkspaceDirectoryPickerModal } from "./WorkspaceDirectoryPickerModal";
 import type { WorkspaceProjectPanelState } from "../types";
+import type { ProjectDirectoryPickerState } from "./WorkspaceDirectoryPickerModal";
 
 interface ProjectPanelProps {
   projectState: WorkspaceProjectPanelState;
-  onRegisterProjectPathChange: (path: string) => void;
-  onRegisterProject: () => void;
+  projectPickerState: ProjectDirectoryPickerState;
+  isProjectPickerOpen: boolean;
+  onOpenProjectPicker: () => void;
+  onCloseProjectPicker: () => void;
+  onOpenProjectPickerDirectory: (path: string) => void;
+  onSelectProjectPickerDirectory: (path: string) => void;
+  onRefreshProjectPicker: () => void;
+  onStartRuntimeForProjectPicker: () => void;
   onApproveRegistrationRequest: (requestId: string) => void;
   onRejectRegistrationRequest: (requestId: string) => void;
   onDeleteProject: (projectId: string) => void;
@@ -29,8 +36,14 @@ interface ProjectPanelProps {
 
 export function ProjectPanel({
   projectState,
-  onRegisterProjectPathChange,
-  onRegisterProject,
+  projectPickerState,
+  isProjectPickerOpen,
+  onOpenProjectPicker,
+  onCloseProjectPicker,
+  onOpenProjectPickerDirectory,
+  onSelectProjectPickerDirectory,
+  onRefreshProjectPicker,
+  onStartRuntimeForProjectPicker,
   onApproveRegistrationRequest,
   onRejectRegistrationRequest,
   onDeleteProject,
@@ -68,6 +81,10 @@ export function ProjectPanel({
   const deleteProject =
     projectState.projects.find((project) => project.id === deleteProjectId) ??
     null;
+  const basename = (path: string): string => {
+    const trimmed = path.replace(/\/+$/, "");
+    return trimmed.slice(trimmed.lastIndexOf("/") + 1) || trimmed;
+  };
 
   return (
     <>
@@ -98,9 +115,14 @@ export function ProjectPanel({
                         <Box c="blue" style={{ display: "inline-flex" }}>
                           <IconFolderOpen size="1rem" />
                         </Box>
-                        <Text size="sm" fw={600} truncate>
-                          {project.path}
-                        </Text>
+                        <Box miw={0}>
+                          <Text size="sm" fw={600} truncate>
+                            {basename(project.path)}
+                          </Text>
+                          <Text size="xs" c="dimmed" truncate>
+                            {project.path}
+                          </Text>
+                        </Box>
                       </Group>
                       <Button
                         size="xs"
@@ -131,24 +153,18 @@ export function ProjectPanel({
                 {t("registerProjectSubtitle")}
               </Text>
             </Box>
-            <TextInput
-              label={t("registerProjectPath")}
-              value={projectState.registerProjectPath}
-              onChange={(event) =>
-                onRegisterProjectPathChange(event.currentTarget.value)
-              }
-            />
             {projectState.registerProjectError && (
               <Text size="xs" c="red">
                 {projectState.registerProjectError}
               </Text>
             )}
             <Button
+              leftSection={<IconFolderOpen size="1rem" />}
               loading={projectState.isRegisteringProject}
-              onClick={onRegisterProject}
+              onClick={onOpenProjectPicker}
               fullWidth
             >
-              {t("registerProjectSubmit")}
+              {t("registerProjectBrowse")}
             </Button>
           </Stack>
         </Paper>
@@ -203,6 +219,16 @@ export function ProjectPanel({
           </Stack>
         </Paper>
       </Stack>
+
+      <WorkspaceDirectoryPickerModal
+        opened={isProjectPickerOpen}
+        state={projectPickerState}
+        onClose={onCloseProjectPicker}
+        onOpenDirectory={onOpenProjectPickerDirectory}
+        onSelectDirectory={onSelectProjectPickerDirectory}
+        onRefresh={onRefreshProjectPicker}
+        onStartRuntime={onStartRuntimeForProjectPicker}
+      />
 
       <Modal
         opened={deleteProject !== null}

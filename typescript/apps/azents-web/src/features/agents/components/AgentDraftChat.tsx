@@ -33,7 +33,7 @@ export function AgentDraftChat(
     onOpenProjectPicker,
     onCloseProjectPicker,
     onOpenProjectPickerDirectory,
-    onSelectProjectPickerCurrentDirectory,
+    onSelectProjectPickerDirectory,
     onRefreshProjectPicker,
     onStartRuntimeForProjectPicker,
   } = props;
@@ -146,7 +146,7 @@ export function AgentDraftChat(
         onClose={onCloseProjectPicker}
         onOpenDirectory={onOpenProjectPickerDirectory}
         onRefresh={onRefreshProjectPicker}
-        onSelectCurrentDirectory={onSelectProjectPickerCurrentDirectory}
+        onSelectDirectory={onSelectProjectPickerDirectory}
         onStartRuntime={onStartRuntimeForProjectPicker}
       />
     </Box>

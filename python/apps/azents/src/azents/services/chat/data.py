@@ -78,7 +78,7 @@ class ArchiveSessionResult:
 class NewSessionProjectDefaultsSource:
     """Source metadata for new-session Project defaults."""
 
-    type: Literal["empty", "recent_session"]
+    type: Literal["empty", "last_created_session"]
     session_id: str | None = None
 
 

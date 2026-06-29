@@ -16,8 +16,10 @@ code_paths:
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
   - python/apps/azents/src/azents/repos/agent_project_preset/**
+  - python/apps/azents/src/azents/repos/agent_project_default/**
   - python/apps/azents/src/azents/rdb/models/session_workspace_project.py
   - python/apps/azents/src/azents/rdb/models/agent_project_preset.py
+  - python/apps/azents/src/azents/rdb/models/agent_project_default.py
   - python/apps/azents/src/azents/api/internal/agent_home/v1/projects.py
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/features/workspace/**
@@ -41,7 +43,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/session-project-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-06-29
-spec_version: 22
+spec_version: 23
 ---
 
 # Workspace & Membership
@@ -158,7 +160,8 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 
 - Project Source, archive upload, empty folder bootstrap, Runtime pending load/ACK do not exist in public API or current DB/service/runtime provisioning layers. Provisioning such as file creation, archive extract, and git clone is separated into future Project Import/Provisioning phase.
 - New session creation is explicit-project based. `POST /chat/v1/agents/{agent_id}/sessions` and first-message `POST /chat/v1/agents/{agent_id}/sessions/messages` require `project_paths`; they do not copy Projects from the team-primary session.
-- `GET /chat/v1/agents/{agent_id}/session-project-defaults` returns the latest active non-primary session's Project paths for the new-session UI's default chip selection, including source metadata (`empty` or `recent_session`).
+- `agent_project_defaults` stores the last non-empty Project path selection used when creating a non-primary session for the Agent. New-session defaults come from this table, not from the current live Project rows of the most recent session. Creating a new session with non-empty `project_paths` replaces the stored defaults in selection order; creating a session with empty `project_paths` leaves the stored defaults unchanged.
+- `GET /chat/v1/agents/{agent_id}/session-project-defaults` returns the stored last-created-session Project paths for the new-session UI's default chip selection, including source metadata (`empty` or `last_created_session`).
 - `agent_project_presets` stores agent-scoped recent Project path presets. Creating a new session with selected Projects, registering an existing Project, or approving a registration request refreshes matching presets. `GET /chat/v1/agents/{agent_id}/project-presets` returns these presets ordered by recent use.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` registers an existing directory as Project for the selected AgentSession. Server validates user access, agent/session match, active Runtime directory existence, and Project path policy, then creates the session-owned registry row. This API does not modify filesystem.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/projects` returns registered Project list for the selected AgentSession. Public response exposes only `id`, `path`, `created_at`, `updated_at`.
@@ -166,7 +169,7 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, exact duplicate Project path per session forbidden. Nested Project paths are allowed.
 - Registration request is flow where Agent asks user approval to include a folder it created into the current session's Projects. Approve validates active Runtime path and creates registered Project in the selected AgentSession; reject does not create Project.
 
-New-session azents-web UI shows selected Project chips above the draft first-message composer. It loads latest-session defaults, shows recent agent-level presets, and provides a Runtime-gated folder picker with Runtime start control. Projects tab in azents-web concrete session header exposes only the selected session's registered Project list, existing folder registration form, and registration request approve/reject. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
+New-session azents-web UI shows selected Project chips above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, and provides a Runtime-gated folder picker with Runtime start control. Projects tab in azents-web concrete session header exposes the selected session's registered Project list, a Runtime-gated folder picker for registering an existing directory, and registration request approve/reject. Project lists display the folder basename as primary text with the full path as secondary text. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
 
 ### Workspace Home / Membership UI
 
