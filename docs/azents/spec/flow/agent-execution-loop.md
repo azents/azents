@@ -32,7 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-06-28
-spec_version: 46
+spec_version: 47
 ---
 
 # Agent Execution Loop
@@ -84,6 +84,12 @@ Phase enum:
 `active_tool_calls` contains `call_id`, `name`, redacted/summarized `arguments`, `started_at`,
 and `background`. The UI LLM running indicator uses `waiting_for_model` / `streaming_model`, and
 tool activity uses `executing_tools` and `active_tool_calls`.
+
+`retry_state` is nullable durable JSON on `agent_runs`. When present, it records failed-run retry
+progress for a still-running run and includes the latest user-safe error message, failed attempt
+count, max retries, backoff seconds, `next_retry_at`, error type/source, and future retry
+classification fields. Terminal run transitions clear `retry_state`. `/live` exposes this as the
+optional `run.retry` projection so retry UI does not need durable transcript retry-attempt events.
 
 ## 3. Event Transcript
 
@@ -345,8 +351,10 @@ Primary checks:
 Idle transition is allowed only at a terminal run boundary. `AgentSession.run_state` may become `idle` only
 after the runner has observed a terminal `RunComplete` boundary and has confirmed that there is no
 follow-up work: no pending command, no pending input buffer, and no queued actionable wake-up. User
-interrupt and unrecoverable turn errors also end through `RunComplete`; after that same follow-up
-check they may transition the session to idle.
+interrupt and failed terminal runs also end through `RunComplete`; after that same follow-up check
+they may transition the session to idle. Idle continuation hooks are dispatched only when the latest
+terminal run status is `completed`; failed, stopped, interrupted, cancelled, or retry-active running
+runs must not enqueue Goal continuation.
 
 Wake-up is a signal, not work by itself. If a wake-up reaches a running session, it is a no-op signal.
 If a wake-up reaches the runner and there is no pending command, input buffer, or other actionable
@@ -392,4 +400,5 @@ updated by the user.
 
 ## Changelog
 
+- **2026-06-28** (spec_version 47) — Added failed-run retry state foundation, live retry projection contract, and Goal continuation gating by successful terminal run status.
 - **2026-06-28** (spec_version 46) — Promoted generic client tool result metadata and runtime process tool execution (`exec_command`/`write_stdin`) into the execution loop spec.

@@ -147,6 +147,7 @@ class CommandExecutor:
                 toolkits=[],
                 terminal_event_observed=True,
                 no_actionable_work=False,
+                terminal_run_status=AgentRunStatus.FAILED,
             )
 
         run_request = resolved.value
@@ -247,6 +248,7 @@ class CommandExecutor:
             terminal_event_observed=True,
             no_actionable_work=False,
             run_id=run_id,
+            terminal_run_status=terminal_run_status,
         )
 
     async def clear_pending_command(self, session_id: str, *, command_id: str) -> None:

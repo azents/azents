@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.types import ActiveToolCall
+from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.models.event import JSONValue
 
 
@@ -54,6 +55,10 @@ class AgentRunPatch(BaseModel):
     active_tool_calls: list[ActiveToolCall] | None = Field(
         default=None,
         description="Active tool calls",
+    )
+    retry_state: FailedRunRetryState | None = Field(
+        default=None,
+        description="Durable failed-run retry state",
     )
     last_completed_event_id: str | None = Field(
         default=None,

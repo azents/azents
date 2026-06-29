@@ -36,6 +36,7 @@ from .data import (
     AgentNotFound,
     ArchiveSessionError,
     ArchiveSessionResult,
+    ChatLiveRunRetryState,
     ChatLiveRunState,
     ChatLiveStateSnapshot,
     DeleteInputBufferError,
@@ -490,6 +491,16 @@ class ChatSessionService:
                         run_id=run.id,
                         phase=run.phase,
                         status=run.status,
+                        retry=None
+                        if run.retry_state is None
+                        else ChatLiveRunRetryState(
+                            status=run.retry_state.status,
+                            last_error_message=run.retry_state.last_user_message,
+                            failed_attempt_count=run.retry_state.failed_attempt_count,
+                            max_retries=run.retry_state.max_retries,
+                            backoff_seconds=run.retry_state.backoff_seconds,
+                            next_retry_at=run.retry_state.next_retry_at.isoformat(),
+                        ),
                     ),
                     session_run_state=agent_session.run_state,
                     todo=todo,

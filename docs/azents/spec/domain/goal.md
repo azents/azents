@@ -82,7 +82,8 @@ Goal continuation is produced through the general session idle lifecycle.
 
 The required order is:
 
-1. A foreground run reaches a terminal `RunComplete` boundary.
+1. A foreground run reaches a terminal `RunComplete` boundary and the durable run status is
+   `completed`.
 2. The runner confirms there is no pending command, pending input buffer, or queued actionable
    wake-up.
 3. The runner transitions the session runtime to `idle`.
@@ -94,9 +95,11 @@ The required order is:
    runtime `running` in the same database transaction.
 8. The worker publishes pending input-buffer live state and sends a broker wake-up signal.
 
-`paused`, `blocked`, `complete`, or empty Goal state returns no continuation. If any pending input
-buffer already exists when the idle hook boundary is reached, idle continuation is skipped so existing
-user or system input runs first.
+`paused`, `blocked`, `complete`, or empty Goal state returns no continuation. If the latest terminal
+run status is `failed`, `stopped`, `interrupted`, or `cancelled`, idle continuation is skipped even
+though the session may still transition to `idle`. If retry is active, the run remains `running` and
+the idle continuation path is not reached. If any pending input buffer already exists when the idle
+hook boundary is reached, idle continuation is skipped so existing user or system input runs first.
 
 Hook providers do not write durable transcript events and do not send broker wake-ups directly. They
 return `SessionContinuationInput`; the worker converts it into session-bound input buffers. Broker

@@ -7,6 +7,10 @@ from azcommon.types import JSONObject
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation, model_validator
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.engine.run.failure import (
+    FailedRunFailureMetadata,
+    FailedRunRetryState,
+)
 
 RawDict: TypeAlias = Annotated[dict[str, object], SkipValidation]
 
@@ -411,6 +415,10 @@ class SystemErrorPayload(BaseModel):
     severity: Literal["info", "warning", "error"] | None = Field(default=None)
     recoverable: bool | None = Field(default=None)
     reset_suggested: bool | None = Field(default=None)
+    failure: FailedRunFailureMetadata | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class UnknownAdapterOutputPayload(BaseModel):
@@ -544,6 +552,7 @@ class AgentRunState(BaseModel):
     phase: AgentRunPhase
     status: AgentRunStatus
     active_tool_calls: list[ActiveToolCall] = Field(default_factory=list)
+    retry_state: FailedRunRetryState | None = Field(default=None)
     last_completed_event_id: str | None = Field(default=None)
     stop_requested_at: datetime.datetime | None = Field(default=None)
     started_at: datetime.datetime
