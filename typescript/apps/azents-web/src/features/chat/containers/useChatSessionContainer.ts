@@ -1502,21 +1502,21 @@ export function useChatSessionContainer(
   batchReloadRef.current = messagesRefetch;
 
   const applyLatestSnapshot = useCallback(
-    async (targetSessionId: string, followBottom: boolean): Promise<void> => {
+    async (targetSessionId: string): Promise<void> => {
       setBufferingLiveEvents(true);
       const result = await utils.chat.listSessionEvents.fetch({
         sessionId: targetSessionId,
       });
       const mapped = mapSessionEvents(result);
       historyNewestCursorRef.current = mapped.newestCursor;
-      setHistoryMessages(mapped.historyMessages);
+      setHistoryMessages((prev) =>
+        mergeWithOlderPages(prev, mapped.historyMessages),
+      );
       setManagedLiveState(mapped.liveState);
       setHasMore(mapped.hasMore);
       setChatTimelineState({ type: "LATEST_FOLLOWING" });
       replayBufferedLiveEvents();
-      if (followBottom) {
-        setChatViewState({ type: "READY" });
-      }
+      setChatViewState({ type: "READY" });
     },
     [
       replayBufferedLiveEvents,
@@ -1663,7 +1663,7 @@ export function useChatSessionContainer(
           });
           return;
         }
-        void applyLatestSnapshot(sessionId, false);
+        void applyLatestSnapshot(sessionId);
       })
       .finally(() => {
         setIsLoadingNewer(false);
@@ -1677,7 +1677,7 @@ export function useChatSessionContainer(
   ]);
 
   const onResetToLatest = useCallback((): void => {
-    void applyLatestSnapshot(sessionId, true);
+    void applyLatestSnapshot(sessionId);
   }, [applyLatestSnapshot, sessionId]);
 
   const onAuthorizationComplete = useCallback((toolkitId: string) => {

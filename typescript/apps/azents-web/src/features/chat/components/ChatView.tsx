@@ -72,6 +72,7 @@ const LOAD_MORE_THRESHOLD = 100;
 /** tail follow detection allowed distance (px). mobile viewport/sub-pixel/keyboard resize absorbs error.. */
 const BOTTOM_FOLLOW_THRESHOLD = 48;
 const PROGRAMMATIC_SCROLL_GUARD_MS = 350;
+const LOAD_MORE_COOLDOWN_MS = 800;
 const NEW_MESSAGE_CHIP_OFFSET = "calc(100% + var(--mantine-spacing-xl))";
 const KEYBOARD_RESIZE_SETTLE_MS = 250;
 const WORKSPACE_RATIO_STORAGE_KEY = "azents.chat.workspaceRatio";
@@ -324,6 +325,7 @@ export function ChatView({
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const programmaticScrollUntilRef = useRef(0);
   const lastUserScrollIntentAtRef = useRef(0);
+  const lastLoadMoreTriggerAtRef = useRef(0);
 
   // whether mobile determine (touch device)
   const isMobile = useMemo(
@@ -476,13 +478,14 @@ export function ChatView({
     const viewport = viewportRef.current;
     if (saved && viewport && !isLoadingMore) {
       const diff = viewport.scrollHeight - saved.scrollHeight;
+      markProgrammaticScroll();
       viewport.scrollTop = saved.scrollTop + diff;
       savedScrollRef.current = null;
       prevMessageIdsRef.current = new Set(
         getTimelineItemIds(messages, pendingInputBuffers),
       );
     }
-  }, [messages, pendingInputBuffers, isLoadingMore]);
+  }, [messages, pendingInputBuffers, isLoadingMore, markProgrammaticScroll]);
 
   // initial load when paint before to bottom with scroll.
   // useEffect(paint after) itext useLayoutEffect(paint before) in handledtext
@@ -636,9 +639,18 @@ export function ChatView({
         scrollTop <= LOAD_MORE_THRESHOLD &&
         hasMore &&
         !isLoadingMore &&
-        isReadyForPaginationRef.current
+        isReadyForPaginationRef.current &&
+        !inProgrammaticScroll
       ) {
-        onLoadMore();
+        const lastLoadMoreTriggerAt = lastLoadMoreTriggerAtRef.current;
+        if (now - lastLoadMoreTriggerAt >= LOAD_MORE_COOLDOWN_MS) {
+          lastLoadMoreTriggerAtRef.current = now;
+          savedScrollRef.current = {
+            scrollHeight: viewport.scrollHeight,
+            scrollTop: viewport.scrollTop,
+          };
+          onLoadMore();
+        }
       }
     };
 
