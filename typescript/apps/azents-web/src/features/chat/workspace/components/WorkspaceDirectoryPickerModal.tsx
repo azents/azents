@@ -170,8 +170,8 @@ export function WorkspaceDirectoryPickerModal({
         : null;
     return (
       <Stack gap="sm">
-        <Group justify="space-between" gap="sm">
-          <Stack gap={2} style={{ minWidth: 0 }}>
+        <Group justify="space-between" gap="sm" wrap="nowrap">
+          <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
             <Text c="dimmed" size="xs">
               {t("projectPickerCurrentPath")}
             </Text>
@@ -192,11 +192,17 @@ export function WorkspaceDirectoryPickerModal({
             </Tooltip>
           </Group>
         </Group>
-        <ScrollArea.Autosize mah={{ base: 520, sm: 440 }} type="auto">
-          <Stack gap={4}>
+        <ScrollArea.Autosize
+          mah={{ base: 520, sm: 440 }}
+          styles={{ viewport: { overflowX: "hidden" } }}
+          type="auto"
+        >
+          <Stack gap={4} style={{ minWidth: 0, overflowX: "hidden" }}>
             {parent ? (
               <Button
+                fullWidth
                 justify="flex-start"
+                size="compact-sm"
                 variant="subtle"
                 onClick={() => onOpenDirectory(parent)}
               >
@@ -207,20 +213,31 @@ export function WorkspaceDirectoryPickerModal({
               <Paper
                 key={entry.path}
                 withBorder
-                p="xs"
-                radius="md"
-                style={{ cursor: "pointer", minWidth: 0 }}
+                px={8}
+                py={6}
+                radius="sm"
+                style={{
+                  cursor: "pointer",
+                  maxWidth: "100%",
+                  minWidth: 0,
+                  overflow: "hidden",
+                }}
                 onClick={() => onOpenDirectory(entry.path)}
               >
-                <Group justify="space-between" wrap="nowrap" gap="xs">
+                <Group
+                  justify="space-between"
+                  wrap="nowrap"
+                  gap={6}
+                  style={{ maxWidth: "100%", minWidth: 0 }}
+                >
                   <Group
-                    gap="xs"
-                    style={{ minWidth: 0, flex: 1 }}
+                    gap={8}
+                    style={{ flex: 1, minWidth: 0, overflow: "hidden" }}
                     wrap="nowrap"
                   >
-                    <IconFolder size={18} />
-                    <Stack gap={0} style={{ minWidth: 0 }}>
-                      <Text size="sm" fw={500} truncate>
+                    <IconFolder size={16} style={{ flex: "0 0 auto" }} />
+                    <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+                      <Text fw={500} size="sm" truncate>
                         {basename(entry.path)}
                       </Text>
                       <Text c="dimmed" size="xs" truncate>
@@ -228,17 +245,19 @@ export function WorkspaceDirectoryPickerModal({
                       </Text>
                     </Stack>
                   </Group>
-                  <Button
-                    size="compact-xs"
-                    variant="light"
-                    leftSection={<IconFolderPlus size={14} />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onSelectDirectory(entry.path);
-                    }}
-                  >
-                    {t("projectPickerSelectDirectory")}
-                  </Button>
+                  <Tooltip label={t("projectPickerSelectDirectory")}>
+                    <ActionIcon
+                      aria-label={t("projectPickerSelectDirectory")}
+                      size={30}
+                      variant="light"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelectDirectory(entry.path);
+                      }}
+                    >
+                      <IconFolderPlus size={15} />
+                    </ActionIcon>
+                  </Tooltip>
                 </Group>
               </Paper>
             ))}
@@ -259,9 +278,13 @@ export function WorkspaceDirectoryPickerModal({
       opened={opened}
       size="lg"
       title={t("projectPickerTitle")}
+      styles={{
+        body: { overflowX: "hidden" },
+        content: { overflowX: "hidden" },
+      }}
       onClose={onClose}
     >
-      <Stack gap="sm">
+      <Stack gap="sm" style={{ minWidth: 0, overflowX: "hidden" }}>
         <Text c="dimmed" size="sm">
           {t("projectPickerDescription")}
         </Text>
