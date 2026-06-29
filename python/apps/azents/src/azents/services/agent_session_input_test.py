@@ -19,6 +19,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
@@ -262,6 +263,7 @@ class TestAgentSessionInputService:
         input_buffer_service = _InputBufferServiceDouble(calls)
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
             agent_runtime_repository=runtime_repository,
             agent_session_repository=session_repository,
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -301,7 +303,7 @@ class TestAgentSessionInputService:
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """First draft input creates a session with project snapshot."""
+        """First draft input creates a session with explicit Projects."""
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(session, "draft-session-input")
             user_id = await _create_user(session, "draft-session-input@example.com")
@@ -326,6 +328,7 @@ class TestAgentSessionInputService:
 
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -344,6 +347,10 @@ class TestAgentSessionInputService:
                 attachments=[],
             ),
             user_id=user_id,
+            project_paths=[
+                "/workspace/agent/project-a/nested",
+                "/workspace/agent/project-a/nested",
+            ],
             client_request_id="draft-client-1",
         )
 
@@ -369,7 +376,9 @@ class TestAgentSessionInputService:
             AgentSessionPrimaryKind.TEAM_PRIMARY,
             None,
         ]
-        assert [project.path for project in projects] == ["/workspace/agent/project-a"]
+        assert [project.path for project in projects] == [
+            "/workspace/agent/project-a/nested"
+        ]
         assert updated is not None
         assert updated.run_state == AgentSessionRunState.RUNNING
 
@@ -400,6 +409,7 @@ class TestAgentSessionInputService:
 
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -452,6 +462,7 @@ class TestAgentSessionInputService:
 
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -506,6 +517,7 @@ class TestAgentSessionInputService:
 
         service = AgentSessionInputService(
             agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),

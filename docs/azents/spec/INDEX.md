@@ -19,7 +19,7 @@ Details of all living specs. Synchronized from frontmatter.
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-06-29 | 40 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-06-29 | 5 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-06-27 | 21 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-06-29 | 22 |
 
 ## Flow Specs
 

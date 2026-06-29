@@ -30,6 +30,7 @@ from azents.api.public.chat.v1 import (
     update_session_goal_status,
 )
 from azents.api.public.chat.v1.data import (
+    AgentSessionCreateRequest,
     AgentSessionTitleUpdateRequest,
     ChatCommandWriteRequest,
     ChatEditMessageWriteRequest,
@@ -604,6 +605,7 @@ class _AgentSessionRouteChatService:
     def __init__(self) -> None:
         self.agent_id: str | None = None
         self.session_id: str | None = None
+        self.project_paths: list[str] | None = None
         self.primary_session = AgentSession(
             id="1123456789abcdef0123456789abcdef",
             workspace_id="workspace-1",
@@ -677,10 +679,12 @@ class _AgentSessionRouteChatService:
         *,
         agent_id: str,
         user_id: str,
+        project_paths: list[str],
     ) -> Result[AgentSession, SessionNotFound]:
         """Return created team session result."""
         del user_id
         self.agent_id = agent_id
+        self.project_paths = project_paths
         return Success(self.secondary_session)
 
     async def get_agent_session(
@@ -771,6 +775,7 @@ class TestAgentSessionRoutes:
 
         response = await create_team_agent_session(
             agent_id="agent-1",
+            request=AgentSessionCreateRequest(project_paths=["/workspace/agent/app"]),
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
             chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
         )
@@ -778,6 +783,7 @@ class TestAgentSessionRoutes:
         assert response.id == "2123456789abcdef0123456789abcdef"
         assert response.agent_id == "agent-1"
         assert response.primary_kind is None
+        assert chat_service.project_paths == ["/workspace/agent/app"]
 
     async def test_update_agent_session_title_returns_updated_session(self) -> None:
         """Session title update route returns updated session metadata."""
@@ -1110,6 +1116,7 @@ class TestRestMessageWriteContract:
             ChatSessionCreateMessageWriteRequest(
                 client_request_id="client-new-1",
                 message="hello from draft",
+                project_paths=["/workspace/agent/app"],
             ),
             agent_id="agent-1",
             user_id="user-1",
@@ -1118,6 +1125,7 @@ class TestRestMessageWriteContract:
 
         assert input_service.calls == ["create_team_session_with_buffered_input"]
         assert input_service.kwargs[0]["client_request_id"] == "client-new-1"
+        assert input_service.kwargs[0]["project_paths"] == ["/workspace/agent/app"]
         assert response.session_id == "4123456789abcdef0123456789abcdef"
         assert response.accepted.id == "0123456789abcdef0123456789abcdef"
         snapshot_buffer = response.snapshot.input_buffer_events[0]

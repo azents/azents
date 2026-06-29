@@ -23,8 +23,10 @@ import {
   chatV1EditMessage,
   chatV1GetAgentSession,
   chatV1GetAgentSessionContext,
+  chatV1GetAgentSessionProjectDefaults,
   chatV1GetAgentWorkspace,
   chatV1IssueWsTicket,
+  chatV1ListAgentProjectPresets,
   chatV1ListAgentProjectRegistrationRequests,
   chatV1ListAgentProjects,
   chatV1ListAgentSessions,
@@ -89,12 +91,18 @@ export const chatRouter = router({
     }),
 
   createTeamAgentSession: publicProcedure
-    .input(z.object({ agentId: z.string().min(1) }))
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        projectPaths: z.array(z.string().min(1)),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await chatV1CreateTeamAgentSession({
           client: ctx.apiClient,
           path: { agent_id: input.agentId },
+          body: { project_paths: input.projectPaths },
           throwOnError: true,
         });
         return data;
@@ -113,6 +121,7 @@ export const chatRouter = router({
         clientRequestId: z.string().min(1).max(64),
         message: z.string().min(1),
         attachments: z.array(z.string().min(1)).optional(),
+        projectPaths: z.array(z.string().min(1)),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -123,6 +132,7 @@ export const chatRouter = router({
           body: {
             client_request_id: input.clientRequestId,
             message: input.message,
+            project_paths: input.projectPaths,
             attachments: input.attachments,
           },
           throwOnError: true,
@@ -205,6 +215,42 @@ export const chatRouter = router({
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  listAgentProjectPresets: publicProcedure
+    .input(z.object({ agentId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1ListAgentProjectPresets({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  getAgentSessionProjectDefaults: publicProcedure
+    .input(z.object({ agentId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1GetAgentSessionProjectDefaults({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
           404: "NOT_FOUND",
         });
       }
@@ -754,7 +800,7 @@ export const chatRouter = router({
     .input(
       z.object({
         agentId: z.string().min(1),
-        sessionId: z.string().min(1),
+        sessionId: z.string().min(1).optional(),
         path: z.string().min(1),
         limit: z.number().min(1).max(1_048_576).optional(),
       }),

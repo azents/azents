@@ -10,15 +10,33 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo } from "react";
 import { ChatInput } from "@/features/chat/components/ChatInput";
 import { useFileUpload } from "@/features/chat/hooks/useFileUpload";
+import { WorkspaceDirectoryPickerModal } from "@/features/chat/workspace/components/WorkspaceDirectoryPickerModal";
 import styles from "./AgentChatTab.module.css";
 import { AgentSettingsHeader } from "./AgentSettingsHeader";
+import { NewSessionProjectSelector } from "./NewSessionProjectSelector";
 import type { AgentDraftChatContainerOutput } from "../containers/useAgentDraftChatContainer";
 import type { UploadedFile } from "@/features/chat/hooks/useFileUpload";
 
 export function AgentDraftChat(
   props: AgentDraftChatContainerOutput,
 ): React.ReactElement {
-  const { agent, isWritePending, onSendMessage } = props;
+  const {
+    agent,
+    isWritePending,
+    onSendMessage,
+    selectedProjectPaths,
+    projectPresetState,
+    projectPickerState,
+    isProjectPickerOpen,
+    onAddPresetProject,
+    onRemoveProject,
+    onOpenProjectPicker,
+    onCloseProjectPicker,
+    onOpenProjectPickerDirectory,
+    onSelectProjectPickerCurrentDirectory,
+    onRefreshProjectPicker,
+    onStartRuntimeForProjectPicker,
+  } = props;
   const t = useTranslations("chat");
   const isMobile = useMemo(
     () =>
@@ -90,6 +108,13 @@ export function AgentDraftChat(
       </Center>
       <Box px="md" py="sm" style={{ flexShrink: 0 }}>
         <Box maw={rem(920)} mx="auto">
+          <NewSessionProjectSelector
+            projectPresetState={projectPresetState}
+            selectedProjectPaths={selectedProjectPaths}
+            onAddPresetProject={onAddPresetProject}
+            onOpenProjectPicker={onOpenProjectPicker}
+            onRemoveProject={onRemoveProject}
+          />
           <ChatInput
             agentId={agent.id}
             sessionId={null}
@@ -115,6 +140,15 @@ export function AgentDraftChat(
           />
         </Box>
       </Box>
+      <WorkspaceDirectoryPickerModal
+        opened={isProjectPickerOpen}
+        state={projectPickerState}
+        onClose={onCloseProjectPicker}
+        onOpenDirectory={onOpenProjectPickerDirectory}
+        onRefresh={onRefreshProjectPicker}
+        onSelectCurrentDirectory={onSelectProjectPickerCurrentDirectory}
+        onStartRuntime={onStartRuntimeForProjectPicker}
+      />
     </Box>
   );
 }

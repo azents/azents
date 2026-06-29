@@ -2588,6 +2588,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSessionCreateRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2595,6 +2605,102 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentSessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/project-presets": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "List Agent Project Presets",
+        "description": "List Agent Project path presets.",
+        "operationId": "chat_v1_list_agent_project_presets",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProjectPresetListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/session-project-defaults": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Get Agent Session Project Defaults",
+        "description": "Get default Project paths for a new AgentSession.",
+        "operationId": "chat_v1_get_agent_session_project_defaults",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionProjectDefaultsResponse"
                 }
               }
             }
@@ -7540,6 +7646,59 @@
         "title": "AgentModelSelectionInput",
         "description": "Catalog model selection input."
       },
+      "AgentProjectPresetListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentProjectPresetResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Project presets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AgentProjectPresetListResponse",
+        "description": "Agent Project preset list response."
+      },
+      "AgentProjectPresetResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Project preset ID"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Agent Workspace absolute path"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "path",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AgentProjectPresetResponse",
+        "description": "Agent Project preset response."
+      },
       "AgentResponse": {
         "properties": {
           "id": {
@@ -8055,6 +8214,24 @@
         "title": "AgentRuntimeSummaryResponse",
         "description": "Agent Runtime summary response."
       },
+      "AgentSessionCreateRequest": {
+        "properties": {
+          "project_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Project Paths",
+            "description": "Exact Project paths to register on the created session"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_paths"
+        ],
+        "title": "AgentSessionCreateRequest",
+        "description": "REST non-primary AgentSession create request."
+      },
       "AgentSessionListResponse": {
         "properties": {
           "items": {
@@ -8080,6 +8257,60 @@
         ],
         "title": "AgentSessionPrimaryKind",
         "description": "AgentSession primary role."
+      },
+      "AgentSessionProjectDefaultsResponse": {
+        "properties": {
+          "project_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Project Paths",
+            "description": "Default selected Project paths"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AgentSessionProjectDefaultsSourceResponse",
+            "description": "Default source metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_paths",
+          "source"
+        ],
+        "title": "AgentSessionProjectDefaultsResponse",
+        "description": "New AgentSession Project defaults response."
+      },
+      "AgentSessionProjectDefaultsSourceResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "empty",
+              "recent_session"
+            ],
+            "title": "Type",
+            "description": "Default source type"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Source session ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "AgentSessionProjectDefaultsSourceResponse",
+        "description": "New AgentSession Project defaults source metadata response."
       },
       "AgentSessionResponse": {
         "properties": {
@@ -10197,6 +10428,14 @@
             "title": "Message",
             "description": "Message content"
           },
+          "project_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Project Paths",
+            "description": "Exact Project paths to register on the created session"
+          },
           "attachments": {
             "anyOf": [
               {
@@ -10216,7 +10455,8 @@
         "type": "object",
         "required": [
           "client_request_id",
-          "message"
+          "message",
+          "project_paths"
         ],
         "title": "ChatSessionCreateMessageWriteRequest",
         "description": "REST first message write request for a draft AgentSession."

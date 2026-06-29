@@ -118,7 +118,7 @@ def _create_secondary_session(
         server_url=server_url,
         token=token,
         path=f"/chat/v1/agents/{agent_id}/sessions",
-        payload={},
+        payload={"project_paths": []},
     )
     session_id = payload.get("id")
     if not isinstance(session_id, str):
@@ -166,6 +166,7 @@ def _write_first_session_message(
         payload={
             "client_request_id": client_request_id,
             "message": message,
+            "project_paths": [],
         },
     )
 
