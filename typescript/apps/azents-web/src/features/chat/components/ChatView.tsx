@@ -73,6 +73,9 @@ const LOAD_MORE_THRESHOLD = 100;
 const BOTTOM_FOLLOW_THRESHOLD = 48;
 const PROGRAMMATIC_SCROLL_GUARD_MS = 350;
 const LOAD_MORE_COOLDOWN_MS = 800;
+/** distance that intentionally exits latest-follow mode (roughly a paragraph or two). */
+const FOLLOW_EXIT_THRESHOLD = 160;
+const CHAT_SCROLL_STATE_STORAGE_PREFIX = "azents.chat.scrollState.";
 const NEW_MESSAGE_CHIP_OFFSET = "calc(100% + var(--mantine-spacing-xl))";
 const KEYBOARD_RESIZE_SETTLE_MS = 250;
 const WORKSPACE_RATIO_STORAGE_KEY = "azents.chat.workspaceRatio";
@@ -81,9 +84,41 @@ const MIN_CHAT_RATIO = 0.35;
 const MAX_CHAT_RATIO = 0.75;
 
 /** viewport bottom or iOS bounce area to existstext determines.. */
-function isAtFollowBoundary(viewport: HTMLDivElement): boolean {
+function scrollDistanceFromBottom(viewport: HTMLDivElement): number {
   const { scrollTop, scrollHeight, clientHeight } = viewport;
-  return scrollHeight - scrollTop - clientHeight <= BOTTOM_FOLLOW_THRESHOLD;
+  return Math.max(0, scrollHeight - scrollTop - clientHeight);
+}
+
+interface StoredChatScrollState {
+  distanceFromBottom: number;
+  following: boolean;
+}
+
+function parseStoredChatScrollState(
+  raw: string | null,
+): StoredChatScrollState | null {
+  if (raw === null) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) {
+      return null;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (
+      typeof record.distanceFromBottom === "number" &&
+      typeof record.following === "boolean"
+    ) {
+      return {
+        distanceFromBottom: record.distanceFromBottom,
+        following: record.following,
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 interface BoundaryControls {
@@ -326,6 +361,10 @@ export function ChatView({
   const programmaticScrollUntilRef = useRef(0);
   const lastUserScrollIntentAtRef = useRef(0);
   const lastLoadMoreTriggerAtRef = useRef(0);
+  const previousSessionIdRef = useRef<string | null>(null);
+  const pendingInitialScrollRestoreRef = useRef<StoredChatScrollState | null>(
+    null,
+  );
 
   // whether mobile determine (touch device)
   const isMobile = useMemo(
@@ -341,6 +380,8 @@ export function ChatView({
   const hasDetachedNewer =
     chatTimelineState.type === "DETACHED_HISTORY_BROWSING" &&
     chatTimelineState.hasNewer;
+  const hasTimelineItems =
+    messages.length > 0 || pendingInputBuffers.length > 0;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
       return null;
@@ -398,6 +439,26 @@ export function ChatView({
     programmaticScrollUntilRef.current =
       performance.now() + PROGRAMMATIC_SCROLL_GUARD_MS;
   }, []);
+
+  const persistScrollState = useCallback(
+    (viewport: HTMLDivElement, following: boolean): void => {
+      if (sessionId === null || typeof window === "undefined") {
+        return;
+      }
+      try {
+        window.sessionStorage.setItem(
+          `${CHAT_SCROLL_STATE_STORAGE_PREFIX}${sessionId}`,
+          JSON.stringify({
+            distanceFromBottom: scrollDistanceFromBottom(viewport),
+            following,
+          } satisfies StoredChatScrollState),
+        );
+      } catch {
+        // Ignore storage failures (private mode/quota) and keep in-memory behavior.
+      }
+    },
+    [sessionId],
+  );
 
   const pinToBottom = useCallback((): void => {
     const viewport = viewportRef.current;
@@ -472,6 +533,32 @@ export function ChatView({
     isLoadingMoreRef.current = isLoadingMore;
   }, [isLoadingMore]);
 
+  useLayoutEffect(() => {
+    if (previousSessionIdRef.current === sessionId) {
+      return;
+    }
+    previousSessionIdRef.current = sessionId;
+    isInitialScrollRef.current = true;
+    isReadyForPaginationRef.current = false;
+    isFollowingLatestRef.current = true;
+    setShowNewMessageChip(false);
+    prevMessageIdsRef.current = new Set();
+    pendingInitialScrollRestoreRef.current = null;
+
+    if (sessionId === null || typeof window === "undefined") {
+      return;
+    }
+    try {
+      pendingInitialScrollRestoreRef.current = parseStoredChatScrollState(
+        window.sessionStorage.getItem(
+          `${CHAT_SCROLL_STATE_STORAGE_PREFIX}${sessionId}`,
+        ),
+      );
+    } catch {
+      pendingInitialScrollRestoreRef.current = null;
+    }
+  }, [sessionId]);
+
   // older messages prepend after scroll position restore
   useLayoutEffect(() => {
     const saved = savedScrollRef.current;
@@ -503,8 +590,25 @@ export function ChatView({
       return;
     }
 
-    pinToBottom();
-    isFollowingLatestRef.current = true;
+    const storedScrollState = pendingInitialScrollRestoreRef.current;
+    pendingInitialScrollRestoreRef.current = null;
+    if (
+      storedScrollState !== null &&
+      !storedScrollState.following &&
+      storedScrollState.distanceFromBottom >= FOLLOW_EXIT_THRESHOLD
+    ) {
+      markProgrammaticScroll();
+      viewport.scrollTop = Math.max(
+        0,
+        viewport.scrollHeight -
+          viewport.clientHeight -
+          storedScrollState.distanceFromBottom,
+      );
+      isFollowingLatestRef.current = false;
+    } else {
+      pinToBottom();
+      isFollowingLatestRef.current = true;
+    }
     isInitialScrollRef.current = false;
     prevMessageIdsRef.current = new Set(
       getTimelineItemIds(messages, pendingInputBuffers),
@@ -514,7 +618,7 @@ export function ChatView({
     requestAnimationFrame(() => {
       isReadyForPaginationRef.current = true;
     });
-  }, [messages, pendingInputBuffers, pinToBottom]);
+  }, [messages, pendingInputBuffers, markProgrammaticScroll, pinToBottom]);
 
   useEffect(() => {
     const el = contentRef.current;
@@ -548,16 +652,20 @@ export function ChatView({
     };
   }, [schedulePinToBottom]);
 
-  // when session switches sectext scroll text reset + header display + scroll status sectext
+  // First history load resets scroll; same-session reloads keep the current follow state.
   useEffect(() => {
-    if (chatViewState.type === "LOADING_HISTORY") {
+    if (
+      chatViewState.type === "LOADING_HISTORY" &&
+      messages.length === 0 &&
+      pendingInputBuffers.length === 0
+    ) {
       isInitialScrollRef.current = true;
       isReadyForPaginationRef.current = false;
       isFollowingLatestRef.current = true;
       setShowNewMessageChip(false);
       prevMessageIdsRef.current = new Set();
     }
-  }, [chatViewState.type]);
+  }, [chatViewState.type, messages.length, pendingInputBuffers.length]);
 
   // message/pending buffer change when conditional scroll (initial load except — useLayoutEffect in handle)
   // - new timeline item + follow active: smooth scroll
@@ -607,15 +715,19 @@ export function ChatView({
       const scrollTop = viewport.scrollTop;
 
       // (1) follow detection update
-      const atFollowBoundary = isAtFollowBoundary(viewport);
+      const distanceFromBottom = scrollDistanceFromBottom(viewport);
+      const atFollowBoundary = distanceFromBottom <= BOTTOM_FOLLOW_THRESHOLD;
       const now = performance.now();
       const inProgrammaticScroll = now < programmaticScrollUntilRef.current;
-      const hasRecentUserIntent = now - lastUserScrollIntentAtRef.current < 500;
       if (atFollowBoundary) {
         isFollowingLatestRef.current = true;
-      } else if (hasRecentUserIntent && !inProgrammaticScroll) {
+      } else if (
+        !inProgrammaticScroll &&
+        distanceFromBottom >= FOLLOW_EXIT_THRESHOLD
+      ) {
         isFollowingLatestRef.current = false;
       }
+      persistScrollState(viewport, isFollowingLatestRef.current);
 
       // bottom or bottom bounce area to alsotextwhen new message chip hide.
       // text bottom in text textonly with detached/buffering switchdoes not..
@@ -682,6 +794,7 @@ export function ChatView({
     onLoadMore,
     onLoadNewer,
     onResetToLatest,
+    persistScrollState,
   ]);
 
   useEffect(() => {
@@ -755,7 +868,7 @@ export function ChatView({
   }
 
   // history loading
-  if (chatViewState.type === "LOADING_HISTORY") {
+  if (chatViewState.type === "LOADING_HISTORY" && !hasTimelineItems) {
     return (
       <Center h="100%">
         <Stack align="center" gap="md">
