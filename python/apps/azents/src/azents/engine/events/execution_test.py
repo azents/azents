@@ -796,6 +796,7 @@ async def test_model_request_fingerprint_is_logged(
     ]
     assert fields["store"] is False
     assert fields["max_output_tokens"] == 100
+    assert fields["input_prefix_hashes"] == {}
     assert isinstance(fields["input_hash"], str)
     assert isinstance(fields["tools_hash"], str)
     assert isinstance(fields["kwargs_hash"], str)
@@ -803,6 +804,45 @@ async def test_model_request_fingerprint_is_logged(
     assert fields["input_hash"] != fields["tools_hash"]
     assert "hello secret" not in fields
     assert "tool secret" not in fields
+
+
+async def test_model_request_prefix_ladder_hashes_are_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Log fixed input prefix hashes for append-only cache analysis."""
+    native_request = NativeModelRequest(
+        model="gpt-5.1",
+        input=[{"role": "user", "content": f"message {index}"} for index in range(300)],
+        tools=[],
+        kwargs={},
+    )
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(native_request),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    with caplog.at_level(logging.INFO, logger="azents.engine.events.execution"):
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    record = next(
+        item for item in caplog.records if item.message == "Model request fingerprint"
+    )
+    prefix_hashes = record.__dict__["input_prefix_hashes"]
+    assert set(prefix_hashes) == {"16", "32", "64", "128", "192", "256"}
+    assert all(isinstance(value, str) for value in prefix_hashes.values())
+    assert len(set(prefix_hashes.values())) == len(prefix_hashes)
 
 
 async def test_model_input_uses_session_head_event_id() -> None:
