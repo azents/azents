@@ -11,9 +11,10 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from textwrap import dedent
 
+from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +48,7 @@ from azents.engine.tooling.toolkit_state import (
     ToolkitStateStore,
 )
 from azents.engine.tools.mcp import McpToolkit
+from azents.engine.tools.mcp_base import McpToolSnapshotState, wrap_mcp_tool
 from azents.rdb.session import SessionManager
 from azents.repos.github_user_installation import (
     GithubUserInstallationRepository,
@@ -628,23 +630,86 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                     self._prepare_installation_mcp(binding)
                 )
             if binding.lazy_mcp_task is not None and not binding.lazy_mcp_task.done():
-                return ToolkitState(
-                    status=ToolkitStatus.ENABLED,
-                    tools=[],
-                    prompt="",
+                return await self._installation_snapshot_update_context(
+                    binding,
+                    context,
                 )
             if binding.lazy_mcp_error is not None:
-                return ToolkitState(
-                    status=ToolkitStatus.ENABLED,
-                    tools=[],
-                    prompt="",
+                return await self._installation_snapshot_update_context(
+                    binding,
+                    context,
                 )
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=[],
-                prompt="",
+            return await self._installation_snapshot_update_context(
+                binding,
+                context,
             )
         return await binding.mcp_toolkit.update_context(context)
+
+    async def _installation_snapshot_update_context(
+        self,
+        binding: GitHubInstallationBinding,
+        context: TurnContext,
+    ) -> ToolkitState:
+        """Return tools from a previous installation MCP snapshot if available."""
+        del context
+        snapshot = await _load_installation_tool_snapshot(binding)
+        tools = (
+            self._tools_from_installation_snapshot(binding, snapshot)
+            if snapshot is not None
+            else []
+        )
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt="")
+
+    def _tools_from_installation_snapshot(
+        self,
+        binding: GitHubInstallationBinding,
+        snapshot: McpToolSnapshotState,
+    ) -> list[FunctionTool]:
+        """Rebuild installation MCP tools before the lazy McpToolkit exists."""
+        config = binding.lazy_mcp_config
+        if config is None:
+            return []
+
+        async def headers_provider() -> dict[str, str]:
+            return await self._installation_auth_headers(binding)
+
+        tools: list[FunctionTool] = []
+        for item in sorted(snapshot.tools, key=lambda tool: tool.model_name):
+            mcp_tool = McpBaseTool(
+                name=item.raw_name,
+                description=item.description,
+                inputSchema=item.input_schema,
+            )
+            tool = wrap_mcp_tool(
+                mcp_tool,
+                item.server_url,
+                {},
+                config.timeout,
+                use_streamable_http=item.use_streamable_http,
+                on_auth_failure=binding.lazy_mcp_secret_provider,
+                proxy_url=binding.lazy_mcp_proxy_url,
+                headers_provider=headers_provider,
+            )
+            if item.model_name != item.raw_name:
+                tool = replace(
+                    tool,
+                    spec=replace(tool.spec, name=item.model_name),
+                )
+            tools.append(tool)
+        return tools
+
+    async def _installation_auth_headers(
+        self,
+        binding: GitHubInstallationBinding,
+    ) -> dict[str, str]:
+        """Build auth headers for an installation MCP tool call."""
+        token = await self._get_cached_installation_token(
+            binding.target.installation_id,
+            binding.token_provider,
+        )
+        if not token:
+            return {}
+        return {"Authorization": f"Bearer {token}"}
 
     async def _prepare_lazy_mcp(self) -> None:
         """Issue GitHub token in background and start MCP lazy load."""
@@ -1208,6 +1273,37 @@ def _build_installation_bindings(
             )
         )
     return bindings
+
+
+async def _load_installation_tool_snapshot(
+    binding: GitHubInstallationBinding,
+) -> McpToolSnapshotState | None:
+    """Load a previous MCP tool snapshot before lazy GitHub MCP setup finishes."""
+    config = binding.lazy_mcp_config
+    if (
+        config is None
+        or binding.session_manager is None
+        or not binding.agent_id
+        or not binding.session_id
+    ):
+        return None
+    identity = ToolkitStateIdentity(
+        agent_id=binding.agent_id,
+        session_id=binding.session_id,
+        toolkit_namespace="mcp",
+        state_name=binding.state_name,
+    )
+    async with binding.session_manager() as session:
+        handle = ToolkitStateStore(session=session).handle(
+            identity,
+            McpToolSnapshotState,
+        )
+        snapshot = await handle.load(default_factory=McpToolSnapshotState)
+    if not snapshot.tools:
+        return None
+    if snapshot.server_url != config.server_url:
+        return None
+    return snapshot
 
 
 def _github_snapshot_state_name(*, toolkit_id: str, suffix: str) -> str:
