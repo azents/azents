@@ -100,6 +100,20 @@ async def build_tool_catalog(
                 },
             )
         if state.status != ToolkitStatus.ENABLED:
+            logger.info(
+                "Toolkit catalog debug",
+                extra={
+                    **_toolkit_debug_log_extra(
+                        binding=binding,
+                        context=context,
+                        index=index,
+                        state=state,
+                        tool_names=[],
+                        prompt="",
+                    ),
+                    "disabled": True,
+                },
+            )
             continue
         prompt = state.prompt.strip()
         if prompt:
@@ -112,15 +126,61 @@ async def build_tool_catalog(
                     metadata=_toolkit_prompt_metadata(binding),
                 )
             )
+        bound_tools: list[FunctionTool] = []
         for tool in state.tools:
             bound = (
                 tool.with_prefix(f"{binding.slug}__") if binding.use_prefix else tool
             )
+            bound_tools.append(bound)
             tools[bound.spec.name] = bound
+        logger.info(
+            "Toolkit catalog debug",
+            extra=_toolkit_debug_log_extra(
+                binding=binding,
+                context=context,
+                index=index,
+                state=state,
+                tool_names=[tool.spec.name for tool in bound_tools],
+                prompt=prompt,
+            ),
+        )
     return ToolCatalog(
         tools=tools,
         prompt_fragment_inputs=prompt_fragment_inputs,
     )
+
+
+def _toolkit_debug_log_extra(
+    *,
+    binding: ToolkitBinding,
+    context: TurnContext,
+    index: int,
+    state: object,
+    tool_names: list[str],
+    prompt: str,
+) -> dict[str, object]:
+    """Build structured fields for temporary Toolkit catalog debug logs."""
+    status = getattr(state, "status", None)
+    status_value = getattr(status, "value", str(status))
+    return {
+        "session_id": context.session_id,
+        "run_id": context.run_id,
+        "workspace_id": context.workspace_id,
+        "model": context.model,
+        "run_index": context.run_index,
+        "toolkit_index": index,
+        "toolkit_slug": binding.slug,
+        "toolkit_type": binding.toolkit_type,
+        "toolkit_class": binding.toolkit.__class__.__name__,
+        "toolkit_display_name": binding.toolkit.display_name,
+        "use_prefix": binding.use_prefix,
+        "status": status_value,
+        "tool_count": len(tool_names),
+        "tool_names": tool_names,
+        "prompt_present": bool(prompt),
+        "prompt_char_count": len(prompt),
+        "prompt": prompt,
+    }
 
 
 def _toolkit_update_context_log_extra(

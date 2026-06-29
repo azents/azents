@@ -1,7 +1,9 @@
 """Event tool catalog tests."""
 
 import asyncio
+import logging
 
+import pytest
 from pydantic import BaseModel
 
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
@@ -149,6 +151,45 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
         tools=catalog.native_tools,
     ).lower([], model="gpt-5.1")
     assert request.tools == catalog.native_tools
+
+
+async def test_build_tool_catalog_logs_tool_names_and_prompts(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Temporary debug log includes per-toolkit tools and prompt content."""
+    with caplog.at_level(logging.INFO, logger="azents.engine.events.tools"):
+        await build_tool_catalog(
+            toolkit_bindings=[
+                ToolkitBinding(
+                    toolkit=_Toolkit(),
+                    slug="demo",
+                    use_prefix=True,
+                    toolkit_type="builtin",
+                )
+            ],
+            context=TurnContext(
+                user_id="user-1",
+                workspace_id="workspace-1",
+                model="gpt-5.1",
+                run_id="run-1",
+                session_id="session-1",
+                publish_event=_noop_publish,
+            ),
+        )
+
+    record = next(
+        item for item in caplog.records if item.message == "Toolkit catalog debug"
+    )
+    fields = record.__dict__
+    assert fields["session_id"] == "session-1"
+    assert fields["run_id"] == "run-1"
+    assert fields["workspace_id"] == "workspace-1"
+    assert fields["toolkit_slug"] == "demo"
+    assert fields["toolkit_type"] == "builtin"
+    assert fields["tool_names"] == ["demo__echo"]
+    assert fields["tool_count"] == 1
+    assert fields["prompt"] == "tool prompt"
+    assert fields["prompt_char_count"] == len("tool prompt")
 
 
 async def test_native_tools_are_sorted_by_function_name() -> None:
