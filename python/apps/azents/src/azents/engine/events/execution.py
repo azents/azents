@@ -2,9 +2,11 @@
 
 import asyncio
 import datetime
+import hashlib
 import itertools
+import json
 import logging
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -160,7 +162,7 @@ class AgentRunExecution:
     ) -> AgentRunStatus:
         """Run until terminal state."""
         try:
-            for _turn in _turn_range(request.max_turns):
+            for model_call_index in _turn_range(request.max_turns):
                 if await _stopped(check_stop):
                     await self._mark_terminal(
                         session,
@@ -228,6 +230,12 @@ class AgentRunExecution:
                     system_prompt=request.system_prompt,
                 )
                 native_request = self._post_lower_filter.apply(native_request)
+                _log_model_request_fingerprint(
+                    request=request,
+                    model_call_index=model_call_index,
+                    compacted=compacted,
+                    native_request=native_request,
+                )
 
                 await self._update_phase(
                     session,
@@ -704,6 +712,66 @@ class AgentRunExecution:
             await self._phase_sink(phase)
 
 
+def _log_model_request_fingerprint(
+    *,
+    request: AgentRunExecutionRequest,
+    model_call_index: int,
+    compacted: bool,
+    native_request: NativeModelRequest,
+) -> None:
+    """Log model request fingerprints without exposing prompt content."""
+    input_item_types = [_native_input_item_type(item) for item in native_request.input]
+    tool_names = [_native_tool_name(tool) for tool in native_request.tools]
+    kwargs_keys = sorted(native_request.kwargs)
+    instructions = native_request.kwargs.get("instructions")
+    prompt_cache_key = native_request.kwargs.get("prompt_cache_key")
+    logger.info(
+        "Model request fingerprint",
+        extra={
+            "session_id": request.session_id,
+            "run_id": request.run_id,
+            "run_index": request.run_index,
+            "model": request.model,
+            "model_call_index": model_call_index,
+            "model_call_sequence": model_call_index + 1,
+            "compacted": compacted,
+            "native_model": native_request.model,
+            "input_item_count": len(native_request.input),
+            "input_item_type_counts": _count_values(input_item_types),
+            "input_first_item_types": input_item_types[:8],
+            "input_last_item_types": input_item_types[-8:],
+            "input_hash": _stable_hash(_scrub_for_fingerprint(native_request.input)),
+            "tools_count": len(native_request.tools),
+            "tool_name_counts": _count_values(tool_names),
+            "tool_first_names": tool_names[:8],
+            "tool_last_names": tool_names[-8:],
+            "tools_hash": _stable_hash(_scrub_for_fingerprint(native_request.tools)),
+            "kwargs_keys": kwargs_keys,
+            "kwargs_hash": _stable_hash(_scrub_for_fingerprint(native_request.kwargs)),
+            "instructions_hash": (
+                _stable_hash(instructions) if isinstance(instructions, str) else None
+            ),
+            "prompt_cache_key_hash": (
+                _stable_hash(prompt_cache_key)
+                if isinstance(prompt_cache_key, str)
+                else None
+            ),
+            "store": native_request.kwargs.get("store"),
+            "max_output_tokens": native_request.kwargs.get("max_output_tokens"),
+            "request_hash": _stable_hash(
+                _scrub_for_fingerprint(
+                    {
+                        "model": native_request.model,
+                        "input": native_request.input,
+                        "tools": native_request.tools,
+                        "kwargs": native_request.kwargs,
+                    }
+                )
+            ),
+        },
+    )
+
+
 def _log_model_token_usage(
     *,
     request: AgentRunExecutionRequest,
@@ -747,6 +815,63 @@ def _log_model_token_usage(
             "raw_hidden_params": usage.raw_hidden_params,
         },
     )
+
+
+def _native_input_item_type(item: Mapping[str, object]) -> str:
+    """Return a stable, non-sensitive native input item type label."""
+    item_type = item.get("type")
+    if isinstance(item_type, str) and item_type:
+        return item_type
+    role = item.get("role")
+    if isinstance(role, str) and role:
+        return f"role:{role}"
+    return "unknown"
+
+
+def _native_tool_name(tool: Mapping[str, object]) -> str:
+    """Return a stable, non-sensitive native tool name label."""
+    name = tool.get("name")
+    if isinstance(name, str) and name:
+        return name
+    tool_type = tool.get("type")
+    if isinstance(tool_type, str) and tool_type:
+        return tool_type
+    function = tool.get("function")
+    if isinstance(function, Mapping):
+        function_name = function.get("name")
+        if isinstance(function_name, str) and function_name:
+            return function_name
+    return "unknown"
+
+
+def _count_values(values: Sequence[str]) -> dict[str, int]:
+    """Count ordered string values for structured logs."""
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _stable_hash(value: object) -> str:
+    """Return a stable short hash for JSON-compatible diagnostic values."""
+    data = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()[:16]
+
+
+def _scrub_for_fingerprint(value: object) -> object:
+    """Preserve shape/hash for comparison while removing raw prompt content."""
+    if isinstance(value, str):
+        return {"type": "str", "length": len(value), "hash": _stable_hash(value)}
+    if isinstance(value, bool | int | float) or value is None:
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _scrub_for_fingerprint(child)
+            for key, child in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, Sequence):
+        return [_scrub_for_fingerprint(item) for item in value]
+    return {"type": type(value).__name__, "hash": _stable_hash(str(value))}
 
 
 def _turn_range(max_turns: int | None) -> Iterable[int]:
