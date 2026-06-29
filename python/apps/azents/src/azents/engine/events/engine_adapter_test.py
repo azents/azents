@@ -463,8 +463,12 @@ class _PromptHookToolkit(Toolkit[BaseModel]):
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[],
-            prompt="tool prompt",
         )
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static prompt."""
+        del context
+        return "tool prompt"
 
     def hooks(self) -> RuntimeHooks:
         """Return turn start hook."""
@@ -723,7 +727,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
     assert execution.request is not None
     assert execution.request.system_prompt == (
         "## Agent prompt\n\nagent prompt\n\n"
-        "## Toolkit prompt: hooks\n\ntool prompt\n\n"
+        "## Static toolkit prompt: hooks\n\ntool prompt\n\n"
         "## Turn injected prompt from hooks\n\nvisible prompt\n\n"
         "## Turn injected prompt from hooks\n\nhidden prompt"
     )

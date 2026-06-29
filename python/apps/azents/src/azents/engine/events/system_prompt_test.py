@@ -11,12 +11,20 @@ def test_build_system_prompt_wraps_sections_and_matches_final_prompt() -> None:
     """The assembled fragments must match the final system prompt."""
     result = build_system_prompt(
         agent_prompt="agent rules",
-        toolkit_prompts=[
+        static_toolkit_prompts=[
             ToolkitPromptInput(
-                id="toolkit-0",
+                id="toolkit-0-static",
                 label="github",
                 content="github rules",
-                metadata={"slug": "github"},
+                metadata={"slug": "github", "prompt_layer": "static"},
+            )
+        ],
+        dynamic_toolkit_prompts=[
+            ToolkitPromptInput(
+                id="toolkit-1-dynamic",
+                label="todo",
+                content="todo state",
+                metadata={"slug": "todo", "prompt_layer": "dynamic"},
             )
         ],
         injected_prompts=[
@@ -31,7 +39,8 @@ def test_build_system_prompt_wraps_sections_and_matches_final_prompt() -> None:
 
     assert result.prompt == (
         "## Agent prompt\n\nagent rules\n\n"
-        "## Toolkit prompt: github\n\ngithub rules\n\n"
+        "## Static toolkit prompt: github\n\ngithub rules\n\n"
+        "## Dynamic toolkit prompt: todo\n\ntodo state\n\n"
         "## Turn injected prompt from hookkit\n\nhook rules"
     )
     assert result.analysis is not None
@@ -51,7 +60,8 @@ def test_build_system_prompt_returns_empty_when_no_prompt_parts() -> None:
     """Do not generate a system prompt when there are no prompt fragments."""
     result = build_system_prompt(
         agent_prompt=None,
-        toolkit_prompts=[],
+        static_toolkit_prompts=[],
+        dynamic_toolkit_prompts=[],
         injected_prompts=[],
     )
 

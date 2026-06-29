@@ -658,7 +658,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             if snapshot is not None
             else []
         )
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt="")
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
     def _tools_from_installation_snapshot(
         self,
@@ -747,14 +747,13 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         tools = state.tools
         if self._toolsets is not None:
             tools = _filter_by_toolsets(tools, self._toolsets)
-        return ToolkitState(status=state.status, tools=tools, prompt=state.prompt)
+        return ToolkitState(status=state.status, tools=tools)
 
     async def _update_context_multi_installation(
         self, context: TurnContext
     ) -> ToolkitState:
         """Merge and return MCP state for all installations."""
         tools: list[FunctionTool] = []
-        prompts: list[str] = []
         for binding in sorted(
             self._installation_bindings,
             key=lambda item: (
@@ -774,23 +773,23 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             tools.extend(
                 _with_tool_prefix(tool, binding.target) for tool in installation_tools
             )
-            prompt = state.prompt.strip()
-            if prompt:
-                prompts.append(prompt)
-        selected_target = await self._get_selected_installation_target()
         if len(self._installation_targets) > 1 and self._selected_installation_store:
             tools.append(self._create_switch_installation_tool())
-        mapping_prompt = _build_installation_prompt(
-            self._installation_targets,
-            selected_target,
-        )
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=sorted(tools, key=lambda tool: tool.spec.name),
-            prompt="\n\n".join(
-                prompt for prompt in [mapping_prompt, *prompts] if prompt
-            ),
         )
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static GitHub prompt for the current run."""
+        if self._installation_bindings:
+            selected_target = await self._get_selected_installation_target()
+            return _build_installation_prompt(
+                self._installation_targets, selected_target
+            )
+        if self._mcp is None:
+            return ""
+        return await self._mcp.get_static_prompt(context)
 
     def _create_switch_installation_tool(self) -> FunctionTool:
         """Create switch_installation tool."""
@@ -829,22 +828,10 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             ):
                 self._lazy_mcp_task = asyncio.create_task(self._prepare_lazy_mcp())
             if self._lazy_mcp_task is not None and not self._lazy_mcp_task.done():
-                return ToolkitState(
-                    status=ToolkitStatus.ENABLED,
-                    tools=[],
-                    prompt="",
-                )
+                return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
             if self._lazy_mcp_error is not None:
-                return ToolkitState(
-                    status=ToolkitStatus.ENABLED,
-                    tools=[],
-                    prompt="",
-                )
-            return ToolkitState(
-                status=ToolkitStatus.ENABLED,
-                tools=[],
-                prompt="",
-            )
+                return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
+            return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
         return await self._mcp.update_context(context)
 
 

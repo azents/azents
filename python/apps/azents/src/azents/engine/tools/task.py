@@ -179,16 +179,19 @@ class BackgroundTaskToolkit(Toolkit[Any]):
             name="task_stop",
             input_model=TaskStopInput,
         )
-        prompt = dedent(
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=[task_status_tool, task_stop_tool],
+        )
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static background task prompt for the current run."""
+        del context
+        return dedent(
             """\
             When you call a tool with ``run_in_background=true``, it returns a
             task_id immediately and the actual result arrives later as a
             separate conversation turn. Use ``task_status`` to check if a
             background task is still running, or ``task_stop`` to cancel it.
             """
-        )
-        return ToolkitState(
-            status=ToolkitStatus.ENABLED,
-            tools=[task_status_tool, task_stop_tool],
-            prompt=prompt,
         )

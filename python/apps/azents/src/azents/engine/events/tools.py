@@ -40,7 +40,16 @@ class ToolCatalog:
     """Tool catalog used by one run/turn of event loop."""
 
     tools: dict[str, FunctionTool]
-    prompt_fragment_inputs: list[ToolkitPromptInput]
+    static_prompt_fragment_inputs: list[ToolkitPromptInput]
+    dynamic_prompt_fragment_inputs: list[ToolkitPromptInput]
+
+    @property
+    def prompt_fragment_inputs(self) -> list[ToolkitPromptInput]:
+        """Return all toolkit prompt inputs in model assembly order."""
+        return [
+            *self.static_prompt_fragment_inputs,
+            *self.dynamic_prompt_fragment_inputs,
+        ]
 
     @property
     def native_tools(self) -> list[dict[str, object]]:
@@ -64,7 +73,8 @@ async def build_tool_catalog(
 ) -> ToolCatalog:
     """Collect Toolkit state and build event tool catalog."""
     tools: dict[str, FunctionTool] = {}
-    prompt_fragment_inputs: list[ToolkitPromptInput] = []
+    static_prompt_fragment_inputs: list[ToolkitPromptInput] = []
+    dynamic_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     for index, binding in enumerate(toolkit_bindings):
         update_started_at = time.monotonic()
         try:
@@ -95,21 +105,32 @@ async def build_tool_catalog(
                         duration_seconds=duration_seconds,
                     ),
                     "tool_count": len(state.tools),
-                    "prompt_present": bool(state.prompt.strip()),
                     "status": state.status.value,
                 },
             )
         if state.status != ToolkitStatus.ENABLED:
             continue
-        prompt = state.prompt.strip()
+        label = _toolkit_prompt_label(binding)
+        prompt = (await binding.toolkit.get_static_prompt(context)).strip()
         if prompt:
-            label = _toolkit_prompt_label(binding)
-            prompt_fragment_inputs.append(
-                ToolkitPromptInput(
-                    id=f"toolkit-{index}",
+            static_prompt_fragment_inputs.append(
+                _toolkit_prompt_input(
+                    binding=binding,
+                    index=index,
                     label=label,
+                    layer="static",
                     content=prompt,
-                    metadata=_toolkit_prompt_metadata(binding),
+                )
+            )
+        dynamic_prompt = (await binding.toolkit.get_dynamic_prompt(context)).strip()
+        if dynamic_prompt:
+            dynamic_prompt_fragment_inputs.append(
+                _toolkit_prompt_input(
+                    binding=binding,
+                    index=index,
+                    label=label,
+                    layer="dynamic",
+                    content=dynamic_prompt,
                 )
             )
         bound_tools: list[FunctionTool] = []
@@ -121,7 +142,25 @@ async def build_tool_catalog(
             tools[bound.spec.name] = bound
     return ToolCatalog(
         tools=tools,
-        prompt_fragment_inputs=prompt_fragment_inputs,
+        static_prompt_fragment_inputs=static_prompt_fragment_inputs,
+        dynamic_prompt_fragment_inputs=dynamic_prompt_fragment_inputs,
+    )
+
+
+def _toolkit_prompt_input(
+    *,
+    binding: ToolkitBinding,
+    index: int,
+    label: str,
+    layer: str,
+    content: str,
+) -> ToolkitPromptInput:
+    """Build a layer-tagged toolkit prompt input."""
+    return ToolkitPromptInput(
+        id=f"toolkit-{index}-{layer}",
+        label=label,
+        content=content,
+        metadata={**_toolkit_prompt_metadata(binding), "prompt_layer": layer},
     )
 
 

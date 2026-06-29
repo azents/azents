@@ -717,7 +717,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         tools = self._tools_from_snapshot(snapshot) if snapshot is not None else []
         if self._entered:
             self._ensure_refresh_task()
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt="")
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful MCP tool snapshot from Toolkit State."""

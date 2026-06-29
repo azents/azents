@@ -337,11 +337,12 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         tools = self._tools_from_snapshot(snapshot) if snapshot is not None else []
         if self._entered:
             self._ensure_refresh_task()
-        return ToolkitState(
-            status=ToolkitStatus.ENABLED,
-            tools=tools,
-            prompt=self._build_prompt(),
-        )
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static AWS toolkit prompt for the current run."""
+        del context
+        return self._build_prompt()
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful AWS MCP tool snapshot."""

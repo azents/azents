@@ -128,8 +128,10 @@ class TestEnvVarToolkitUpdateContext:
         state = await toolkit.update_context(_make_turn_context())
 
         assert not state.tools
-        assert "$NOTION_TOKEN" in state.prompt
-        assert "My Notion" in state.prompt
+        assert "$NOTION_TOKEN" in (
+            await toolkit.get_static_prompt(_make_turn_context())
+        )
+        assert "My Notion" in (await toolkit.get_static_prompt(_make_turn_context()))
         assert state.status == ToolkitStatus.ENABLED
 
     async def test_empty_config_returns_empty_prompt(self) -> None:
@@ -140,9 +142,9 @@ class TestEnvVarToolkitUpdateContext:
             toolkit_name="empty",
         )
 
-        state = await toolkit.update_context(_make_turn_context())
+        await toolkit.update_context(_make_turn_context())
 
-        assert state.prompt == ""
+        assert (await toolkit.get_static_prompt(_make_turn_context())) == ""
 
 
 class TestEnvVarToolkitProviderResolve:
@@ -310,7 +312,7 @@ class TestToolkitProtocolDefault:
 
         class _NoopToolkit(Toolkit[EnvVarToolkitConfig]):
             async def update_context(self, context: TurnContext) -> ToolkitState:  # noqa: ARG002
-                return ToolkitState(tools=[], prompt="", status=ToolkitStatus.ENABLED)
+                return ToolkitState(tools=[], status=ToolkitStatus.ENABLED)
 
         setting = await _NoopToolkit().expose_env()
 

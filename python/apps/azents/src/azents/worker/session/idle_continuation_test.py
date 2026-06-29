@@ -100,7 +100,7 @@ class _IdleToolkit(Toolkit[Any]):
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Always return active empty state."""
         del context
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[], prompt="")
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
 
     def hooks(self) -> RuntimeHooks:
         """Provide only session idle hook."""

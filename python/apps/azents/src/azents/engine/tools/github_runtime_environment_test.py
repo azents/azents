@@ -432,7 +432,9 @@ class TestExposeEnvMultiInstallation:
 
         assert store.installation_id == "202"
         assert "Hardtack (202)" in str(result)
-        assert "Current default installation" in state.prompt
+        assert "Current default installation" in (
+            await toolkit.get_static_prompt(_make_turn_context())
+        )
 
     @pytest.mark.asyncio
     async def test_switch_installation_by_id_updates_state(self) -> None:

@@ -60,7 +60,7 @@ class DeterministicRuntimeHookProvider(Toolkit[BaseModel]):
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Always return active empty state."""
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[], prompt="")
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
 
     def hooks(self) -> RuntimeHooks:
         """Return only lifecycle callbacks registered in actions."""

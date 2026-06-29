@@ -627,33 +627,33 @@ class TestRuntimeToolkitUpdateContext:
         """Check that prompt includes Runtime Files section."""
         toolkit = _make_toolkit()
         ctx = _make_context()
-        state = await toolkit.update_context(ctx)
-        assert "Runtime Files" in state.prompt
+        await toolkit.update_context(ctx)
+        assert "Runtime Files" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
     async def test_prompt_includes_agent_workspace_path(self) -> None:
         """Prompt includes /workspace/agent path."""
         toolkit = _make_toolkit(agent_id="agent-1")
         ctx = _make_context()
-        state = await toolkit.update_context(ctx)
-        assert "/workspace/agent/" in state.prompt
+        await toolkit.update_context(ctx)
+        assert "/workspace/agent/" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
     async def test_prompt_includes_exchange_tools_when_user_id(self) -> None:
         """When user_id exists, exchange tool guidance is included."""
         toolkit = _make_toolkit()
         ctx = _make_context(user_id="user-1")
-        state = await toolkit.update_context(ctx)
-        assert "import_file" in state.prompt
-        assert "present_file" in state.prompt
+        await toolkit.update_context(ctx)
+        assert "import_file" in (await toolkit.get_static_prompt(_make_context()))
+        assert "present_file" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
     async def test_prompt_excludes_legacy_data_paths(self) -> None:
         """runtime prompt does not guide legacy /data path."""
         toolkit = _make_toolkit()
         ctx = _make_context()
-        state = await toolkit.update_context(ctx)
-        assert "/data/" not in state.prompt
+        await toolkit.update_context(ctx)
+        assert "/data/" not in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
     async def test_prompt_includes_registered_projects(self) -> None:
@@ -666,12 +666,20 @@ class TestRuntimeToolkitUpdateContext:
         )
         ctx = _make_context()
 
-        state = await toolkit.update_context(ctx)
+        await toolkit.update_context(ctx)
 
-        assert "Registered Projects" in state.prompt
-        assert "`/workspace/agent/azents`" in state.prompt
-        assert "`/workspace/agent/admin`" in state.prompt
-        assert "`/workspace/agent` itself is not a Project" in state.prompt
+        assert "Registered Projects" in (
+            await toolkit.get_static_prompt(_make_context())
+        )
+        assert "`/workspace/agent/azents`" in (
+            await toolkit.get_static_prompt(_make_context())
+        )
+        assert "`/workspace/agent/admin`" in (
+            await toolkit.get_static_prompt(_make_context())
+        )
+        assert "`/workspace/agent` itself is not a Project" in (
+            await toolkit.get_static_prompt(_make_context())
+        )
 
     @pytest.mark.asyncio
     async def test_prompt_omits_project_section_when_empty(self) -> None:
@@ -679,9 +687,11 @@ class TestRuntimeToolkitUpdateContext:
         toolkit = _make_toolkit(projects=[])
         ctx = _make_context()
 
-        state = await toolkit.update_context(ctx)
+        await toolkit.update_context(ctx)
 
-        assert "Registered Projects" not in state.prompt
+        assert "Registered Projects" not in (
+            await toolkit.get_static_prompt(_make_context())
+        )
 
     @pytest.mark.asyncio
     async def test_read_appends_root_and_project_agents(self) -> None:
@@ -695,9 +705,9 @@ class TestRuntimeToolkitUpdateContext:
                 "/workspace/agent/app/src/file.py": b"print('hi')",
             },
         )
-        state = await toolkit.update_context(_make_context())
-        assert "ROOT_RULE" not in state.prompt
-        assert "PROJECT_RULE" not in state.prompt
+        await toolkit.update_context(_make_context())
+        assert "ROOT_RULE" not in (await toolkit.get_static_prompt(_make_context()))
+        assert "PROJECT_RULE" not in (await toolkit.get_static_prompt(_make_context()))
 
         decision = await toolkit.append_agents_after_read(
             MagicMock(
@@ -867,9 +877,10 @@ class TestBuiltinToolkitMemoryPrompt:
             memory_repo=_make_mock_memory_repo(),
         )
         ctx = _make_context()
-        state = await toolkit.update_context(ctx)
-        assert "Memories" in state.prompt
-        assert "Memory Rules" in state.prompt
+        await toolkit.update_context(ctx)
+        assert (await toolkit.get_static_prompt(_make_context())) == ""
+        assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
+        assert "Memory Rules" in (await toolkit.get_dynamic_prompt(ctx))
 
     @pytest.mark.asyncio
     async def test_memory_disabled_excludes_memory(self) -> None:
@@ -877,8 +888,9 @@ class TestBuiltinToolkitMemoryPrompt:
         config = ShellToolkitConfig(memory_enabled=False)
         toolkit = _make_builtin_toolkit(config=config)
         ctx = _make_context()
-        state = await toolkit.update_context(ctx)
-        assert "Memories" not in state.prompt
+        await toolkit.update_context(ctx)
+        assert "Memories" not in (await toolkit.get_static_prompt(_make_context()))
+        assert (await toolkit.get_dynamic_prompt(ctx)) == ""
 
     @pytest.mark.asyncio
     async def test_memory_index_included(self) -> None:
@@ -898,9 +910,9 @@ class TestBuiltinToolkitMemoryPrompt:
             ),
         )
         ctx = _make_context()
-        state = await toolkit.update_context(ctx)
-        assert "my-project" in state.prompt
-        assert "my project description" in state.prompt
+        await toolkit.update_context(ctx)
+        assert "my-project" in (await toolkit.get_dynamic_prompt(ctx))
+        assert "my project description" in (await toolkit.get_dynamic_prompt(ctx))
 
     @pytest.mark.asyncio
     async def test_builtin_toolkit_excludes_runtime_tools(self) -> None:
@@ -920,7 +932,8 @@ class TestBuiltinToolkitMemoryPrompt:
         assert "search_memories" in tool_names
         assert "bash" not in tool_names
         assert "exec_command" not in tool_names
-        assert "Runtime Files" not in state.prompt
+        assert "Runtime Files" not in (await toolkit.get_static_prompt(_make_context()))
+        assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
 
 
 # ---------------------------------------------------------------------------
@@ -937,8 +950,8 @@ class TestRuntimeToolkitDomainConfig:
         config = ShellToolkitConfig(allowed_domains=["example.com"])
         toolkit = _make_toolkit(config=config)
         ctx = _make_context()
-        state = await toolkit.update_context(ctx)
-        assert "example.com" in state.prompt
+        await toolkit.update_context(ctx)
+        assert "example.com" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
     async def test_denied_domains_in_prompt(self) -> None:
@@ -946,8 +959,8 @@ class TestRuntimeToolkitDomainConfig:
         config = ShellToolkitConfig(denied_domains=["evil.com"])
         toolkit = _make_toolkit(config=config)
         ctx = _make_context()
-        state = await toolkit.update_context(ctx)
-        assert "evil.com" in state.prompt
+        await toolkit.update_context(ctx)
+        assert "evil.com" in (await toolkit.get_static_prompt(_make_context()))
 
     def test_get_runtime_domain_config_reflects_config(self) -> None:
         """get_runtime_domain_config() returns allowed/denied_domains from config."""

@@ -344,15 +344,15 @@ class GoogleAnalyticsToolkit(Toolkit[GoogleAnalyticsToolkitConfig]):
             _make_list_property_annotations_tool(self._api, default_pid),
         ]
 
-        prompt = ""
-        if default_pid:
-            prompt = f"Default GA4 Property: {default_pid}"
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
-        return ToolkitState(
-            status=ToolkitStatus.ENABLED,
-            tools=tools,
-            prompt=prompt,
-        )
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static Google Analytics prompt for the current run."""
+        del context
+        default_pid = self._config.default_property_id
+        if not default_pid:
+            return ""
+        return f"Default GA4 Property: {default_pid}"
 
 
 # ---------------------------------------------------------------------------

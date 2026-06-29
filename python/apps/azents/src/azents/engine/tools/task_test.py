@@ -64,7 +64,9 @@ async def test_toolkit_returns_enabled_with_two_tools() -> None:
     assert state.status == ToolkitStatus.ENABLED
     names = sorted(t.spec.name for t in state.tools)
     assert names == ["task_status", "task_stop"]
-    assert "run_in_background" in state.prompt
+    assert "run_in_background" in (
+        await toolkit.get_static_prompt(_make_turn_context())
+    )
 
 
 @pytest.mark.asyncio

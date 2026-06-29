@@ -177,7 +177,6 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
             return ToolkitState(
                 status=ToolkitStatus.ENABLED,
                 tools=[],
-                prompt="",
             )
 
         async def publish_todo_changed(snapshot: TodoStateSnapshot) -> None:
@@ -195,7 +194,6 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
                     publish_changed=publish_todo_changed,
                 )
             ],
-            prompt=render_todo_prompt(),
         )
 
 

@@ -644,7 +644,7 @@ class _TrackingToolkit(Toolkit[_DummyConfig]):
         del context
         if self.events is not None:
             self.events.append(f"update:{self.name}")
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[], prompt="")
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
 
     async def __aenter__(self) -> "_TrackingToolkit":
         if self.events is not None:

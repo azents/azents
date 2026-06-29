@@ -128,7 +128,7 @@ class SentryToolkit(Toolkit[SentryToolkitConfig]):
         if not self._enabled_skills:
             return state
         filtered = filter_tools_by_skills(state.tools, self._enabled_skills)
-        return ToolkitState(status=state.status, tools=filtered, prompt=state.prompt)
+        return ToolkitState(status=state.status, tools=filtered)
 
 
 def filter_tools_by_skills(
