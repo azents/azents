@@ -349,7 +349,9 @@ class AgentProjectPresetListResponse(BaseModel):
 class AgentSessionProjectDefaultsSourceResponse(BaseModel):
     """New AgentSession Project defaults source metadata response."""
 
-    type: Literal["empty", "recent_session"] = Field(description="Default source type")
+    type: Literal["empty", "last_created_session"] = Field(
+        description="Default source type"
+    )
     session_id: str | None = Field(default=None, description="Source session ID")
 
     @classmethod

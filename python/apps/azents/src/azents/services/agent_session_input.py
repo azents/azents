@@ -12,6 +12,7 @@ from azents.engine.run.input import InputMessage
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -76,6 +77,10 @@ class AgentSessionInputService:
     agent_project_preset_repository: Annotated[
         AgentProjectPresetRepository,
         Depends(AgentProjectPresetRepository),
+    ]
+    agent_project_default_repository: Annotated[
+        AgentProjectDefaultRepository,
+        Depends(AgentProjectDefaultRepository),
     ]
     agent_runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
@@ -246,6 +251,12 @@ class AgentSessionInputService:
                 session,
                 agent_id=agent_id,
                 path=path,
+            )
+        if project_paths:
+            await self.agent_project_default_repository.replace_defaults(
+                session,
+                agent_id=agent_id,
+                paths=project_paths,
             )
 
     async def _has_workspace_access(

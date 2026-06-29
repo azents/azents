@@ -1,9 +1,15 @@
 import { Box } from "@mantine/core";
 import { ProjectPanel } from "./ProjectPanel";
 import type { WorkspaceProjectPanelState } from "../types";
+import type { ProjectDirectoryPickerState } from "./WorkspaceDirectoryPickerModal";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const noop = (): void => {};
+const noopPath = (): void => {};
+
+const closedProjectPickerState: ProjectDirectoryPickerState = {
+  type: "CLOSED",
+};
 
 const readyProjectState: WorkspaceProjectPanelState = {
   type: "READY",
@@ -31,7 +37,6 @@ const readyProjectState: WorkspaceProjectPanelState = {
       updated_at: "2026-05-09T00:00:00Z",
     },
   ],
-  registerProjectPath: "/workspace/agent/new-project",
   isRegisteringProject: false,
   registerProjectError: null,
   pendingApproveRequestId: null,
@@ -50,8 +55,14 @@ const meta = {
   ],
   args: {
     projectState: readyProjectState,
-    onRegisterProjectPathChange: noop,
-    onRegisterProject: noop,
+    projectPickerState: closedProjectPickerState,
+    isProjectPickerOpen: false,
+    onOpenProjectPicker: noop,
+    onCloseProjectPicker: noop,
+    onOpenProjectPickerDirectory: noopPath,
+    onSelectProjectPickerDirectory: noopPath,
+    onRefreshProjectPicker: noop,
+    onStartRuntimeForProjectPicker: noop,
     onApproveRegistrationRequest: noop,
     onRejectRegistrationRequest: noop,
     onDeleteProject: noop,

@@ -1049,7 +1049,8 @@
       "renamePrompt": "New name",
       "movePrompt": "Destination path",
       "deleteConfirmTitle": "Delete file or folder",
-      "deleteConfirm": "Delete {path}? This cannot be undone."
+      "deleteConfirm": "Delete {path}? This cannot be undone.",
+      "registerProjectBrowse": "Browse folders"
     },
     "toolCall": {
       "preparing": "Writing command...",
@@ -1266,7 +1267,8 @@
       "retryExhaustedTitle": "Run failed after retrying",
       "nonRetryableTitle": "Run failed without retrying",
       "attempts": "Failed attempts: {failedAttemptCount} / {maxRetries}"
-    }
+    },
+    "projectPickerSelectDirectory": "Select"
   },
   "oauth": {
     "title": "Authorization",

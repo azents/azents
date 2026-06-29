@@ -24,6 +24,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_project_preset.data import AgentProjectPreset
 from azents.repos.agent_session import AgentSessionRepository
@@ -83,6 +84,10 @@ class ChatSessionService:
     agent_project_preset_repository: Annotated[
         AgentProjectPresetRepository,
         Depends(AgentProjectPresetRepository),
+    ]
+    agent_project_default_repository: Annotated[
+        AgentProjectDefaultRepository,
+        Depends(AgentProjectDefaultRepository),
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     event_transcript_repository: Annotated[
@@ -326,30 +331,21 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            latest_session = (
-                await self.agent_session_repository.get_latest_active_non_primary(
-                    session,
-                    agent_id=agent_id,
-                )
+            defaults = await self.agent_project_default_repository.list_defaults(
+                session,
+                agent_id=agent_id,
             )
-            if latest_session is None:
+            if not defaults:
                 return Success(
                     NewSessionProjectDefaults(
                         project_paths=[],
                         source=NewSessionProjectDefaultsSource(type="empty"),
                     )
                 )
-            projects = await self.session_workspace_project_repository.list_projects(
-                session,
-                session_id=latest_session.id,
-            )
             return Success(
                 NewSessionProjectDefaults(
-                    project_paths=[project.path for project in projects],
-                    source=NewSessionProjectDefaultsSource(
-                        type="recent_session",
-                        session_id=latest_session.id,
-                    ),
+                    project_paths=[default.path for default in defaults],
+                    source=NewSessionProjectDefaultsSource(type="last_created_session"),
                 )
             )
 
@@ -371,6 +367,12 @@ class ChatSessionService:
                 session,
                 agent_id=agent_id,
                 path=path,
+            )
+        if project_paths:
+            await self.agent_project_default_repository.replace_defaults(
+                session,
+                agent_id=agent_id,
+                paths=project_paths,
             )
 
     async def archive_agent_session(

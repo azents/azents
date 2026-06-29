@@ -18,10 +18,12 @@ import {
 } from "@mantine/core";
 import { IconFolder, IconFolderPlus, IconRefresh } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import type {
-  AgentWorkspaceEntryResponse,
-  AgentWorkspaceResponse,
-} from "@azents/public-client";
+import type { AgentWorkspaceResponse } from "@azents/public-client";
+
+export type ProjectDirectoryPickerEntry = {
+  path: string;
+  kind: "file" | "directory";
+};
 
 export type ProjectDirectoryPickerState =
   | { type: "CLOSED" }
@@ -31,7 +33,7 @@ export type ProjectDirectoryPickerState =
       type: "SERVER";
       server: AgentWorkspaceResponse;
       currentPath: string;
-      entries: AgentWorkspaceEntryResponse[];
+      entries: ProjectDirectoryPickerEntry[];
       isRefreshing: boolean;
       isStarting: boolean;
     };
@@ -41,7 +43,7 @@ export interface WorkspaceDirectoryPickerModalProps {
   state: ProjectDirectoryPickerState;
   onClose: () => void;
   onOpenDirectory: (path: string) => void;
-  onSelectCurrentDirectory: () => void;
+  onSelectDirectory: (path: string) => void;
   onRefresh: () => void;
   onStartRuntime: () => void;
 }
@@ -65,7 +67,7 @@ export function WorkspaceDirectoryPickerModal({
   state,
   onClose,
   onOpenDirectory,
-  onSelectCurrentDirectory,
+  onSelectDirectory,
   onRefresh,
   onStartRuntime,
 }: WorkspaceDirectoryPickerModalProps): React.ReactElement {
@@ -166,9 +168,6 @@ export function WorkspaceDirectoryPickerModal({
       (rawParent === workspaceRoot || rawParent.startsWith(`${workspaceRoot}/`))
         ? rawParent
         : null;
-    const canSelectCurrent =
-      state.currentPath !== "" && state.currentPath !== workspaceRoot;
-
     return (
       <Stack gap="sm">
         <Group justify="space-between" gap="sm">
@@ -191,18 +190,10 @@ export function WorkspaceDirectoryPickerModal({
                 <IconRefresh size={16} />
               </ActionIcon>
             </Tooltip>
-            <Button
-              disabled={!canSelectCurrent}
-              leftSection={<IconFolderPlus size={16} />}
-              size="xs"
-              onClick={onSelectCurrentDirectory}
-            >
-              {t("projectPickerSelectCurrent")}
-            </Button>
           </Group>
         </Group>
-        <ScrollArea.Autosize mah={360} type="auto">
-          <Stack gap={6}>
+        <ScrollArea.Autosize mah={{ base: 520, sm: 440 }} type="auto">
+          <Stack gap={4}>
             {parent ? (
               <Button
                 justify="flex-start"
@@ -213,12 +204,23 @@ export function WorkspaceDirectoryPickerModal({
               </Button>
             ) : null}
             {directoryEntries.map((entry) => (
-              <Paper key={entry.path} withBorder p="xs" radius="md">
-                <Group justify="space-between" wrap="nowrap">
-                  <Group gap="xs" style={{ minWidth: 0 }}>
+              <Paper
+                key={entry.path}
+                withBorder
+                p="xs"
+                radius="md"
+                style={{ cursor: "pointer", minWidth: 0 }}
+                onClick={() => onOpenDirectory(entry.path)}
+              >
+                <Group justify="space-between" wrap="nowrap" gap="xs">
+                  <Group
+                    gap="xs"
+                    style={{ minWidth: 0, flex: 1 }}
+                    wrap="nowrap"
+                  >
                     <IconFolder size={18} />
                     <Stack gap={0} style={{ minWidth: 0 }}>
-                      <Text size="sm" truncate>
+                      <Text size="sm" fw={500} truncate>
                         {basename(entry.path)}
                       </Text>
                       <Text c="dimmed" size="xs" truncate>
@@ -229,9 +231,13 @@ export function WorkspaceDirectoryPickerModal({
                   <Button
                     size="compact-xs"
                     variant="light"
-                    onClick={() => onOpenDirectory(entry.path)}
+                    leftSection={<IconFolderPlus size={14} />}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectDirectory(entry.path);
+                    }}
                   >
-                    {t("projectPickerOpenDirectory")}
+                    {t("projectPickerSelectDirectory")}
                   </Button>
                 </Group>
               </Paper>

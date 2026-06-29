@@ -11,6 +11,7 @@ import {
   type WorkspacePanelState,
   type WorkspaceProjectPanelState,
 } from "../types";
+import type { ProjectDirectoryPickerState } from "../components/WorkspaceDirectoryPickerModal";
 
 const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
 
@@ -41,8 +42,14 @@ export interface WorkspacePanelContainerOutput {
   onBulkMovePaths: (destinationDirectory: string) => void;
   onBulkDeletePaths: (recursive: boolean) => void;
   getDownloadHref: (path: string) => string;
-  onRegisterProjectPathChange: (path: string) => void;
-  onRegisterProject: () => void;
+  projectPickerState: ProjectDirectoryPickerState;
+  isProjectPickerOpen: boolean;
+  onOpenProjectPicker: () => void;
+  onCloseProjectPicker: () => void;
+  onOpenProjectPickerDirectory: (path: string) => void;
+  onSelectProjectPickerDirectory: (path: string) => void;
+  onRefreshProjectPicker: () => void;
+  onStartRuntimeForProjectPicker: () => void;
   onApproveRegistrationRequest: (requestId: string) => void;
   onRejectRegistrationRequest: (requestId: string) => void;
   onDeleteProject: (projectId: string) => void;
@@ -96,7 +103,7 @@ export function useWorkspacePanelContainer({
     Record<string, WorkspaceEntry[]>
   >({});
   const utils = trpc.useUtils();
-  const [registerProjectPath, setRegisterProjectPath] = useState("");
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [registerProjectError, setRegisterProjectError] = useState<
     string | null
   >(null);
@@ -117,6 +124,7 @@ export function useWorkspacePanelContainer({
     setSelectedPaths([]);
     setWorkspaceView("browser");
     setDirectoryEntriesByPath({});
+    setProjectPickerOpen(false);
   }, [agentId, sessionId]);
 
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
@@ -152,13 +160,6 @@ export function useWorkspacePanelContainer({
   }, [workspaceQuery.data]);
 
   const activeDirectoryPath = currentDirectoryPath ?? manifest?.cwd ?? "";
-
-  useEffect(() => {
-    if (!manifest || registerProjectPath.trim() !== "") {
-      return;
-    }
-    setRegisterProjectPath(`${manifest.root}/`);
-  }, [manifest, registerProjectPath]);
 
   useEffect(() => {
     if (!manifest) {
@@ -545,14 +546,17 @@ export function useWorkspacePanelContainer({
     [agentId],
   );
 
-  const onRegisterProject = useCallback(() => {
-    setRegisterProjectError(null);
-    registerProjectMutation.mutate({
-      agentId,
-      sessionId,
-      path: registerProjectPath,
-    });
-  }, [agentId, registerProjectMutation, registerProjectPath, sessionId]);
+  const onRegisterProject = useCallback(
+    (path: string) => {
+      setRegisterProjectError(null);
+      registerProjectMutation.mutate({
+        agentId,
+        sessionId,
+        path,
+      });
+    },
+    [agentId, registerProjectMutation, sessionId],
+  );
 
   const onApproveRegistrationRequest = useCallback(
     (requestId: string) => {
@@ -599,6 +603,46 @@ export function useWorkspacePanelContainer({
       [mappedDirectory.path]: mappedDirectory.entries,
     }));
   }, [directoryQuery.data]);
+
+  const projectPickerState = useMemo<ProjectDirectoryPickerState>(() => {
+    if (!projectPickerOpen) {
+      return { type: "CLOSED" };
+    }
+    if (workspaceQuery.isLoading) {
+      return { type: "LOADING" };
+    }
+    if (workspaceQuery.isError) {
+      return { type: "ERROR", message: getErrorMessage(workspaceQuery.error) };
+    }
+    if (!workspaceQuery.data) {
+      return { type: "LOADING" };
+    }
+    const directoryResult = directoryQuery.data;
+    const entries =
+      directoryResult?.type === "DIRECTORY"
+        ? directoryResult.entries
+        : (manifest?.entries ?? []);
+    return {
+      type: "SERVER",
+      server: workspaceQuery.data,
+      currentPath: activeDirectoryPath,
+      entries,
+      isRefreshing: workspaceQuery.isFetching || directoryQuery.isFetching,
+      isStarting: startRuntimeMutation.isPending,
+    };
+  }, [
+    activeDirectoryPath,
+    directoryQuery.data,
+    directoryQuery.isFetching,
+    manifest?.entries,
+    projectPickerOpen,
+    startRuntimeMutation.isPending,
+    workspaceQuery.data,
+    workspaceQuery.error,
+    workspaceQuery.isError,
+    workspaceQuery.isFetching,
+    workspaceQuery.isLoading,
+  ]);
 
   const state = useMemo<WorkspacePanelState>(() => {
     if (workspaceQuery.isLoading) {
@@ -746,7 +790,6 @@ export function useWorkspacePanelContainer({
       type: "READY",
       projects: projectsQuery.data?.items ?? [],
       registrationRequests: registrationRequestsQuery.data?.items ?? [],
-      registerProjectPath,
       isRegisteringProject: registerProjectMutation.isPending,
       registerProjectError,
       pendingApproveRequestId,
@@ -763,7 +806,6 @@ export function useWorkspacePanelContainer({
     projectsQuery.isLoading,
     registerProjectError,
     registerProjectMutation.isPending,
-    registerProjectPath,
     registrationRequestsQuery.data?.items,
     registrationRequestsQuery.error,
     registrationRequestsQuery.isError,
@@ -791,8 +833,17 @@ export function useWorkspacePanelContainer({
     onBulkMovePaths,
     onBulkDeletePaths,
     getDownloadHref,
-    onRegisterProjectPathChange: setRegisterProjectPath,
-    onRegisterProject,
+    projectPickerState,
+    isProjectPickerOpen: projectPickerOpen,
+    onOpenProjectPicker: () => setProjectPickerOpen(true),
+    onCloseProjectPicker: () => setProjectPickerOpen(false),
+    onOpenProjectPickerDirectory: setCurrentDirectoryPath,
+    onSelectProjectPickerDirectory: (path: string) => {
+      onRegisterProject(path);
+      setProjectPickerOpen(false);
+    },
+    onRefreshProjectPicker: onRefresh,
+    onStartRuntimeForProjectPicker: onStartRuntime,
     onApproveRegistrationRequest,
     onRejectRegistrationRequest,
     onDeleteProject,

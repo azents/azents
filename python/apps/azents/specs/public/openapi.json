@@ -8287,7 +8287,7 @@
             "type": "string",
             "enum": [
               "empty",
-              "recent_session"
+              "last_created_session"
             ],
             "title": "Type",
             "description": "Default source type"

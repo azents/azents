@@ -41,7 +41,7 @@ export interface AgentDraftChatContainerOutput {
   onOpenProjectPicker: () => void;
   onCloseProjectPicker: () => void;
   onOpenProjectPickerDirectory: (path: string) => void;
-  onSelectProjectPickerCurrentDirectory: () => void;
+  onSelectProjectPickerDirectory: (path: string) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
   onSendMessage: (
@@ -294,11 +294,8 @@ export function useAgentDraftChatContainer(
     onOpenProjectPicker: () => setProjectPickerOpen(true),
     onCloseProjectPicker: () => setProjectPickerOpen(false),
     onOpenProjectPickerDirectory: setProjectPickerPath,
-    onSelectProjectPickerCurrentDirectory: () => {
-      if (!activeProjectPickerPath) {
-        return;
-      }
-      onAddPresetProject(activeProjectPickerPath);
+    onSelectProjectPickerDirectory: (path: string) => {
+      onAddPresetProject(path);
       setProjectPickerOpen(false);
     },
     onRefreshProjectPicker: () => {

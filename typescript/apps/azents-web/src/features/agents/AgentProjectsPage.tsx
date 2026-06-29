@@ -30,10 +30,20 @@ export function AgentProjectsPage({
       <Box p="lg" style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <ProjectPanel
           projectState={workspacePanel.projectState}
-          onRegisterProjectPathChange={
-            workspacePanel.onRegisterProjectPathChange
+          projectPickerState={workspacePanel.projectPickerState}
+          isProjectPickerOpen={workspacePanel.isProjectPickerOpen}
+          onOpenProjectPicker={workspacePanel.onOpenProjectPicker}
+          onCloseProjectPicker={workspacePanel.onCloseProjectPicker}
+          onOpenProjectPickerDirectory={
+            workspacePanel.onOpenProjectPickerDirectory
           }
-          onRegisterProject={workspacePanel.onRegisterProject}
+          onSelectProjectPickerDirectory={
+            workspacePanel.onSelectProjectPickerDirectory
+          }
+          onRefreshProjectPicker={workspacePanel.onRefreshProjectPicker}
+          onStartRuntimeForProjectPicker={
+            workspacePanel.onStartRuntimeForProjectPicker
+          }
           onApproveRegistrationRequest={
             workspacePanel.onApproveRegistrationRequest
           }

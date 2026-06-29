@@ -22,6 +22,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
@@ -120,6 +121,7 @@ def _service(
         message_repository=MessageRepository(),
         agent_repository=AgentRepository(),
         agent_project_preset_repository=AgentProjectPresetRepository(),
+        agent_project_default_repository=AgentProjectDefaultRepository(),
         agent_run_repository=AgentRunRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
@@ -213,12 +215,12 @@ class TestChatSessionTeamSessions:
             "/workspace/agent/project-a/nested",
         }
 
-    async def test_new_session_project_defaults_report_source(
+    async def test_new_session_project_defaults_use_stored_last_created_projects(
         self,
         rdb_session: AsyncSession,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """New session Project defaults include empty/recent-session source metadata."""
+        """New session Project defaults use stored last non-empty creation paths."""
         workspace_id = await _create_workspace(rdb_session, "team-session-defaults")
         user_id = await _create_user(rdb_session, "team-session-defaults@example.com")
         await _add_workspace_user(
@@ -266,8 +268,52 @@ class TestChatSessionTeamSessions:
 
         assert isinstance(recent_result, Success)
         assert recent_result.value.project_paths == ["/workspace/agent/project-a"]
-        assert recent_result.value.source.type == "recent_session"
-        assert recent_result.value.source.session_id == create_result.value.id
+        assert recent_result.value.source.type == "last_created_session"
+        assert recent_result.value.source.session_id is None
+
+        empty_create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            project_paths=[],
+        )
+        assert isinstance(empty_create_result, Success)
+
+        after_empty_result = await _service(
+            rdb_session_manager
+        ).get_new_session_project_defaults(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(after_empty_result, Success)
+        assert after_empty_result.value.project_paths == ["/workspace/agent/project-a"]
+        assert after_empty_result.value.source.type == "last_created_session"
+        assert after_empty_result.value.source.session_id is None
+
+        replace_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            project_paths=[
+                "/workspace/agent/project-b",
+                "/workspace/agent/project-c",
+            ],
+        )
+        assert isinstance(replace_result, Success)
+
+        replaced_defaults = await _service(
+            rdb_session_manager
+        ).get_new_session_project_defaults(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(replaced_defaults, Success)
+        assert replaced_defaults.value.project_paths == [
+            "/workspace/agent/project-b",
+            "/workspace/agent/project-c",
+        ]
+        assert replaced_defaults.value.source.type == "last_created_session"
+        assert replaced_defaults.value.source.session_id is None
 
     async def test_update_session_title_trims_and_clears_title(
         self,
