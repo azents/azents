@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import logging
 from collections.abc import AsyncIterator, Callable, Sequence
 
 import pytest
@@ -626,11 +627,23 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
     ]
 
 
-async def test_model_usage_is_appended_as_turn_marker() -> None:
-    """Durably append normalizer usage as turn marker."""
+async def test_model_usage_is_appended_as_turn_marker(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Durably append normalizer usage as turn marker and debug log."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    usage = _usage()
+    usage = TokenUsagePayload(
+        prompt_tokens=100,
+        completion_tokens=20,
+        total_tokens=120,
+        raw={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+        cached_tokens=75,
+        cache_creation_tokens=10,
+        reasoning_tokens=5,
+        cost_usd=0.001,
+        raw_hidden_params={"response_cost": 0.001, "model_id": "gpt-5.1"},
+    )
     system_prompt = SystemPromptAnalysisPayload(
         agent_prompt=SystemPromptFragmentPayload(
             id="agent",
@@ -651,15 +664,17 @@ async def test_model_usage_is_appended_as_turn_marker() -> None:
         transcript_repo=transcript_repo,
     )
 
-    status = await execution.run(
-        _Session(),
-        AgentRunExecutionRequest(
-            run_id="run-1",
-            session_id="session-1",
-            model="gpt-5.1",
-            system_prompt_analysis=system_prompt,
-        ),
-    )
+    with caplog.at_level(logging.INFO, logger="azents.engine.events.execution"):
+        status = await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+                run_index=7,
+                system_prompt_analysis=system_prompt,
+            ),
+        )
 
     assert status == AgentRunStatus.COMPLETED
     turn_markers = [
@@ -671,6 +686,22 @@ async def test_model_usage_is_appended_as_turn_marker() -> None:
     assert payload.run_id == "run-1"
     assert payload.usage == usage
     assert payload.system_prompt == system_prompt
+    record = next(
+        item for item in caplog.records if item.message == "Model token usage"
+    )
+    fields = record.__dict__
+    assert fields["session_id"] == "session-1"
+    assert fields["run_id"] == "run-1"
+    assert fields["run_index"] == 7
+    assert fields["model"] == "gpt-5.1"
+    assert fields["prompt_tokens"] == 100
+    assert fields["completion_tokens"] == 20
+    assert fields["total_tokens"] == 120
+    assert fields["cached_tokens"] == 75
+    assert fields["cache_creation_tokens"] == 10
+    assert fields["cached_token_ratio"] == 0.75
+    assert fields["raw_usage"] == usage.raw
+    assert fields["raw_hidden_params"] == usage.raw_hidden_params
 
 
 async def test_model_input_uses_session_head_event_id() -> None:
