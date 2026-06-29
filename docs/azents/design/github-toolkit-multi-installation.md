@@ -1,7 +1,7 @@
 ---
 title: "GitHub Toolkit Multi-Installation Design"
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-29
 tags: [backend, engine, frontend, security]
 ---
 
@@ -123,6 +123,12 @@ Example final tool names:
 
 - `github__azents__get_file_contents`
 - `github__hardtack__create_pull_request`
+
+Installation MCP tool exposure follows the same stale-while-revalidate snapshot lifecycle as generic MCP toolkits. `update_context()` must not await live GitHub MCP `list_tools`, but it must use the latest successful session-bound MCP snapshot for each installation when one exists.
+
+This matters for lazy multi-installation startup: a `GitHubInstallationBinding` can exist before its concrete `McpToolkit` instance has been created, because installation token exchange and MCP startup run in the background. That lazy preparation state must not prevent snapshot use. When `binding.mcp_toolkit` is still absent, the GitHub toolkit reads the installation's MCP snapshot directly from Toolkit State using the binding's `agent_id`, `session_id`, and installation-specific snapshot state name.
+
+Snapshot-backed installation tools are exposed with the same account-login prefix as live MCP-backed tools. Tool handlers acquire the current installation token at call time, not during `update_context()`, so listing cached tool schemas does not block on token exchange. If a cached snapshot is unavailable for an installation, that installation contributes no MCP tools until background refresh succeeds.
 
 ### Runtime env routing
 
