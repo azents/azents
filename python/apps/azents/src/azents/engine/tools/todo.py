@@ -195,7 +195,7 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
                     publish_changed=publish_todo_changed,
                 )
             ],
-            prompt=render_todo_prompt(),
+            prompt="",
         )
 
 

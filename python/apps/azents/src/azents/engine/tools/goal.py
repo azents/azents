@@ -227,7 +227,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
                     session_id=self._session_id,
                 ),
             ],
-            prompt=render_goal_prompt(),
+            prompt="",
         )
 
     def hooks(self) -> RuntimeHooks:

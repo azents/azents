@@ -448,12 +448,11 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
                 ]
             )
 
-        prompt = memory_prompt
-
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=tools,
-            prompt=prompt,
+            prompt="",
+            dynamic_prompt=memory_prompt,
         )
 
 

@@ -723,7 +723,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
     assert execution.request is not None
     assert execution.request.system_prompt == (
         "## Agent prompt\n\nagent prompt\n\n"
-        "## Toolkit prompt: hooks\n\ntool prompt\n\n"
+        "## Static toolkit prompt: hooks\n\ntool prompt\n\n"
         "## Turn injected prompt from hooks\n\nvisible prompt\n\n"
         "## Turn injected prompt from hooks\n\nhidden prompt"
     )

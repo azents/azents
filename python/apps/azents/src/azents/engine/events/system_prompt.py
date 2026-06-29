@@ -33,7 +33,8 @@ class SystemPromptBuildResult:
 def build_system_prompt(
     *,
     agent_prompt: str | None,
-    toolkit_prompts: list[ToolkitPromptInput],
+    static_toolkit_prompts: list[ToolkitPromptInput],
+    dynamic_toolkit_prompts: list[ToolkitPromptInput],
     injected_prompts: list[TurnInjectedPrompt],
 ) -> SystemPromptBuildResult:
     """Assemble actual model input and debug payload from same source."""
@@ -49,14 +50,13 @@ def build_system_prompt(
         fragments.append(agent_fragment)
 
     toolkit_fragments: list[SystemPromptFragmentPayload] = []
-    for prompt in toolkit_prompts:
-        fragment = _fragment(
-            id=prompt.id,
-            source="toolkit",
-            label=prompt.label,
-            content=_section(f"Toolkit prompt: {prompt.label}", prompt.content),
-            metadata=prompt.metadata,
-        )
+    for prompt in static_toolkit_prompts:
+        fragment = _toolkit_fragment(prompt, layer="static")
+        toolkit_fragments.append(fragment)
+        fragments.append(fragment)
+
+    for prompt in dynamic_toolkit_prompts:
+        fragment = _toolkit_fragment(prompt, layer="dynamic")
         toolkit_fragments.append(fragment)
         fragments.append(fragment)
 
@@ -98,6 +98,22 @@ def build_system_prompt(
 def _section(title: str, content: str) -> str:
     """Create system prompt section text."""
     return f"## {title}\n\n{content}"
+
+
+def _toolkit_fragment(
+    prompt: ToolkitPromptInput,
+    *,
+    layer: Literal["static", "dynamic"],
+) -> SystemPromptFragmentPayload:
+    """Build a toolkit prompt fragment tagged with its prompt layer."""
+    title = f"{layer.title()} toolkit prompt: {prompt.label}"
+    return _fragment(
+        id=prompt.id,
+        source="toolkit",
+        label=prompt.label,
+        content=_section(title, prompt.content),
+        metadata={**prompt.metadata, "prompt_layer": layer},
+    )
 
 
 def _fragment(

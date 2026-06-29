@@ -38,11 +38,21 @@ class ToolkitStatus(enum.StrEnum):
 
 @dataclasses.dataclass(frozen=True)
 class ToolkitState:
-    """State returned by toolkit each turn."""
+    """State returned by toolkit each turn.
+
+    ``prompt`` is the default static toolkit prompt layer. It is intended for
+    setup/configuration text that is established before a run starts and should
+    not change during that run.
+
+    ``dynamic_prompt`` is an opt-in layer for toolkits that intentionally mutate
+    the system prompt from current runtime state, such as memory summaries.
+    Most toolkits should leave it empty.
+    """
 
     status: ToolkitStatus
     tools: list[FunctionTool]
     prompt: str
+    dynamic_prompt: str = ""
 
 
 @dataclasses.dataclass(frozen=True)

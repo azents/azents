@@ -868,8 +868,9 @@ class TestBuiltinToolkitMemoryPrompt:
         )
         ctx = _make_context()
         state = await toolkit.update_context(ctx)
-        assert "Memories" in state.prompt
-        assert "Memory Rules" in state.prompt
+        assert state.prompt == ""
+        assert "Memories" in state.dynamic_prompt
+        assert "Memory Rules" in state.dynamic_prompt
 
     @pytest.mark.asyncio
     async def test_memory_disabled_excludes_memory(self) -> None:
@@ -879,6 +880,7 @@ class TestBuiltinToolkitMemoryPrompt:
         ctx = _make_context()
         state = await toolkit.update_context(ctx)
         assert "Memories" not in state.prompt
+        assert state.dynamic_prompt == ""
 
     @pytest.mark.asyncio
     async def test_memory_index_included(self) -> None:
@@ -899,8 +901,8 @@ class TestBuiltinToolkitMemoryPrompt:
         )
         ctx = _make_context()
         state = await toolkit.update_context(ctx)
-        assert "my-project" in state.prompt
-        assert "my project description" in state.prompt
+        assert "my-project" in state.dynamic_prompt
+        assert "my project description" in state.dynamic_prompt
 
     @pytest.mark.asyncio
     async def test_builtin_toolkit_excludes_runtime_tools(self) -> None:
@@ -921,6 +923,7 @@ class TestBuiltinToolkitMemoryPrompt:
         assert "bash" not in tool_names
         assert "exec_command" not in tool_names
         assert "Runtime Files" not in state.prompt
+        assert "Memories" in state.dynamic_prompt
 
 
 # ---------------------------------------------------------------------------

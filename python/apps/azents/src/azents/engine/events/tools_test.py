@@ -60,6 +60,20 @@ class _Toolkit(Toolkit[_ToolkitConfig]):
         )
 
 
+class _DynamicPromptToolkit(Toolkit[_ToolkitConfig]):
+    """Toolkit that intentionally returns dynamic prompt content."""
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return dynamic prompt state."""
+        del context
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            prompt="",
+            dynamic_prompt="dynamic tool prompt",
+            tools=[],
+        )
+
+
 class _InlineToolkit(Toolkit[_ToolkitConfig]):
     """Test toolkit returning a single FunctionTool."""
 
@@ -138,8 +152,9 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
     )
 
     assert list(catalog.tools) == ["demo__echo"]
-    assert catalog.prompt_fragment_inputs[0].label == "demo"
-    assert catalog.prompt_fragment_inputs[0].content == "tool prompt"
+    assert catalog.static_prompt_fragment_inputs[0].label == "demo"
+    assert catalog.static_prompt_fragment_inputs[0].content == "tool prompt"
+    assert catalog.dynamic_prompt_fragment_inputs == []
     assert catalog.native_tools[0]["name"] == "demo__echo"
     assert catalog.native_tools[0]["strict"] is False
 
@@ -149,6 +164,33 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
         tools=catalog.native_tools,
     ).lower([], model="gpt-5.1")
     assert request.tools == catalog.native_tools
+
+
+async def test_build_tool_catalog_separates_dynamic_prompt_layer() -> None:
+    """Dynamic toolkit prompt content is isolated from static prompt inputs."""
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_DynamicPromptToolkit(),
+                slug="memory",
+                use_prefix=True,
+            )
+        ],
+        context=TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    assert catalog.static_prompt_fragment_inputs == []
+    assert catalog.dynamic_prompt_fragment_inputs[0].label == "memory"
+    assert catalog.dynamic_prompt_fragment_inputs[0].content == "dynamic tool prompt"
+    assert (
+        catalog.dynamic_prompt_fragment_inputs[0].metadata["prompt_layer"] == "dynamic"
+    )
 
 
 async def test_native_tools_are_sorted_by_function_name() -> None:

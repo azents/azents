@@ -352,7 +352,8 @@ class AgentEngineAdapter:
         ]
         system_prompt_result = build_system_prompt(
             agent_prompt=request.agent_prompt,
-            toolkit_prompts=catalog.prompt_fragment_inputs,
+            static_toolkit_prompts=catalog.static_prompt_fragment_inputs,
+            dynamic_toolkit_prompts=catalog.dynamic_prompt_fragment_inputs,
             injected_prompts=injected_prompts,
         )
         system_prompt = system_prompt_result.prompt
