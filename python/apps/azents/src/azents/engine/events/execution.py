@@ -720,6 +720,8 @@ def _log_model_request_fingerprint(
     native_request: NativeModelRequest,
 ) -> None:
     """Log model request fingerprints without exposing prompt content."""
+    scrubbed_input = _scrub_for_fingerprint(native_request.input)
+    input_prefix_hashes = _input_prefix_hashes(scrubbed_input)
     input_item_types = [_native_input_item_type(item) for item in native_request.input]
     tool_names = [_native_tool_name(tool) for tool in native_request.tools]
     kwargs_keys = sorted(native_request.kwargs)
@@ -740,7 +742,8 @@ def _log_model_request_fingerprint(
             "input_item_type_counts": _count_values(input_item_types),
             "input_first_item_types": input_item_types[:8],
             "input_last_item_types": input_item_types[-8:],
-            "input_hash": _stable_hash(_scrub_for_fingerprint(native_request.input)),
+            "input_prefix_hashes": input_prefix_hashes,
+            "input_hash": _stable_hash(scrubbed_input),
             "tools_count": len(native_request.tools),
             "tool_name_counts": _count_values(tool_names),
             "tool_first_names": tool_names[:8],
@@ -850,6 +853,17 @@ def _count_values(values: Sequence[str]) -> dict[str, int]:
     for value in values:
         counts[value] = counts.get(value, 0) + 1
     return counts
+
+
+def _input_prefix_hashes(scrubbed_input: object) -> dict[str, str]:
+    """Return stable hashes for fixed input prefixes to verify append-only growth."""
+    if not isinstance(scrubbed_input, list):
+        return {}
+    hashes: dict[str, str] = {}
+    for size in (16, 32, 64, 128, 192, 256, 384, 512):
+        if len(scrubbed_input) >= size:
+            hashes[str(size)] = _stable_hash(scrubbed_input[:size])
+    return hashes
 
 
 def _stable_hash(value: object) -> str:
