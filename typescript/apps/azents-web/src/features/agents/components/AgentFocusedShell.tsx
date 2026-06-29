@@ -76,7 +76,7 @@ export function AgentFocusedShell({
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
       closeDrawer();
       if (activeSessionId === variables.sessionId) {
-        router.replace(`/w/${handle}/agents/${agent.id}/settings`);
+        router.replace(`/w/${handle}/agents/${agent.id}/sessions/new`);
       }
     },
   });

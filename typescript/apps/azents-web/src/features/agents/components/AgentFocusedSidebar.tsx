@@ -39,6 +39,7 @@ import {
   IconMoon,
   IconPencil,
   IconPlus,
+  IconSettings,
   IconSun,
   IconTrash,
   IconUser,
@@ -134,8 +135,9 @@ export function AgentFocusedSidebar({
   const pathname = usePathname();
   const workspacePath = `/w/${handle}`;
   const basePath = `${workspacePath}/agents/${agent.id}`;
+  const agentHomeHref = `${basePath}/sessions/new`;
   const settingsHref = `${basePath}/settings`;
-  const isAgentSettingsActive = pathname.startsWith(`${basePath}/settings`);
+  const isAgentHomeActive = pathname === basePath || pathname === agentHomeHref;
   const { mode, preference, setColorMode } = useColorMode();
   const { setColorScheme } = useMantineColorScheme();
   const [editingSession, setEditingSession] =
@@ -296,32 +298,46 @@ export function AgentFocusedSidebar({
           >
             {t("backToWorkspace")}
           </Button>
-          <UnstyledButton
-            component={Link}
-            href={settingsHref}
-            w="100%"
-            onClick={onNavigate}
-            className={`${styles.agentInfoLink} ${
-              isAgentSettingsActive ? styles.agentInfoLinkActive : ""
-            }`}
-          >
-            <Group gap="sm" wrap="nowrap" align="center">
-              <AgentAvatar
-                name={agent.name}
-                avatar={agent.avatar ?? null}
-                size={40}
-                radius="xl"
-              />
-              <Box style={{ minWidth: 0, flex: 1 }}>
-                <Text fw={700} size="sm" truncate>
-                  {agent.name}
-                </Text>
-                <Text size="xs" c="dimmed" truncate>
-                  @{handle}
-                </Text>
-              </Box>
-            </Group>
-          </UnstyledButton>
+          <Group gap="xs" wrap="nowrap" align="stretch">
+            <UnstyledButton
+              component={Link}
+              href={agentHomeHref}
+              w="100%"
+              onClick={onNavigate}
+              className={`${styles.agentInfoLink} ${
+                isAgentHomeActive ? styles.agentInfoLinkActive : ""
+              }`}
+            >
+              <Group gap="sm" wrap="nowrap" align="center">
+                <AgentAvatar
+                  name={agent.name}
+                  avatar={agent.avatar ?? null}
+                  size={40}
+                  radius="xl"
+                />
+                <Box style={{ minWidth: 0, flex: 1 }}>
+                  <Text fw={700} size="sm" truncate>
+                    {agent.name}
+                  </Text>
+                  <Text size="xs" c="dimmed" truncate>
+                    @{handle}
+                  </Text>
+                </Box>
+              </Group>
+            </UnstyledButton>
+            <Tooltip label={t("tabs.settings")}>
+              <ActionIcon
+                component={Link}
+                href={settingsHref}
+                variant="subtle"
+                aria-label={t("tabs.settings")}
+                onClick={onNavigate}
+                className={styles.agentSettingsButton}
+              >
+                <IconSettings size={rem(18)} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
           {agent.description && (
             <Text mt="xs" size="xs" c="dimmed" lineClamp={2}>
               {agent.description}

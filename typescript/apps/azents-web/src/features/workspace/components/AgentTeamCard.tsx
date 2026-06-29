@@ -52,7 +52,7 @@ export function AgentTeamCard({
 
   const modelLabel = agent.modelSummary;
 
-  const href = `/w/${handle}/agents/${agent.id}/settings`;
+  const href = `/w/${handle}/agents/${agent.id}/sessions/new`;
 
   return (
     <Card
