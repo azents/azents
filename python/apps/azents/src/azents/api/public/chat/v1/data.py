@@ -19,6 +19,7 @@ from azents.core.enums import (
 from azents.engine.events.types import Event
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
+from azents.repos.agent_project_preset.data import AgentProjectPreset
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.session_workspace_project.data import (
     SessionWorkspaceProject,
@@ -33,7 +34,12 @@ from azents.services.chat.context import (
     SessionContextSystemPrompt,
     SessionContextSystemPromptFragment,
 )
-from azents.services.chat.data import ChatLiveRunRetryState, ChatLiveRunState
+from azents.services.chat.data import (
+    ChatLiveRunRetryState,
+    ChatLiveRunState,
+    NewSessionProjectDefaults,
+    NewSessionProjectDefaultsSource,
+)
 from azents.services.chat.workspace import (
     AgentWorkspaceAccessConnecting,
     AgentWorkspaceAccessState,
@@ -92,9 +98,20 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         description="Client-generated idempotency key",
     )
     message: str = Field(description="Message content")
+    project_paths: list[str] = Field(
+        description="Exact Project paths to register on the created session",
+    )
     attachments: list[str] | None = Field(
         default=None,
         description="Attachment reference list, exchange:// URIs received after upload",
+    )
+
+
+class AgentSessionCreateRequest(BaseModel):
+    """REST non-primary AgentSession create request."""
+
+    project_paths: list[str] = Field(
+        description="Exact Project paths to register on the created session",
     )
 
 
@@ -302,6 +319,62 @@ class SessionWorkspaceProjectListResponse(BaseModel):
     """Agent Workspace Project list response."""
 
     items: list[SessionWorkspaceProjectResponse] = Field(description="Project list")
+
+
+class AgentProjectPresetResponse(BaseModel):
+    """Agent Project preset response."""
+
+    id: str = Field(description="Project preset ID")
+    path: str = Field(description="Agent Workspace absolute path")
+    created_at: datetime.datetime = Field(description="Created time")
+    updated_at: datetime.datetime = Field(description="Updated time")
+
+    @classmethod
+    def from_domain(cls, preset: AgentProjectPreset) -> Self:
+        """Convert from service model."""
+        return cls(
+            id=preset.id,
+            path=preset.path,
+            created_at=preset.created_at,
+            updated_at=preset.updated_at,
+        )
+
+
+class AgentProjectPresetListResponse(BaseModel):
+    """Agent Project preset list response."""
+
+    items: list[AgentProjectPresetResponse] = Field(description="Project presets")
+
+
+class AgentSessionProjectDefaultsSourceResponse(BaseModel):
+    """New AgentSession Project defaults source metadata response."""
+
+    type: Literal["empty", "recent_session"] = Field(description="Default source type")
+    session_id: str | None = Field(default=None, description="Source session ID")
+
+    @classmethod
+    def from_domain(cls, source: NewSessionProjectDefaultsSource) -> Self:
+        """Convert from service model."""
+        return cls(type=source.type, session_id=source.session_id)
+
+
+class AgentSessionProjectDefaultsResponse(BaseModel):
+    """New AgentSession Project defaults response."""
+
+    project_paths: list[str] = Field(description="Default selected Project paths")
+    source: AgentSessionProjectDefaultsSourceResponse = Field(
+        description="Default source metadata",
+    )
+
+    @classmethod
+    def from_domain(cls, defaults: NewSessionProjectDefaults) -> Self:
+        """Convert from service model."""
+        return cls(
+            project_paths=defaults.project_paths,
+            source=AgentSessionProjectDefaultsSourceResponse.from_domain(
+                defaults.source
+            ),
+        )
 
 
 class SessionWorkspaceProjectRegisterRequest(BaseModel):

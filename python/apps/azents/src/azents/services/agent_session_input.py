@@ -12,6 +12,7 @@ from azents.engine.run.input import InputMessage
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
@@ -20,6 +21,10 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.services.session_workspace_project import (
+    InvalidProjectPath,
+    normalize_session_workspace_project_paths,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -59,6 +64,7 @@ AgentSessionInputError = (
     AgentSessionInputSessionNotFound
     | AgentSessionInputWrongAgent
     | AgentSessionInputInactiveSession
+    | InvalidProjectPath
 )
 
 
@@ -67,6 +73,10 @@ class AgentSessionInputService:
     """Input enqueue facade based on AgentSession."""
 
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    agent_project_preset_repository: Annotated[
+        AgentProjectPresetRepository,
+        Depends(AgentProjectPresetRepository),
+    ]
     agent_runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
     ]
@@ -130,6 +140,7 @@ class AgentSessionInputService:
         agent_id: str,
         message: InputMessage,
         user_id: str,
+        project_paths: list[str],
         client_request_id: str | None = None,
     ) -> Result[CreatedAgentSessionInputResult, AgentSessionInputError]:
         """Create a non-primary team AgentSession and store first user input."""
@@ -146,11 +157,17 @@ class AgentSessionInputService:
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
             )
-            primary = await self.agent_session_repository.ensure_team_primary_for_agent(
+            await self.agent_session_repository.ensure_team_primary_for_agent(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
             )
+            try:
+                normalized_project_paths = normalize_session_workspace_project_paths(
+                    project_paths
+                )
+            except ValueError as exc:
+                return Failure(InvalidProjectPath(path="", reason=str(exc)))
             agent_session = await self.agent_session_repository.create(
                 session,
                 AgentSessionCreate(
@@ -160,10 +177,11 @@ class AgentSessionInputService:
                     primary_kind=None,
                 ),
             )
-            await self._copy_primary_projects(
+            await self._create_session_projects(
                 session,
-                from_session_id=primary.id,
-                to_session_id=agent_session.id,
+                agent_id=agent_id,
+                session_id=agent_session.id,
+                project_paths=normalized_project_paths,
             )
             input_buffer = await self._enqueue_user_message(
                 session,
@@ -206,26 +224,28 @@ class AgentSessionInputService:
         )
         return result.input_buffer
 
-    async def _copy_primary_projects(
+    async def _create_session_projects(
         self,
         session: AsyncSession,
         *,
-        from_session_id: str,
-        to_session_id: str,
+        agent_id: str,
+        session_id: str,
+        project_paths: list[str],
     ) -> None:
-        """Snapshot-copy team primary project registrations into a new session."""
+        """Create session Project rows and refresh Agent Project presets."""
         project_repository = self.session_workspace_project_repository
-        primary_projects = await project_repository.list_projects(
-            session,
-            session_id=from_session_id,
-        )
-        for project in primary_projects:
+        for path in project_paths:
             await project_repository.create_project(
                 session,
                 SessionWorkspaceProjectCreate(
-                    session_id=to_session_id,
-                    path=project.path,
+                    session_id=session_id,
+                    path=path,
                 ),
+            )
+            await self.agent_project_preset_repository.upsert_preset(
+                session,
+                agent_id=agent_id,
+                path=path,
             )
 
     async def _has_workspace_access(

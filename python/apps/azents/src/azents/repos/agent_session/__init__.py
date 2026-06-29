@@ -106,6 +106,28 @@ class AgentSessionRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def get_latest_active_non_primary(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> AgentSession | None:
+        """Fetch newest active non-primary AgentSession by creation time."""
+        result = await session.execute(
+            sa.select(RDBAgentSession)
+            .where(
+                RDBAgentSession.agent_id == agent_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.primary_kind.is_(None),
+            )
+            .order_by(RDBAgentSession.created_at.desc())
+            .limit(1)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
     async def lock_by_id(
         self,
         session: AsyncSession,

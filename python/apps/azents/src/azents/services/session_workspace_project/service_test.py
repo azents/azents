@@ -16,6 +16,7 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -172,6 +173,7 @@ def _service(
     """Create service for tests."""
     return SessionWorkspaceProjectService(
         repository=SessionWorkspaceProjectRepository(),
+        agent_project_preset_repository=AgentProjectPresetRepository(),
         agent_runtime_repository=AgentRuntimeRepository(),
         agent_session_repository=AgentSessionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
@@ -208,10 +210,10 @@ class TestSessionWorkspaceProjectService:
         assert isinstance(result, Failure)
         assert isinstance(result.error, InvalidProjectPath)
 
-    async def test_create_project_rejects_nested_path(
+    async def test_create_project_allows_nested_path(
         self, rdb_session: AsyncSession
     ) -> None:
-        """Reject path nested with existing Project."""
+        """Allow parent and nested child Project paths in the same session."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-nested")
         session_id = await _create_session(rdb_session, workspace_id, "swp-svc-nested")
         service = _service(rdb_session)
@@ -226,8 +228,8 @@ class TestSessionWorkspaceProjectService:
             path="/workspace/agent/app/frontend",
         )
 
-        assert isinstance(result, Failure)
-        assert isinstance(result.error, InvalidProjectPath)
+        assert isinstance(result, Success)
+        assert result.value.path == "/workspace/agent/app/frontend"
 
     async def test_create_project_rejects_duplicate_path(
         self, rdb_session: AsyncSession
@@ -321,6 +323,11 @@ class TestSessionWorkspaceProjectService:
         assert isinstance(result, Success)
         assert result.value.session_id == fixture.session_id
         assert result.value.path == "/workspace/agent/app"
+        presets = await AgentProjectPresetRepository().list_presets(
+            rdb_session,
+            agent_id=fixture.agent_id,
+        )
+        assert [preset.path for preset in presets] == ["/workspace/agent/app"]
         assert runner_operations.paths == ["/workspace/agent/app"]
 
     async def test_list_projects_for_session_requires_matching_agent(

@@ -17,6 +17,7 @@ from azents.core.enums import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
@@ -119,14 +120,20 @@ def normalize_session_workspace_path(path: str) -> str:
         raise ValueError("Session Workspace root cannot be a Project")
     if not normalized.is_relative_to(SESSION_WORKSPACE_ROOT):
         raise ValueError("Project path must be under Agent Workspace root")
-    if normalized.parent != SESSION_WORKSPACE_ROOT:
-        raise ValueError("Project path must be a direct child of Agent Workspace root")
     return normalized.as_posix()
 
 
-def _is_nested_or_parent(candidate: PurePosixPath, existing: PurePosixPath) -> bool:
-    """Check whether two Project paths have nested relationship."""
-    return candidate.is_relative_to(existing) or existing.is_relative_to(candidate)
+def normalize_session_workspace_project_paths(paths: list[str]) -> list[str]:
+    """Normalize Project paths and remove exact duplicates while preserving order."""
+    normalized_paths: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        normalized = normalize_session_workspace_path(path)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        normalized_paths.append(normalized)
+    return normalized_paths
 
 
 def _runner_project_validation_deadline() -> datetime:
@@ -143,6 +150,10 @@ class SessionWorkspaceProjectService:
     repository: Annotated[
         SessionWorkspaceProjectRepository,
         Depends(SessionWorkspaceProjectRepository),
+    ]
+    agent_project_preset_repository: Annotated[
+        AgentProjectPresetRepository,
+        Depends(AgentProjectPresetRepository),
     ]
     agent_runtime_repository: Annotated[
         AgentRuntimeRepository,
@@ -247,6 +258,11 @@ class SessionWorkspaceProjectService:
                     session_id=context.session_id,
                     path=normalized_path,
                 ),
+            )
+            await self.agent_project_preset_repository.upsert_preset(
+                session,
+                agent_id=context.agent_id,
+                path=normalized_path,
             )
             await session.commit()
             return Success(project)
@@ -358,6 +374,11 @@ class SessionWorkspaceProjectService:
                     session_id=context.session_id,
                 )
                 return Failure(RegistrationRequestAlreadyResolved())
+            await self.agent_project_preset_repository.upsert_preset(
+                session,
+                agent_id=context.agent_id,
+                path=normalized_path,
+            )
             await session.commit()
             return Success(project)
 
@@ -521,20 +542,18 @@ class SessionWorkspaceProjectService:
             normalized = normalize_session_workspace_path(path)
         except ValueError as exc:
             return Failure(InvalidProjectPath(path=path, reason=str(exc)))
-        candidate = PurePosixPath(normalized)
-        existing_projects = await self.repository.list_projects(
+        existing_project = await self.repository.get_project_by_path(
             session,
             session_id=session_id,
+            path=normalized,
         )
-        for project in existing_projects:
-            existing = PurePosixPath(project.path)
-            if _is_nested_or_parent(candidate, existing):
-                return Failure(
-                    ProjectPathConflict(
-                        path=normalized,
-                        conflicting_project_id=project.id,
-                    )
+        if existing_project is not None:
+            return Failure(
+                ProjectPathConflict(
+                    path=normalized,
+                    conflicting_project_id=existing_project.id,
                 )
+            )
         return Success(normalized)
 
     async def _get_runtime_for_project_context(

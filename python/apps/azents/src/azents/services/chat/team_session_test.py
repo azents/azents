@@ -22,11 +22,11 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -119,6 +119,7 @@ def _service(
     return ChatSessionService(
         message_repository=MessageRepository(),
         agent_repository=AgentRepository(),
+        agent_project_preset_repository=AgentProjectPresetRepository(),
         agent_run_repository=AgentRunRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
@@ -153,38 +154,39 @@ class _ModelFileService(ModelFileService):
 class TestChatSessionTeamSessions:
     """Team session service behavior."""
 
-    async def test_create_team_session_copies_primary_projects_once(
+    async def test_create_team_session_uses_explicit_projects(
         self,
         rdb_session: AsyncSession,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """New team sessions receive a snapshot of primary projects."""
-        workspace_id = await _create_workspace(rdb_session, "team-session-copy")
-        user_id = await _create_user(rdb_session, "team-session-copy@example.com")
+        """New team sessions receive exactly the submitted Project paths."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-projects")
+        user_id = await _create_user(rdb_session, "team-session-projects@example.com")
         await _add_workspace_user(
             rdb_session,
             workspace_id=workspace_id,
             user_id=user_id,
         )
-        agent_id = await _create_agent(rdb_session, workspace_id, "team-copy-agent")
-        primary = await AgentSessionRepository().ensure_team_primary_for_agent(
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-explicit-projects",
+        )
+        await AgentSessionRepository().ensure_team_primary_for_agent(
             rdb_session,
             workspace_id=workspace_id,
             agent_id=agent_id,
-        )
-        project_repo = SessionWorkspaceProjectRepository()
-        await project_repo.create_project(
-            rdb_session,
-            SessionWorkspaceProjectCreate(
-                session_id=primary.id,
-                path="/workspace/agent/project-a",
-            ),
         )
         await rdb_session.commit()
 
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
+            project_paths=[
+                "/workspace/agent/project-a",
+                "/workspace/agent/project-a/nested",
+                "/workspace/agent/project-a",
+            ],
         )
 
         assert isinstance(create_result, Success)
@@ -193,30 +195,79 @@ class TestChatSessionTeamSessions:
         assert created.primary_kind is None
 
         async with rdb_session_manager() as verify_session:
-            copied_projects = await project_repo.list_projects(
+            projects = await SessionWorkspaceProjectRepository().list_projects(
                 verify_session,
                 session_id=created.id,
             )
-            assert [project.path for project in copied_projects] == [
-                "/workspace/agent/project-a"
-            ]
-            await project_repo.create_project(
+            presets = await AgentProjectPresetRepository().list_presets(
                 verify_session,
-                SessionWorkspaceProjectCreate(
-                    session_id=primary.id,
-                    path="/workspace/agent/project-b",
-                ),
+                agent_id=agent_id,
             )
-            await verify_session.commit()
 
-        async with rdb_session_manager() as verify_session:
-            copied_projects = await project_repo.list_projects(
-                verify_session,
-                session_id=created.id,
-            )
-            assert [project.path for project in copied_projects] == [
-                "/workspace/agent/project-a"
-            ]
+        assert [project.path for project in projects] == [
+            "/workspace/agent/project-a",
+            "/workspace/agent/project-a/nested",
+        ]
+        assert {preset.path for preset in presets} == {
+            "/workspace/agent/project-a",
+            "/workspace/agent/project-a/nested",
+        }
+
+    async def test_new_session_project_defaults_report_source(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """New session Project defaults include empty/recent-session source metadata."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-defaults")
+        user_id = await _create_user(rdb_session, "team-session-defaults@example.com")
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-default-projects",
+        )
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+
+        empty_result = await _service(
+            rdb_session_manager
+        ).get_new_session_project_defaults(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(empty_result, Success)
+        assert empty_result.value.project_paths == []
+        assert empty_result.value.source.type == "empty"
+        assert empty_result.value.source.session_id is None
+
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            project_paths=["/workspace/agent/project-a"],
+        )
+        assert isinstance(create_result, Success)
+
+        recent_result = await _service(
+            rdb_session_manager
+        ).get_new_session_project_defaults(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(recent_result, Success)
+        assert recent_result.value.project_paths == ["/workspace/agent/project-a"]
+        assert recent_result.value.source.type == "recent_session"
+        assert recent_result.value.source.session_id == create_result.value.id
 
     async def test_update_session_title_trims_and_clears_title(
         self,
@@ -476,6 +527,7 @@ class TestChatSessionTeamSessions:
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
+            project_paths=[],
         )
         assert isinstance(create_result, Success)
 
@@ -523,10 +575,12 @@ class TestChatSessionTeamSessions:
         first_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
+            project_paths=[],
         )
         second_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
+            project_paths=[],
         )
         assert isinstance(first_result, Success)
         assert isinstance(second_result, Success)
@@ -642,6 +696,7 @@ class TestChatSessionTeamSessions:
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
+            project_paths=[],
         )
         assert isinstance(create_result, Success)
 
@@ -721,6 +776,7 @@ class TestChatSessionTeamSessions:
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
+            project_paths=[],
         )
         assert isinstance(create_result, Success)
         async with rdb_session_manager() as update_session:

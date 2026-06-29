@@ -137,7 +137,11 @@ from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    AgentProjectPresetListResponse,
+    AgentProjectPresetResponse,
+    AgentSessionCreateRequest,
     AgentSessionListResponse,
+    AgentSessionProjectDefaultsResponse,
     AgentSessionResponse,
     AgentSessionTitleUpdateRequest,
     AgentWorkspaceActionResponse,
@@ -631,6 +635,8 @@ def _handle_created_agent_session_input_result(
                         status_code=409,
                         detail="Session is not active.",
                     )
+                case InvalidProjectPath():
+                    raise HTTPException(status_code=400, detail=error.reason)
                 case _:
                     assert_never(error)
         case _:
@@ -655,6 +661,8 @@ def _handle_agent_session_input_result(
                         status_code=409,
                         detail="Session is not active.",
                     )
+                case InvalidProjectPath():
+                    raise HTTPException(status_code=400, detail=error.reason)
                 case _:
                     assert_never(error)
         case _:
@@ -924,6 +932,7 @@ async def _write_new_session_message_via_rest(
             agent_id=agent_id,
             message=message,
             user_id=user_id,
+            project_paths=request.project_paths,
             client_request_id=request.client_request_id,
         )
     )
@@ -1214,9 +1223,64 @@ async def list_agent_sessions(
             assert_never(result)
 
 
+@router.get("/agents/{agent_id}/project-presets")
+async def list_agent_project_presets(
+    agent_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentProjectPresetListResponse:
+    """List Agent Project path presets."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await chat_service.list_agent_project_presets(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(presets):
+            return AgentProjectPresetListResponse(
+                items=[
+                    AgentProjectPresetResponse.from_domain(preset) for preset in presets
+                ]
+            )
+        case Failure(error):
+            match error:
+                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/agents/{agent_id}/session-project-defaults")
+async def get_agent_session_project_defaults(
+    agent_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentSessionProjectDefaultsResponse:
+    """Get default Project paths for a new AgentSession."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await chat_service.get_new_session_project_defaults(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(defaults):
+            return AgentSessionProjectDefaultsResponse.from_domain(defaults)
+        case Failure(error):
+            match error:
+                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
 @router.post("/agents/{agent_id}/sessions")
 async def create_team_agent_session(
     agent_id: str,
+    request: AgentSessionCreateRequest,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
 ) -> AgentSessionResponse:
@@ -1224,12 +1288,15 @@ async def create_team_agent_session(
     result = await chat_service.create_team_session(
         agent_id=agent_id,
         user_id=current_user.user_id,
+        project_paths=request.project_paths,
     )
     match result:
         case Success(session):
             return AgentSessionResponse.from_domain(session)
         case Failure(error):
             match error:
+                case InvalidProjectPath():
+                    raise HTTPException(status_code=400, detail=error.reason)
                 case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case _:

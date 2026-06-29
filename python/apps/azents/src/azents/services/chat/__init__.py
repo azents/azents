@@ -24,6 +24,8 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_project_preset import AgentProjectPresetRepository
+from azents.repos.agent_project_preset.data import AgentProjectPreset
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.message import MessageRepository
@@ -31,6 +33,10 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.input_buffer import InputBufferService
+from azents.services.session_workspace_project import (
+    InvalidProjectPath,
+    normalize_session_workspace_project_paths,
+)
 
 from .data import (
     AgentNotFound,
@@ -44,6 +50,8 @@ from .data import (
     EnsureSessionError,
     InvalidGoalStatusTransition,
     InvalidSessionTitle,
+    NewSessionProjectDefaults,
+    NewSessionProjectDefaultsSource,
     NotWorkspaceMember,
     PaginatedEvents,
     PrimarySessionArchiveBlocked,
@@ -72,6 +80,10 @@ class ChatSessionService:
 
     message_repository: Annotated[MessageRepository, Depends(MessageRepository)]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    agent_project_preset_repository: Annotated[
+        AgentProjectPresetRepository,
+        Depends(AgentProjectPresetRepository),
+    ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     event_transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
@@ -223,8 +235,9 @@ class ChatSessionService:
         *,
         agent_id: str,
         user_id: str,
-    ) -> Result[AgentSession, EnsureSessionError]:
-        """Create a non-primary team session and copy primary projects."""
+        project_paths: list[str],
+    ) -> Result[AgentSession, EnsureSessionError | InvalidProjectPath]:
+        """Create a non-primary team session with explicit Projects."""
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
@@ -238,11 +251,17 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            primary = await self.agent_session_repository.ensure_team_primary_for_agent(
+            await self.agent_session_repository.ensure_team_primary_for_agent(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
             )
+            try:
+                normalized_project_paths = normalize_session_workspace_project_paths(
+                    project_paths
+                )
+            except ValueError as exc:
+                return Failure(InvalidProjectPath(path="", reason=str(exc)))
             created = await self.agent_session_repository.create(
                 session,
                 AgentSessionCreate(
@@ -252,22 +271,107 @@ class ChatSessionService:
                     primary_kind=None,
                 ),
             )
-            primary_projects = (
-                await self.session_workspace_project_repository.list_projects(
-                    session,
-                    session_id=primary.id,
-                )
+            await self._create_session_projects(
+                session,
+                agent_id=agent_id,
+                session_id=created.id,
+                project_paths=normalized_project_paths,
             )
-            for project in primary_projects:
-                await self.session_workspace_project_repository.create_project(
-                    session,
-                    SessionWorkspaceProjectCreate(
-                        session_id=created.id,
-                        path=project.path,
-                    ),
-                )
             await session.commit()
             return Success(created)
+
+    async def list_agent_project_presets(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[list[AgentProjectPreset], EnsureSessionError]:
+        """Fetch Agent Project path presets after access validation."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            presets = await self.agent_project_preset_repository.list_presets(
+                session,
+                agent_id=agent_id,
+            )
+            return Success(presets)
+
+    async def get_new_session_project_defaults(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[NewSessionProjectDefaults, EnsureSessionError]:
+        """Fetch default Project paths for a new non-primary AgentSession."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            latest_session = (
+                await self.agent_session_repository.get_latest_active_non_primary(
+                    session,
+                    agent_id=agent_id,
+                )
+            )
+            if latest_session is None:
+                return Success(
+                    NewSessionProjectDefaults(
+                        project_paths=[],
+                        source=NewSessionProjectDefaultsSource(type="empty"),
+                    )
+                )
+            projects = await self.session_workspace_project_repository.list_projects(
+                session,
+                session_id=latest_session.id,
+            )
+            return Success(
+                NewSessionProjectDefaults(
+                    project_paths=[project.path for project in projects],
+                    source=NewSessionProjectDefaultsSource(
+                        type="recent_session",
+                        session_id=latest_session.id,
+                    ),
+                )
+            )
+
+    async def _create_session_projects(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        project_paths: list[str],
+    ) -> None:
+        """Create Project rows and refresh Agent Project presets."""
+        for path in project_paths:
+            await self.session_workspace_project_repository.create_project(
+                session,
+                SessionWorkspaceProjectCreate(session_id=session_id, path=path),
+            )
+            await self.agent_project_preset_repository.upsert_preset(
+                session,
+                agent_id=agent_id,
+                path=path,
+            )
 
     async def archive_agent_session(
         self,

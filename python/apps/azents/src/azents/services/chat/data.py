@@ -1,6 +1,7 @@
 """Chat session service data models."""
 
 import dataclasses
+from typing import Literal
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
 from azents.engine.events.types import Event
@@ -71,6 +72,22 @@ class ArchiveSessionResult:
     """AgentSession archive result."""
 
     archived_session_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class NewSessionProjectDefaultsSource:
+    """Source metadata for new-session Project defaults."""
+
+    type: Literal["empty", "recent_session"]
+    session_id: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class NewSessionProjectDefaults:
+    """Default Project paths for a new non-primary AgentSession."""
+
+    project_paths: list[str]
+    source: NewSessionProjectDefaultsSource
 
 
 # ---------------------------------------------------------------------------
