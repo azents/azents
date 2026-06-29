@@ -539,9 +539,7 @@ def _make_toolkit(
     """Create RuntimeToolkit for tests."""
     runner_operations = _FakeRunnerOperations(storage_files)
     session_manager = _make_mock_session_manager()
-    agent_runtime_repo: AgentRuntimeRepository | None = AsyncMock(
-        spec=AgentRuntimeRepository
-    )
+    agent_runtime_repo = AsyncMock(spec=AgentRuntimeRepository)
     agent_runtime_repo.get_by_agent_id.return_value = SimpleNamespace(
         id="runtime-1",
         desired_state=desired_state,
@@ -550,10 +548,8 @@ def _make_toolkit(
         runner_state=runner_state,
         runner_generation=1,
     )
-    project_repo: SessionWorkspaceProjectRepository | None = None
-    if projects is not None:
-        project_repo = AsyncMock(spec=SessionWorkspaceProjectRepository)
-        project_repo.list_projects.return_value = projects
+    project_repo = AsyncMock(spec=SessionWorkspaceProjectRepository)
+    project_repo.list_projects.return_value = projects or []
     if agents_store is None:
         agents_store = _FakeAgentsAppendixDedupeStateStore()
 
@@ -594,15 +590,13 @@ def _make_builtin_toolkit(
     session_id: str = "session-1",
     session_manager: SessionManager[AsyncMock] | None = None,
     memory_repo: MemoryRepository | None = None,
-    agent_runtime_repo: AgentRuntimeRepository | None = None,
 ) -> BuiltinToolkit:
     """Create BuiltinToolkit for tests."""
     toolkit = BuiltinToolkit(
         config=config or ShellToolkitConfig(),
         agent_id=agent_id,
-        session_manager=session_manager,
-        memory_repo=memory_repo,
-        agent_runtime_repo=agent_runtime_repo,
+        session_manager=session_manager or _make_mock_session_manager(),
+        memory_repo=memory_repo or _make_mock_memory_repo(),
     )
     toolkit.set_session_id(session_id)
     return toolkit
@@ -639,6 +633,7 @@ class TestBuiltinToolkitProviderResolve:
             model_file_service=AsyncMock(),
             agents_store=agents_store,
             session_manager=_make_mock_session_manager(),
+            memory_repo=_make_mock_memory_repo(),
             agent_runtime_repo=agent_runtime_repo,
             runner_operations=cast(
                 Any,
