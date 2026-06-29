@@ -450,6 +450,7 @@ def wrap_mcp_tool(
     on_auth_failure: Callable[[], Awaitable[str | None]] | None = None,
     proxy_url: str | None = None,
     auth: httpx.Auth | None = None,
+    headers_provider: Callable[[], Awaitable[dict[str, str]]] | None = None,
     artifact_sink_getter: ArtifactSinkGetter | None = None,
 ) -> FunctionTool:
     """Wrap MCP tool as azents Tool.
@@ -465,6 +466,10 @@ def wrap_mcp_tool(
     :param on_auth_failure: Token reissue callback called on 401; no retry when None
     :param proxy_url: egress proxy URL; direct connection when None
     :param auth: httpx Auth handler for per-request signing such as SigV4
+    :param headers_provider:
+        Optional async header provider evaluated when the tool is called.
+        Useful when a cached tool snapshot can be exposed before credentials are
+        available during turn preparation.
     :return: azents Tool instance
     """
     spec = FunctionToolSpec(
@@ -481,10 +486,13 @@ def wrap_mcp_tool(
             )
         except json.JSONDecodeError as exc:
             raise FunctionToolError(f"Invalid JSON in tool arguments: {exc}") from None
+        call_headers = (
+            await headers_provider() if headers_provider is not None else headers
+        )
         try:
             result = await mcp_call_tool(
                 server_url,
-                headers,
+                call_headers,
                 timeout,
                 mcp_tool.name,
                 args,
@@ -496,7 +504,10 @@ def wrap_mcp_tool(
             if on_auth_failure is not None and _is_http_401(exc):
                 new_token = await on_auth_failure()
                 if new_token is not None:
-                    new_headers = {**headers, "Authorization": f"Bearer {new_token}"}
+                    new_headers = {
+                        **call_headers,
+                        "Authorization": f"Bearer {new_token}",
+                    }
                     try:
                         result = await mcp_call_tool(
                             server_url,
