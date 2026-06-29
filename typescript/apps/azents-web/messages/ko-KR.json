@@ -1241,7 +1241,12 @@
       "durationMinutes": "{count}분",
       "durationSeconds": "{count}초"
     },
-    "goalUpdatedIndicator": "Goal 수정됨"
+    "goalUpdatedIndicator": "Goal 수정됨",
+    "failedRunError": {
+      "retryExhaustedTitle": "재시도 후 실행 실패",
+      "nonRetryableTitle": "재시도하지 않고 실행 실패",
+      "attempts": "실패한 시도: {failedAttemptCount} / {maxRetries}"
+    }
   },
   "oauth": {
     "title": "인증",

@@ -264,8 +264,9 @@ This makes retry responsible for recovering failed attempts and Goal continuatio
 ### Phase 3: UX recovery improvements
 
 - Render retry countdown and latest error in live run activity.
-- Render final failed-run metadata in the history error card.
-- Add user-safe action hints.
+- Preserve `SystemErrorPayload.failure.kind = failed_run` metadata when mapping history/live events into chat UI messages.
+- Render final failed-run metadata in the history error card, including failed attempt count, retry budget, non-retryable status, and user-safe action hints.
+- Keep raw/internal diagnostics out of UI metadata; only display the user-safe `failure` payload fields.
 - Consider explicit separate actions for generic stop vs stop retrying.
 
 ### Phase 4: classification improvements

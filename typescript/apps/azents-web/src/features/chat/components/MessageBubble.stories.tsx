@@ -77,6 +77,26 @@ export const ErrorResponse = {
   },
 } satisfies Story;
 
+export const FailedRunErrorResponse = {
+  args: {
+    message: createChatMessage({
+      id: "failed-run-error-response",
+      role: "error",
+      content: "An internal error occurred.",
+      metadata: {
+        failed_run_kind: "failed_run",
+        failed_run_finalization_reason: "retry_exhausted",
+        failed_run_failed_attempt_count: "10",
+        failed_run_max_retries: "10",
+        failed_run_last_error_type: "RuntimeError",
+        failed_run_retryability: "unknown",
+        failed_run_failure_code: "",
+        failed_run_action_hint: "Check provider status or try again later.",
+      },
+    }),
+  },
+} satisfies Story;
+
 export const Streaming = {
   args: {
     message: createChatMessage({
