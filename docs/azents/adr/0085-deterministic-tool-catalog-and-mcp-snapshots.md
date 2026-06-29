@@ -191,6 +191,16 @@ GitHub `per_user_pat` behavior is legacy and conflicts with the current toolkit-
 
 This cleanup is not part of the immediate tool-catalog optimization scope because the path is not expected to be used.
 
+### ADR-0085-D15. Expose GitHub installation snapshots before lazy MCP startup completes
+
+GitHub multi-installation toolkits must not require a concrete `McpToolkit` object before reading a previous successful installation snapshot.
+
+Each installation binding already has stable target metadata, `agent_id`, `session_id`, and an installation-specific MCP snapshot state name. During lazy startup, `update_context()` may run before installation token exchange and MCP client creation complete. In that state, the GitHub toolkit must read the session-bound installation snapshot directly from Toolkit State and rebuild provider-facing tool specs from it when the snapshot exists.
+
+Snapshot-backed GitHub handlers must defer installation token lookup until tool execution. `update_context()` may expose the cached tool schema without issuing a GitHub installation token. When the model later calls the tool, the handler obtains the current installation token and preserves the standard MCP auth-failure retry behavior.
+
+If no snapshot exists for an installation, the installation contributes no MCP tools until a complete background refresh saves one. The multi-installation `switch_installation` routing tool remains separate from MCP discovery; it does not satisfy the MCP snapshot contract by itself.
+
 ## Consequences
 
 ### Positive
@@ -226,6 +236,7 @@ Initial implementation should prioritize:
 9. Change `update_todo` to return a compact acknowledgement instead of the full Todo state JSON.
 10. Move AGENTS.md injection from Toolkit prompts to successful `read` tool result appendices with Toolkit State path dedupe reset on compaction.
 11. Add observability for `tool_count`, canonical `tool_names_hash`, full `tools_schema_hash`, `system_prompt_hash`, snapshot age, refresh outcome, and refresh duration.
+12. In GitHub multi-installation lazy bindings, read installation MCP snapshots before concrete `McpToolkit` creation and defer installation token lookup to tool-call execution.
 
 The immediate non-MCP tool scope is intentionally narrow: final tool ordering, hosted-tool ordering, and regression coverage for Goal/Todo fixed tool definitions. Background task and subagent tool injection are known future redesign areas and are not part of this optimization pass.
 
