@@ -135,8 +135,9 @@ _14 documents_
 - [ADR-0083: User Stop Terminates Session-Owned Runtime Exec Processes](adr/0083-runtime-exec-user-stop-termination.md)
 - [ADR-0084: Failed-run Error Retry and Finalization](adr/0084-failed-run-error-retry.md)
 - [ADR-0085: Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/0085-deterministic-tool-catalog-and-mcp-snapshots.md)
+- [ADR-0086: New Session Project Selection](adr/0086-new-session-project-selection.md)
 
-_86 documents_
+_87 documents_
 
 ## Issues (Bug Tracking)
 
@@ -167,4 +168,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 321
+- Total documents: 323
