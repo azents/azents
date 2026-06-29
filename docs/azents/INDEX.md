@@ -151,8 +151,9 @@ _3 documents_
 - [Agent Thread / Session Model Blueprint](notes/agent-thread-session-blueprint.md)
 - [Codex Goal Pursuing Research](notes/codex-goal-pursuing-research.md)
 - [Local sandbox provider daemon research](notes/local-sandbox-provider-daemon-research.md)
+- [Session Project Model Research and Discussion Summary](notes/session-project-model-research.md)
 
-_3 documents_
+_4 documents_
 
 ## Documentation Rules · Overview
 
@@ -166,4 +167,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 320
+- Total documents: 321
