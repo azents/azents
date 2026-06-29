@@ -23,3 +23,8 @@
   background: var(--mantine-primary-color-light);
   color: var(--mantine-primary-color-light-color);
 }
+
+.agentSettingsButton {
+  align-self: center;
+  flex-shrink: 0;
+}

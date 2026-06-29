@@ -25,8 +25,7 @@ export function SubagentTeamRow({
   subagent,
 }: SubagentTeamRowProps): React.ReactElement {
   const tHome = useTranslations("workspace.home.card");
-  // Subagent has no chat entrypoint, but keep settings edit link
-  const href = `/w/${handle}/agents/${subagent.id}/settings`;
+  const href = `/w/${handle}/agents/${subagent.id}/sessions/new`;
   return (
     <UnstyledButton
       component={Link}

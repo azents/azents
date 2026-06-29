@@ -6,5 +6,5 @@ export default async function AgentDetailIndex({
   params: Promise<{ handle: string; agentId: string }>;
 }): Promise<never> {
   const { handle, agentId } = await params;
-  redirect(`/w/${handle}/agents/${agentId}/settings`);
+  redirect(`/w/${handle}/agents/${agentId}/sessions/new`);
 }

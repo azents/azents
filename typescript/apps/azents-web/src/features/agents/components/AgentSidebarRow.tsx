@@ -3,7 +3,7 @@
 /**
  * Sidebar agent row.
  *
- * Clicking agent enters the Agent settings page.
+ * Clicking agent enters the Agent's draft new-session page.
  */
 
 import { Badge, Box, Group, NavLink, Text } from "@mantine/core";
@@ -28,7 +28,7 @@ export function AgentSidebarRow({
 }: AgentSidebarRowProps): React.ReactElement {
   const t = useTranslations("workspace.agents");
   const isActive = activeAgentId === agent.id;
-  const agentHref = `${basePath}/${agent.id}/settings`;
+  const agentHref = `${basePath}/${agent.id}/sessions/new`;
 
   return (
     <Box>
