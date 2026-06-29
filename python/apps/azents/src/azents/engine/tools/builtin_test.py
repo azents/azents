@@ -20,6 +20,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
 )
 from azents.core.tools import (
+    ResolveContext,
     ShellToolkitConfig,
     ToolCallHookOutcome,
     ToolkitState,
@@ -39,7 +40,11 @@ from azents.engine.run.types import (
     FunctionToolResult,
 )
 from azents.engine.tools import builtin as builtin_module
-from azents.engine.tools.builtin import BuiltinToolkit, RuntimeToolkit
+from azents.engine.tools.builtin import (
+    BuiltinToolkit,
+    BuiltinToolkitProvider,
+    RuntimeToolkit,
+)
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
 from azents.engine.tools.edit import make_edit_tool
 from azents.engine.tools.read_text import make_read_text_tool
@@ -88,6 +93,29 @@ def _make_context(
         model=model,
         run_id=run_id,
         publish_event=AsyncMock(),
+    )
+
+
+def _make_resolve_context(
+    *,
+    agent_id: str = "agent-1",
+    session_id: str = "session-1",
+    user_id: str = "user-1",
+    workspace_id: str = "ws-1",
+) -> ResolveContext:
+    """Create ResolveContext for toolkit provider tests."""
+    return ResolveContext(
+        toolkit_id="",
+        toolkit_name="shell",
+        credentials_json=None,
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=user_id,
+        session=AsyncMock(),
+        web_url="https://example.test",
+        oauth_secret_key="test-secret",
+        workspace_id=workspace_id,
+        workspace_handle="test-workspace",
     )
 
 
@@ -583,6 +611,77 @@ def _make_builtin_toolkit(
 # ---------------------------------------------------------------------------
 # update_context() default behavior tests
 # ---------------------------------------------------------------------------
+
+
+class TestBuiltinToolkitProviderResolve:
+    """BuiltinToolkitProvider resolve behavior tests."""
+
+    @pytest.mark.asyncio
+    async def test_resolved_runtime_toolkit_uses_required_agents_store(self) -> None:
+        """Provider-resolved RuntimeToolkit persists AGENTS.md appendix dedupe."""
+        agents_store = _FakeAgentsAppendixDedupeStateStore()
+        project_repo = AsyncMock(spec=SessionWorkspaceProjectRepository)
+        project_repo.list_projects.return_value = [
+            _make_project(path="/workspace/agent/app")
+        ]
+        agent_runtime_repo = AsyncMock(spec=AgentRuntimeRepository)
+        agent_runtime_repo.get_by_agent_id.return_value = SimpleNamespace(
+            id="runtime-1",
+            desired_state=RuntimeDesiredState.RUNNING,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            provider_observed_state=RuntimeProviderObservedState.RUNNING,
+            runner_state=RuntimeRunnerState.READY,
+            runner_generation=1,
+        )
+        provider = BuiltinToolkitProvider(
+            exchange_file_service=AsyncMock(spec=ExchangeFileService),
+            artifact_service=AsyncMock(spec=ArtifactService),
+            model_file_service=AsyncMock(),
+            agents_store=agents_store,
+            session_manager=_make_mock_session_manager(),
+            agent_runtime_repo=agent_runtime_repo,
+            runner_operations=cast(
+                Any,
+                _FakeRunnerOperations(
+                    {
+                        "/workspace/agent/AGENTS.md": b"ROOT_RULE",
+                        "/workspace/agent/app/AGENTS.md": b"PROJECT_RULE",
+                        "/workspace/agent/app/file.py": b"print('hi')",
+                    }
+                ),
+            ),
+            project_repo=project_repo,
+        )
+        toolkit = await provider.resolve(
+            ShellToolkitConfig(),
+            _make_resolve_context(),
+        )
+        assert isinstance(toolkit, RuntimeToolkit)
+        toolkit.set_session_id("session-1")
+        await toolkit.update_context(_make_context())
+
+        first = await toolkit.append_agents_after_read(
+            MagicMock(
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/app/file.py"}',
+            ),
+            ToolCallHookOutcome(output="ONE", error=None),
+        )
+        second = await toolkit.append_agents_after_read(
+            MagicMock(
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/app/other.py"}',
+            ),
+            ToolCallHookOutcome(output="TWO", error=None),
+        )
+
+        assert first is not None
+        assert second is None
+        dedupe = await agents_store.load_appendix_dedupe("agent-1", "session-1")
+        assert dedupe.appended_paths == [
+            "/workspace/agent/AGENTS.md",
+            "/workspace/agent/app/AGENTS.md",
+        ]
 
 
 class TestRuntimeToolkitUpdateContext:

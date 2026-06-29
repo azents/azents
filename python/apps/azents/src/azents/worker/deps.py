@@ -21,6 +21,7 @@ from azents.core.s3.deps import get_s3_service
 from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.commands import COMMAND_REGISTRY, CommandHandler
 from azents.engine.tools.builtin import BuiltinToolkitProvider
+from azents.engine.tools.builtin_agents import ToolkitAgentsAppendixDedupeStateStore
 from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationClient as EngineRuntimeRunnerOperationClient,
 )
@@ -85,6 +86,9 @@ def get_builtin_toolkit_provider(
         exchange_file_service=exchange_file_service,
         artifact_service=artifact_service,
         model_file_service=model_file_service,
+        agents_store=ToolkitAgentsAppendixDedupeStateStore(
+            session_manager=session_manager,
+        ),
         session_manager=session_manager,
         memory_repo=MemoryRepository(),
         agent_runtime_repo=AgentRuntimeRepository(),

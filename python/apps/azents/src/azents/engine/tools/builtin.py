@@ -53,7 +53,6 @@ from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.builtin_agents import (
     AgentsAppendixDedupeStateStore,
     AgentsAppendixMixin,
-    ToolkitAgentsAppendixDedupeStateStore,
 )
 from azents.engine.tools.delete_file import make_delete_file_tool
 from azents.engine.tools.edit import make_edit_tool
@@ -474,11 +473,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         artifact_service: ArtifactService,
         model_file_service: ModelFileService,
         agent_id: str,
+        agents_store: AgentsAppendixDedupeStateStore,
         runner_operations: RuntimeRunnerOperationClient | None = None,
         session_manager: SessionManager[AsyncSession] | None = None,
         agent_runtime_repo: AgentRuntimeRepository | None = None,
         project_repo: SessionWorkspaceProjectRepository | None = None,
-        agents_store: AgentsAppendixDedupeStateStore | None = None,
     ) -> None:
         self._config = config
         self._runner_operations = runner_operations
@@ -821,6 +820,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         exchange_file_service: ExchangeFileService,
         artifact_service: ArtifactService,
         model_file_service: ModelFileService,
+        agents_store: AgentsAppendixDedupeStateStore,
         session_manager: SessionManager[AsyncSession] | None = None,
         memory_repo: MemoryRepository | None = None,
         agent_runtime_repo: AgentRuntimeRepository | None = None,
@@ -835,12 +835,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self._agent_runtime_repo = agent_runtime_repo
         self._runner_operations = runner_operations
         self._project_repo = project_repo
-        if session_manager is not None:
-            self._agents_store = ToolkitAgentsAppendixDedupeStateStore(
-                session_manager=session_manager,
-            )
-        else:
-            self._agents_store = None
+        self._agents_store = agents_store
 
     async def resolve(
         self,
@@ -867,6 +862,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             session_manager=self._session_manager,
             agent_runtime_repo=self._agent_runtime_repo,
             project_repo=self._project_repo,
+            agents_store=self._agents_store,
         )
 
     async def resolve_builtin(
