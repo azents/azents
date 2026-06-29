@@ -394,25 +394,13 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         self.set_session_id(context.parent_session_id)
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Return builtin tools and prompt independent of Runtime Runner.
-
-        :param context: Context passed each turn
-        :return: Current state (tools + prompt)
-        """
+        """Return builtin tools independent of Runtime Runner."""
         config = self._config
         agent_id = self._agent_id
         user_id = context.user_id
 
-        memory_prompt = ""
         tools: list[FunctionTool] = []
         if config.memory_enabled and self._session_manager and self._memory_repo:
-            async with self._session_manager() as mem_session:
-                memory_prompt = await collect_memory_prompt(
-                    self._memory_repo,
-                    mem_session,
-                    agent_id,
-                    user_id or "",
-                )
             tools.extend(
                 [
                     make_save_memory_tool(
@@ -448,12 +436,20 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
                 ]
             )
 
-        return ToolkitState(
-            status=ToolkitStatus.ENABLED,
-            tools=tools,
-            prompt="",
-            dynamic_prompt=memory_prompt,
-        )
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+    async def get_dynamic_prompt(self, context: TurnContext) -> str:
+        """Return dynamic memory prompt for the current turn."""
+        config = self._config
+        if not (config.memory_enabled and self._session_manager and self._memory_repo):
+            return ""
+        async with self._session_manager() as mem_session:
+            return await collect_memory_prompt(
+                self._memory_repo,
+                mem_session,
+                self._agent_id,
+                context.user_id or "",
+            )
 
 
 class RuntimeEnvProvider(Protocol):
@@ -581,15 +577,10 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         """
         agent_id = self._agent_id
         runtime_agent_id = self._runtime_agent_id
-        has_agent_id = bool(agent_id)
         user_id = context.user_id
 
         if self._runner_operations is None or self._agent_runtime_repo is None:
-            return ToolkitState(
-                status=ToolkitStatus.DISABLED,
-                tools=[],
-                prompt="Runtime Runner operation client is not configured.",
-            )
+            return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
 
         file_ss = RuntimeRunnerFileStorage(
             runner_operations=self._runner_operations,
@@ -678,12 +669,21 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             key=lambda project: project.path,
         )
         self.register_agents_context(file_storage=file_ss, projects=projects)
-        prompt = self._render_config_prompt(
-            has_agent_id=has_agent_id,
-            user_id=user_id,
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static runtime/files prompt for the current run."""
+        if self._runner_operations is None or self._agent_runtime_repo is None:
+            return "Runtime Runner operation client is not configured."
+        projects = sorted(
+            await self._load_projects(session_id=self._session_id),
+            key=lambda project: project.path,
+        )
+        return self._render_config_prompt(
+            has_agent_id=bool(self._agent_id),
+            user_id=context.user_id,
             projects=projects,
         )
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt=prompt)
 
     async def _load_projects(
         self,

@@ -463,8 +463,12 @@ class _PromptHookToolkit(Toolkit[BaseModel]):
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[],
-            prompt="tool prompt",
         )
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static prompt."""
+        del context
+        return "tool prompt"
 
     def hooks(self) -> RuntimeHooks:
         """Return turn start hook."""

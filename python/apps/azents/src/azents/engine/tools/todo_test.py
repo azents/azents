@@ -73,19 +73,20 @@ async def test_todo_toolkit_exposes_unprefixed_update_tool() -> None:
     )
     toolkit = TodoToolkit(store=store, agent_id="agent-1", session_id="session-1")
 
-    state = await toolkit.update_context(
-        TurnContext(
-            user_id="user-1",
-            workspace_id="workspace-1",
-            model="model",
-            run_id="run-1",
-            session_id="session-1",
-            publish_event=AsyncMock(),
-        )
+    context = TurnContext(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        model="model",
+        run_id="run-1",
+        session_id="session-1",
+        publish_event=AsyncMock(),
     )
+    state = await toolkit.update_context(context)
 
     assert [tool.spec.name for tool in state.tools] == ["update_todo"]
-    assert "[in_progress] Current work" not in state.prompt
+    assert "[in_progress] Current work" not in (
+        await toolkit.get_static_prompt(context)
+    )
     store.load.assert_not_awaited()
 
 

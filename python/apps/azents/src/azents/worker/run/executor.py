@@ -509,7 +509,6 @@ class RunExecutor:
                     return ToolkitState(
                         status=ToolkitStatus.ENABLED,
                         tools=[subagent_tool],
-                        prompt="",
                     )
 
             background_task_toolkit = BackgroundTaskToolkit(

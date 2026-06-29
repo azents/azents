@@ -877,8 +877,12 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
                 ]
             )
 
-        prompt = self._render_config_prompt()
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools, prompt=prompt)
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static Kubernetes prompt for the current run."""
+        del context
+        return self._render_config_prompt()
 
     def _render_config_prompt(self) -> str:
         """Provide connected clusters and security settings as prompt."""

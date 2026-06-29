@@ -105,15 +105,13 @@ async def build_tool_catalog(
                         duration_seconds=duration_seconds,
                     ),
                     "tool_count": len(state.tools),
-                    "static_prompt_present": bool(state.prompt.strip()),
-                    "dynamic_prompt_present": bool(state.dynamic_prompt.strip()),
                     "status": state.status.value,
                 },
             )
         if state.status != ToolkitStatus.ENABLED:
             continue
         label = _toolkit_prompt_label(binding)
-        prompt = state.prompt.strip()
+        prompt = (await binding.toolkit.get_static_prompt(context)).strip()
         if prompt:
             static_prompt_fragment_inputs.append(
                 _toolkit_prompt_input(
@@ -124,7 +122,7 @@ async def build_tool_catalog(
                     content=prompt,
                 )
             )
-        dynamic_prompt = state.dynamic_prompt.strip()
+        dynamic_prompt = (await binding.toolkit.get_dynamic_prompt(context)).strip()
         if dynamic_prompt:
             dynamic_prompt_fragment_inputs.append(
                 _toolkit_prompt_input(

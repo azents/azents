@@ -210,9 +210,9 @@ class TestAwsToolkitUpdateContext:
         toolkit = _make_toolkit(region="ap-northeast-2")
         ctx = _make_context()
 
-        state = await toolkit.update_context(ctx)
+        await toolkit.update_context(ctx)
 
-        assert "ap-northeast-2" in state.prompt
+        assert "ap-northeast-2" in (await toolkit.get_static_prompt(ctx))
 
     @pytest.mark.asyncio
     async def test_prompt_includes_role_arn_when_set(self) -> None:
@@ -222,9 +222,11 @@ class TestAwsToolkitUpdateContext:
         )
         ctx = _make_context()
 
-        state = await toolkit.update_context(ctx)
+        await toolkit.update_context(ctx)
 
-        assert "arn:aws:iam::123456789012:role/MyRole" in state.prompt
+        assert "arn:aws:iam::123456789012:role/MyRole" in (
+            await toolkit.get_static_prompt(ctx)
+        )
 
     @pytest.mark.asyncio
     async def test_prompt_no_role_info_when_unset(self) -> None:
@@ -232,9 +234,9 @@ class TestAwsToolkitUpdateContext:
         toolkit = _make_toolkit(role_arn=None)
         ctx = _make_context()
 
-        state = await toolkit.update_context(ctx)
+        await toolkit.update_context(ctx)
 
-        assert "Assumed Role" not in state.prompt
+        assert "Assumed Role" not in (await toolkit.get_static_prompt(ctx))
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +261,7 @@ class TestAwsToolkitConnectionFailure:
             state = await toolkit.update_context(ctx)
 
         assert state.tools == []
-        assert "connection failed" not in state.prompt.lower()
+        assert "connection failed" not in (await toolkit.get_static_prompt(ctx)).lower()
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +298,7 @@ class TestAwsToolkitBackgroundConnect:
                 # connection in progress -> loading
                 state = await toolkit.update_context(ctx)
                 assert state.tools == []
-                assert "Loading" not in state.prompt
+                assert "Loading" not in (await toolkit.get_static_prompt(ctx))
 
                 # connection complete
                 connect_event.set()
@@ -306,7 +308,7 @@ class TestAwsToolkitBackgroundConnect:
                 # ready status
                 state = await toolkit.update_context(ctx)
                 assert len(state.tools) == 2
-                assert "us-east-1" in state.prompt
+                assert "us-east-1" in (await toolkit.get_static_prompt(ctx))
 
     @pytest.mark.asyncio
     async def test_loading_to_error(self) -> None:
@@ -330,7 +332,9 @@ class TestAwsToolkitBackgroundConnect:
 
                 state = await toolkit.update_context(ctx)
                 assert state.tools == []
-                assert "AWS MCP server connection failed" not in state.prompt
+                assert "AWS MCP server connection failed" not in (
+                    await toolkit.get_static_prompt(ctx)
+                )
 
     @pytest.mark.asyncio
     async def test_aexit_cancels_task(self) -> None:
@@ -369,4 +373,4 @@ class TestAwsToolkitBackgroundConnect:
             state = await toolkit.update_context(ctx)
 
         assert state.tools == []
-        assert "us-east-1" in state.prompt
+        assert "us-east-1" in (await toolkit.get_static_prompt(ctx))

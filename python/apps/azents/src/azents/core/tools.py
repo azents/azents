@@ -38,21 +38,16 @@ class ToolkitStatus(enum.StrEnum):
 
 @dataclasses.dataclass(frozen=True)
 class ToolkitState:
-    """State returned by toolkit each turn.
+    """Tool state returned by toolkit each turn.
 
-    ``prompt`` is the default static toolkit prompt layer. It is intended for
-    setup/configuration text that is established before a run starts and should
-    not change during that run.
-
-    ``dynamic_prompt`` is an opt-in layer for toolkits that intentionally mutate
-    the system prompt from current runtime state, such as memory summaries.
-    Most toolkits should leave it empty.
+    Prompt content is intentionally excluded from this state machine. Static
+    prompt content is collected through ``Toolkit.get_static_prompt()`` once at
+    run start, and dynamic prompt content is collected through
+    ``Toolkit.get_dynamic_prompt()`` on the dynamic prompt path.
     """
 
     status: ToolkitStatus
     tools: list[FunctionTool]
-    prompt: str
-    dynamic_prompt: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -217,24 +212,44 @@ ConfigT = TypeVar("ConfigT", bound=BaseModel)
 class Toolkit(ABC, Generic[ConfigT]):
     """Executable Toolkit instance returned from resolve().
 
-    State machine pattern: return current state with ``update_context()`` each turn,
-    and manage session-level lifecycle with ``__aenter__/__aexit__``.
+    ``update_context()`` is only for tool/status state. Prompt content is not part
+    of that state machine: static prompt content is fetched explicitly at run
+    start, and dynamic prompt content is fetched through a separate opt-in path.
     """
 
     display_name: str = ""
     """Name displayed in toolkit prompt. Injected by Provider.resolve()."""
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Receive current turn context and immediately return state.
+        """Receive current turn context and immediately return tool state.
 
-        Do not perform heavy I/O.
-        Each toolkit must override this in Phase 2.
-        Default implementation raises NotImplementedError.
+        Do not return or mutate prompt content from this state-machine path.
 
         :param context: Context passed each turn
-        :return: Current state (tools + prompt)
+        :return: Current tool state
         """
         raise NotImplementedError
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static prompt content to freeze for the current run.
+
+        This is called separately from ``update_context()`` so implementation
+        mistakes in the tool state machine cannot implicitly modify prompt
+        content. Most toolkits return a stable configuration prompt or an empty
+        string.
+        """
+        del context
+        return ""
+
+    async def get_dynamic_prompt(self, context: TurnContext) -> str:
+        """Return dynamic prompt content for explicitly dynamic prompt sources.
+
+        This path is reserved for prompt content that intentionally changes
+        between turns, such as memory summaries. Most toolkits should return an
+        empty string.
+        """
+        del context
+        return ""
 
     async def __aenter__(self) -> Toolkit[ConfigT]:
         """Start background work when session starts, optional."""

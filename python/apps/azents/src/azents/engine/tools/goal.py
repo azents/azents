@@ -207,7 +207,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         """Return current goal prompt and goal tools."""
         del context
         if not self._session_id:
-            return ToolkitState(status=ToolkitStatus.ENABLED, tools=[], prompt="")
+            return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
@@ -227,7 +227,6 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
                     session_id=self._session_id,
                 ),
             ],
-            prompt="",
         )
 
     def hooks(self) -> RuntimeHooks:

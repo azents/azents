@@ -153,7 +153,7 @@ async def test_update_context_returns_immediately_without_snapshot() -> None:
                 toolkit.update_context(_context()), timeout=1
             )
             assert state.tools == []
-            assert state.prompt == ""
+            assert (await toolkit.get_static_prompt(_context())) == ""
 
             continue_list.set()
 
@@ -177,7 +177,7 @@ async def test_background_refresh_success_exposes_sorted_tools_next_turn() -> No
     state = await toolkit.update_context(_context())
 
     assert [tool.spec.name for tool in state.tools] == ["alpha", "zeta"]
-    assert state.prompt == ""
+    assert (await toolkit.get_static_prompt(_context())) == ""
 
 
 async def test_refresh_failure_preserves_previous_successful_snapshot() -> None:
@@ -205,7 +205,7 @@ async def test_refresh_failure_preserves_previous_successful_snapshot() -> None:
     state = await toolkit.update_context(_context())
 
     assert [tool.spec.name for tool in state.tools] == ["alpha"]
-    assert state.prompt == ""
+    assert (await toolkit.get_static_prompt(_context())) == ""
 
 
 async def test_failed_refresh_without_snapshot_exposes_no_retry_tool_or_prompt() -> (
@@ -229,4 +229,4 @@ async def test_failed_refresh_without_snapshot_exposes_no_retry_tool_or_prompt()
     state = await toolkit.update_context(_context())
 
     assert state.tools == []
-    assert state.prompt == ""
+    assert (await toolkit.get_static_prompt(_context())) == ""

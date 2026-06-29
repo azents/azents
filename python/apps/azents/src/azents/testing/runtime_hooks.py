@@ -64,13 +64,17 @@ class TestenvRuntimeHookQAToolkit(Toolkit[TestenvRuntimeHookQAConfig]):
         self._config = config
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Enable QA probe tool and provider prompt."""
+        """Enable QA probe tool."""
         del context
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[self._make_probe_tool()],
-            prompt="Runtime hook QA toolkit is active.",
         )
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static QA toolkit prompt for the current run."""
+        del context
+        return "Runtime hook QA toolkit is active."
 
     def hooks(self) -> RuntimeHooks:
         """Return lifecycle hook mapping targeted by QA."""

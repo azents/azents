@@ -107,15 +107,15 @@ class TestGoogleAnalyticsToolkitPrompt:
     async def test_prompt_with_property_id(self) -> None:
         """default_property_id is included in prompt when set."""
         toolkit = _make_toolkit(default_property_id="123456")
-        state = await toolkit.update_context(_make_context())
-        assert "123456" in state.prompt
+        await toolkit.update_context(_make_context())
+        assert "123456" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
     async def test_prompt_without_property_id(self) -> None:
         """Prompt is empty when default_property_id is absent."""
         toolkit = _make_toolkit()
-        state = await toolkit.update_context(_make_context())
-        assert state.prompt == ""
+        await toolkit.update_context(_make_context())
+        assert (await toolkit.get_static_prompt(_make_context())) == ""
 
 
 # -------------------------------------------------------------------

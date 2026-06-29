@@ -399,11 +399,12 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         tools = self._tools_from_snapshot(snapshot) if snapshot is not None else []
         if self._entered:
             self._ensure_refresh_task()
-        return ToolkitState(
-            status=ToolkitStatus.ENABLED,
-            tools=tools,
-            prompt=self._render_config_prompt(),
-        )
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static GCP toolkit prompt for the current run."""
+        del context
+        return self._render_config_prompt()
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful GCP MCP tool snapshot."""

@@ -273,7 +273,9 @@ async def test_multi_installation_uses_snapshot_while_lazy_mcp_is_pending() -> N
             "hardtack__get_file_contents",
             "switch_installation",
         ]
-        assert "Current default installation" in state.prompt
+        assert "Current default installation" in (
+            await toolkit.get_static_prompt(_make_context())
+        )
 
         second_state = await toolkit.update_context(_make_context())
         assert [tool.spec.name for tool in second_state.tools] == names

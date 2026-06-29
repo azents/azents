@@ -43,7 +43,6 @@ class _Toolkit(Toolkit[_ToolkitConfig]):
         del context
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
-            prompt="tool prompt",
             tools=[
                 FunctionTool(
                     spec=FunctionToolSpec(
@@ -59,6 +58,11 @@ class _Toolkit(Toolkit[_ToolkitConfig]):
             ],
         )
 
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static prompt for tests."""
+        del context
+        return "tool prompt"
+
 
 class _DynamicPromptToolkit(Toolkit[_ToolkitConfig]):
     """Toolkit that intentionally returns dynamic prompt content."""
@@ -68,10 +72,13 @@ class _DynamicPromptToolkit(Toolkit[_ToolkitConfig]):
         del context
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
-            prompt="",
-            dynamic_prompt="dynamic tool prompt",
             tools=[],
         )
+
+    async def get_dynamic_prompt(self, context: TurnContext) -> str:
+        """Return dynamic prompt for tests."""
+        del context
+        return "dynamic tool prompt"
 
 
 class _InlineToolkit(Toolkit[_ToolkitConfig]):
@@ -83,7 +90,7 @@ class _InlineToolkit(Toolkit[_ToolkitConfig]):
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return injected tool state."""
         del context
-        return ToolkitState(status=ToolkitStatus.ENABLED, prompt="", tools=[self._tool])
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[self._tool])
 
 
 class _FunctionToolResultToolkit(Toolkit[_ToolkitConfig]):
@@ -94,7 +101,6 @@ class _FunctionToolResultToolkit(Toolkit[_ToolkitConfig]):
         del context
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
-            prompt="",
             tools=[
                 FunctionTool(
                     spec=FunctionToolSpec(

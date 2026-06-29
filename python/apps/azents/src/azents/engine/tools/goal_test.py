@@ -22,23 +22,22 @@ async def test_goal_toolkit_exposes_goal_tools() -> None:
     store.load.return_value = GoalState(objective="Ship goal", status="active")
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
 
-    state = await toolkit.update_context(
-        TurnContext(
-            user_id="user-1",
-            workspace_id="workspace-1",
-            model="model",
-            run_id="run-1",
-            session_id="session-1",
-            publish_event=AsyncMock(),
-        )
+    context = TurnContext(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        model="model",
+        run_id="run-1",
+        session_id="session-1",
+        publish_event=AsyncMock(),
     )
+    state = await toolkit.update_context(context)
 
     assert [tool.spec.name for tool in state.tools] == [
         "get_goal",
         "create_goal",
         "update_goal",
     ]
-    assert "Ship goal" not in state.prompt
+    assert "Ship goal" not in (await toolkit.get_static_prompt(context))
     store.load.assert_not_awaited()
 
 

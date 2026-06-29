@@ -103,19 +103,19 @@ class EnvVarToolkit(Toolkit[EnvVarToolkitConfig]):
         self.display_name = toolkit_name
 
     async def update_context(self, context: TurnContext) -> ToolkitState:  # noqa: ARG002
-        """No tools; leave only available variable list for shell prompt."""
+        """Return enabled tool state; env prompt is collected separately."""
+        return ToolkitState(tools=[], status=ToolkitStatus.ENABLED)
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return static environment variable prompt for the current run."""
+        del context
         entry_names = [entry.name for entry in self._config.entries]
-        prompt = ""
-        if entry_names:
-            refs = ", ".join(f"${name}" for name in entry_names)
-            prompt = (
-                f"Environment variables available in shell commands "
-                f"via '{self.display_name}': {refs}"
-            )
-        return ToolkitState(
-            tools=[],
-            prompt=prompt,
-            status=ToolkitStatus.ENABLED,
+        if not entry_names:
+            return ""
+        refs = ", ".join(f"${name}" for name in entry_names)
+        return (
+            f"Environment variables available in shell commands "
+            f"via '{self.display_name}': {refs}"
         )
 
     async def expose_env(self) -> dict[str, str]:

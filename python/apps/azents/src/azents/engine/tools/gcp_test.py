@@ -276,9 +276,9 @@ class TestGcpToolkitUpdateContext:
             new_callable=AsyncMock,
             return_value=([], False),
         ):
-            state = await toolkit.update_context(ctx)
+            await toolkit.update_context(ctx)
 
-        assert "my-project-123456" in state.prompt
+        assert "my-project-123456" in (await toolkit.get_static_prompt(ctx))
 
     @pytest.mark.asyncio
     async def test_prompt_includes_service_descriptions(self) -> None:
@@ -291,9 +291,9 @@ class TestGcpToolkitUpdateContext:
             new_callable=AsyncMock,
             return_value=([], False),
         ):
-            state = await toolkit.update_context(ctx)
+            await toolkit.update_context(ctx)
 
-        assert "Logging" in state.prompt
+        assert "Logging" in (await toolkit.get_static_prompt(ctx))
 
 
 # ---------------------------------------------------------------------------
@@ -368,10 +368,10 @@ class TestGcpToolkitReadOnlyFiltering:
             new_callable=AsyncMock,
             return_value=([], False),
         ):
-            state = await toolkit.update_context(ctx)
+            await toolkit.update_context(ctx)
 
-        assert "read+write" in state.prompt
-        assert "read-only" in state.prompt
+        assert "read+write" in (await toolkit.get_static_prompt(ctx))
+        assert "read-only" in (await toolkit.get_static_prompt(ctx))
 
 
 # ---------------------------------------------------------------------------
@@ -566,7 +566,7 @@ class TestGcpToolkitBackgroundConnect:
                 await asyncio.wait_for(refresh_started.wait(), timeout=1)
                 state = await toolkit.update_context(ctx)
                 assert state.tools == []
-                assert "Loading" not in state.prompt
+                assert "Loading" not in (await toolkit.get_static_prompt(ctx))
 
                 continue_refresh.set()
                 await _wait_gcp_tasks(toolkit)
@@ -575,7 +575,7 @@ class TestGcpToolkitBackgroundConnect:
                 assert len(state.tools) == 2
                 names = {t.spec.name for t in state.tools}
                 assert names == {"log_query", "metric_query"}
-                assert "Loading" not in state.prompt
+                assert "Loading" not in (await toolkit.get_static_prompt(ctx))
 
     @pytest.mark.asyncio
     async def test_partial_failure_in_background(self) -> None:

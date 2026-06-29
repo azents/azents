@@ -39,7 +39,7 @@ class _TrackingToolkit(Toolkit[_Config]):
         """Record update_context calls."""
         del context
         self.update_context_calls += 1
-        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[], prompt="")
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
 
     async def __aenter__(self) -> "_TrackingToolkit":
         """Record enter and optionally fail."""
