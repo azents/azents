@@ -6,6 +6,7 @@ from collections.abc import AsyncIterable, Sequence
 from typing import Protocol, runtime_checkable
 
 from litellm.responses.main import aresponses
+from openai.types.responses.response_includable import ResponseIncludable
 from openai.types.responses.response_input_param import ResponseInputParam
 from openai.types.responses.response_text_config_param import ResponseTextConfigParam
 from pydantic import TypeAdapter
@@ -24,6 +25,7 @@ DEFAULT_RESPONSES_TEXT_CONFIG: ResponseTextConfigParam = (
         {"format": {"type": "text"}, "verbosity": "low"}
     )
 )
+_REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -35,6 +37,7 @@ class ResponsesEndpointKwargs:
     base_url: str | None = None
     custom_llm_provider: str | None = None
     store: bool | None = None
+    include: list[ResponseIncludable] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -61,6 +64,7 @@ def responses_endpoint_kwargs(
     )
     store = _optional_bool(credential_kwargs.get("store"), "store")
 
+    include: list[ResponseIncludable] | None = None
     if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         custom_llm_provider = custom_llm_provider or "openai"
         base_url = base_url or api_base
@@ -69,6 +73,7 @@ def responses_endpoint_kwargs(
         api_base = api_base or base_url
         if provider == LLMProvider.CHATGPT_OAUTH:
             store = False if store is None else store
+            include = [_REASONING_ENCRYPTED_CONTENT_INCLUDE]
 
     return ResponsesEndpointKwargs(
         api_key=api_key,
@@ -76,6 +81,7 @@ def responses_endpoint_kwargs(
         base_url=base_url,
         custom_llm_provider=custom_llm_provider,
         store=store,
+        include=include,
     )
 
 
@@ -115,6 +121,7 @@ async def call_responses_model(
         stream=stream,
         max_output_tokens=responses_max_output_tokens(provider, max_output_tokens),
         text=text,
+        include=endpoint_kwargs.include,
         custom_llm_provider=endpoint_kwargs.custom_llm_provider,
         store=endpoint_kwargs.store,
         api_key=endpoint_kwargs.api_key,

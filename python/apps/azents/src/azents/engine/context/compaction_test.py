@@ -169,6 +169,7 @@ class TestSummarizeTextWithModel:
         assert call["instructions"] == "summarize system"
         assert call["stream"] is True
         assert call["max_output_tokens"] is None
+        assert call["include"] == ["reasoning.encrypted_content"]
         assert call["text"] == {"format": {"type": "text"}, "verbosity": "low"}
         assert call["input"] == [
             {"role": "user", "content": "summarize user\n[User]: hello"}

@@ -38,6 +38,7 @@ async def test_call_responses_model_builds_standard_payload(
             "stream": False,
             "max_output_tokens": 80,
             "text": {"format": {"type": "text"}, "verbosity": "low"},
+            "include": None,
             "custom_llm_provider": None,
             "store": None,
             "api_key": None,
@@ -76,6 +77,7 @@ async def test_call_responses_model_uses_openai_compatible_options(
     assert await extract_response_text(response) == "Config review"
     assert calls[0]["custom_llm_provider"] == "openai"
     assert calls[0]["store"] is False
+    assert calls[0]["include"] == ["reasoning.encrypted_content"]
     assert calls[0]["max_output_tokens"] is None
     assert calls[0]["api_key"] == "token"
     assert calls[0]["base_url"] == "https://chatgpt.com/backend-api/codex"

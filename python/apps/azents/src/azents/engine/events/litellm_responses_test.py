@@ -210,6 +210,35 @@ class TestLiteLLMResponsesLowerer:
 
         assert "prompt_cache_key" not in request.kwargs
 
+    def test_chatgpt_oauth_requests_encrypted_reasoning_content(self) -> None:
+        """ChatGPT OAuth requests encrypted reasoning for stateless replay."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1-codex",
+            provider_id=LLMProvider.CHATGPT_OAUTH,
+        )
+
+        request = lowerer.lower([], model="gpt-5.1-codex")
+
+        assert request.kwargs["include"] == ["reasoning.encrypted_content"]
+        assert request.kwargs["store"] is False
+
+    def test_chatgpt_oauth_preserves_existing_include_values(self) -> None:
+        """Append encrypted reasoning include without dropping caller values."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1-codex",
+            provider_id=LLMProvider.CHATGPT_OAUTH,
+            kwargs={"include": ["file_search_call.results"]},
+        )
+
+        request = lowerer.lower([], model="gpt-5.1-codex")
+
+        assert request.kwargs["include"] == [
+            "file_search_call.results",
+            "reasoning.encrypted_content",
+        ]
+
     def test_anthropic_adds_cache_control_hints_to_prefix(self) -> None:
         """Claude targets receive cache_control hints on stable prefix blocks."""
         lowerer = LiteLLMResponsesLowerer(
