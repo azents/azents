@@ -1237,9 +1237,15 @@ def _normalize_response_usage(
             _dict(raw_usage.get("completion_tokens_details")).get("reasoning_tokens")
         ),
     )
+    raw_hidden_params = _dict(response.get("_hidden_params")) or None
     cost_usd = _first_float(
         _float_or_none(raw_usage.get("cost_usd")),
         _float_or_none(raw_usage.get("cost")),
+        _float_or_none(
+            raw_hidden_params.get("response_cost")
+            if raw_hidden_params is not None
+            else None
+        ),
     )
 
     return TokenUsagePayload(
@@ -1251,6 +1257,7 @@ def _normalize_response_usage(
         cache_creation_tokens=cache_creation_tokens,
         reasoning_tokens=reasoning_tokens,
         cost_usd=cost_usd,
+        raw_hidden_params=raw_hidden_params,
     )
 
 

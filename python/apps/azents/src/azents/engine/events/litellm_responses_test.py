@@ -1934,6 +1934,45 @@ class TestLiteLLMResponsesOutputNormalizer:
             "cost": 0.001,
         }
 
+    def test_normalizes_hidden_params_cost_usage(self) -> None:
+        """LiteLLM hidden params are preserved for cache hit analysis."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        )
+
+        output = normalizer.normalize(
+            "session-1",
+            [
+                NativeEvent(
+                    type="ResponseCompletedEvent",
+                    item={
+                        "response": {
+                            "usage": {
+                                "input_tokens": 20,
+                                "output_tokens": 4,
+                                "total_tokens": 24,
+                            },
+                            "_hidden_params": {
+                                "response_cost": 0.002,
+                                "cache_hit": True,
+                                "model_id": "gpt-5.1",
+                            },
+                            "output": [],
+                        }
+                    },
+                )
+            ],
+        )
+
+        assert output.usage is not None
+        assert output.usage.cost_usd == 0.002
+        assert output.usage.raw_hidden_params == {
+            "response_cost": 0.002,
+            "cache_hit": True,
+            "model_id": "gpt-5.1",
+        }
+
     def test_normalizes_output_item_done_when_completed_response_has_no_output(
         self,
     ) -> None:

@@ -257,6 +257,10 @@ class AgentRunExecution:
                     request.session_id,
                     native_events,
                 )
+                _log_model_token_usage(
+                    request=request,
+                    usage=normalized.usage,
+                )
 
                 await self._update_phase(
                     session,
@@ -706,6 +710,51 @@ class AgentRunExecution:
         )
         if self._phase_sink is not None:
             await self._phase_sink(phase)
+
+
+def _log_model_token_usage(
+    *,
+    request: AgentRunExecutionRequest,
+    usage: TokenUsagePayload | None,
+) -> None:
+    """Log per-turn token usage, including prompt cache counters."""
+    if usage is None:
+        logger.info(
+            "Model token usage",
+            extra={
+                "session_id": request.session_id,
+                "run_id": request.run_id,
+                "run_index": request.run_index,
+                "model": request.model,
+                "usage_present": False,
+            },
+        )
+        return
+    cached_tokens = usage.cached_tokens or 0
+    prompt_tokens = usage.prompt_tokens
+    cached_ratio = cached_tokens / prompt_tokens if prompt_tokens > 0 else None
+    logger.info(
+        "Model token usage",
+        extra={
+            "session_id": request.session_id,
+            "run_id": request.run_id,
+            "run_index": request.run_index,
+            "model": request.model,
+            "usage_present": True,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "cached_tokens": usage.cached_tokens,
+            "cache_creation_tokens": usage.cache_creation_tokens,
+            "reasoning_tokens": usage.reasoning_tokens,
+            "cost_usd": usage.cost_usd,
+            "cached_token_ratio": (
+                round(cached_ratio, 4) if cached_ratio is not None else None
+            ),
+            "raw_usage": usage.raw,
+            "raw_hidden_params": usage.raw_hidden_params,
+        },
+    )
 
 
 def _turn_range(max_turns: int | None) -> Iterable[int]:
