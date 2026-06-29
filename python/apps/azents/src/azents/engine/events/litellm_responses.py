@@ -16,6 +16,7 @@ from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
 from litellm.responses.main import aresponses
 from litellm.types.llms.openai import ResponseAPIUsage, ResponsesAPIResponse
 from openai import OpenAIError as OpenAIBaseError
+from openai.types.responses.response_includable import ResponseIncludable
 from openai.types.responses.tool_param import ToolParam
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import TypeAdapter, ValidationError
@@ -79,6 +80,7 @@ from azents.engine.run.types import BuiltinToolSpec
 _DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
 _PROMPT_CACHE_KEY_PREFIX = "azs"
 _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
+_REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
 _TOOLS_ADAPTER: TypeAdapter[list[ToolParam]] = TypeAdapter(list[ToolParam])
 _REASONING_ADAPTER: TypeAdapter[Reasoning] = TypeAdapter(Reasoning)
 
@@ -252,8 +254,6 @@ class LiteLLMResponsesLowerer:
             prompt_cache_key = _openai_prompt_cache_key(self._prompt_cache_scope)
             if prompt_cache_key is not None:
                 kwargs.setdefault("prompt_cache_key", prompt_cache_key)
-        if self._provider_id == LLMProvider.CHATGPT_OAUTH:
-            kwargs.setdefault("store", False)
         if self._temperature is not None:
             kwargs["temperature"] = self._temperature
         if self._max_tokens is not None:
@@ -265,6 +265,9 @@ class LiteLLMResponsesLowerer:
         if self._reasoning_effort is not None:
             kwargs["reasoning"] = {"effort": self._reasoning_effort, "summary": "auto"}
         kwargs.update(self._extra_kwargs)
+        if self._provider_id == LLMProvider.CHATGPT_OAUTH:
+            kwargs.setdefault("store", False)
+            _append_include_value(kwargs, _REASONING_ENCRYPTED_CONTENT_INCLUDE)
         return kwargs
 
     def _compatible_native_item(
@@ -393,6 +396,26 @@ def _openai_prompt_cache_key(scope: str | None) -> str | None:
         return None
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
     return f"{_PROMPT_CACHE_KEY_PREFIX}:{digest}"[:_OPENAI_PROMPT_CACHE_KEY_MAX_CHARS]
+
+
+def _append_include_value(
+    kwargs: dict[str, object],
+    value: ResponseIncludable,
+) -> None:
+    """Add a Responses include value to kwargs without dropping explicit values."""
+    raw_include = kwargs.get("include")
+    if raw_include is None:
+        kwargs["include"] = [value]
+        return
+    if isinstance(raw_include, list) and all(
+        isinstance(item, str) for item in raw_include
+    ):
+        include = list(raw_include)
+        if value not in include:
+            include.append(value)
+        kwargs["include"] = include
+        return
+    raise TypeError("LiteLLM kwarg include must be list[str]")
 
 
 def _apply_provider_prompt_cache_hints(
@@ -656,6 +679,7 @@ async def _call_litellm_responses(
         base_url=_optional_str(kwargs, "base_url"),
         api_base=_optional_str(kwargs, "api_base"),
         stop=_optional_stop(kwargs, "stop"),
+        include=_optional_include(kwargs, "include"),
         **extra_kwargs,
     )
 
@@ -717,6 +741,7 @@ def _extra_litellm_kwargs(kwargs: dict[str, object]) -> dict[str, Any]:
         "base_url",
         "api_base",
         "stop",
+        "include",
     }
     return {key: value for key, value in kwargs.items() if key not in excluded}
 
@@ -817,6 +842,19 @@ def _optional_stop(kwargs: dict[str, object], key: str) -> str | list[str] | Non
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         return value
     raise TypeError(f"LiteLLM kwarg {key} must be str or list[str]")
+
+
+def _optional_include(
+    kwargs: dict[str, object],
+    key: str,
+) -> list[ResponseIncludable] | None:
+    """Return optional include kwarg."""
+    value = kwargs.get(key)
+    if value is None:
+        return None
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return cast(list[ResponseIncludable], value)
+    raise TypeError(f"LiteLLM kwarg {key} must be list[str]")
 
 
 def _format_model_call_error(exc: Exception) -> str:
