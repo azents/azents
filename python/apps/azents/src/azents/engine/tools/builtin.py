@@ -359,16 +359,14 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         self,
         config: ShellToolkitConfig,
         agent_id: str,
-        session_manager: SessionManager[AsyncSession] | None = None,
-        memory_repo: MemoryRepository | None = None,
-        agent_runtime_repo: AgentRuntimeRepository | None = None,
+        session_manager: SessionManager[AsyncSession],
+        memory_repo: MemoryRepository,
     ) -> None:
         self._config = config
         self._agent_id = agent_id
         self._session_id = ""
         self._session_manager = session_manager
         self._memory_repo = memory_repo
-        self._agent_runtime_repo = agent_runtime_repo
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id.
@@ -399,7 +397,7 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         user_id = context.user_id
 
         tools: list[FunctionTool] = []
-        if config.memory_enabled and self._session_manager and self._memory_repo:
+        if config.memory_enabled:
             tools.extend(
                 [
                     make_save_memory_tool(
@@ -440,7 +438,7 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
     async def get_dynamic_prompt(self, context: TurnContext) -> str:
         """Return dynamic memory prompt for the current turn."""
         config = self._config
-        if not (config.memory_enabled and self._session_manager and self._memory_repo):
+        if not config.memory_enabled:
             return ""
         async with self._session_manager() as mem_session:
             return await collect_memory_prompt(
@@ -474,10 +472,10 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         model_file_service: ModelFileService,
         agent_id: str,
         agents_store: AgentsAppendixDedupeStateStore,
-        runner_operations: RuntimeRunnerOperationClient | None = None,
-        session_manager: SessionManager[AsyncSession] | None = None,
-        agent_runtime_repo: AgentRuntimeRepository | None = None,
-        project_repo: SessionWorkspaceProjectRepository | None = None,
+        runner_operations: RuntimeRunnerOperationClient,
+        session_manager: SessionManager[AsyncSession],
+        agent_runtime_repo: AgentRuntimeRepository,
+        project_repo: SessionWorkspaceProjectRepository,
     ) -> None:
         self._config = config
         self._runner_operations = runner_operations
@@ -578,9 +576,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         runtime_agent_id = self._runtime_agent_id
         user_id = context.user_id
 
-        if self._runner_operations is None or self._agent_runtime_repo is None:
-            return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
-
         file_ss = RuntimeRunnerFileStorage(
             runner_operations=self._runner_operations,
             agent_runtime_repo=self._agent_runtime_repo,
@@ -672,8 +667,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Return static runtime/files prompt for the current run."""
-        if self._runner_operations is None or self._agent_runtime_repo is None:
-            return "Runtime Runner operation client is not configured."
         projects = sorted(
             await self._load_projects(session_id=self._session_id),
             key=lambda project: project.path,
@@ -690,11 +683,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         session_id: str,
     ) -> list[SessionWorkspaceProject]:
         """Fetch Project list registered to AgentSession."""
-        if (
-            not session_id
-            or self._session_manager is None
-            or self._project_repo is None
-        ):
+        if not session_id:
             return []
         async with self._session_manager() as session:
             return await self._project_repo.list_projects(
@@ -821,11 +810,11 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         artifact_service: ArtifactService,
         model_file_service: ModelFileService,
         agents_store: AgentsAppendixDedupeStateStore,
-        session_manager: SessionManager[AsyncSession] | None = None,
-        memory_repo: MemoryRepository | None = None,
-        agent_runtime_repo: AgentRuntimeRepository | None = None,
-        runner_operations: RuntimeRunnerOperationClient | None = None,
-        project_repo: SessionWorkspaceProjectRepository | None = None,
+        session_manager: SessionManager[AsyncSession],
+        memory_repo: MemoryRepository,
+        agent_runtime_repo: AgentRuntimeRepository,
+        runner_operations: RuntimeRunnerOperationClient,
+        project_repo: SessionWorkspaceProjectRepository,
     ) -> None:
         self._exchange_file_service = exchange_file_service
         self._artifact_service = artifact_service
@@ -881,7 +870,6 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             agent_id=context.agent_id,
             session_manager=self._session_manager,
             memory_repo=self._memory_repo,
-            agent_runtime_repo=self._agent_runtime_repo,
         )
 
 
