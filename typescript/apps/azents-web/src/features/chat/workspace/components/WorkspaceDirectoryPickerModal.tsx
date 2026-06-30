@@ -194,10 +194,10 @@ export function WorkspaceDirectoryPickerModal({
         </Group>
         <ScrollArea.Autosize
           mah={{ base: 520, sm: 440 }}
-          styles={{ viewport: { overflowX: "hidden" } }}
+          styles={{ viewport: { overflowX: "auto" } }}
           type="auto"
         >
-          <Stack gap={4} style={{ minWidth: 0, overflowX: "hidden" }}>
+          <Stack gap={4} style={{ minWidth: 0, width: "100%" }}>
             {parent ? (
               <Button
                 fullWidth
@@ -217,10 +217,11 @@ export function WorkspaceDirectoryPickerModal({
                 py={6}
                 radius="sm"
                 style={{
+                  boxSizing: "border-box",
                   cursor: "pointer",
                   maxWidth: "100%",
                   minWidth: 0,
-                  overflow: "hidden",
+                  width: "100%",
                 }}
                 onClick={() => onOpenDirectory(entry.path)}
               >
@@ -228,27 +229,23 @@ export function WorkspaceDirectoryPickerModal({
                   justify="space-between"
                   wrap="nowrap"
                   gap={6}
-                  style={{ maxWidth: "100%", minWidth: 0 }}
+                  style={{ maxWidth: "100%", minWidth: 0, width: "100%" }}
                 >
                   <Group
                     gap={8}
-                    style={{ flex: 1, minWidth: 0, overflow: "hidden" }}
+                    style={{ flex: "1 1 auto", minWidth: 0 }}
                     wrap="nowrap"
                   >
                     <IconFolder size={16} style={{ flex: "0 0 auto" }} />
-                    <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
-                      <Text fw={500} size="sm" truncate>
-                        {basename(entry.path)}
-                      </Text>
-                      <Text c="dimmed" size="xs" truncate>
-                        {entry.path}
-                      </Text>
-                    </Stack>
+                    <Text fw={500} size="sm" truncate style={{ minWidth: 0 }}>
+                      {basename(entry.path)}
+                    </Text>
                   </Group>
                   <Tooltip label={t("projectPickerSelectDirectory")}>
                     <ActionIcon
                       aria-label={t("projectPickerSelectDirectory")}
                       size={30}
+                      style={{ flex: "0 0 auto" }}
                       variant="light"
                       onClick={(event) => {
                         event.stopPropagation();
