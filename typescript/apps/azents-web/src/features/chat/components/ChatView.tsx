@@ -337,7 +337,6 @@ export function ChatView({
     addFiles,
     removeFile,
     clearFiles,
-    clearDoneFiles,
     resetDoneFiles,
     uploadAll,
     isUploading,
@@ -1078,7 +1077,7 @@ export function ChatView({
                 onResumeGoal={onResumeGoal}
                 uploadAll={uploadAll}
                 onSendInput={handleSubmitInput}
-                clearDoneFiles={clearDoneFiles}
+                clearFiles={clearFiles}
                 resetDoneFiles={resetDoneFiles}
                 addFiles={addFiles}
                 removeFile={removeFile}

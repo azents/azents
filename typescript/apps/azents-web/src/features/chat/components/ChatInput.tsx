@@ -80,8 +80,8 @@ interface ChatInputProps {
     action?: ChatAction | null,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
-  /** complete file clear */
-  clearDoneFiles: () => void;
+  /** clear attached file draft state */
+  clearFiles: () => void;
   /** complete file status pending  with text. */
   resetDoneFiles: () => void;
   /** file add callback */
@@ -348,7 +348,7 @@ export const ChatInput = memo(function ChatInput({
   onResumeGoal,
   uploadAll,
   onSendInput,
-  clearDoneFiles,
+  clearFiles,
   resetDoneFiles,
   addFiles,
   removeFile,
@@ -386,6 +386,7 @@ export const ChatInput = memo(function ChatInput({
     initialInputValue ?? parsedDraft.message,
   );
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
       resolveActionDefinition(parsedDraft.action, inputActions),
@@ -500,8 +501,9 @@ export const ChatInput = memo(function ChatInput({
     setSelectedAction(null);
     updateInputValue("");
     clearDraft();
+    clearFiles();
     onAfterSend();
-  }, [clearDraft, onAfterSend, updateInputValue]);
+  }, [clearDraft, clearFiles, onAfterSend, updateInputValue]);
 
   const handleSend = useCallback((): void => {
     const send = async (): Promise<void> => {
@@ -535,12 +537,26 @@ export const ChatInput = memo(function ChatInput({
         try {
           const uploaded = await uploadAll(agentId);
           if (uploaded.length === 0) {
+            if (!trimmed || attachmentPolicy === "required") {
+              setSendErrorVisible(true);
+              resetDoneFiles();
+              return;
+            }
+            clearFiles();
+            const sentWithoutAttachments = await onSendInput(
+              trimmed,
+              normalizedAction,
+            );
+            if (sentWithoutAttachments) {
+              clearInputAfterSend();
+            } else {
+              setSendErrorVisible(true);
+            }
             return;
           }
           const sent = await onSendInput(trimmed, normalizedAction, uploaded);
           if (sent) {
             clearInputAfterSend();
-            clearDoneFiles();
           } else {
             setSendErrorVisible(true);
             resetDoneFiles();
@@ -570,7 +586,7 @@ export const ChatInput = memo(function ChatInput({
     uploadAll,
     onSendInput,
     clearInputAfterSend,
-    clearDoneFiles,
+    clearFiles,
     resetDoneFiles,
   ]);
 
@@ -590,6 +606,21 @@ export const ChatInput = memo(function ChatInput({
       }
     },
     [handleSend, isMobile],
+  );
+
+  const handleTextareaFocus = useCallback((): void => {
+    setComposerFocused(true);
+    onFocus?.();
+  }, [onFocus]);
+
+  const handleComposerBlur = useCallback(
+    (event: React.FocusEvent<HTMLDivElement>): void => {
+      if (event.currentTarget.contains(event.relatedTarget)) {
+        return;
+      }
+      setComposerFocused(false);
+    },
+    [],
   );
 
   /** file select handler */
@@ -721,63 +752,108 @@ export const ChatInput = memo(function ChatInput({
                   onRemove={removeFile}
                 />
               )}
-              {selectedAction !== null && !editingMessageId && (
-                <Paper withBorder radius="sm" px="sm" py="2xs">
-                  <Group justify="space-between" gap="sm" wrap="nowrap">
-                    <Text size="xs" c="dimmed" fw={500}>
-                      /{selectedAction.keyword} · {selectedAction.label}
-                    </Text>
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      c="dimmed"
-                      onClick={() => {
-                        setSelectedAction(null);
-                        persistDraft(inputValue, null);
-                      }}
-                      aria-label={t("cancelEdit")}
-                    >
-                      <IconX size={14} />
-                    </ActionIcon>
-                  </Group>
-                  {selectedAction.availability_hint?.message && (
-                    <Text size="xs" c="orange" mt={rem(4)}>
-                      {selectedAction.availability_hint.message}
-                    </Text>
+              <Paper
+                withBorder
+                radius="md"
+                px="sm"
+                py={rem(6)}
+                onBlur={handleComposerBlur}
+                onClick={() => textareaRef.current?.focus()}
+                style={{
+                  borderColor: composerFocused
+                    ? "var(--mantine-color-blue-5)"
+                    : void 0,
+                  boxShadow: composerFocused
+                    ? "0 0 0 1px var(--mantine-color-blue-5)"
+                    : void 0,
+                  transition: "border-color 120ms ease, box-shadow 120ms ease",
+                }}
+              >
+                <Stack gap={rem(4)}>
+                  {selectedAction !== null && !editingMessageId && (
+                    <Stack gap={rem(2)} align="flex-start">
+                      <Group
+                        gap={rem(4)}
+                        wrap="nowrap"
+                        px={rem(8)}
+                        py={rem(3)}
+                        style={{
+                          borderRadius: rem(999),
+                          background: "var(--mantine-color-blue-light)",
+                          border:
+                            "1px solid var(--mantine-color-blue-light-color)",
+                          width: "fit-content",
+                          maxWidth: "100%",
+                        }}
+                      >
+                        <Text size="xs" fw={700} c="blue" truncate>
+                          /{selectedAction.keyword}
+                        </Text>
+                        <ActionIcon
+                          variant="transparent"
+                          size={rem(16)}
+                          c="dimmed"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedAction(null);
+                            persistDraft(inputValue, null);
+                            textareaRef.current?.focus();
+                          }}
+                          aria-label={t("cancelEdit")}
+                        >
+                          <IconX size={12} />
+                        </ActionIcon>
+                      </Group>
+                      {selectedAction.availability_hint?.message && (
+                        <Text size="xs" c="orange" pl={rem(2)}>
+                          {selectedAction.availability_hint.message}
+                        </Text>
+                      )}
+                    </Stack>
                   )}
-                </Paper>
-              )}
-              <Box style={{ minWidth: 0, position: "relative" }}>
-                {todo !== null && !editingMessageId && (
-                  <TodoPreviewBar
-                    goal={goal}
-                    isMobile={isMobile}
-                    todo={todo}
-                    onClearGoal={onClearGoal}
-                    onUpdateGoal={onUpdateGoal}
-                    onPauseGoal={onPauseGoal}
-                    onResumeGoal={onResumeGoal}
-                  />
-                )}
-                <Textarea
-                  ref={textareaRef}
-                  placeholder={
-                    selectedAction?.message.placeholder ??
-                    (isMobile
-                      ? t("inputPlaceholder")
-                      : t("inputPlaceholderDesktop"))
-                  }
-                  value={inputValue}
-                  onChange={(e) => updateInputValue(e.currentTarget.value)}
-                  onKeyDown={handleKeyDown}
-                  onFocus={onFocus}
-                  autosize
-                  minRows={1}
-                  maxRows={5}
-                  flex={1}
-                  styles={{ input: { fontSize: rem(16) } }}
-                />
-              </Box>
+                  <Box style={{ minWidth: 0, position: "relative" }}>
+                    {todo !== null &&
+                      !editingMessageId &&
+                      selectedAction === null &&
+                      inputActionQuery === null && (
+                        <TodoPreviewBar
+                          goal={goal}
+                          isMobile={isMobile}
+                          todo={todo}
+                          onClearGoal={onClearGoal}
+                          onUpdateGoal={onUpdateGoal}
+                          onPauseGoal={onPauseGoal}
+                          onResumeGoal={onResumeGoal}
+                        />
+                      )}
+                    <Textarea
+                      ref={textareaRef}
+                      variant="unstyled"
+                      placeholder={
+                        selectedAction?.message.placeholder ??
+                        (isMobile
+                          ? t("inputPlaceholder")
+                          : t("inputPlaceholderDesktop"))
+                      }
+                      value={inputValue}
+                      onChange={(e) => updateInputValue(e.currentTarget.value)}
+                      onKeyDown={handleKeyDown}
+                      onFocus={handleTextareaFocus}
+                      autosize
+                      minRows={1}
+                      maxRows={5}
+                      flex={1}
+                      styles={{
+                        input: {
+                          fontSize: rem(16),
+                          padding: 0,
+                          minHeight: rem(28),
+                        },
+                      }}
+                    />
+                  </Box>
+                </Stack>
+              </Paper>
             </Stack>
           </Box>
           {isStopAvailable && !inputValue.trim() && selectedAction === null ? (

@@ -828,6 +828,42 @@ function isInputBufferLiveEvent(event: ChatEventResponse): boolean {
   return isRecord(metadata) && metadata.live_projection === "input_buffer";
 }
 
+function pendingBufferMatchesEvent(
+  buffer: PendingInputBuffer,
+  event: ChatEventResponse,
+): boolean {
+  const externalId = event.external_id ?? null;
+  const externalRoot = externalId?.split(":", 1)[0] ?? null;
+  return (
+    buffer.id === event.id ||
+    buffer.id === externalId ||
+    buffer.id === externalRoot
+  );
+}
+
+function shouldRemovePendingBufferForEvent(event: ChatEventResponse): boolean {
+  switch (event.kind) {
+    case "user_message":
+    case "action_message":
+    case "goal_continuation":
+    case "goal_updated":
+    case "system_error":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function removePendingBuffersForEvent(
+  buffers: PendingInputBuffer[],
+  event: ChatEventResponse,
+): PendingInputBuffer[] {
+  if (!shouldRemovePendingBufferForEvent(event)) {
+    return buffers;
+  }
+  return buffers.filter((buffer) => !pendingBufferMatchesEvent(buffer, event));
+}
+
 function mapInputBufferLiveEvent(
   event: ChatEventResponse,
 ): PendingInputBuffer | null {
@@ -1409,16 +1445,10 @@ export function useChatSessionContainer(
             prev.partialHistory,
             responseEvent,
           ),
-          pendingInputBuffers:
-            responseEvent.kind === "user_message" ||
-            responseEvent.kind === "action_message" ||
-            responseEvent.kind === "goal_continuation"
-              ? prev.pendingInputBuffers.filter(
-                  (buffer) =>
-                    buffer.id !== responseEvent.external_id &&
-                    buffer.id !== responseEvent.id,
-                )
-              : prev.pendingInputBuffers,
+          pendingInputBuffers: removePendingBuffersForEvent(
+            prev.pendingInputBuffers,
+            responseEvent,
+          ),
         }));
         if (responseEvent.kind === "run_marker") {
           markRunInactive();

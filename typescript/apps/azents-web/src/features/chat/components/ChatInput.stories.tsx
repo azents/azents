@@ -8,7 +8,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const uploadAll = (): Promise<UploadedFile[]> => Promise.resolve([]);
 const sendInput = (): Promise<boolean> => Promise.resolve(true);
-const clearDoneFiles = (): void => {};
+const clearFiles = (): void => {};
 const resetDoneFiles = (): void => {};
 const addFiles: (files: FileList) => void = () => {};
 const removeFile = (): void => {};
@@ -67,7 +67,7 @@ const baseArgs = {
   todo: null,
   uploadAll,
   onSendInput: sendInput,
-  clearDoneFiles,
+  clearFiles,
   resetDoneFiles,
   addFiles,
   removeFile,
