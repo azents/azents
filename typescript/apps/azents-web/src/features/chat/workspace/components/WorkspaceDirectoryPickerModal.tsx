@@ -192,11 +192,7 @@ export function WorkspaceDirectoryPickerModal({
             </Tooltip>
           </Group>
         </Group>
-        <ScrollArea.Autosize
-          mah={{ base: 520, sm: 440 }}
-          styles={{ viewport: { overflowX: "auto" } }}
-          type="auto"
-        >
+        <ScrollArea.Autosize mah={{ base: 520, sm: 440 }} type="auto">
           <Stack gap={4} style={{ minWidth: 0, width: "100%" }}>
             {parent ? (
               <Button
