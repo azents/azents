@@ -1,7 +1,6 @@
 """Context window utility tests."""
 
 from azents.engine.context.window import (
-    compute_auto_compaction_protected_tokens,
     compute_effective_context_window_tokens,
     get_max_input_tokens,
 )
@@ -29,18 +28,6 @@ class TestComputeEffectiveContextWindowTokens:
 
         assert result.effective_max_input_tokens == 272_000
         assert result.auto_compaction_threshold_tokens == 244_800
-
-
-class TestComputeAutoCompactionProtectedTokens:
-    """compute_auto_compaction_protected_tokens tests."""
-
-    def test_uses_ten_percent_for_small_window(self) -> None:
-        """Preserve 10 percent of small effective windows."""
-        assert compute_auto_compaction_protected_tokens(32_000) == 3_200
-
-    def test_caps_large_window_tail(self) -> None:
-        """Do not let protected tail grow with large effective windows."""
-        assert compute_auto_compaction_protected_tokens(272_000) == 12_000
 
 
 class TestGetMaxInputTokens:

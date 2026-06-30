@@ -332,7 +332,6 @@ class ManualCompactor(Protocol):
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: "SummaryGenerator",
-        protected_token_budget: int,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
     ) -> Event | None:
