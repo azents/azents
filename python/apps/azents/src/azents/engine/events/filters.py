@@ -606,7 +606,7 @@ def _append_continuity_events(summary: str, events: Sequence[Event]) -> str:
             "compacted transcript was already included in the summary above. Each "
             "event excerpt is independently bounded and may be truncated."
         ),
-        f"Recent turn window: last {_CONTINUITY_RECENT_TURNS} user turns.",
+        f"Recent turn window: last {_CONTINUITY_RECENT_TURNS} completed model turns.",
         f"Per-event excerpt cap: {_CONTINUITY_MAX_EVENT_TOKENS} estimated tokens.",
         "",
     ]
@@ -623,20 +623,20 @@ def _append_continuity_events(summary: str, events: Sequence[Event]) -> str:
 
 
 def _select_recent_turn_events(events: Sequence[Event], max_turns: int) -> list[Event]:
-    """Return events belonging to the last user turns."""
+    """Return events belonging to the last completed model turns."""
     if max_turns <= 0:
         return []
-    user_turn_indexes = [
+    turn_marker_indexes = [
         index
         for index, event in enumerate(events)
-        if event.kind == EventKind.USER_MESSAGE
-        and isinstance(event.payload, UserMessagePayload)
+        if isinstance(event.payload, TurnMarkerPayload)
     ]
-    if not user_turn_indexes:
+    if not turn_marker_indexes:
         return list(events)
-    if len(user_turn_indexes) <= max_turns:
-        return list(events[user_turn_indexes[0] :])
-    return list(events[user_turn_indexes[-max_turns] :])
+    if len(turn_marker_indexes) <= max_turns:
+        return list(events)
+    start_index = turn_marker_indexes[-max_turns - 1] + 1
+    return list(events[start_index:])
 
 
 def _render_continuity_event(event: Event) -> _ContinuityEventRender | None:

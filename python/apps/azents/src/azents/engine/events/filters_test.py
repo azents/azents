@@ -531,17 +531,16 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
     assert "recent" in payload.content
 
 
-async def test_compactor_continuity_uses_last_five_user_turns() -> None:
-    """Continuity excerpts include only the last five user turns."""
-    events: list[Event] = []
-    for turn in range(1, 7):
-        events.append(
-            _event(
-                str((turn * 2) - 1),
-                EventKind.USER_MESSAGE,
-                UserMessagePayload(content=f"user turn {turn}"),
-            )
+async def test_compactor_continuity_uses_last_five_completed_turns() -> None:
+    """Continuity excerpts include only the last five completed model turns."""
+    events: list[Event] = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="initial request"),
         )
+    ]
+    for turn in range(1, 7):
         events.append(
             _event(
                 str(turn * 2),
@@ -550,6 +549,13 @@ async def test_compactor_continuity_uses_last_five_user_turns() -> None:
                     content=f"assistant turn {turn}",
                     native_artifact=_native_artifact(),
                 ),
+            )
+        )
+        events.append(
+            _event(
+                str((turn * 2) + 1),
+                EventKind.TURN_MARKER,
+                TurnMarkerPayload(run_id="run-1", usage=_usage(prompt_tokens=turn)),
             )
         )
     original_event_ids = [event.id for event in events]
@@ -578,9 +584,9 @@ async def test_compactor_continuity_uses_last_five_user_turns() -> None:
     assert summary is not None
     payload = summary.payload
     assert isinstance(payload, CompactionSummaryPayload)
-    assert "user turn 1" not in payload.content
+    assert "initial request" not in payload.content
     assert "assistant turn 1" not in payload.content
-    assert "user turn 2" in payload.content
+    assert "assistant turn 2" in payload.content
     assert "assistant turn 6" in payload.content
 
 

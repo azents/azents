@@ -435,9 +435,10 @@ input starts from the compacted head.
 
 Future model input is selected and sorted by event `model_order`. Auto and manual compaction both
 summarize the full selected model-input transcript into one `compaction_summary` event. The summary
-content also includes a bounded `Recent Events for Continuity` section built from the last five user
-turns in the compacted transcript. Each recent event excerpt is truncated independently before it is
-embedded in the summary payload, so oversized tool output cannot remain as an unbounded raw tail.
+content also includes a bounded `Recent Events for Continuity` section built from the last five
+completed model turns in the compacted transcript. Each recent event excerpt is truncated
+independently before it is embedded in the summary payload, so oversized tool output cannot remain as
+an unbounded raw tail.
 
 ## 9. Invariants
 

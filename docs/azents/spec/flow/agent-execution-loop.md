@@ -303,9 +303,9 @@ Compaction is append-only:
 
 Automatic compaction summarizes the full selected model-input transcript. The compaction summary
 payload then embeds a bounded `Recent Events for Continuity` section containing excerpts from the
-last five user turns of the same compacted transcript. The next model step therefore sees a single
-`compaction_summary` head event that contains both the durable checkpoint and recent continuity
-context.
+last five completed model turns of the same compacted transcript. The next model step therefore sees
+a single `compaction_summary` head event that contains both the durable checkpoint and recent
+continuity context.
 
 Successful automatic compaction writes `auto_threshold_exceeded` to both the marker and summary
 payload reason. Explicit `/compact` writes `manual_command` to both payloads.
