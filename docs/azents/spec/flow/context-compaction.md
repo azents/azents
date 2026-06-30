@@ -13,8 +13,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-06-27
-spec_version: 12
+last_verified_at: 2026-06-30
+spec_version: 13
 ---
 
 # Context Compaction
@@ -43,7 +43,8 @@ When compaction is required:
 2. Select the transcript slice that will be summarized.
 3. For automatic compaction, split the slice into:
    - older events that are summarized; and
-   - preserved tail turns that must remain raw in the next model input.
+   - preserved tail events that must remain raw in the next model input, capped at 10% of
+     the effective context window and 12,000 estimated tokens.
 4. Generate the summary from only the summarized older events.
 5. Append `compaction_summary` with the same `compaction_id` and reason.
 6. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event.
@@ -84,7 +85,7 @@ for the next agent. The prompt also tells the model not to answer the user, not 
 not to fill the budget unnecessarily, not to invent details, and to mark uncertain items as
 `Needs verification`.
 
-Automatic compaction does not include preserved tail turns in the summary request. The preserved tail
+Automatic compaction does not include preserved tail events in the summary request. The preserved tail
 remains available as raw events after the summary in model order, which prevents duplicate
 knowledge between summary text and raw tail events. The prompt explicitly tells the model not to
 duplicate preserved tail content, while still preserving durable state from the compacted transcript.
@@ -119,8 +120,8 @@ run after lowering and do not mutate DB state.
 - `model_input_head_event_id` points at the event summary event after successful compaction, and `model_input_head_model_order` stores the same head event model order for scheduler GC cursor comparisons.
 - Future model input is selected and sorted by event model order, not by physical append id.
 - Automatic compaction presents model input as `compaction_summary` followed by preserved raw tail
-  turns.
-- Preserved tail turns are excluded from automatic compaction summaries.
+  events capped at 10% of the effective context window and 12,000 estimated tokens.
+- Preserved tail events are excluded from automatic compaction summaries.
 - Manual compaction and fallback compaction do not preserve a separate raw tail.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.
 - Summary model calls are non-streaming and carry API-level `max_output_tokens`.

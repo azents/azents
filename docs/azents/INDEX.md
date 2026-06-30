@@ -36,7 +36,7 @@ _8 documents_
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-06-13 | 6 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-06-27 | 12 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-06-30 | 13 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-06-27 | 8 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |

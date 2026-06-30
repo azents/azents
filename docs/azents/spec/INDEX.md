@@ -31,7 +31,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Background Tool Call](flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-06-13 | 6 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
-| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-06-27 | 12 |
+| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-06-30 | 13 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-06-27 | 8 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |
