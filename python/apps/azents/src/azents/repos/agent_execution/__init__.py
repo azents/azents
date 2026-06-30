@@ -398,9 +398,8 @@ class EventTranscriptRepository:
     ) -> int:
         """Calculate next model input logical order inside Session.
 
-        Sequential appends keep a fixed gap. This leaves room to assign middle
-        logical order without renumbering the full transcript each time auto
-        compaction shows summary first and keeps preserved tail after it.
+        Sequential appends keep a fixed gap. This leaves room to insert future
+        model-visible system events without renumbering the full transcript.
         `model_order` is DB BigInteger, so overflow from increments of 1000 is
         not a practical constraint from session event count perspective.
         """

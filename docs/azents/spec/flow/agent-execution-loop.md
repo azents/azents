@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-06-28
-spec_version: 48
+last_verified_at: 2026-06-30
+spec_version: 49
 ---
 
 # Agent Execution Loop
@@ -298,22 +298,24 @@ Compaction is append-only:
 - `agent_sessions.model_input_head_event_id` moves to the compaction summary event id;
 - model input reads events by model order, so physical append order is not the model-visible
   ordering contract;
-- sequential appends leave gaps in model order to allow later summary/tail reordering without
-  renumbering the whole transcript.
+- sequential appends leave gaps in model order so later model-visible system events can be inserted
+  without renumbering the whole transcript.
 
-Automatic compaction summarizes only the older compacted portion and preserves recent tail turns as
-raw events. After the summary is appended, the summary receives an intermediate model order
-between the compacted range and the preserved tail. The next model step therefore naturally sees
-`compaction_summary` followed by the raw tail without a special branch in the input builder. The
-preserved tail keeps its existing model order when a gap is available.
+Automatic compaction summarizes the full selected model-input transcript. The compaction summary
+payload then embeds a bounded `Recent Events for Continuity` section containing excerpts from the
+last five user turns of the same compacted transcript. The next model step therefore sees a single
+`compaction_summary` head event that contains both the durable checkpoint and recent continuity
+context.
 
 Successful automatic compaction writes `auto_threshold_exceeded` to both the marker and summary
 payload reason. Explicit `/compact` writes `manual_command` to both payloads.
 
-Manual compaction and fallback compaction continue to compact the full selected slice and do not
-preserve a separate raw tail. Compaction summary generation uses LiteLLM Responses API directly from
-`engine/context/compaction.py`. If summary generation fails, the failure is propagated to the caller instead
-of being published as a successful compaction. The existing transcript remains append-only.
+Manual compaction uses the same summary-plus-continuity structure as automatic compaction. The
+runtime no longer keeps a separate raw tail by moving the compaction boundary; recent continuity is
+embedded into the summary payload with per-event truncation. Compaction summary generation uses
+LiteLLM Responses API directly from `engine/context/compaction.py`. If summary generation fails, the
+failure is propagated to the caller instead of being published as a successful compaction. The
+existing transcript remains append-only.
 
 ## 7. Entrypoints And Projection
 

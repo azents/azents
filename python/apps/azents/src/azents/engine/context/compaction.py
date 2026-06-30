@@ -97,11 +97,11 @@ needed to continue.
 """
 
 _SUMMARY_USER_TEMPLATE = """\
-Create an updated handoff checkpoint for the compacted transcript below.
-The recent raw tail may be preserved separately by the runtime. Summarize only
-the compacted transcript provided here. Do not duplicate preserved tail content,
-but do not omit durable state from the compacted transcript just because a raw
-tail exists.
+Create an updated handoff checkpoint for the full compacted transcript below.
+The runtime may append bounded recent event excerpts after your checkpoint for
+immediate continuity. Still summarize durable state from the whole compacted
+transcript; do not assume any raw event will remain available outside this
+checkpoint.
 
 If existing checkpoints are present, integrate them into one updated checkpoint.
 Do not copy previous checkpoints verbatim. Keep durable instructions and

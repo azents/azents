@@ -4,17 +4,14 @@ import dataclasses
 import json
 import logging
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Literal, NamedTuple, Protocol
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, ExchangeFileStatus, ModelFileStatus
 from azents.engine.context.compaction import compute_summary_budget
-from azents.engine.context.window import (
-    compute_auto_compaction_protected_tokens,
-    compute_auto_compaction_threshold_tokens,
-)
+from azents.engine.context.window import compute_auto_compaction_threshold_tokens
 from azents.engine.events.file_parts import file_output_part_placeholder_text
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
@@ -69,6 +66,10 @@ from azents.repos.model_file import ModelFileRepository
 logger = logging.getLogger(__name__)
 
 _TOKEN_BYTES = 4
+_CONTINUITY_RECENT_TURNS = 5
+_CONTINUITY_MAX_EVENT_TOKENS = 2_000
+_CONTINUITY_MAX_EVENT_CHARS = _CONTINUITY_MAX_EVENT_TOKENS * _TOKEN_BYTES
+_CONTINUITY_TRUNCATION_MARKER = "\n\n[Event truncated by Azents continuity guard.]"
 _EXCHANGE_URI_PREFIX = "exchange://"
 
 
@@ -246,9 +247,6 @@ class EventAutoCompactionFilter:
         self._threshold_tokens = compute_auto_compaction_threshold_tokens(
             max_input_tokens
         )
-        self._protection_tokens = compute_auto_compaction_protected_tokens(
-            max_input_tokens
-        )
         self._compaction_id_factory = compaction_id_factory
         self._on_compaction_started = on_compaction_started
         self.was_compacted = False
@@ -273,15 +271,13 @@ class EventAutoCompactionFilter:
             transcript=events,
             compaction_id=self._compaction_id_factory(),
             summarize=self._summarize,
-            protected_token_budget=self._protection_tokens,
             summary_context_window_tokens=self._max_input_tokens,
             reason="auto_threshold_exceeded",
         )
         if summary is None:
             return events
         self.was_compacted = True
-        boundary = _find_keep_boundary(events, self._protection_tokens)
-        return [summary, *events[boundary:]]
+        return [summary]
 
 
 class NativeRequestSizeGuard:
@@ -340,16 +336,11 @@ class EventCompactor:
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: SummaryGenerator,
-        protected_token_budget: int,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
     ) -> Event | None:
         """Append summary event and move session model input head to summary."""
-        boundary = _find_keep_boundary(transcript, protected_token_budget)
-        # Summary replaces only the compacted range. Preserved tail remains as
-        # original text after the summary, so it is not included in summary input.
-        old_events = list(transcript[:boundary])
-        tail_events = list(transcript[boundary:])
+        old_events = list(transcript)
         if not old_events:
             return None
 
@@ -403,6 +394,7 @@ class EventCompactor:
                 "Compaction failed: summary model returned no text."
             )
 
+        summary_with_continuity = _append_continuity_events(summary, old_events)
         summary_event = await self.transcript_repo.append(
             session,
             EventCreate(
@@ -410,7 +402,7 @@ class EventCompactor:
                 kind=EventKind.COMPACTION_SUMMARY,
                 payload=CompactionSummaryPayload(
                     compaction_id=compaction_id,
-                    content=summary,
+                    content=summary_with_continuity,
                     covered_until_event_id=old_events[-1].id,
                     reason=reason,
                 ).model_dump(mode="json", exclude_none=True),
@@ -422,16 +414,6 @@ class EventCompactor:
             marker_event.id: marker_order,
             summary_event.id: summary_order,
         }
-        if tail_events and summary_order >= tail_events[0].model_order:
-            # Normal append path leaves a model_order gap.
-            # Therefore only marker/summary need to be inserted in the middle.
-            # This branch repairs tail order only for legacy/manual input without gaps.
-            order_updates.update(
-                {
-                    event.id: summary_order + index + 1
-                    for index, event in enumerate(tail_events)
-                }
-            )
         await self.transcript_repo.update_model_orders(
             session,
             session_id,
@@ -490,84 +472,10 @@ def _estimate_event_tokens(events: Sequence[Event]) -> int:
 
 def _estimate_event_visible_bytes(event: Event) -> int:
     """Calculate model-visible byte cost for one Event."""
-    payload = event.payload
-    if event.kind == EventKind.GOAL_CONTINUATION and isinstance(
-        payload, UserMessagePayload
-    ):
-        return _compact_json_bytes(
-            {
-                "role": "user",
-                "content": format_goal_continuation_reminder(
-                    payload.metadata.get("goal_objective")
-                ),
-            }
-        )
-    if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):
-        return _compact_json_bytes(
-            {"role": "user", "content": _format_goal_updated_event_reminder(payload)}
-        )
-    if isinstance(payload, UserMessagePayload):
-        return _compact_json_bytes(
-            {"role": "user", "content": _visible_input_content(payload.content)}
-        )
-    if isinstance(payload, AssistantMessagePayload):
-        return _compact_json_bytes(
-            {"role": "assistant", "content": _visible_output_content(payload.content)}
-        )
-    if isinstance(payload, ClientToolCallPayload):
-        return _compact_json_bytes(
-            {
-                "type": "function_call",
-                "call_id": payload.call_id,
-                "name": payload.name,
-                "arguments": payload.arguments,
-            }
-        )
-    if isinstance(payload, ClientToolResultPayload):
-        return _compact_json_bytes(
-            {
-                "type": "function_call_output",
-                "call_id": payload.call_id,
-                "output": _visible_tool_output(payload.output),
-            }
-        )
-    if isinstance(payload, ProviderToolCallPayload):
-        return _compact_json_bytes(
-            {
-                "role": "assistant",
-                "content": _provider_tool_call_text(payload),
-            }
-        )
-    if isinstance(payload, ProviderToolResultPayload):
-        return _compact_json_bytes(
-            {
-                "role": "assistant",
-                "content": _provider_tool_result_text(payload),
-            }
-        )
-    if isinstance(payload, CompactionSummaryPayload):
-        return _compact_json_bytes(
-            {
-                "role": "user",
-                "content": format_compaction_summary_reminder(payload.content),
-            }
-        )
-    if isinstance(payload, InterruptedPayload):
-        return _compact_json_bytes(
-            {"role": "user", "content": format_interrupted_reminder()}
-        )
-    if isinstance(payload, SystemReminderPayload):
-        return _compact_json_bytes(
-            {
-                "role": "user",
-                "content": format_system_reminder(
-                    reminder_type="system_reminder",
-                    instruction=payload.text,
-                    data=(),
-                ),
-            }
-        )
-    return 0
+    visible_value = _model_visible_event_value(event)
+    if visible_value is None:
+        return 0
+    return _compact_json_bytes(visible_value)
 
 
 def _visible_input_content(content: str | list[UserContentPart]) -> object:
@@ -670,22 +578,155 @@ def _estimate_bytes_tokens(byte_count: int) -> int:
     return (byte_count + _TOKEN_BYTES - 1) // _TOKEN_BYTES
 
 
-def _find_keep_boundary(
-    events: Sequence[Event],
-    protected_token_budget: int,
-) -> int:
-    """Find old/recent event boundary for summary."""
-    if protected_token_budget <= 0:
-        return len(events)
-    if len(events) <= 1:
-        return 0
-    running = 0
-    for index in range(len(events) - 1, 0, -1):
-        tokens = _estimate_single_event_tokens(events[index])
-        if running + tokens > protected_token_budget:
-            return min(index + 1, len(events) - 1)
-        running += tokens
-    return 1
+class _ContinuityEventRender(NamedTuple):
+    """Rendered recent event excerpt for compaction continuity."""
+
+    text: str
+    truncated: bool
+    original_chars: int
+
+
+def _append_continuity_events(summary: str, events: Sequence[Event]) -> str:
+    """Append bounded recent event excerpts to the compaction summary."""
+    rendered_events = [
+        rendered
+        for event in _select_recent_turn_events(events, _CONTINUITY_RECENT_TURNS)
+        if (rendered := _render_continuity_event(event)) is not None
+    ]
+    if not rendered_events:
+        return summary
+
+    lines = [
+        summary.rstrip(),
+        "",
+        "## Recent Events for Continuity",
+        (
+            "The following are raw excerpts from the most recent compacted events "
+            "so the next agent can continue from the immediate context. The full "
+            "compacted transcript was already included in the summary above. Each "
+            "event excerpt is independently bounded and may be truncated."
+        ),
+        f"Recent turn window: last {_CONTINUITY_RECENT_TURNS} user turns.",
+        f"Per-event excerpt cap: {_CONTINUITY_MAX_EVENT_TOKENS} estimated tokens.",
+        "",
+    ]
+    for index, rendered in enumerate(rendered_events, start=1):
+        lines.append(f"### Recent Event {index}")
+        if rendered.truncated:
+            lines.append(
+                "This event excerpt was truncated "
+                f"from {rendered.original_chars} characters."
+            )
+        lines.append(rendered.text)
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _select_recent_turn_events(events: Sequence[Event], max_turns: int) -> list[Event]:
+    """Return events belonging to the last user turns."""
+    if max_turns <= 0:
+        return []
+    user_turn_indexes = [
+        index
+        for index, event in enumerate(events)
+        if event.kind == EventKind.USER_MESSAGE
+        and isinstance(event.payload, UserMessagePayload)
+    ]
+    if not user_turn_indexes:
+        return list(events)
+    if len(user_turn_indexes) <= max_turns:
+        return list(events[user_turn_indexes[0] :])
+    return list(events[user_turn_indexes[-max_turns] :])
+
+
+def _render_continuity_event(event: Event) -> _ContinuityEventRender | None:
+    """Render one event as a bounded model-visible continuity excerpt."""
+    visible_value = _model_visible_event_value(event)
+    if visible_value is None:
+        return None
+    event_text = json.dumps(
+        {
+            "kind": event.kind.value,
+            "model_order": event.model_order,
+            "content": visible_value,
+        },
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+    original_chars = len(event_text)
+    if original_chars <= _CONTINUITY_MAX_EVENT_CHARS:
+        return _ContinuityEventRender(
+            text=event_text,
+            truncated=False,
+            original_chars=original_chars,
+        )
+    keep_chars = max(
+        _CONTINUITY_MAX_EVENT_CHARS - len(_CONTINUITY_TRUNCATION_MARKER),
+        0,
+    )
+    return _ContinuityEventRender(
+        text=event_text[:keep_chars].rstrip() + _CONTINUITY_TRUNCATION_MARKER,
+        truncated=True,
+        original_chars=original_chars,
+    )
+
+
+def _model_visible_event_value(event: Event) -> object | None:
+    """Return model-visible content for continuity rendering."""
+    payload = event.payload
+    if event.kind == EventKind.GOAL_CONTINUATION and isinstance(
+        payload, UserMessagePayload
+    ):
+        return {
+            "role": "user",
+            "content": format_goal_continuation_reminder(
+                payload.metadata.get("goal_objective")
+            ),
+        }
+    if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):
+        return {"role": "user", "content": _format_goal_updated_event_reminder(payload)}
+    if isinstance(payload, UserMessagePayload):
+        return {"role": "user", "content": _visible_input_content(payload.content)}
+    if isinstance(payload, AssistantMessagePayload):
+        return {
+            "role": "assistant",
+            "content": _visible_output_content(payload.content),
+        }
+    if isinstance(payload, ClientToolCallPayload):
+        return {
+            "type": "function_call",
+            "call_id": payload.call_id,
+            "name": payload.name,
+            "arguments": payload.arguments,
+        }
+    if isinstance(payload, ClientToolResultPayload):
+        return {
+            "type": "function_call_output",
+            "call_id": payload.call_id,
+            "output": _visible_tool_output(payload.output),
+        }
+    if isinstance(payload, ProviderToolCallPayload):
+        return {"role": "assistant", "content": _provider_tool_call_text(payload)}
+    if isinstance(payload, ProviderToolResultPayload):
+        return {"role": "assistant", "content": _provider_tool_result_text(payload)}
+    if isinstance(payload, CompactionSummaryPayload):
+        return {
+            "role": "user",
+            "content": format_compaction_summary_reminder(payload.content),
+        }
+    if isinstance(payload, InterruptedPayload):
+        return {"role": "user", "content": format_interrupted_reminder()}
+    if isinstance(payload, SystemReminderPayload):
+        return {
+            "role": "user",
+            "content": format_system_reminder(
+                reminder_type="system_reminder",
+                instruction=payload.text,
+                data=(),
+            ),
+        }
+    return None
 
 
 def _exchange_attachment_object_keys(

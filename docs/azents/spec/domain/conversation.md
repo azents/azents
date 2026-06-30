@@ -73,8 +73,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-06-28
-spec_version: 75
+last_verified_at: 2026-06-30
+spec_version: 76
 ---
 
 # Conversation & Events
@@ -273,9 +273,9 @@ Attachments are payload-specific, not event-common. Tool result output is always
 events have both physical append identity and model-visible order. Physical ids keep the
 durable append/audit sequence. `model_order` is scoped to a session and is the ordering/filtering key
 used when reading future model input. Sequential appends allocate `model_order` with a gap so later
-compaction can place summary/tail events between existing orders without renumbering the whole
-transcript. This lets compaction keep append-only storage while presenting a logical order such as
-`compaction_summary` followed by preserved raw tail events.
+compaction can insert model-visible system events without renumbering the whole transcript.
+Compaction keeps append-only storage while presenting future model input from a single
+`compaction_summary` head event.
 
 `NativeArtifact.item` is adapter-native opaque payload. Event core does not interpret it.
 Same-native pass-through is allowed only when the compat key matches:
@@ -433,11 +433,11 @@ Compaction is append-only. It appends `compaction_marker` and `compaction_summar
 for UI/audit, and moves `agent_sessions.model_input_head_event_id` to the summary id so future model
 input starts from the compacted head.
 
-Future model input is selected and sorted by event `model_order`. Automatic compaction
-excludes preserved tail turns from the summary text and assigns the summary an intermediate model
-order before the preserved tail. The input builder can therefore read the normal model-input range
-without a dedicated compaction branch while the model still sees `compaction_summary` followed by the
-preserved raw tail. Manual compaction and fallback compaction do not preserve a separate raw tail.
+Future model input is selected and sorted by event `model_order`. Auto and manual compaction both
+summarize the full selected model-input transcript into one `compaction_summary` event. The summary
+content also includes a bounded `Recent Events for Continuity` section built from the last five user
+turns in the compacted transcript. Each recent event excerpt is truncated independently before it is
+embedded in the summary payload, so oversized tool output cannot remain as an unbounded raw tail.
 
 ## 9. Invariants
 

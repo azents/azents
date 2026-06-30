@@ -10,12 +10,6 @@ logger = logging.getLogger(__name__)
 COMPACTION_THRESHOLD_RATIO = 0.9
 """Compaction trigger threshold ratio."""
 
-PROTECTION_RATIO = 0.1
-"""Auto compaction protected segment ratio."""
-
-PROTECTION_MAX_TOKENS = 12_000
-"""Maximum raw tail tokens preserved by auto compaction."""
-
 
 @dataclasses.dataclass(frozen=True)
 class EffectiveContextWindow:
@@ -34,15 +28,6 @@ def compute_auto_compaction_threshold_tokens(max_input_tokens: int) -> int:
     :return: Token threshold that starts auto compaction
     """
     return int(max_input_tokens * COMPACTION_THRESHOLD_RATIO)
-
-
-def compute_auto_compaction_protected_tokens(max_input_tokens: int) -> int:
-    """Calculate raw tail token budget preserved by auto compaction.
-
-    :param max_input_tokens: Effective context window token count
-    :return: Token budget for raw tail events preserved after auto compaction
-    """
-    return min(int(max_input_tokens * PROTECTION_RATIO), PROTECTION_MAX_TOKENS)
 
 
 def compute_effective_context_window_tokens(
