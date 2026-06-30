@@ -977,9 +977,7 @@ class TestListInputActions:
             "id": "command:compact",
             "keyword": "compact",
             "label": "Compact",
-            "description": (
-                "Summarize previous conversation and compact the context window."
-            ),
+            "description": ("Compact chat context."),
             "action": {"type": "command", "name": "compact"},
             "category": "command",
             "message": {

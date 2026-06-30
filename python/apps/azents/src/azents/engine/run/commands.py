@@ -36,7 +36,7 @@ class CompactCommand:
 
     definition = SlashCommandDefinition(
         name="compact",
-        description="Summarize previous conversation and compact the context window.",
+        description="Compact chat context.",
     )
 
     async def execute(

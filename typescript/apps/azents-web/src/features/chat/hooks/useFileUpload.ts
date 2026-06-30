@@ -45,7 +45,6 @@ interface UseFileUploadReturn {
   addFiles: (files: FileList | File[]) => void;
   removeFile: (id: string) => void;
   clearFiles: () => void;
-  clearDoneFiles: () => void;
   resetDoneFiles: () => void;
   uploadAll: (agentId: string) => Promise<UploadedFile[]>;
   isUploading: boolean;
@@ -275,11 +274,6 @@ export function useFileUpload(): UseFileUploadReturn {
     setPendingFiles([]);
   }, []);
 
-  /** complete fileonly remove and, error/in progress file keep. */
-  const clearDoneFiles = useCallback(() => {
-    setPendingFiles((prev) => prev.filter((f) => f.status !== "done"));
-  }, []);
-
   /** send text when complete status text textwhenalso when when uploadto can existstext . */
   const resetDoneFiles = useCallback(() => {
     setPendingFiles((prev) =>
@@ -373,7 +367,6 @@ export function useFileUpload(): UseFileUploadReturn {
     addFiles,
     removeFile,
     clearFiles,
-    clearDoneFiles,
     resetDoneFiles,
     uploadAll,
     isUploading,

@@ -2,7 +2,7 @@
 
 /** common layout for input-buffer bubbles. */
 
-import { Badge, Box, Group, Paper, rem, Stack } from "@mantine/core";
+import { Box, Group, Paper, rem, Stack, Text } from "@mantine/core";
 import { extractFilename, FileAttachmentList } from "./FileAttachmentList";
 import { MarkdownContent } from "./MarkdownContent";
 import type { ChatAction, FileAttachment } from "../types";
@@ -33,6 +33,29 @@ function actionLabel(action: ChatAction): string {
     case "skill":
       return "Skill";
   }
+}
+
+function ActionPill({ action }: { action: ChatAction }): React.ReactElement {
+  return (
+    <Group
+      gap={rem(5)}
+      wrap="nowrap"
+      px={rem(8)}
+      py={rem(3)}
+      style={{
+        alignSelf: "flex-start",
+        background: "rgba(255, 255, 255, 0.92)",
+        border: "1px solid rgba(255, 255, 255, 0.95)",
+        borderRadius: rem(999),
+        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.12)",
+        maxWidth: "100%",
+      }}
+    >
+      <Text size="xs" fw={700} c="blue" truncate>
+        {actionLabel(action)}
+      </Text>
+    </Group>
+  );
 }
 
 export function InputBufferBubbleFrame({
@@ -73,14 +96,8 @@ export function InputBufferBubbleFrame({
             opacity,
           }}
         >
-          <Stack gap={rem(4)}>
-            {action && (
-              <Group gap={rem(6)} wrap="nowrap">
-                <Badge size="sm" variant="white" color="blue">
-                  {actionLabel(action)}
-                </Badge>
-              </Group>
-            )}
+          <Stack gap={rem(8)} align="flex-start">
+            {action && <ActionPill action={action} />}
             <MarkdownContent>{content}</MarkdownContent>
           </Stack>
         </Paper>

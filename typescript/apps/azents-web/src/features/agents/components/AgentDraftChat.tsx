@@ -48,7 +48,7 @@ export function AgentDraftChat(
     pendingFiles,
     addFiles,
     removeFile,
-    clearDoneFiles,
+    clearFiles,
     resetDoneFiles,
     uploadAll,
     isUploading,
@@ -129,7 +129,7 @@ export function AgentDraftChat(
                 ? Promise.resolve(false)
                 : handleSendMessage(message, attachments)
             }
-            clearDoneFiles={clearDoneFiles}
+            clearFiles={clearFiles}
             resetDoneFiles={resetDoneFiles}
             addFiles={addFiles}
             removeFile={removeFile}
