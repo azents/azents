@@ -386,7 +386,6 @@ export const ChatInput = memo(function ChatInput({
     initialInputValue ?? parsedDraft.message,
   );
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
-  const [composerFocused, setComposerFocused] = useState(false);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
       resolveActionDefinition(parsedDraft.action, inputActions),
@@ -608,21 +607,6 @@ export const ChatInput = memo(function ChatInput({
     [handleSend, isMobile],
   );
 
-  const handleTextareaFocus = useCallback((): void => {
-    setComposerFocused(true);
-    onFocus?.();
-  }, [onFocus]);
-
-  const handleComposerBlur = useCallback(
-    (event: React.FocusEvent<HTMLDivElement>): void => {
-      if (event.currentTarget.contains(event.relatedTarget)) {
-        return;
-      }
-      setComposerFocused(false);
-    },
-    [],
-  );
-
   /** file select handler */
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -752,108 +736,91 @@ export const ChatInput = memo(function ChatInput({
                   onRemove={removeFile}
                 />
               )}
-              <Paper
-                withBorder
-                radius="md"
-                px="sm"
-                py={rem(6)}
-                onBlur={handleComposerBlur}
-                onClick={() => textareaRef.current?.focus()}
-                style={{
-                  borderColor: composerFocused
-                    ? "var(--mantine-color-blue-5)"
-                    : void 0,
-                  boxShadow: composerFocused
-                    ? "0 0 0 1px var(--mantine-color-blue-5)"
-                    : void 0,
-                  transition: "border-color 120ms ease, box-shadow 120ms ease",
-                }}
-              >
-                <Stack gap={rem(4)}>
-                  {selectedAction !== null && !editingMessageId && (
-                    <Stack gap={rem(2)} align="flex-start">
-                      <Group
-                        gap={rem(4)}
-                        wrap="nowrap"
-                        px={rem(8)}
-                        py={rem(3)}
-                        style={{
-                          borderRadius: rem(999),
-                          background: "var(--mantine-color-blue-light)",
-                          border:
-                            "1px solid var(--mantine-color-blue-light-color)",
-                          width: "fit-content",
-                          maxWidth: "100%",
-                        }}
-                      >
-                        <Text size="xs" fw={700} c="blue" truncate>
-                          /{selectedAction.keyword}
-                        </Text>
-                        <ActionIcon
-                          variant="transparent"
-                          size={rem(16)}
-                          c="dimmed"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSelectedAction(null);
-                            persistDraft(inputValue, null);
-                            textareaRef.current?.focus();
-                          }}
-                          aria-label={t("cancelEdit")}
-                        >
-                          <IconX size={12} />
-                        </ActionIcon>
-                      </Group>
-                      {selectedAction.availability_hint?.message && (
-                        <Text size="xs" c="orange" pl={rem(2)}>
-                          {selectedAction.availability_hint.message}
-                        </Text>
-                      )}
-                    </Stack>
-                  )}
-                  <Box style={{ minWidth: 0, position: "relative" }}>
-                    {todo !== null &&
-                      !editingMessageId &&
-                      selectedAction === null &&
-                      inputActionQuery === null && (
-                        <TodoPreviewBar
-                          goal={goal}
-                          isMobile={isMobile}
-                          todo={todo}
-                          onClearGoal={onClearGoal}
-                          onUpdateGoal={onUpdateGoal}
-                          onPauseGoal={onPauseGoal}
-                          onResumeGoal={onResumeGoal}
-                        />
-                      )}
-                    <Textarea
-                      ref={textareaRef}
-                      variant="unstyled"
-                      placeholder={
-                        selectedAction?.message.placeholder ??
-                        (isMobile
-                          ? t("inputPlaceholder")
-                          : t("inputPlaceholderDesktop"))
-                      }
-                      value={inputValue}
-                      onChange={(e) => updateInputValue(e.currentTarget.value)}
-                      onKeyDown={handleKeyDown}
-                      onFocus={handleTextareaFocus}
-                      autosize
-                      minRows={1}
-                      maxRows={5}
-                      flex={1}
-                      styles={{
-                        input: {
-                          fontSize: rem(16),
-                          padding: 0,
-                          minHeight: rem(28),
-                        },
-                      }}
+              <Box style={{ minWidth: 0, position: "relative" }}>
+                {todo !== null &&
+                  !editingMessageId &&
+                  selectedAction === null &&
+                  inputActionQuery === null && (
+                    <TodoPreviewBar
+                      goal={goal}
+                      isMobile={isMobile}
+                      todo={todo}
+                      onClearGoal={onClearGoal}
+                      onUpdateGoal={onUpdateGoal}
+                      onPauseGoal={onPauseGoal}
+                      onResumeGoal={onResumeGoal}
                     />
-                  </Box>
-                </Stack>
-              </Paper>
+                  )}
+                {selectedAction !== null && !editingMessageId && (
+                  <Group
+                    gap={rem(4)}
+                    wrap="nowrap"
+                    px={rem(7)}
+                    py={rem(2)}
+                    style={{
+                      position: "absolute",
+                      top: rem(7),
+                      left: rem(12),
+                      zIndex: 1,
+                      borderRadius: rem(999),
+                      background: "var(--mantine-color-blue-light)",
+                      maxWidth: "calc(100% - 24px)",
+                      pointerEvents: "auto",
+                    }}
+                  >
+                    <Text size="xs" fw={700} c="blue" truncate>
+                      /{selectedAction.keyword}
+                    </Text>
+                    <ActionIcon
+                      variant="transparent"
+                      size={rem(14)}
+                      c="dimmed"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSelectedAction(null);
+                        persistDraft(inputValue, null);
+                        textareaRef.current?.focus();
+                      }}
+                      aria-label={t("cancelEdit")}
+                    >
+                      <IconX size={10} />
+                    </ActionIcon>
+                  </Group>
+                )}
+                <Textarea
+                  ref={textareaRef}
+                  placeholder={
+                    selectedAction?.message.placeholder ??
+                    (isMobile
+                      ? t("inputPlaceholder")
+                      : t("inputPlaceholderDesktop"))
+                  }
+                  value={inputValue}
+                  onChange={(e) => updateInputValue(e.currentTarget.value)}
+                  onKeyDown={handleKeyDown}
+                  onFocus={onFocus}
+                  autosize
+                  minRows={1}
+                  maxRows={5}
+                  flex={1}
+                  styles={{
+                    input: {
+                      fontSize: rem(16),
+                      paddingTop:
+                        selectedAction !== null && !editingMessageId
+                          ? rem(34)
+                          : void 0,
+                    },
+                  }}
+                />
+                {selectedAction?.availability_hint?.message &&
+                  !editingMessageId && (
+                    <Text size="xs" c="orange" mt={rem(4)}>
+                      {selectedAction.availability_hint.message}
+                    </Text>
+                  )}
+              </Box>
             </Stack>
           </Box>
           {isStopAvailable && !inputValue.trim() && selectedAction === null ? (

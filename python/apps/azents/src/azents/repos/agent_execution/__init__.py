@@ -12,26 +12,9 @@ from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentRunState,
-    AssistantMessagePayload,
-    ClientToolCallPayload,
-    ClientToolResultPayload,
-    CompactionMarkerPayload,
-    CompactionSummaryPayload,
     Event,
     EventPayload,
-    GoalBriefingPayload,
-    InterruptedPayload,
-    ProviderToolCallPayload,
-    ProviderToolResultPayload,
-    ReasoningPayload,
-    RunMarkerPayload,
-    SubagentEndPayload,
-    SubagentStartPayload,
-    SystemErrorPayload,
-    SystemReminderPayload,
-    TurnMarkerPayload,
-    UnknownAdapterOutputPayload,
-    UserMessagePayload,
+    validate_event_payload,
 )
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -52,48 +35,8 @@ def _validate_payload(
     kind: EventKind,
     payload: dict[str, JSONValue],
 ) -> EventPayload:
-    """Validate JSON payload with payload model by kind."""
-    match kind:
-        case EventKind.USER_MESSAGE | EventKind.BACKGROUND_COMPLETION:
-            return UserMessagePayload.model_validate(payload)
-        case EventKind.ASSISTANT_MESSAGE:
-            return AssistantMessagePayload.model_validate(payload)
-        case EventKind.REASONING:
-            return ReasoningPayload.model_validate(payload)
-        case EventKind.CLIENT_TOOL_CALL:
-            return ClientToolCallPayload.model_validate(payload)
-        case EventKind.CLIENT_TOOL_RESULT:
-            return ClientToolResultPayload.model_validate(payload)
-        case EventKind.PROVIDER_TOOL_CALL:
-            return ProviderToolCallPayload.model_validate(payload)
-        case EventKind.PROVIDER_TOOL_RESULT:
-            return ProviderToolResultPayload.model_validate(payload)
-        case EventKind.TURN_MARKER:
-            return TurnMarkerPayload.model_validate(payload)
-        case EventKind.RUN_MARKER:
-            return RunMarkerPayload.model_validate(payload)
-        case EventKind.INTERRUPTED:
-            return InterruptedPayload.model_validate(payload)
-        case EventKind.COMPACTION_MARKER:
-            return CompactionMarkerPayload.model_validate(payload)
-        case EventKind.COMPACTION_SUMMARY:
-            return CompactionSummaryPayload.model_validate(payload)
-        case EventKind.SUBAGENT_START:
-            return SubagentStartPayload.model_validate(payload)
-        case EventKind.SUBAGENT_END:
-            return SubagentEndPayload.model_validate(payload)
-        case EventKind.GOAL_CONTINUATION | EventKind.GOAL_UPDATED:
-            return UserMessagePayload.model_validate(payload)
-        case EventKind.GOAL_BRIEFING:
-            return GoalBriefingPayload.model_validate(payload)
-        case EventKind.SYSTEM_REMINDER:
-            return SystemReminderPayload.model_validate(payload)
-        case EventKind.SYSTEM_ERROR:
-            return SystemErrorPayload.model_validate(payload)
-        case EventKind.UNKNOWN_ADAPTER_OUTPUT:
-            return UnknownAdapterOutputPayload.model_validate(payload)
-        case _:
-            raise ValueError("Unsupported event kind")
+    """Validate JSON payload using the canonical payload model mapping."""
+    return validate_event_payload(kind, payload)
 
 
 class EventTranscriptRepository:
