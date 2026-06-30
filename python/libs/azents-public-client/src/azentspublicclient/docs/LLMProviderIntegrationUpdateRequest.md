@@ -6,10 +6,10 @@ LLM Provider Integration update request for partial updates.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Display name | [optional]
-**secrets** | [**Secrets1**](Secrets1.md) |  | [optional]
-**config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  | [optional]
-**enabled** | **bool** | Enabled flag | [optional]
+**name** | **str** | Display name | [optional] 
+**secrets** | [**Secrets1**](Secrets1.md) |  | [optional] 
+**config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  | [optional] 
+**enabled** | **bool** | Enabled flag | [optional] 
 
 ## Example
 

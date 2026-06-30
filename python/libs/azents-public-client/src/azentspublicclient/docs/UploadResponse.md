@@ -6,11 +6,11 @@ File upload response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**attachment_id** | **str** | Exchange attachment ID |
-**uri** | **str** | Uploaded file URI |
-**media_type** | **str** | File MIME type |
-**size** | **int** | File size in bytes |
-**name** | **str** | Display filename |
+**attachment_id** | **str** | Exchange attachment ID | 
+**uri** | **str** | Uploaded file URI | 
+**media_type** | **str** | File MIME type | 
+**size** | **int** | File size in bytes | 
+**name** | **str** | Display filename | 
 
 ## Example
 

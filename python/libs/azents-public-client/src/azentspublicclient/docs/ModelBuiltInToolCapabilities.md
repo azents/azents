@@ -6,7 +6,7 @@ Represents provider built-in tool capability.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**supported** | **List[str]** |  | [optional]
+**supported** | **List[str]** |  | [optional] 
 
 ## Example
 

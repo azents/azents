@@ -6,10 +6,10 @@ Workspace response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Workspace name |
-**handle** | **str** | Workspace unique handle |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**name** | **str** | Workspace name | 
+**handle** | **str** | Workspace unique handle | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 

@@ -44,6 +44,7 @@ __all__ = [
     "ApiAttributeError",
     "ApiException",
     "AcceptDeclineResponse",
+    "Action",
     "AgentAdminAddRequest",
     "AgentAdminListResponse",
     "AgentAdminResponse",
@@ -51,6 +52,8 @@ __all__ = [
     "AgentListResponse",
     "AgentModelSelection",
     "AgentModelSelectionInput",
+    "AgentProjectPresetListResponse",
+    "AgentProjectPresetResponse",
     "AgentResponse",
     "AgentRole",
     "AgentRunPhase",
@@ -61,8 +64,11 @@ __all__ = [
     "AgentRuntimeRawStateResponse",
     "AgentRuntimeResponse",
     "AgentRuntimeSummaryResponse",
+    "AgentSessionCreateRequest",
     "AgentSessionListResponse",
     "AgentSessionPrimaryKind",
+    "AgentSessionProjectDefaultsResponse",
+    "AgentSessionProjectDefaultsSourceResponse",
     "AgentSessionResponse",
     "AgentSessionRunState",
     "AgentSessionStatus",
@@ -108,7 +114,6 @@ __all__ = [
     "AwsConfig",
     "AwsSecrets",
     "BuiltinToolConfig",
-    "ChatCommandWriteRequest",
     "ChatEditMessageWriteRequest",
     "ChatEventPageResponse",
     "ChatEventResponse",
@@ -117,13 +122,16 @@ __all__ = [
     "ChatGPTOAuthDeviceStatusResponse",
     "ChatGPTOAuthSecrets",
     "ChatGPTOAuthSessionStatus",
+    "ChatInputWriteRequest",
+    "ChatInputWriteRequestAction",
+    "ChatLiveRunRetryStateResponse",
     "ChatLiveRunStateResponse",
-    "ChatMessageWriteRequest",
     "ChatSessionCreateMessageWriteRequest",
     "ChatStopResponse",
     "ChatWriteAcceptedResponse",
     "ChatWriteResponse",
     "ChatWriteSnapshotResponse",
+    "CommandAction",
     "CreateInvitationRequest",
     "CreateJoinRequestRequest",
     "CreateWorkspaceRequest",
@@ -141,6 +149,7 @@ __all__ = [
     "GitHubPlatformInstallationsRequest",
     "GitHubPlatformInstallationsResponse",
     "GitHubPlatformOAuthUrlResponse",
+    "GoalAction",
     "GoalStateResponse",
     "GoalStatusUpdateRequest",
     "GoalUpdateRequest",
@@ -148,6 +157,11 @@ __all__ = [
     "HealthStatus",
     "ImageFile",
     "ImageThumbnails",
+    "InputActionAttachmentPolicyResponse",
+    "InputActionAvailabilityHintResponse",
+    "InputActionDefinitionResponse",
+    "InputActionListResponse",
+    "InputActionMessagePolicyResponse",
     "InvitationListResponse",
     "InvitationResponse",
     "InvitationStatus",
@@ -228,8 +242,7 @@ __all__ = [
     "SessionWorkspaceProjectResponse",
     "SetPasswordRequest",
     "SignupStatusResponse",
-    "SlashCommandListResponse",
-    "SlashCommandResponse",
+    "SkillAction",
     "SubagentToolkitInheritMode",
     "TestConnectionRequest",
     "TestConnectionResponse",
@@ -295,6 +308,7 @@ from azentspublicclient.exceptions import ApiException as ApiException
 
 # import models into sdk package
 from azentspublicclient.models.accept_decline_response import AcceptDeclineResponse as AcceptDeclineResponse
+from azentspublicclient.models.action import Action as Action
 from azentspublicclient.models.agent_admin_add_request import AgentAdminAddRequest as AgentAdminAddRequest
 from azentspublicclient.models.agent_admin_list_response import AgentAdminListResponse as AgentAdminListResponse
 from azentspublicclient.models.agent_admin_response import AgentAdminResponse as AgentAdminResponse
@@ -302,6 +316,8 @@ from azentspublicclient.models.agent_create_request import AgentCreateRequest as
 from azentspublicclient.models.agent_list_response import AgentListResponse as AgentListResponse
 from azentspublicclient.models.agent_model_selection import AgentModelSelection as AgentModelSelection
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput as AgentModelSelectionInput
+from azentspublicclient.models.agent_project_preset_list_response import AgentProjectPresetListResponse as AgentProjectPresetListResponse
+from azentspublicclient.models.agent_project_preset_response import AgentProjectPresetResponse as AgentProjectPresetResponse
 from azentspublicclient.models.agent_response import AgentResponse as AgentResponse
 from azentspublicclient.models.agent_role import AgentRole as AgentRole
 from azentspublicclient.models.agent_run_phase import AgentRunPhase as AgentRunPhase
@@ -312,8 +328,11 @@ from azentspublicclient.models.agent_runtime_lifecycle_response import AgentRunt
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse as AgentRuntimeRawStateResponse
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse as AgentRuntimeResponse
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse as AgentRuntimeSummaryResponse
+from azentspublicclient.models.agent_session_create_request import AgentSessionCreateRequest as AgentSessionCreateRequest
 from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse as AgentSessionListResponse
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind as AgentSessionPrimaryKind
+from azentspublicclient.models.agent_session_project_defaults_response import AgentSessionProjectDefaultsResponse as AgentSessionProjectDefaultsResponse
+from azentspublicclient.models.agent_session_project_defaults_source_response import AgentSessionProjectDefaultsSourceResponse as AgentSessionProjectDefaultsSourceResponse
 from azentspublicclient.models.agent_session_response import AgentSessionResponse as AgentSessionResponse
 from azentspublicclient.models.agent_session_run_state import AgentSessionRunState as AgentSessionRunState
 from azentspublicclient.models.agent_session_status import AgentSessionStatus as AgentSessionStatus
@@ -359,7 +378,6 @@ from azentspublicclient.models.avatar_upload_ticket_response import AvatarUpload
 from azentspublicclient.models.aws_config import AwsConfig as AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets as AwsSecrets
 from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig as BuiltinToolConfig
-from azentspublicclient.models.chat_command_write_request import ChatCommandWriteRequest as ChatCommandWriteRequest
 from azentspublicclient.models.chat_edit_message_write_request import ChatEditMessageWriteRequest as ChatEditMessageWriteRequest
 from azentspublicclient.models.chat_event_page_response import ChatEventPageResponse as ChatEventPageResponse
 from azentspublicclient.models.chat_event_response import ChatEventResponse as ChatEventResponse
@@ -368,13 +386,16 @@ from azentspublicclient.models.chat_gpto_auth_device_start_response import ChatG
 from azentspublicclient.models.chat_gpto_auth_device_status_response import ChatGPTOAuthDeviceStatusResponse as ChatGPTOAuthDeviceStatusResponse
 from azentspublicclient.models.chat_gpto_auth_secrets import ChatGPTOAuthSecrets as ChatGPTOAuthSecrets
 from azentspublicclient.models.chat_gpto_auth_session_status import ChatGPTOAuthSessionStatus as ChatGPTOAuthSessionStatus
+from azentspublicclient.models.chat_input_write_request import ChatInputWriteRequest as ChatInputWriteRequest
+from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction as ChatInputWriteRequestAction
+from azentspublicclient.models.chat_live_run_retry_state_response import ChatLiveRunRetryStateResponse as ChatLiveRunRetryStateResponse
 from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunStateResponse as ChatLiveRunStateResponse
-from azentspublicclient.models.chat_message_write_request import ChatMessageWriteRequest as ChatMessageWriteRequest
 from azentspublicclient.models.chat_session_create_message_write_request import ChatSessionCreateMessageWriteRequest as ChatSessionCreateMessageWriteRequest
 from azentspublicclient.models.chat_stop_response import ChatStopResponse as ChatStopResponse
 from azentspublicclient.models.chat_write_accepted_response import ChatWriteAcceptedResponse as ChatWriteAcceptedResponse
 from azentspublicclient.models.chat_write_response import ChatWriteResponse as ChatWriteResponse
 from azentspublicclient.models.chat_write_snapshot_response import ChatWriteSnapshotResponse as ChatWriteSnapshotResponse
+from azentspublicclient.models.command_action import CommandAction as CommandAction
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest as CreateInvitationRequest
 from azentspublicclient.models.create_join_request_request import CreateJoinRequestRequest as CreateJoinRequestRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest as CreateWorkspaceRequest
@@ -392,6 +413,7 @@ from azentspublicclient.models.git_hub_platform_install_url_response import GitH
 from azentspublicclient.models.git_hub_platform_installations_request import GitHubPlatformInstallationsRequest as GitHubPlatformInstallationsRequest
 from azentspublicclient.models.git_hub_platform_installations_response import GitHubPlatformInstallationsResponse as GitHubPlatformInstallationsResponse
 from azentspublicclient.models.git_hub_platform_o_auth_url_response import GitHubPlatformOAuthUrlResponse as GitHubPlatformOAuthUrlResponse
+from azentspublicclient.models.goal_action import GoalAction as GoalAction
 from azentspublicclient.models.goal_state_response import GoalStateResponse as GoalStateResponse
 from azentspublicclient.models.goal_status_update_request import GoalStatusUpdateRequest as GoalStatusUpdateRequest
 from azentspublicclient.models.goal_update_request import GoalUpdateRequest as GoalUpdateRequest
@@ -399,6 +421,11 @@ from azentspublicclient.models.http_validation_error import HTTPValidationError 
 from azentspublicclient.models.health_status import HealthStatus as HealthStatus
 from azentspublicclient.models.image_file import ImageFile as ImageFile
 from azentspublicclient.models.image_thumbnails import ImageThumbnails as ImageThumbnails
+from azentspublicclient.models.input_action_attachment_policy_response import InputActionAttachmentPolicyResponse as InputActionAttachmentPolicyResponse
+from azentspublicclient.models.input_action_availability_hint_response import InputActionAvailabilityHintResponse as InputActionAvailabilityHintResponse
+from azentspublicclient.models.input_action_definition_response import InputActionDefinitionResponse as InputActionDefinitionResponse
+from azentspublicclient.models.input_action_list_response import InputActionListResponse as InputActionListResponse
+from azentspublicclient.models.input_action_message_policy_response import InputActionMessagePolicyResponse as InputActionMessagePolicyResponse
 from azentspublicclient.models.invitation_list_response import InvitationListResponse as InvitationListResponse
 from azentspublicclient.models.invitation_response import InvitationResponse as InvitationResponse
 from azentspublicclient.models.invitation_status import InvitationStatus as InvitationStatus
@@ -479,8 +506,7 @@ from azentspublicclient.models.session_workspace_project_registration_request_re
 from azentspublicclient.models.session_workspace_project_response import SessionWorkspaceProjectResponse as SessionWorkspaceProjectResponse
 from azentspublicclient.models.set_password_request import SetPasswordRequest as SetPasswordRequest
 from azentspublicclient.models.signup_status_response import SignupStatusResponse as SignupStatusResponse
-from azentspublicclient.models.slash_command_list_response import SlashCommandListResponse as SlashCommandListResponse
-from azentspublicclient.models.slash_command_response import SlashCommandResponse as SlashCommandResponse
+from azentspublicclient.models.skill_action import SkillAction as SkillAction
 from azentspublicclient.models.subagent_toolkit_inherit_mode import SubagentToolkitInheritMode as SubagentToolkitInheritMode
 from azentspublicclient.models.test_connection_request import TestConnectionRequest as TestConnectionRequest
 from azentspublicclient.models.test_connection_response import TestConnectionResponse as TestConnectionResponse

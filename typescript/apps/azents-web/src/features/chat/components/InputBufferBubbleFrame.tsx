@@ -2,13 +2,14 @@
 
 /** common layout for input-buffer bubbles. */
 
-import { Box, Group, Paper, rem } from "@mantine/core";
+import { Badge, Box, Group, Paper, rem, Stack } from "@mantine/core";
 import { extractFilename, FileAttachmentList } from "./FileAttachmentList";
 import { MarkdownContent } from "./MarkdownContent";
-import type { FileAttachment } from "../types";
+import type { ChatAction, FileAttachment } from "../types";
 
 interface InputBufferBubbleFrameProps {
   content: string;
+  action?: ChatAction | null;
   attachments: string[];
   attachmentFiles?: FileAttachment[];
   opacity: number;
@@ -23,8 +24,20 @@ function toPendingAttachment(uri: string): FileAttachment {
   };
 }
 
+function actionLabel(action: ChatAction): string {
+  switch (action.type) {
+    case "command":
+      return `/${action.name}`;
+    case "goal":
+      return "Goal";
+    case "skill":
+      return "Skill";
+  }
+}
+
 export function InputBufferBubbleFrame({
   content,
+  action,
   attachments,
   attachmentFiles,
   opacity,
@@ -60,7 +73,16 @@ export function InputBufferBubbleFrame({
             opacity,
           }}
         >
-          <MarkdownContent>{content}</MarkdownContent>
+          <Stack gap={rem(4)}>
+            {action && (
+              <Group gap={rem(6)} wrap="nowrap">
+                <Badge size="sm" variant="white" color="blue">
+                  {actionLabel(action)}
+                </Badge>
+              </Group>
+            )}
+            <MarkdownContent>{content}</MarkdownContent>
+          </Stack>
         </Paper>
         {actions}
       </Box>

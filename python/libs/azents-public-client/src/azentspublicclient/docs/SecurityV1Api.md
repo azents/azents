@@ -51,7 +51,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.SecurityV1Api(api_client)
-    elevate_with_email_request = azentspublicclient.ElevateWithEmailRequest() # ElevateWithEmailRequest |
+    elevate_with_email_request = azentspublicclient.ElevateWithEmailRequest() # ElevateWithEmailRequest | 
 
     try:
         # Elevate With Email
@@ -69,7 +69,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **elevate_with_email_request** | [**ElevateWithEmailRequest**](ElevateWithEmailRequest.md)|  |
+ **elevate_with_email_request** | [**ElevateWithEmailRequest**](ElevateWithEmailRequest.md)|  | 
 
 ### Return type
 
@@ -131,7 +131,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.SecurityV1Api(api_client)
-    elevate_with_password_request = azentspublicclient.ElevateWithPasswordRequest() # ElevateWithPasswordRequest |
+    elevate_with_password_request = azentspublicclient.ElevateWithPasswordRequest() # ElevateWithPasswordRequest | 
 
     try:
         # Elevate With Password
@@ -149,7 +149,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **elevate_with_password_request** | [**ElevateWithPasswordRequest**](ElevateWithPasswordRequest.md)|  |
+ **elevate_with_password_request** | [**ElevateWithPasswordRequest**](ElevateWithPasswordRequest.md)|  | 
 
 ### Return type
 
@@ -503,7 +503,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.SecurityV1Api(api_client)
-    set_password_request = azentspublicclient.SetPasswordRequest() # SetPasswordRequest |
+    set_password_request = azentspublicclient.SetPasswordRequest() # SetPasswordRequest | 
 
     try:
         # Set Password
@@ -519,7 +519,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **set_password_request** | [**SetPasswordRequest**](SetPasswordRequest.md)|  |
+ **set_password_request** | [**SetPasswordRequest**](SetPasswordRequest.md)|  | 
 
 ### Return type
 

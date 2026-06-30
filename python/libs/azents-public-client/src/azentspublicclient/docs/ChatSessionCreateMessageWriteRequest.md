@@ -6,9 +6,10 @@ REST first message write request for a draft AgentSession.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**client_request_id** | **str** | Client-generated idempotency key |
-**message** | **str** | Message content |
-**attachments** | **List[str]** |  | [optional]
+**client_request_id** | **str** | Client-generated idempotency key | 
+**message** | **str** | Message content | 
+**project_paths** | **List[str]** | Exact Project paths to register on the created session | 
+**attachments** | **List[str]** |  | [optional] 
 
 ## Example
 
@@ -28,3 +29,5 @@ chat_session_create_message_write_request_dict = chat_session_create_message_wri
 chat_session_create_message_write_request_from_dict = ChatSessionCreateMessageWriteRequest.from_dict(chat_session_create_message_write_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

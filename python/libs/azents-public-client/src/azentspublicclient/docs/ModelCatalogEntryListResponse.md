@@ -6,14 +6,14 @@ Stored model catalog entry list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**catalog_id** | **str** |  |
-**current_snapshot_id** | **str** |  |
-**current_snapshot_created_at** | **datetime** |  |
-**latest_attempt** | [**ModelCatalogSyncAttemptResponse**](ModelCatalogSyncAttemptResponse.md) |  |
-**entries** | [**List[ModelCatalogEntryResponse]**](ModelCatalogEntryResponse.md) |  |
-**total** | **int** |  |
-**limit** | **int** |  |
-**offset** | **int** |  |
+**catalog_id** | **str** |  | 
+**current_snapshot_id** | **str** |  | 
+**current_snapshot_created_at** | **datetime** |  | 
+**latest_attempt** | [**ModelCatalogSyncAttemptResponse**](ModelCatalogSyncAttemptResponse.md) |  | 
+**entries** | [**List[ModelCatalogEntryResponse]**](ModelCatalogEntryResponse.md) |  | 
+**total** | **int** |  | 
+**limit** | **int** |  | 
+**offset** | **int** |  | 
 
 ## Example
 

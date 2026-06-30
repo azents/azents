@@ -7,7 +7,7 @@ AWS IAM based secrets for AWS Bedrock.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'aws_credentials']
-**secret_access_key** | **str** | AWS Secret Access Key |
+**secret_access_key** | **str** | AWS Secret Access Key | 
 
 ## Example
 

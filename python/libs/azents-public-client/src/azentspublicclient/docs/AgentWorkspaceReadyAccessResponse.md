@@ -6,8 +6,8 @@ Agent Workspace ready access response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**manifest** | [**AgentWorkspaceManifestResponse**](AgentWorkspaceManifestResponse.md) | Agent Workspace manifest |
+**type** | **str** | Response type | 
+**manifest** | [**AgentWorkspaceManifestResponse**](AgentWorkspaceManifestResponse.md) | Agent Workspace manifest | 
 
 ## Example
 

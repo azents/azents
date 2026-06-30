@@ -7,8 +7,6 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 from azcommon.result import Failure, Result, Success
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from azents.api.public.chat.v1 import (
     _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
@@ -23,8 +21,8 @@ from azents.api.public.chat.v1 import (
     get_team_primary_agent_session,
     list_agent_sessions,
     list_history_events,
+    list_input_actions,
     list_live_events,
-    mount,
     stop_session_run,
     update_agent_session_title,
     update_session_goal_status,
@@ -91,14 +89,6 @@ from azents.services.chat_write import (
     AcceptedPendingCommand,
     AcceptedStopRequest,
 )
-from azents.utils.fastapi.route import as_route_mounter
-
-
-def _make_app() -> FastAPI:
-    """Create a test app with Chat public endpoints mounted."""
-    app = FastAPI()
-    mount(as_route_mounter(app))
-    return app
 
 
 class _MemoryBroker:
@@ -971,27 +961,38 @@ class TestStopSessionRun:
         assert chat_write_service.session_ids == []
 
 
-class TestListSlashCommands:
-    """Tests for GET /chat/v1/commands."""
+class TestListInputActions:
+    """Tests for GET /chat/v1/sessions/{session_id}/actions."""
 
-    def test_returns_server_managed_slash_commands(self) -> None:
-        """Return registered slash commands."""
-        client = TestClient(_make_app())
+    async def test_returns_server_managed_input_actions(self) -> None:
+        """Return registered composer actions."""
+        response = await list_input_actions(
+            "1123456789abcdef0123456789abcdef",
+            CurrentUser(user_id="user-1", session_id="auth-session"),
+            _EventService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+        )
 
-        response = client.get("/chat/v1/commands")
-
-        assert response.status_code == 200
-        assert response.json() == {
-            "items": [
-                {
-                    "name": "compact",
-                    "description": (
-                        "Summarize previous conversation and compact "
-                        "the context window."
-                    ),
-                }
-            ]
+        items = response.model_dump(mode="json")["items"]
+        assert items[0] == {
+            "id": "command:compact",
+            "keyword": "compact",
+            "label": "Compact",
+            "description": (
+                "Summarize previous conversation and compact the context window."
+            ),
+            "action": {"type": "command", "name": "compact"},
+            "category": "command",
+            "message": {
+                "policy": "optional",
+                "placeholder": "Send to run this command.",
+                "max_length": None,
+            },
+            "attachments": {"policy": "unsupported"},
+            "availability_hint": None,
         }
+        assert items[1]["id"] == "goal"
+        assert items[1]["action"] == {"type": "goal"}
+        assert items[1]["message"]["policy"] == "required"
 
 
 class TestEventRoutes:

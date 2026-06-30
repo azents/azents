@@ -42,6 +42,7 @@ import {
 } from "react";
 import { ChatCopyButton } from "./ChatCopyButton";
 import { FileAttachmentList } from "./FileAttachmentList";
+import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
 import { MarkdownContent } from "./MarkdownContent";
 import classes from "./MessageBubble.module.css";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
@@ -495,6 +496,31 @@ function UserTextMessage({
   editable?: boolean;
   onEdit?: () => void;
 }): React.ReactElement {
+  if (message.action) {
+    return (
+      <MessageSurface>
+        <InputBufferBubbleFrame
+          content={message.content ?? ""}
+          action={message.action}
+          attachments={[]}
+          attachmentFiles={message.attachments}
+          opacity={1}
+          actions={
+            message.content && message.status !== "partial" ? (
+              <MessageActionRow
+                content={message.content}
+                createdAt={message.createdAt}
+                align="user"
+                editable={editable}
+                onEdit={onEdit}
+              />
+            ) : null
+          }
+        />
+      </MessageSurface>
+    );
+  }
+
   return (
     <Group
       align="flex-start"

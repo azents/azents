@@ -6,11 +6,11 @@ Device OAuth start response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**session_id** | **str** | OAuth session ID |
-**user_code** | **str** | Device user code |
-**verification_uri** | **str** | Device verification URI |
-**interval_seconds** | **int** | Provider polling interval |
-**expires_at** | **datetime** | Session expiry |
+**session_id** | **str** | OAuth session ID | 
+**user_code** | **str** | Device user code | 
+**verification_uri** | **str** | Device verification URI | 
+**interval_seconds** | **int** | Provider polling interval | 
+**expires_at** | **datetime** | Session expiry | 
 
 ## Example
 

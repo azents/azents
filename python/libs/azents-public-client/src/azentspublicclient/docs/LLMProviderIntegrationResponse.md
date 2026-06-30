@@ -6,13 +6,13 @@ LLM Provider Integration response without secrets.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**provider** | [**LLMProvider**](LLMProvider.md) |  |
-**name** | **str** |  |
-**config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  |
-**enabled** | **bool** |  |
-**created_at** | **datetime** |  |
-**updated_at** | **datetime** |  |
+**id** | **str** |  | 
+**provider** | [**LLMProvider**](LLMProvider.md) |  | 
+**name** | **str** |  | 
+**config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  | 
+**enabled** | **bool** |  | 
+**created_at** | **datetime** |  | 
+**updated_at** | **datetime** |  | 
 
 ## Example
 

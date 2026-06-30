@@ -18,9 +18,10 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_run_phase import AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus
+from azentspublicclient.models.chat_live_run_retry_state_response import ChatLiveRunRetryStateResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -31,8 +32,9 @@ class ChatLiveRunStateResponse(BaseModel):
     run_id: StrictStr = Field(description="AgentRun ID")
     phase: AgentRunPhase = Field(description="Current run phase")
     status: AgentRunStatus = Field(description="Current run status")
+    retry: Optional[ChatLiveRunRetryStateResponse] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["run_id", "phase", "status"]
+    __properties: ClassVar[List[str]] = ["run_id", "phase", "status", "retry"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -75,10 +77,18 @@ class ChatLiveRunStateResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of retry
+        if self.retry:
+            _dict['retry'] = self.retry.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
+
+        # set to None if retry (nullable) is None
+        # and model_fields_set contains the field
+        if self.retry is None and "retry" in self.model_fields_set:
+            _dict['retry'] = None
 
         return _dict
 
@@ -94,7 +104,8 @@ class ChatLiveRunStateResponse(BaseModel):
         _obj = cls.model_validate({
             "run_id": obj.get("run_id"),
             "phase": obj.get("phase"),
-            "status": obj.get("status")
+            "status": obj.get("status"),
+            "retry": ChatLiveRunRetryStateResponse.from_dict(obj["retry"]) if obj.get("retry") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

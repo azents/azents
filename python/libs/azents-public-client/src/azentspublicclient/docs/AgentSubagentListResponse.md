@@ -6,7 +6,7 @@ AgentSubagent list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[AgentSubagentResponse]**](AgentSubagentResponse.md) |  |
+**items** | [**List[AgentSubagentResponse]**](AgentSubagentResponse.md) |  | 
 
 ## Example
 

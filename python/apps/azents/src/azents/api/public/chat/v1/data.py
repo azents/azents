@@ -16,6 +16,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
 )
+from azents.engine.events.action_messages import ChatAction
 from azents.engine.events.types import Event
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
@@ -71,6 +72,78 @@ class UploadResponse(BaseModel):
     media_type: str = Field(description="File MIME type")
     size: int = Field(description="File size in bytes")
     name: str = Field(description="Display filename")
+
+
+class ChatInputWriteRequest(BaseModel):
+    """REST composer input write request."""
+
+    agent_id: str = Field(description="Agent ID")
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Client-generated idempotency key",
+    )
+    message: str = Field(description="Input message content")
+    action: ChatAction | None = Field(
+        default=None,
+        description="Optional selected chat action",
+    )
+    attachments: list[str] | None = Field(
+        default=None,
+        description="Attachment reference list, exchange:// URIs received after upload",
+    )
+
+
+class InputActionMessagePolicyResponse(BaseModel):
+    """Composer action message policy."""
+
+    policy: Literal["none", "optional", "required"] = Field(
+        description="Message input policy"
+    )
+    placeholder: str | None = Field(default=None, description="Composer placeholder")
+    max_length: int | None = Field(default=None, description="Message max length")
+
+
+class InputActionAttachmentPolicyResponse(BaseModel):
+    """Composer action attachment policy."""
+
+    policy: Literal["unsupported", "optional", "required"] = Field(
+        description="Attachment policy"
+    )
+
+
+class InputActionAvailabilityHintResponse(BaseModel):
+    """Non-authoritative composer action availability hint."""
+
+    state: Literal["ready", "warning"] = Field(description="Hint state")
+    message: str | None = Field(default=None, description="Hint text")
+
+
+class InputActionDefinitionResponse(BaseModel):
+    """Composer action definition response."""
+
+    id: str = Field(description="Action definition ID")
+    keyword: str = Field(description="Slash search keyword")
+    label: str = Field(description="Action label")
+    description: str = Field(description="Action description")
+    action: ChatAction = Field(description="Action payload")
+    category: Literal["command", "turn"] = Field(description="Action category")
+    message: InputActionMessagePolicyResponse = Field(description="Message policy")
+    attachments: InputActionAttachmentPolicyResponse = Field(
+        description="Attachment policy"
+    )
+    availability_hint: InputActionAvailabilityHintResponse | None = Field(
+        default=None,
+        description="Non-authoritative availability hint",
+    )
+
+
+class InputActionListResponse(BaseModel):
+    """Composer action list response."""
+
+    items: list[InputActionDefinitionResponse] = Field(
+        description="Available composer action definitions"
+    )
 
 
 class ChatMessageWriteRequest(BaseModel):

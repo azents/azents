@@ -6,7 +6,7 @@ Agent Workspace bulk delete response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**paths** | **List[str]** | Deleted paths |
+**paths** | **List[str]** | Deleted paths | 
 
 ## Example
 

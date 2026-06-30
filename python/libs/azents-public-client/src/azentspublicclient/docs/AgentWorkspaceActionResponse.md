@@ -6,9 +6,9 @@ Agent Workspace state transition action response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Action type |
-**method** | **str** | HTTP method |
-**path** | **str** | API path to call |
+**type** | **str** | Action type | 
+**method** | **str** | HTTP method | 
+**path** | **str** | API path to call | 
 
 ## Example
 

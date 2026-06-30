@@ -6,11 +6,11 @@ REST user message edit request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**agent_id** | **str** | Agent ID |
-**client_request_id** | **str** | Client-generated idempotency key |
-**message_id** | **str** | Existing user_message event ID to edit |
-**message** | **str** | Edited message content |
-**attachments** | **List[str]** |  | [optional]
+**agent_id** | **str** | Agent ID | 
+**client_request_id** | **str** | Client-generated idempotency key | 
+**message_id** | **str** | Existing user_message event ID to edit | 
+**message** | **str** | Edited message content | 
+**attachments** | **List[str]** |  | [optional] 
 
 ## Example
 

@@ -36,100 +36,100 @@ class TestSessionContextResponse(unittest.TestCase):
         if include_optional:
             return SessionContextResponse(
                 session = azentspublicclient.models.session_context_session_response.SessionContextSessionResponse(
-                    id = '',
-                    agent_id = '',
-                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                    id = '', 
+                    agent_id = '', 
+                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
                 usage = { },
                 stats = azentspublicclient.models.session_context_stats_response.SessionContextStatsResponse(
-                    total_events = 56,
-                    user_messages = 56,
-                    assistant_messages = 56,
-                    reasoning_events = 56,
-                    tool_calls = 56,
-                    tool_results = 56,
-                    turn_markers = 56,
+                    total_events = 56, 
+                    user_messages = 56, 
+                    assistant_messages = 56, 
+                    reasoning_events = 56, 
+                    tool_calls = 56, 
+                    tool_results = 56, 
+                    turn_markers = 56, 
                     total_cost_usd = 1.337, ),
                 breakdown = [
                     azentspublicclient.models.session_context_breakdown_segment_response.SessionContextBreakdownSegmentResponse(
-                        key = 'system',
-                        tokens = 56,
+                        key = 'system', 
+                        tokens = 56, 
                         percent = 1.337, )
                     ],
                 system_prompt = azentspublicclient.models.session_context_system_prompt_response.SessionContextSystemPromptResponse(
                     agent_prompt = azentspublicclient.models.session_context_system_prompt_fragment_response.SessionContextSystemPromptFragmentResponse(
-                        id = '',
-                        source = 'agent',
-                        label = '',
-                        content = '',
-                        preview = '',
-                        length = 56,
+                        id = '', 
+                        source = 'agent', 
+                        label = '', 
+                        content = '', 
+                        preview = '', 
+                        length = 56, 
                         metadata = {
                             'key' : ''
-                            }, ),
+                            }, ), 
                     toolkit_prompts = [
                         azentspublicclient.models.session_context_system_prompt_fragment_response.SessionContextSystemPromptFragmentResponse(
-                            id = '',
-                            source = 'agent',
-                            label = '',
-                            content = '',
-                            preview = '',
-                            length = 56,
+                            id = '', 
+                            source = 'agent', 
+                            label = '', 
+                            content = '', 
+                            preview = '', 
+                            length = 56, 
                             metadata = {
                                 'key' : ''
                                 }, )
-                        ],
+                        ], 
                     injected_prompts = [
-
-                        ],
+                        
+                        ], 
                     final_prompt = , ),
                 raw_events = [
                     azentspublicclient.models.session_context_raw_event_response.SessionContextRawEventResponse(
-                        id = '',
-                        kind = '',
-                        payload = { },
-                        external_id = '',
-                        adapter = '',
-                        provider = '',
-                        model = '',
-                        native_format = '',
-                        schema_version = '',
+                        id = '', 
+                        kind = '', 
+                        payload = { }, 
+                        external_id = '', 
+                        adapter = '', 
+                        provider = '', 
+                        model = '', 
+                        native_format = '', 
+                        schema_version = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
         else:
             return SessionContextResponse(
                 session = azentspublicclient.models.session_context_session_response.SessionContextSessionResponse(
-                    id = '',
-                    agent_id = '',
-                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                    id = '', 
+                    agent_id = '', 
+                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
                 stats = azentspublicclient.models.session_context_stats_response.SessionContextStatsResponse(
-                    total_events = 56,
-                    user_messages = 56,
-                    assistant_messages = 56,
-                    reasoning_events = 56,
-                    tool_calls = 56,
-                    tool_results = 56,
-                    turn_markers = 56,
+                    total_events = 56, 
+                    user_messages = 56, 
+                    assistant_messages = 56, 
+                    reasoning_events = 56, 
+                    tool_calls = 56, 
+                    tool_results = 56, 
+                    turn_markers = 56, 
                     total_cost_usd = 1.337, ),
                 breakdown = [
                     azentspublicclient.models.session_context_breakdown_segment_response.SessionContextBreakdownSegmentResponse(
-                        key = 'system',
-                        tokens = 56,
+                        key = 'system', 
+                        tokens = 56, 
                         percent = 1.337, )
                     ],
                 raw_events = [
                     azentspublicclient.models.session_context_raw_event_response.SessionContextRawEventResponse(
-                        id = '',
-                        kind = '',
-                        payload = { },
-                        external_id = '',
-                        adapter = '',
-                        provider = '',
-                        model = '',
-                        native_format = '',
-                        schema_version = '',
+                        id = '', 
+                        kind = '', 
+                        payload = { }, 
+                        external_id = '', 
+                        adapter = '', 
+                        provider = '', 
+                        model = '', 
+                        native_format = '', 
+                        schema_version = '', 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

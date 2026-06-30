@@ -6,9 +6,9 @@ Signup token redeem request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | **str** | Signup token |
-**email** | **str** | Signup email |
-**password** | **str** | Initial password |
+**token** | **str** | Signup token | 
+**email** | **str** | Signup email | 
+**password** | **str** | Initial password | 
 
 ## Example
 

@@ -6,10 +6,10 @@ AgentAdmin response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**agent_id** | **str** |  |
-**workspace_user_id** | **str** |  |
-**created_at** | **datetime** |  |
+**id** | **str** |  | 
+**agent_id** | **str** |  | 
+**workspace_user_id** | **str** |  | 
+**created_at** | **datetime** |  | 
 
 ## Example
 

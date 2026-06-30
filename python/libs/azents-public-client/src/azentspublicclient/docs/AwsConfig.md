@@ -7,9 +7,9 @@ AWS Bedrock settings, stored as plaintext.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'aws_credentials']
-**access_key_id** | **str** | AWS Access Key ID |
-**region** | **str** | AWS region |
-**role_arn** | **str** |  | [optional]
+**access_key_id** | **str** | AWS Access Key ID | 
+**region** | **str** | AWS region | 
+**role_arn** | **str** |  | [optional] 
 
 ## Example
 

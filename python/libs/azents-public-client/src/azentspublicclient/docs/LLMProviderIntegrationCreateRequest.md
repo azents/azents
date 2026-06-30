@@ -6,10 +6,10 @@ LLM Provider Integration creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**provider** | [**LLMProvider**](LLMProvider.md) | LLM Hosting provider |
-**name** | **str** |  | [optional]
-**secrets** | [**Secrets**](Secrets.md) |  |
-**config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  | [optional]
+**provider** | [**LLMProvider**](LLMProvider.md) | LLM Hosting provider | 
+**name** | **str** |  | [optional] 
+**secrets** | [**Secrets**](Secrets.md) |  | 
+**config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  | [optional] 
 **enabled** | **bool** | Enabled state | [optional] [default to True]
 
 ## Example

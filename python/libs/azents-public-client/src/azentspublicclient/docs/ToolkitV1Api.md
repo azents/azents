@@ -59,9 +59,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
-    agent_toolkit_attach_request = azentspublicclient.AgentToolkitAttachRequest() # AgentToolkitAttachRequest |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    agent_toolkit_attach_request = azentspublicclient.AgentToolkitAttachRequest() # AgentToolkitAttachRequest | 
 
     try:
         # Attach Toolkit To Agent
@@ -79,9 +79,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
- **agent_toolkit_attach_request** | [**AgentToolkitAttachRequest**](AgentToolkitAttachRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **agent_toolkit_attach_request** | [**AgentToolkitAttachRequest**](AgentToolkitAttachRequest.md)|  | 
 
 ### Return type
 
@@ -145,8 +145,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    handle = 'handle_example' # str |
-    toolkit_config_create_request = azentspublicclient.ToolkitConfigCreateRequest() # ToolkitConfigCreateRequest |
+    handle = 'handle_example' # str | 
+    toolkit_config_create_request = azentspublicclient.ToolkitConfigCreateRequest() # ToolkitConfigCreateRequest | 
 
     try:
         # Create Toolkit Config
@@ -164,8 +164,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **toolkit_config_create_request** | [**ToolkitConfigCreateRequest**](ToolkitConfigCreateRequest.md)|  |
+ **handle** | **str**|  | 
+ **toolkit_config_create_request** | [**ToolkitConfigCreateRequest**](ToolkitConfigCreateRequest.md)|  | 
 
 ### Return type
 
@@ -228,8 +228,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str |
-    handle = 'handle_example' # str |
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Create Toolkit Scope
@@ -247,8 +247,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  |
- **handle** | **str**|  |
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -310,8 +310,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str |
-    handle = 'handle_example' # str |
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Delete Toolkit Config
@@ -327,8 +327,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  |
- **handle** | **str**|  |
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -390,9 +390,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str |
-    scope_id = 'scope_id_example' # str |
-    handle = 'handle_example' # str |
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    scope_id = 'scope_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Delete Toolkit Scope
@@ -408,9 +408,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  |
- **scope_id** | **str**|  |
- **handle** | **str**|  |
+ **toolkit_config_id** | **str**|  | 
+ **scope_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -472,9 +472,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    agent_toolkit_id = 'agent_toolkit_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    agent_toolkit_id = 'agent_toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Detach Toolkit From Agent
@@ -490,9 +490,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **agent_toolkit_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **agent_toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -555,8 +555,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str |
-    handle = 'handle_example' # str |
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Toolkit Config
@@ -574,8 +574,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  |
- **handle** | **str**|  |
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -638,8 +638,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # List Agent Toolkits
@@ -657,8 +657,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -721,7 +721,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # List Available Toolkit Configs
@@ -739,7 +739,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -802,7 +802,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # List Toolkit Configs
@@ -820,7 +820,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -883,8 +883,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str |
-    handle = 'handle_example' # str |
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # List Toolkit Scopes
@@ -902,8 +902,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  |
- **handle** | **str**|  |
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -1034,9 +1034,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str |
-    handle = 'handle_example' # str |
-    toolkit_config_update_request = azentspublicclient.ToolkitConfigUpdateRequest() # ToolkitConfigUpdateRequest |
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
+    toolkit_config_update_request = azentspublicclient.ToolkitConfigUpdateRequest() # ToolkitConfigUpdateRequest | 
 
     try:
         # Update Toolkit Config
@@ -1054,9 +1054,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  |
- **handle** | **str**|  |
- **toolkit_config_update_request** | [**ToolkitConfigUpdateRequest**](ToolkitConfigUpdateRequest.md)|  |
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **toolkit_config_update_request** | [**ToolkitConfigUpdateRequest**](ToolkitConfigUpdateRequest.md)|  | 
 
 ### Return type
 

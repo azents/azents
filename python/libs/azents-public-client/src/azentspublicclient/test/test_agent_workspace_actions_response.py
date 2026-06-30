@@ -36,20 +36,20 @@ class TestAgentWorkspaceActionsResponse(unittest.TestCase):
         if include_optional:
             return AgentWorkspaceActionsResponse(
                 start = azentspublicclient.models.agent_workspace_action_response.AgentWorkspaceActionResponse(
-                    type = 'START_RUNTIME',
-                    method = 'POST',
+                    type = 'START_RUNTIME', 
+                    method = 'POST', 
                     path = '', ),
                 stop = azentspublicclient.models.agent_workspace_action_response.AgentWorkspaceActionResponse(
-                    type = 'START_RUNTIME',
-                    method = 'POST',
+                    type = 'START_RUNTIME', 
+                    method = 'POST', 
                     path = '', ),
                 restart = azentspublicclient.models.agent_workspace_action_response.AgentWorkspaceActionResponse(
-                    type = 'START_RUNTIME',
-                    method = 'POST',
+                    type = 'START_RUNTIME', 
+                    method = 'POST', 
                     path = '', ),
                 reset = azentspublicclient.models.agent_workspace_action_response.AgentWorkspaceActionResponse(
-                    type = 'START_RUNTIME',
-                    method = 'POST',
+                    type = 'START_RUNTIME', 
+                    method = 'POST', 
                     path = '', )
             )
         else:

@@ -49,6 +49,7 @@ from azents.core.auth.jwt import (
 from azents.core.config import AuthConfig, Config
 from azents.core.deps import get_appctx, get_auth_config
 from azents.core.redis import create_redis_client
+from azents.engine.events.action_messages import CommandAction, GoalAction
 from azents.engine.events.types import FileOutputPart
 from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
 from azents.engine.run.input import InputMessage
@@ -164,6 +165,7 @@ from .data import (
     ChatEditMessageWriteRequest,
     ChatEventPageResponse,
     ChatEventResponse,
+    ChatInputWriteRequest,
     ChatLiveRunStateResponse,
     ChatMessageWriteRequest,
     ChatSessionCreateMessageWriteRequest,
@@ -174,6 +176,11 @@ from .data import (
     GoalStateResponse,
     GoalStatusUpdateRequest,
     GoalUpdateRequest,
+    InputActionAttachmentPolicyResponse,
+    InputActionAvailabilityHintResponse,
+    InputActionDefinitionResponse,
+    InputActionListResponse,
+    InputActionMessagePolicyResponse,
     LiveEventListResponse,
     PartialHistoryResponse,
     SessionContextResponse,
@@ -182,8 +189,6 @@ from .data import (
     SessionWorkspaceProjectRegistrationRequestListResponse,
     SessionWorkspaceProjectRegistrationRequestResponse,
     SessionWorkspaceProjectResponse,
-    SlashCommandListResponse,
-    SlashCommandResponse,
     TodoStateResponse,
     UploadResponse,
     WsTicketResponse,
@@ -849,13 +854,14 @@ async def stop_session_run(
             assert_never(result)
 
 
-@router.post("/sessions/{session_id}/messages")
-async def create_message(
+@router.post("/sessions/{session_id}/inputs")
+async def create_input(
     session_id: str,
-    request: ChatMessageWriteRequest,
+    request: ChatInputWriteRequest,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
     agent_session_input_service: Annotated[AgentSessionInputService, Depends()],
+    chat_write_service: Annotated[ChatWriteService, Depends()],
     exchange_file_service: Annotated[ExchangeFileService, Depends()],
     model_file_service: Annotated[ModelFileService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
@@ -863,11 +869,12 @@ async def create_message(
     live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
     timezone: str | None = None,
 ) -> ChatWriteResponse:
-    """Accept an existing session message at the REST input buffer boundary."""
+    """Accept a composer input at the REST boundary."""
     _validate_session_id(session_id)
-    return await _write_message_via_rest(
+    return await _write_input_via_rest(
         chat_service,
         agent_session_input_service,
+        chat_write_service,
         exchange_file_service,
         model_file_service,
         broker,
@@ -1036,6 +1043,7 @@ async def _write_command_via_rest(
     *,
     session_id: str,
     user_id: str,
+    payload_override: dict[str, object] | None = None,
 ) -> ChatWriteResponse:
     """Handle REST command writes as idle-only pending command boundaries."""
     if request.command not in COMMAND_REGISTRY:
@@ -1048,7 +1056,7 @@ async def _write_command_via_rest(
         agent_id=request.agent_id,
         user_id=user_id,
     )
-    payload = request.model_dump(mode="json")
+    payload = payload_override or request.model_dump(mode="json")
     try:
         accepted = await chat_write_service.create_idempotent_pending_command(
             agent_id=request.agent_id,
@@ -1090,6 +1098,137 @@ async def _write_command_via_rest(
     )
 
 
+async def _write_turn_action_via_rest(
+    chat_service: ChatSessionService,
+    agent_session_input_service: AgentSessionInputService,
+    broker: SessionBroker,
+    broadcast: WebSocketBroadcast,
+    live_event_store: LiveEventStore,
+    request: ChatInputWriteRequest,
+    *,
+    session_id: str,
+    user_id: str,
+    tz: ZoneInfo,
+) -> ChatWriteResponse:
+    """Handle TurnAction writes as action_message input buffers."""
+    if request.action is None:
+        raise HTTPException(status_code=400, detail="Action is required.")
+    if request.attachments:
+        raise HTTPException(
+            status_code=400,
+            detail="This action does not support attachments.",
+        )
+    match request.action:
+        case GoalAction():
+            if not request.message.strip():
+                raise HTTPException(
+                    status_code=400, detail="Goal objective is required."
+                )
+        case _:
+            raise HTTPException(status_code=400, detail="This action is not supported.")
+    message = _create_chat_input_message(
+        text=request.message,
+        user_id=user_id,
+        tz=tz,
+        attachments=[],
+        file_parts=[],
+    )
+    input_result = await agent_session_input_service.create_buffered_agent_action_input(
+        agent_id=request.agent_id,
+        agent_session_id=session_id,
+        action=request.action.model_dump(mode="json"),
+        message=message,
+        user_id=user_id,
+        client_request_id=request.client_request_id,
+    )
+    result = _handle_agent_session_input_result(input_result)
+    return await _finalize_message_write_response(
+        chat_service,
+        broker,
+        broadcast,
+        live_event_store,
+        agent_id=request.agent_id,
+        session_id=result.agent_session_id,
+        user_id=user_id,
+        client_request_id=request.client_request_id,
+        input_buffer=result.input_buffer,
+    )
+
+
+async def _write_input_via_rest(
+    chat_service: ChatSessionService,
+    agent_session_input_service: AgentSessionInputService,
+    chat_write_service: ChatWriteService,
+    exchange_file_service: ExchangeFileService,
+    model_file_service: ModelFileService,
+    broker: SessionBroker,
+    broadcast: WebSocketBroadcast,
+    live_event_store: LiveEventStore,
+    request: ChatInputWriteRequest,
+    *,
+    session_id: str,
+    user_id: str,
+    tz: ZoneInfo,
+) -> ChatWriteResponse:
+    """Dispatch one composer input by action category."""
+    match request.action:
+        case None:
+            message_request = ChatMessageWriteRequest(
+                agent_id=request.agent_id,
+                client_request_id=request.client_request_id,
+                message=request.message,
+                attachments=request.attachments,
+            )
+            return await _write_message_via_rest(
+                chat_service,
+                agent_session_input_service,
+                exchange_file_service,
+                model_file_service,
+                broker,
+                broadcast,
+                live_event_store,
+                message_request,
+                session_id=session_id,
+                user_id=user_id,
+                tz=tz,
+            )
+        case CommandAction(name=name):
+            if request.attachments:
+                raise HTTPException(
+                    status_code=400,
+                    detail="This action does not support attachments.",
+                )
+            command_request = ChatCommandWriteRequest(
+                agent_id=request.agent_id,
+                client_request_id=request.client_request_id,
+                command=name,
+            )
+            return await _write_command_via_rest(
+                chat_service,
+                chat_write_service,
+                broker,
+                live_event_store,
+                command_request,
+                session_id=session_id,
+                user_id=user_id,
+                payload_override=request.model_dump(mode="json"),
+            )
+        case GoalAction():
+            return await _write_turn_action_via_rest(
+                chat_service,
+                agent_session_input_service,
+                broker,
+                broadcast,
+                live_event_store,
+                request,
+                session_id=session_id,
+                user_id=user_id,
+                tz=tz,
+            )
+        case _:
+            raise HTTPException(status_code=400, detail="This action is not supported.")
+
+
 @router.post("/sessions/{session_id}/edit-message")
 async def edit_message(
     session_id: str,
@@ -1116,29 +1255,6 @@ async def edit_message(
         session_id=session_id,
         user_id=current_user.user_id,
         tz=_parse_timezone(timezone),
-    )
-
-
-@router.post("/sessions/{session_id}/commands")
-async def create_command(
-    session_id: str,
-    request: ChatCommandWriteRequest,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    chat_service: Annotated[ChatSessionService, Depends()],
-    chat_write_service: Annotated[ChatWriteService, Depends()],
-    broker: Annotated[SessionBroker, Depends(get_broker)],
-    live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
-) -> ChatWriteResponse:
-    """Accept a slash command at the REST boundary."""
-    _validate_session_id(session_id)
-    return await _write_command_via_rest(
-        chat_service,
-        chat_write_service,
-        broker,
-        live_event_store,
-        request,
-        session_id=session_id,
-        user_id=current_user.user_id,
     )
 
 
@@ -1403,18 +1519,81 @@ async def update_agent_session_title(
             assert_never(result)
 
 
-@router.get("/commands")
-async def list_slash_commands() -> SlashCommandListResponse:
-    """Return the list of available slash commands."""
-    return SlashCommandListResponse(
-        items=[
-            SlashCommandResponse(
-                name=command.name,
-                description=command.description,
-            )
-            for command in list_registered_commands()
-        ]
+@router.get("/sessions/{session_id}/actions")
+async def list_input_actions(
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> InputActionListResponse:
+    """Return composer actions available for a session."""
+    _validate_session_id(session_id)
+    result = await chat_service.list_live_events(
+        session_id,
+        user_id=current_user.user_id,
+        live_event_store=None,
     )
+    match result:
+        case Success(snapshot):
+            goal_hint = None
+            if (
+                snapshot.goal is not None
+                and snapshot.goal.objective
+                and snapshot.goal.status in {"active", "paused", "blocked"}
+            ):
+                goal_hint = InputActionAvailabilityHintResponse(
+                    state="warning",
+                    message=(
+                        "A goal is already in progress. Manage it from the goal card."
+                    ),
+                )
+            return InputActionListResponse(
+                items=[
+                    *[
+                        InputActionDefinitionResponse(
+                            id=f"command:{command.name}",
+                            keyword=command.name,
+                            label=command.name.capitalize(),
+                            description=command.description,
+                            action=CommandAction(name=command.name),
+                            category="command",
+                            message=InputActionMessagePolicyResponse(
+                                policy="optional",
+                                placeholder="Send to run this command.",
+                            ),
+                            attachments=InputActionAttachmentPolicyResponse(
+                                policy="unsupported"
+                            ),
+                            availability_hint=None,
+                        )
+                        for command in list_registered_commands()
+                    ],
+                    InputActionDefinitionResponse(
+                        id="goal",
+                        keyword="goal",
+                        label="Goal",
+                        description="Create a session goal.",
+                        action=GoalAction(),
+                        category="turn",
+                        message=InputActionMessagePolicyResponse(
+                            policy="required",
+                            placeholder="Describe the goal for this session.",
+                            max_length=4000,
+                        ),
+                        attachments=InputActionAttachmentPolicyResponse(
+                            policy="unsupported"
+                        ),
+                        availability_hint=goal_hint,
+                    ),
+                ]
+            )
+        case Failure(error):
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
 
 
 @router.get("/agents/{agent_id}/sessions/{session_id}/projects")

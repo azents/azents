@@ -6,7 +6,7 @@ Agent Workspace mutation response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**path** | **str** | Affected path |
+**path** | **str** | Affected path | 
 
 ## Example
 

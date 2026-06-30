@@ -6,8 +6,8 @@ Agent Workspace move request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**source_path** | **str** | Source path |
-**destination_path** | **str** | Destination path |
+**source_path** | **str** | Source path | 
+**destination_path** | **str** | Destination path | 
 **overwrite** | **bool** | Overwrite existing destination | [optional] [default to False]
 
 ## Example

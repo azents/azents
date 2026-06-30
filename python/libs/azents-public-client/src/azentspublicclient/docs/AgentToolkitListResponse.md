@@ -6,7 +6,7 @@ AgentToolkit list response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[AgentToolkitResponse]**](AgentToolkitResponse.md) |  |
+**items** | [**List[AgentToolkitResponse]**](AgentToolkitResponse.md) |  | 
 
 ## Example
 

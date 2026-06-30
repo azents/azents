@@ -6,15 +6,15 @@ Agent Workspace path metadata response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**path** | **str** | Agent Workspace path |
-**name** | **str** | Path basename |
-**kind** | **str** | Path kind |
-**size** | **int** |  | [optional]
-**media_type** | **str** |  | [optional]
-**modified_at** | **datetime** |  | [optional]
-**symlink** | **bool** | Whether the path itself is a symlink |
-**real_path** | **str** |  | [optional]
-**resolved_kind** | **str** |  | [optional]
+**path** | **str** | Agent Workspace path | 
+**name** | **str** | Path basename | 
+**kind** | **str** | Path kind | 
+**size** | **int** |  | [optional] 
+**media_type** | **str** |  | [optional] 
+**modified_at** | **datetime** |  | [optional] 
+**symlink** | **bool** | Whether the path itself is a symlink | 
+**real_path** | **str** |  | [optional] 
+**resolved_kind** | **str** |  | [optional] 
 
 ## Example
 

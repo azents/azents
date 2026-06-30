@@ -6,7 +6,7 @@ Signup token preview request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | **str** | Signup token |
+**token** | **str** | Signup token | 
 
 ## Example
 

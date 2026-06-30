@@ -6,7 +6,7 @@ Invitation list response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[InvitationResponse]**](InvitationResponse.md) | Invitation list |
+**items** | [**List[InvitationResponse]**](InvitationResponse.md) | Invitation list | 
 
 ## Example
 

@@ -6,14 +6,14 @@ Auth method.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Auth method type (email, password) |
-**enabled** | **bool** | Enabled flag |
-**configured** | **bool** | Whether user configured credential |
-**valid** | **bool** | Whether usable in current environment |
-**can_login** | **bool** | Whether usable for login |
-**can_elevate** | **bool** | Whether usable for Elevation |
-**can_remove** | **bool** | Whether removable |
-**unavailable_reason** | **str** |  | [optional]
+**type** | **str** | Auth method type (email, password) | 
+**enabled** | **bool** | Enabled flag | 
+**configured** | **bool** | Whether user configured credential | 
+**valid** | **bool** | Whether usable in current environment | 
+**can_login** | **bool** | Whether usable for login | 
+**can_elevate** | **bool** | Whether usable for Elevation | 
+**can_remove** | **bool** | Whether removable | 
+**unavailable_reason** | **str** |  | [optional] 
 
 ## Example
 

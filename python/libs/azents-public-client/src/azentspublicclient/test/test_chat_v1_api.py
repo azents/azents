@@ -61,17 +61,10 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
-    def test_chat_v1_create_command(self) -> None:
-        """Test case for chat_v1_create_command
+    def test_chat_v1_create_input(self) -> None:
+        """Test case for chat_v1_create_input
 
-        Create Command
-        """
-        pass
-
-    def test_chat_v1_create_message(self) -> None:
-        """Test case for chat_v1_create_message
-
-        Create Message
+        Create Input
         """
         pass
 
@@ -159,6 +152,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_get_agent_session_project_defaults(self) -> None:
+        """Test case for chat_v1_get_agent_session_project_defaults
+
+        Get Agent Session Project Defaults
+        """
+        pass
+
     def test_chat_v1_get_agent_workspace(self) -> None:
         """Test case for chat_v1_get_agent_workspace
 
@@ -177,6 +177,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_issue_ws_ticket
 
         Issue Ws Ticket
+        """
+        pass
+
+    def test_chat_v1_list_agent_project_presets(self) -> None:
+        """Test case for chat_v1_list_agent_project_presets
+
+        List Agent Project Presets
         """
         pass
 
@@ -208,6 +215,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_list_input_actions(self) -> None:
+        """Test case for chat_v1_list_input_actions
+
+        List Input Actions
+        """
+        pass
+
     def test_chat_v1_list_live_events(self) -> None:
         """Test case for chat_v1_list_live_events
 
@@ -219,13 +233,6 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_list_sessions
 
         List Sessions
-        """
-        pass
-
-    def test_chat_v1_list_slash_commands(self) -> None:
-        """Test case for chat_v1_list_slash_commands
-
-        List Slash Commands
         """
         pass
 

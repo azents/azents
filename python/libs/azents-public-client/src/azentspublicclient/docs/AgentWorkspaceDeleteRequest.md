@@ -6,7 +6,7 @@ Agent Workspace delete request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**path** | **str** | File or directory path to delete |
+**path** | **str** | File or directory path to delete | 
 **recursive** | **bool** | Delete directories recursively | [optional] [default to False]
 
 ## Example

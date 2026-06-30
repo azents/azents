@@ -124,8 +124,11 @@ export function AgentDraftChat(
             goal={null}
             todo={null}
             uploadAll={uploadAll}
-            onSendMessage={handleSendMessage}
-            onSendCommand={() => Promise.resolve(false)}
+            onSendInput={(message, action, attachments) =>
+              action
+                ? Promise.resolve(false)
+                : handleSendMessage(message, attachments)
+            }
             clearDoneFiles={clearDoneFiles}
             resetDoneFiles={resetDoneFiles}
             addFiles={addFiles}
@@ -135,7 +138,7 @@ export function AgentDraftChat(
             isStopAvailable={false}
             isStopPending={false}
             onStopRequest={() => {}}
-            slashCommands={[]}
+            inputActions={[]}
             editSendDisabled={isWritePending}
           />
         </Box>

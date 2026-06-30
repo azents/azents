@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import InputBufferKind
 from azents.engine.events.types import FileOutputPart
+from azents.rdb.models.event import JSONValue
 from azents.rdb.models.input_buffer import RDBInputBuffer
 
 from .data import InputBuffer, InputBufferCreate
@@ -32,6 +33,7 @@ class InputBufferRepository:
             content=create.content,
             idempotency_key=create.idempotency_key,
             metadata_=create.metadata,
+            action=cast("dict[str, object] | None", create.action),
             attachments=create.attachments,
             file_parts=[
                 part.model_dump(mode="json", exclude_none=True)
@@ -60,6 +62,7 @@ class InputBufferRepository:
                 content=create.content,
                 idempotency_key=idempotency_key,
                 metadata_=create.metadata,
+                action=cast("dict[str, object] | None", create.action),
                 attachments=create.attachments,
                 file_parts=[
                     part.model_dump(mode="json", exclude_none=True)
@@ -258,6 +261,7 @@ class InputBufferRepository:
             content=rdb.content,
             idempotency_key=rdb.idempotency_key,
             metadata={str(k): str(v) for k, v in rdb.metadata_.items()},
+            action=cast("dict[str, JSONValue] | None", rdb.action),
             attachments=[str(uri) for uri in rdb.attachments],
             file_parts=[FileOutputPart.model_validate(part) for part in rdb.file_parts],
             created_at=rdb.created_at,

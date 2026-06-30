@@ -6,11 +6,11 @@ Toolkit tool definition response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**slug** | **str** | Tool slug |
-**name** | **str** | Tool name |
-**description** | **str** | Tool description |
-**config_schema** | **Dict[str, object]** | Configuration JSON Schema |
-**system_prompt** | **str** | Definition-level system prompt |
+**slug** | **str** | Tool slug | 
+**name** | **str** | Tool name | 
+**description** | **str** | Tool description | 
+**config_schema** | **Dict[str, object]** | Configuration JSON Schema | 
+**system_prompt** | **str** | Definition-level system prompt | 
 
 ## Example
 

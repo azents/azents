@@ -46,8 +46,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatGPTOAuthV1Api(api_client)
-    session_id = 'session_id_example' # str |
-    handle = 'handle_example' # str |
+    session_id = 'session_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Cancel Device
@@ -65,8 +65,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
- **handle** | **str**|  |
+ **session_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -127,8 +127,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatGPTOAuthV1Api(api_client)
-    session_id = 'session_id_example' # str |
-    handle = 'handle_example' # str |
+    session_id = 'session_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Poll Device
@@ -146,8 +146,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
- **handle** | **str**|  |
+ **session_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -208,7 +208,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatGPTOAuthV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # Start Device
@@ -226,7 +226,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 

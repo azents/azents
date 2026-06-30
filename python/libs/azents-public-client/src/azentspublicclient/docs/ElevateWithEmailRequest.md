@@ -6,8 +6,8 @@ Email OTP elevation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**code** | **str** | 6-digit authentication code |
-**csrf_token** | **str** | CSRF token |
+**code** | **str** | 6-digit authentication code | 
+**csrf_token** | **str** | CSRF token | 
 
 ## Example
 

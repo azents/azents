@@ -49,8 +49,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Agent Runtime
@@ -68,8 +68,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -130,8 +130,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Observe Agent Runtime
@@ -149,8 +149,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -212,9 +212,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
-    reset_agent_runtime_request = azentspublicclient.ResetAgentRuntimeRequest() # ResetAgentRuntimeRequest |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    reset_agent_runtime_request = azentspublicclient.ResetAgentRuntimeRequest() # ResetAgentRuntimeRequest | 
 
     try:
         # Reset Agent Runtime
@@ -232,9 +232,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
- **reset_agent_runtime_request** | [**ResetAgentRuntimeRequest**](ResetAgentRuntimeRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **reset_agent_runtime_request** | [**ResetAgentRuntimeRequest**](ResetAgentRuntimeRequest.md)|  | 
 
 ### Return type
 
@@ -295,8 +295,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Restart Agent Runtime
@@ -314,8 +314,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -376,8 +376,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Start Agent Runtime
@@ -395,8 +395,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -457,8 +457,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Stop Agent Runtime
@@ -476,8 +476,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **handle** | **str**|  |
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 

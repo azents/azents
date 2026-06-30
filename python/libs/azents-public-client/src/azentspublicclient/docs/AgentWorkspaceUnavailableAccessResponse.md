@@ -6,8 +6,8 @@ Workspace unavailable response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**reason** | **str** | Unavailable reason |
+**type** | **str** | Response type | 
+**reason** | **str** | Unavailable reason | 
 
 ## Example
 

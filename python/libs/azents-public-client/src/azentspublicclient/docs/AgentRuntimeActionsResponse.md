@@ -6,11 +6,11 @@ Agent Runtime action availability response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**start** | **bool** |  |
-**stop** | **bool** |  |
-**restart** | **bool** |  |
-**reset** | **bool** |  |
-**use_runner** | **bool** |  |
+**start** | **bool** |  | 
+**stop** | **bool** |  | 
+**restart** | **bool** |  | 
+**reset** | **bool** |  | 
+**use_runner** | **bool** |  | 
 
 ## Example
 

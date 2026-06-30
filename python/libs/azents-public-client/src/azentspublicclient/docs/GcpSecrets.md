@@ -7,7 +7,7 @@ GCP service account based secrets for Google Vertex AI.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'gcp_service_account']
-**service_account_json** | **str** | Service account JSON |
+**service_account_json** | **str** | Service account JSON | 
 
 ## Example
 

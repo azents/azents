@@ -20,6 +20,7 @@ export function OptimisticInputBubble({
   return (
     <InputBufferBubbleFrame
       content={buffer.content}
+      action={buffer.action}
       attachments={buffer.attachments}
       attachmentFiles={buffer.attachmentFiles}
       opacity={0.6}

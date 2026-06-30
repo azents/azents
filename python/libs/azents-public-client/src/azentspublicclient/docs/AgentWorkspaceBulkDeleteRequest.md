@@ -6,7 +6,7 @@ Agent Workspace bulk delete request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**paths** | **List[str]** | File or directory paths to delete |
+**paths** | **List[str]** | File or directory paths to delete | 
 **recursive** | **bool** | Delete directories recursively | [optional] [default to False]
 
 ## Example

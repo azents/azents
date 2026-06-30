@@ -6,10 +6,10 @@ Common response schema for uploaded image + thumbnails.  agent avatar, workspace
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**filename** | **str** | Original upload filename |
-**default** | [**ImageFile**](ImageFile.md) | Always non-null fallback image |
-**thumbnails** | [**ImageThumbnails**](ImageThumbnails.md) | Declarative 3-tier thumbnails |
-**uploaded_at** | **datetime** | Upload completion time (ISO 8601, tz-aware) |
+**filename** | **str** | Original upload filename | 
+**default** | [**ImageFile**](ImageFile.md) | Always non-null fallback image | 
+**thumbnails** | [**ImageThumbnails**](ImageThumbnails.md) | Declarative 3-tier thumbnails | 
+**uploaded_at** | **datetime** | Upload completion time (ISO 8601, tz-aware) | 
 
 ## Example
 

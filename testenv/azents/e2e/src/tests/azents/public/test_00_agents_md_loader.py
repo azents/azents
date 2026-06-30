@@ -319,7 +319,7 @@ def _run_message(
     """t session messaget REST write boundary t t."""
     del public_api_client
     response = requests.post(
-        f"{public_url}/chat/v1/sessions/{session_id}/messages",
+        f"{public_url}/chat/v1/sessions/{session_id}/inputs",
         headers={
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",

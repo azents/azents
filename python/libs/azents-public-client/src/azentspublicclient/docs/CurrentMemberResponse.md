@@ -6,8 +6,8 @@ Current user workspace member info response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**workspace_user_id** | **str** | Current user WorkspaceUser ID |
-**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Current user role |
+**workspace_user_id** | **str** | Current user WorkspaceUser ID | 
+**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Current user role | 
 
 ## Example
 

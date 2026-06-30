@@ -12,6 +12,8 @@ Event transcript event kind.
 
 * `GOAL_UPDATED` (value: `'goal_updated'`)
 
+* `ACTION_MESSAGE` (value: `'action_message'`)
+
 * `GOAL_BRIEFING` (value: `'goal_briefing'`)
 
 * `ASSISTANT_MESSAGE` (value: `'assistant_message'`)

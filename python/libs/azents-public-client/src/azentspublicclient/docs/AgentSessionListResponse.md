@@ -6,7 +6,7 @@ Conversation session list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[AgentSessionResponse]**](AgentSessionResponse.md) | Session list |
+**items** | [**List[AgentSessionResponse]**](AgentSessionResponse.md) | Session list | 
 
 ## Example
 

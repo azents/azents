@@ -6,8 +6,8 @@ Avatar upload ticket issue request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**content_type** | **str** | MIME of the file to upload. JPEG/PNG/WebP allowed |
-**content_length** | **int** | Byte size of the file to upload, up to 5MB |
+**content_type** | **str** | MIME of the file to upload. JPEG/PNG/WebP allowed | 
+**content_length** | **int** | Byte size of the file to upload, up to 5MB | 
 
 ## Example
 

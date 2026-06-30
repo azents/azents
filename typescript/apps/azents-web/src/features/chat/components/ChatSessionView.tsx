@@ -97,8 +97,7 @@ export function ChatSessionView({
           isWritePending={output.isWritePending}
           isModelResponsePending={output.isModelResponsePending}
           handle={handle}
-          onSendMessage={output.onSendMessage}
-          onSendCommand={output.onSendCommand}
+          onSendInput={output.onSendInput}
           onDeletePendingInputBuffer={output.onDeletePendingInputBuffer}
           onClearGoal={output.onClearGoal}
           onUpdateGoal={output.onUpdateGoal}
@@ -116,7 +115,7 @@ export function ChatSessionView({
           isStopAvailable={output.isStopAvailable}
           isStopPending={output.isStopPending}
           onStopRequest={output.onStopRequest}
-          slashCommands={output.slashCommands}
+          inputActions={output.inputActions}
           authorizationRequests={output.authorizationRequests}
           onAuthorizationComplete={output.onAuthorizationComplete}
           workspacePanel={workspacePanel}

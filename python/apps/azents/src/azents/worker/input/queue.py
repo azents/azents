@@ -101,6 +101,7 @@ class DatabaseWorkerInputQueue:
                         "tool_name": item.tool_name,
                         "status": item.status,
                     },
+                    action=None,
                     attachments=[],
                     file_parts=[],
                 ),

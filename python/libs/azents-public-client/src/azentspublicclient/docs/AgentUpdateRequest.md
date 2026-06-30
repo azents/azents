@@ -6,20 +6,20 @@ Agent update request, for partial updates.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Agent name | [optional]
-**description** | **str** |  | [optional]
-**model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**model_parameters** | [**ModelParameters**](ModelParameters.md) |  | [optional]
-**system_prompt** | **str** |  | [optional]
-**enabled** | **bool** | Enabled state | [optional]
-**type** | [**AgentType**](AgentType.md) | Visibility scope | [optional]
-**role** | [**AgentRole**](AgentRole.md) | Role (agent/subagent) | [optional]
-**runtime_provider_id** | **str** |  | [optional]
-**shell_enabled** | **bool** | Shell enabled state | [optional]
-**memory_enabled** | **bool** | Memory enabled state | [optional]
-**max_turns** | **int** |  | [optional]
-**toolkit_inherit_mode** | [**SubagentToolkitInheritMode**](SubagentToolkitInheritMode.md) | Toolkit inherit mode | [optional]
+**name** | **str** | Agent name | [optional] 
+**description** | **str** |  | [optional] 
+**model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**model_parameters** | [**ModelParameters**](ModelParameters.md) |  | [optional] 
+**system_prompt** | **str** |  | [optional] 
+**enabled** | **bool** | Enabled state | [optional] 
+**type** | [**AgentType**](AgentType.md) | Visibility scope | [optional] 
+**role** | [**AgentRole**](AgentRole.md) | Role (agent/subagent) | [optional] 
+**runtime_provider_id** | **str** |  | [optional] 
+**shell_enabled** | **bool** | Shell enabled state | [optional] 
+**memory_enabled** | **bool** | Memory enabled state | [optional] 
+**max_turns** | **int** |  | [optional] 
+**toolkit_inherit_mode** | [**SubagentToolkitInheritMode**](SubagentToolkitInheritMode.md) | Toolkit inherit mode | [optional] 
 
 ## Example
 

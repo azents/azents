@@ -12,6 +12,7 @@ from azents.core.config import Config
 from azents.core.deps import get_appctx
 from azents.core.enums import EventKind, InputBufferKind
 from azents.core.redis import create_redis_client
+from azents.engine.events.action_messages import ActionMessagePayload, ChatAction
 from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
@@ -30,6 +31,7 @@ from azents.utils.appctx import AppContext
 
 _LIVE_EVENT_TTL_SECONDS = 300
 _live_event_adapter = TypeAdapter(Event)
+_chat_action_adapter = TypeAdapter(ChatAction)
 
 
 def _live_event_key(session_id: str) -> str:
@@ -184,23 +186,35 @@ def _is_live_projection(event: Event, projection: str) -> bool:
 
 def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
     """Convert InputBuffer to non-durable live event projection."""
-    content: str | list[UserContentPart]
-    if input_buffer.file_parts:
-        content = [InputTextPart(text=input_buffer.content), *input_buffer.file_parts]
+    if input_buffer.kind == InputBufferKind.ACTION_MESSAGE:
+        if input_buffer.action is None:
+            raise ValueError("Action message input buffer requires action payload")
+        payload = ActionMessagePayload(
+            action=_chat_action_adapter.validate_python(input_buffer.action),
+            message=input_buffer.content,
+        )
     else:
-        content = input_buffer.content
-    metadata = dict(input_buffer.metadata)
-    metadata["input_buffer_id"] = input_buffer.id
-    metadata["live_projection"] = "input_buffer"
+        content: str | list[UserContentPart]
+        if input_buffer.file_parts:
+            content = [
+                InputTextPart(text=input_buffer.content),
+                *input_buffer.file_parts,
+            ]
+        else:
+            content = input_buffer.content
+        metadata = dict(input_buffer.metadata)
+        metadata["input_buffer_id"] = input_buffer.id
+        metadata["live_projection"] = "input_buffer"
+        payload = UserMessagePayload(
+            content=content,
+            attachments=[],
+            metadata=metadata,
+        )
     return Event(
         id=input_buffer.id,
         session_id=input_buffer.session_id,
         kind=_event_kind_for_input_buffer(input_buffer.kind),
-        payload=UserMessagePayload(
-            content=content,
-            attachments=[],
-            metadata=metadata,
-        ),
+        payload=payload,
         model_order=0,
         external_id=input_buffer.id,
         adapter=None,
@@ -221,6 +235,8 @@ def _event_kind_for_input_buffer(kind: InputBufferKind) -> EventKind:
             return EventKind.BACKGROUND_COMPLETION
         case InputBufferKind.GOAL_CONTINUATION:
             return EventKind.GOAL_CONTINUATION
+        case InputBufferKind.ACTION_MESSAGE:
+            return EventKind.ACTION_MESSAGE
 
 
 class LiveEventStore(Protocol):

@@ -6,10 +6,10 @@ Agent Workspace Project response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Project ID |
-**path** | **str** | Agent Workspace absolute path |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | Project ID | 
+**path** | **str** | Agent Workspace absolute path | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 

@@ -13,8 +13,7 @@ import {
   chatV1BulkDeleteAgentWorkspacePaths,
   chatV1BulkMoveAgentWorkspacePaths,
   chatV1CreateAgentWorkspaceDirectory,
-  chatV1CreateCommand,
-  chatV1CreateMessage,
+  chatV1CreateInput,
   chatV1CreateTeamAgentSession,
   chatV1CreateTeamAgentSessionMessage,
   chatV1DeleteAgentProject,
@@ -31,8 +30,8 @@ import {
   chatV1ListAgentProjects,
   chatV1ListAgentSessions,
   chatV1ListHistoryEvents,
+  chatV1ListInputActions,
   chatV1ListLiveEvents,
-  chatV1ListSlashCommands,
   chatV1MoveAgentWorkspacePath,
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
@@ -47,6 +46,12 @@ import { z } from "zod/v4";
 import { getServerConfig } from "@/config/server";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
+
+const inputActionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("command"), name: z.string().min(1) }),
+  z.object({ type: z.literal("goal") }),
+  z.object({ type: z.literal("skill"), skill_id: z.string().min(1) }),
+]);
 
 export const chatRouter = router({
   getAgentSession: publicProcedure
@@ -419,13 +424,16 @@ export const chatRouter = router({
     }
   }),
 
-  listSlashCommands: publicProcedure.query(async ({ ctx }) => {
-    const { data } = await chatV1ListSlashCommands({
-      client: ctx.apiClient,
-      throwOnError: true,
-    });
-    return data;
-  }),
+  listInputActions: publicProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const { data } = await chatV1ListInputActions({
+        client: ctx.apiClient,
+        path: { session_id: input.sessionId },
+        throwOnError: true,
+      });
+      return data;
+    }),
 
   listSessionEvents: publicProcedure
     .input(
@@ -486,25 +494,27 @@ export const chatRouter = router({
       });
     }),
 
-  sendMessage: publicProcedure
+  sendInput: publicProcedure
     .input(
       z.object({
         sessionId: z.string().min(1),
         agentId: z.string().min(1),
         clientRequestId: z.string().min(1).max(64),
-        message: z.string().min(1),
+        message: z.string(),
+        action: inputActionSchema.nullable().optional(),
         attachments: z.array(z.string().min(1)).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await chatV1CreateMessage({
+        const { data } = await chatV1CreateInput({
           client: ctx.apiClient,
           path: { session_id: input.sessionId },
           body: {
             agent_id: input.agentId,
             client_request_id: input.clientRequestId,
             message: input.message,
+            action: input.action ?? null,
             attachments: input.attachments,
           },
           throwOnError: true,
@@ -543,39 +553,6 @@ export const chatRouter = router({
             message_id: input.messageId,
             message: input.message,
             attachments: input.attachments,
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          400: "BAD_REQUEST",
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-          409: "CONFLICT",
-        });
-      }
-    }),
-
-  sendCommand: publicProcedure
-    .input(
-      z.object({
-        sessionId: z.string().min(1),
-        agentId: z.string().min(1),
-        clientRequestId: z.string().min(1).max(64),
-        command: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await chatV1CreateCommand({
-          client: ctx.apiClient,
-          path: { session_id: input.sessionId },
-          body: {
-            agent_id: input.agentId,
-            client_request_id: input.clientRequestId,
-            command: input.command,
           },
           throwOnError: true,
         });

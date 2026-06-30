@@ -6,7 +6,7 @@ Toolkit Config list response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ToolkitConfigResponse]**](ToolkitConfigResponse.md) |  |
+**items** | [**List[ToolkitConfigResponse]**](ToolkitConfigResponse.md) |  | 
 
 ## Example
 

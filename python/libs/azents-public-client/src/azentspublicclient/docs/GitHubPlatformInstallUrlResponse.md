@@ -6,7 +6,7 @@ GitHub Platform App installation URL response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**install_url** | **str** | GitHub App installation page URL |
+**install_url** | **str** | GitHub App installation page URL | 
 
 ## Example
 

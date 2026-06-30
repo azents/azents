@@ -45,7 +45,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    email = 'email_example' # str |
+    email = 'email_example' # str | 
 
     try:
         # Get Login Methods
@@ -63,7 +63,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **email** | **str**|  |
+ **email** | **str**|  | 
 
 ### Return type
 
@@ -179,7 +179,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    password_login_request = azentspublicclient.PasswordLoginRequest() # PasswordLoginRequest |
+    password_login_request = azentspublicclient.PasswordLoginRequest() # PasswordLoginRequest | 
 
     try:
         # Login With Password
@@ -197,7 +197,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **password_login_request** | [**PasswordLoginRequest**](PasswordLoginRequest.md)|  |
+ **password_login_request** | [**PasswordLoginRequest**](PasswordLoginRequest.md)|  | 
 
 ### Return type
 
@@ -320,7 +320,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    preview_password_reset_token_request = azentspublicclient.PreviewPasswordResetTokenRequest() # PreviewPasswordResetTokenRequest |
+    preview_password_reset_token_request = azentspublicclient.PreviewPasswordResetTokenRequest() # PreviewPasswordResetTokenRequest | 
 
     try:
         # Preview Password Reset Token
@@ -338,7 +338,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **preview_password_reset_token_request** | [**PreviewPasswordResetTokenRequest**](PreviewPasswordResetTokenRequest.md)|  |
+ **preview_password_reset_token_request** | [**PreviewPasswordResetTokenRequest**](PreviewPasswordResetTokenRequest.md)|  | 
 
 ### Return type
 
@@ -390,7 +390,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    preview_signup_token_request = azentspublicclient.PreviewSignupTokenRequest() # PreviewSignupTokenRequest |
+    preview_signup_token_request = azentspublicclient.PreviewSignupTokenRequest() # PreviewSignupTokenRequest | 
 
     try:
         # Preview Signup Token
@@ -408,7 +408,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **preview_signup_token_request** | [**PreviewSignupTokenRequest**](PreviewSignupTokenRequest.md)|  |
+ **preview_signup_token_request** | [**PreviewSignupTokenRequest**](PreviewSignupTokenRequest.md)|  | 
 
 ### Return type
 
@@ -460,7 +460,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    redeem_password_reset_token_request = azentspublicclient.RedeemPasswordResetTokenRequest() # RedeemPasswordResetTokenRequest |
+    redeem_password_reset_token_request = azentspublicclient.RedeemPasswordResetTokenRequest() # RedeemPasswordResetTokenRequest | 
 
     try:
         # Redeem Password Reset Token
@@ -478,7 +478,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **redeem_password_reset_token_request** | [**RedeemPasswordResetTokenRequest**](RedeemPasswordResetTokenRequest.md)|  |
+ **redeem_password_reset_token_request** | [**RedeemPasswordResetTokenRequest**](RedeemPasswordResetTokenRequest.md)|  | 
 
 ### Return type
 
@@ -530,7 +530,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    redeem_signup_token_request = azentspublicclient.RedeemSignupTokenRequest() # RedeemSignupTokenRequest |
+    redeem_signup_token_request = azentspublicclient.RedeemSignupTokenRequest() # RedeemSignupTokenRequest | 
 
     try:
         # Redeem Signup Token
@@ -548,7 +548,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **redeem_signup_token_request** | [**RedeemSignupTokenRequest**](RedeemSignupTokenRequest.md)|  |
+ **redeem_signup_token_request** | [**RedeemSignupTokenRequest**](RedeemSignupTokenRequest.md)|  | 
 
 ### Return type
 
@@ -600,7 +600,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    refresh_token_request = azentspublicclient.RefreshTokenRequest() # RefreshTokenRequest |
+    refresh_token_request = azentspublicclient.RefreshTokenRequest() # RefreshTokenRequest | 
 
     try:
         # Refresh Token
@@ -618,7 +618,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **refresh_token_request** | [**RefreshTokenRequest**](RefreshTokenRequest.md)|  |
+ **refresh_token_request** | [**RefreshTokenRequest**](RefreshTokenRequest.md)|  | 
 
 ### Return type
 
@@ -670,7 +670,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    request_signup_email_request = azentspublicclient.RequestSignupEmailRequest() # RequestSignupEmailRequest |
+    request_signup_email_request = azentspublicclient.RequestSignupEmailRequest() # RequestSignupEmailRequest | 
 
     try:
         # Request Signup Email
@@ -688,7 +688,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **request_signup_email_request** | [**RequestSignupEmailRequest**](RequestSignupEmailRequest.md)|  |
+ **request_signup_email_request** | [**RequestSignupEmailRequest**](RequestSignupEmailRequest.md)|  | 
 
 ### Return type
 
@@ -740,7 +740,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    send_code_request = azentspublicclient.SendCodeRequest() # SendCodeRequest |
+    send_code_request = azentspublicclient.SendCodeRequest() # SendCodeRequest | 
 
     try:
         # Send Code
@@ -758,7 +758,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **send_code_request** | [**SendCodeRequest**](SendCodeRequest.md)|  |
+ **send_code_request** | [**SendCodeRequest**](SendCodeRequest.md)|  | 
 
 ### Return type
 
@@ -810,7 +810,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    verify_code_request = azentspublicclient.VerifyCodeRequest() # VerifyCodeRequest |
+    verify_code_request = azentspublicclient.VerifyCodeRequest() # VerifyCodeRequest | 
 
     try:
         # Verify Code
@@ -828,7 +828,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **verify_code_request** | [**VerifyCodeRequest**](VerifyCodeRequest.md)|  |
+ **verify_code_request** | [**VerifyCodeRequest**](VerifyCodeRequest.md)|  | 
 
 ### Return type
 

@@ -6,9 +6,10 @@ Current live run state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**run_id** | **str** | AgentRun ID |
-**phase** | [**AgentRunPhase**](AgentRunPhase.md) | Current run phase |
-**status** | [**AgentRunStatus**](AgentRunStatus.md) | Current run status |
+**run_id** | **str** | AgentRun ID | 
+**phase** | [**AgentRunPhase**](AgentRunPhase.md) | Current run phase | 
+**status** | [**AgentRunStatus**](AgentRunStatus.md) | Current run status | 
+**retry** | [**ChatLiveRunRetryStateResponse**](ChatLiveRunRetryStateResponse.md) |  | [optional] 
 
 ## Example
 

@@ -6,7 +6,7 @@ Signup status response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email_signup_available** | **bool** | Whether email signup link requests are available |
+**email_signup_available** | **bool** | Whether email signup link requests are available | 
 
 ## Example
 

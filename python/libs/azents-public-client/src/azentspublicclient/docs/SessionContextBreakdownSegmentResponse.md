@@ -6,9 +6,9 @@ Session context breakdown segment response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**key** | **str** | Breakdown key |
-**tokens** | **int** | Prompt character count |
-**percent** | **float** | Known prompt character percentage |
+**key** | **str** | Breakdown key | 
+**tokens** | **int** | Prompt character count | 
+**percent** | **float** | Known prompt character percentage | 
 
 ## Example
 

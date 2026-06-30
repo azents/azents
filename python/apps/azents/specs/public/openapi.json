@@ -2121,14 +2121,14 @@
         }
       }
     },
-    "/chat/v1/sessions/{session_id}/messages": {
+    "/chat/v1/sessions/{session_id}/inputs": {
       "post": {
         "tags": [
           "Chat v1"
         ],
-        "summary": "Create Message",
-        "description": "Accept an existing session message at the REST input buffer boundary.",
-        "operationId": "chat_v1_create_message",
+        "summary": "Create Input",
+        "description": "Accept a composer input at the REST boundary.",
+        "operationId": "chat_v1_create_input",
         "security": [
           {
             "HTTPBearer": []
@@ -2166,7 +2166,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChatMessageWriteRequest"
+                "$ref": "#/components/schemas/ChatInputWriteRequest"
               }
             }
           }
@@ -2315,64 +2315,6 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ChatEditMessageWriteRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChatWriteResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/chat/v1/sessions/{session_id}/commands": {
-      "post": {
-        "tags": [
-          "Chat v1"
-        ],
-        "summary": "Create Command",
-        "description": "Accept a slash command at the REST boundary.",
-        "operationId": "chat_v1_create_command",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChatCommandWriteRequest"
               }
             }
           }
@@ -2883,21 +2825,47 @@
         }
       }
     },
-    "/chat/v1/commands": {
+    "/chat/v1/sessions/{session_id}/actions": {
       "get": {
         "tags": [
           "Chat v1"
         ],
-        "summary": "List Slash Commands",
-        "description": "Return the list of available slash commands.",
-        "operationId": "chat_v1_list_slash_commands",
+        "summary": "List Input Actions",
+        "description": "Return composer actions available for a session.",
+        "operationId": "chat_v1_list_input_actions",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SlashCommandListResponse"
+                  "$ref": "#/components/schemas/InputActionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -9791,35 +9759,6 @@
         "title": "BuiltinToolConfig",
         "description": "Built-in tool setting to enable on an Agent."
       },
-      "ChatCommandWriteRequest": {
-        "properties": {
-          "agent_id": {
-            "type": "string",
-            "title": "Agent Id",
-            "description": "Agent ID"
-          },
-          "client_request_id": {
-            "type": "string",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Client Request Id",
-            "description": "Client-generated idempotency key"
-          },
-          "command": {
-            "type": "string",
-            "title": "Command",
-            "description": "Command name, for example compact"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "client_request_id",
-          "command"
-        ],
-        "title": "ChatCommandWriteRequest",
-        "description": "REST slash command request."
-      },
       "ChatEditMessageWriteRequest": {
         "properties": {
           "agent_id": {
@@ -10289,6 +10228,80 @@
         "title": "ChatGPTOAuthSessionStatus",
         "description": "ChatGPT OAuth session status."
       },
+      "ChatInputWriteRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "description": "Agent ID"
+          },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "description": "Client-generated idempotency key"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Input message content"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CommandAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GoalAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SkillAction"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "command": "#/components/schemas/CommandAction",
+                    "goal": "#/components/schemas/GoalAction",
+                    "skill": "#/components/schemas/SkillAction"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action",
+            "description": "Optional selected chat action"
+          },
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachments",
+            "description": "Attachment reference list, exchange:// URIs received after upload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "client_request_id",
+          "message"
+        ],
+        "title": "ChatInputWriteRequest",
+        "description": "REST composer input write request."
+      },
       "ChatLiveRunRetryStateResponse": {
         "properties": {
           "status": {
@@ -10369,50 +10382,6 @@
         ],
         "title": "ChatLiveRunStateResponse",
         "description": "Current live run state response."
-      },
-      "ChatMessageWriteRequest": {
-        "properties": {
-          "agent_id": {
-            "type": "string",
-            "title": "Agent Id",
-            "description": "Agent ID"
-          },
-          "client_request_id": {
-            "type": "string",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Client Request Id",
-            "description": "Client-generated idempotency key"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Message content"
-          },
-          "attachments": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attachments",
-            "description": "Attachment reference list, exchange:// URIs received after upload"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "client_request_id",
-          "message"
-        ],
-        "title": "ChatMessageWriteRequest",
-        "description": "REST message write request."
       },
       "ChatSessionCreateMessageWriteRequest": {
         "properties": {
@@ -10604,6 +10573,28 @@
         "title": "ChatWriteSnapshotResponse",
         "description": "Authoritative live snapshot after REST write."
       },
+      "CommandAction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "command",
+            "title": "Type",
+            "default": "command"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name",
+            "description": "Command name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CommandAction",
+        "description": "Idle-only prioritized command action."
+      },
       "CreateInvitationRequest": {
         "properties": {
           "email": {
@@ -10775,6 +10766,7 @@
           "background_completion",
           "goal_continuation",
           "goal_updated",
+          "action_message",
           "goal_briefing",
           "assistant_message",
           "reasoning",
@@ -10963,6 +10955,19 @@
         ],
         "title": "GitHubPlatformOAuthUrlResponse",
         "description": "GitHub Platform App OAuth URL response."
+      },
+      "GoalAction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "goal",
+            "title": "Type",
+            "default": "goal"
+          }
+        },
+        "type": "object",
+        "title": "GoalAction",
+        "description": "Session goal creation turn action."
       },
       "GoalStateResponse": {
         "properties": {
@@ -11167,6 +11172,207 @@
         "type": "object",
         "title": "ImageThumbnails",
         "description": "3-tier thumbnails for API response."
+      },
+      "InputActionAttachmentPolicyResponse": {
+        "properties": {
+          "policy": {
+            "type": "string",
+            "enum": [
+              "unsupported",
+              "optional",
+              "required"
+            ],
+            "title": "Policy",
+            "description": "Attachment policy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "policy"
+        ],
+        "title": "InputActionAttachmentPolicyResponse",
+        "description": "Composer action attachment policy."
+      },
+      "InputActionAvailabilityHintResponse": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "warning"
+            ],
+            "title": "State",
+            "description": "Hint state"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Hint text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "InputActionAvailabilityHintResponse",
+        "description": "Non-authoritative composer action availability hint."
+      },
+      "InputActionDefinitionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Action definition ID"
+          },
+          "keyword": {
+            "type": "string",
+            "title": "Keyword",
+            "description": "Slash search keyword"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Action label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Action description"
+          },
+          "action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CommandAction"
+              },
+              {
+                "$ref": "#/components/schemas/GoalAction"
+              },
+              {
+                "$ref": "#/components/schemas/SkillAction"
+              }
+            ],
+            "title": "Action",
+            "description": "Action payload",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "command": "#/components/schemas/CommandAction",
+                "goal": "#/components/schemas/GoalAction",
+                "skill": "#/components/schemas/SkillAction"
+              }
+            }
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "command",
+              "turn"
+            ],
+            "title": "Category",
+            "description": "Action category"
+          },
+          "message": {
+            "$ref": "#/components/schemas/InputActionMessagePolicyResponse",
+            "description": "Message policy"
+          },
+          "attachments": {
+            "$ref": "#/components/schemas/InputActionAttachmentPolicyResponse",
+            "description": "Attachment policy"
+          },
+          "availability_hint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InputActionAvailabilityHintResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Non-authoritative availability hint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "keyword",
+          "label",
+          "description",
+          "action",
+          "category",
+          "message",
+          "attachments"
+        ],
+        "title": "InputActionDefinitionResponse",
+        "description": "Composer action definition response."
+      },
+      "InputActionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InputActionDefinitionResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Available composer action definitions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "InputActionListResponse",
+        "description": "Composer action list response."
+      },
+      "InputActionMessagePolicyResponse": {
+        "properties": {
+          "policy": {
+            "type": "string",
+            "enum": [
+              "none",
+              "optional",
+              "required"
+            ],
+            "title": "Policy",
+            "description": "Message input policy"
+          },
+          "placeholder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placeholder",
+            "description": "Composer placeholder"
+          },
+          "max_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Length",
+            "description": "Message max length"
+          }
+        },
+        "type": "object",
+        "required": [
+          "policy"
+        ],
+        "title": "InputActionMessagePolicyResponse",
+        "description": "Composer action message policy."
       },
       "InvitationListResponse": {
         "properties": {
@@ -13692,44 +13898,27 @@
         "title": "SignupStatusResponse",
         "description": "Signup status response."
       },
-      "SlashCommandListResponse": {
+      "SkillAction": {
         "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/SlashCommandResponse"
-            },
-            "type": "array",
-            "title": "Items",
-            "description": "Available slash command list"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "title": "SlashCommandListResponse",
-        "description": "Slash command list response."
-      },
-      "SlashCommandResponse": {
-        "properties": {
-          "name": {
+          "type": {
             "type": "string",
-            "title": "Name",
-            "description": "Command name without leading slash"
+            "const": "skill",
+            "title": "Type",
+            "default": "skill"
           },
-          "description": {
+          "skill_id": {
             "type": "string",
-            "title": "Description",
-            "description": "Command description"
+            "minLength": 1,
+            "title": "Skill Id",
+            "description": "Skill ID"
           }
         },
         "type": "object",
         "required": [
-          "name",
-          "description"
+          "skill_id"
         ],
-        "title": "SlashCommandResponse",
-        "description": "Slash command response."
+        "title": "SkillAction",
+        "description": "Skill invocation turn action."
       },
       "SubagentToolkitInheritMode": {
         "type": "string",

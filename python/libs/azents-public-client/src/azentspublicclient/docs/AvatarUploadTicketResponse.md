@@ -6,9 +6,9 @@ Presigned PUT ticket response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**upload_key** | **str** | Upload key to pass during finalize |
-**upload_url** | **str** | Presigned URL for the client to PUT to |
-**expires_at** | **datetime** | URL expiration time, ISO 8601 and tz-aware |
+**upload_key** | **str** | Upload key to pass during finalize | 
+**upload_url** | **str** | Presigned URL for the client to PUT to | 
+**expires_at** | **datetime** | URL expiration time, ISO 8601 and tz-aware | 
 
 ## Example
 

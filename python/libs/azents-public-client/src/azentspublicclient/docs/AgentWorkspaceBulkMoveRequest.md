@@ -6,8 +6,8 @@ Agent Workspace bulk move request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**source_paths** | **List[str]** | Source paths |
-**destination_directory** | **str** | Destination directory |
+**source_paths** | **List[str]** | Source paths | 
+**destination_directory** | **str** | Destination directory | 
 **overwrite** | **bool** | Overwrite existing destinations | [optional] [default to False]
 
 ## Example

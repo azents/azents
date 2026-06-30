@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.chat_command_write_request import ChatCommandWriteRequest
+from azentspublicclient.models.goal_action import GoalAction
 
-class TestChatCommandWriteRequest(unittest.TestCase):
-    """ChatCommandWriteRequest unit test stubs"""
+class TestGoalAction(unittest.TestCase):
+    """GoalAction unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,30 +25,25 @@ class TestChatCommandWriteRequest(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> ChatCommandWriteRequest:
-        """Test ChatCommandWriteRequest
+    def make_instance(self, include_optional) -> GoalAction:
+        """Test GoalAction
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `ChatCommandWriteRequest`
+        # uncomment below to create an instance of `GoalAction`
         """
-        model = ChatCommandWriteRequest()
+        model = GoalAction()
         if include_optional:
-            return ChatCommandWriteRequest(
-                agent_id = '',
-                client_request_id = '0',
-                command = ''
+            return GoalAction(
+                type = 'goal'
             )
         else:
-            return ChatCommandWriteRequest(
-                agent_id = '',
-                client_request_id = '0',
-                command = '',
+            return GoalAction(
         )
         """
 
-    def testChatCommandWriteRequest(self):
-        """Test ChatCommandWriteRequest"""
+    def testGoalAction(self):
+        """Test GoalAction"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

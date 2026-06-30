@@ -6,7 +6,7 @@ Agent Workspace Project list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SessionWorkspaceProjectResponse]**](SessionWorkspaceProjectResponse.md) | Project list |
+**items** | [**List[SessionWorkspaceProjectResponse]**](SessionWorkspaceProjectResponse.md) | Project list | 
 
 ## Example
 

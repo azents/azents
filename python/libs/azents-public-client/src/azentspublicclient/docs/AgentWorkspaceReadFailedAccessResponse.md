@@ -6,8 +6,8 @@ Workspace read/list failure response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**detail** | **str** | Status description |
+**type** | **str** | Response type | 
+**detail** | **str** | Status description | 
 
 ## Example
 

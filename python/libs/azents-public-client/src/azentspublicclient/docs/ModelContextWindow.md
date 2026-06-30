@@ -6,8 +6,8 @@ Model context window capability.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**max_input_tokens** | **int** |  | [optional]
-**max_output_tokens** | **int** |  | [optional]
+**max_input_tokens** | **int** |  | [optional] 
+**max_output_tokens** | **int** |  | [optional] 
 
 ## Example
 

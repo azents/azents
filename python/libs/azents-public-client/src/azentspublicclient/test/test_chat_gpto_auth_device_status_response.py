@@ -38,12 +38,12 @@ class TestChatGPTOAuthDeviceStatusResponse(unittest.TestCase):
                 session_id = '',
                 status = 'pending',
                 integration = azentspublicclient.models.llm_provider_integration_response.LLMProviderIntegrationResponse(
-                    id = '',
-                    provider = 'openai',
-                    name = '',
-                    config = null,
-                    enabled = True,
-                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                    id = '', 
+                    provider = 'openai', 
+                    name = '', 
+                    config = null, 
+                    enabled = True, 
+                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
             )
         else:

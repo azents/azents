@@ -6,7 +6,7 @@ Workspace list response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[WorkspaceResponse]**](WorkspaceResponse.md) | Workspace list |
+**items** | [**List[WorkspaceResponse]**](WorkspaceResponse.md) | Workspace list | 
 
 ## Example
 

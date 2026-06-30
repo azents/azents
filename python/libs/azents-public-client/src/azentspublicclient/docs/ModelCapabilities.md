@@ -6,13 +6,13 @@ Normalized LLM model capability contract.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**context_window** | [**ModelContextWindow**](ModelContextWindow.md) |  | [optional]
-**modalities** | [**ModelModalities**](ModelModalities.md) |  | [optional]
-**tool_calling** | [**ModelToolCallingCapabilities**](ModelToolCallingCapabilities.md) |  | [optional]
-**reasoning** | [**ModelReasoningCapabilities**](ModelReasoningCapabilities.md) |  | [optional]
-**built_in_tools** | [**ModelBuiltInToolCapabilities**](ModelBuiltInToolCapabilities.md) |  | [optional]
-**parameters** | [**ModelParameterCapabilities**](ModelParameterCapabilities.md) |  | [optional]
-**compatibility** | [**ModelCompatibilityCapabilities**](ModelCompatibilityCapabilities.md) |  | [optional]
+**context_window** | [**ModelContextWindow**](ModelContextWindow.md) |  | [optional] 
+**modalities** | [**ModelModalities**](ModelModalities.md) |  | [optional] 
+**tool_calling** | [**ModelToolCallingCapabilities**](ModelToolCallingCapabilities.md) |  | [optional] 
+**reasoning** | [**ModelReasoningCapabilities**](ModelReasoningCapabilities.md) |  | [optional] 
+**built_in_tools** | [**ModelBuiltInToolCapabilities**](ModelBuiltInToolCapabilities.md) |  | [optional] 
+**parameters** | [**ModelParameterCapabilities**](ModelParameterCapabilities.md) |  | [optional] 
+**compatibility** | [**ModelCompatibilityCapabilities**](ModelCompatibilityCapabilities.md) |  | [optional] 
 
 ## Example
 

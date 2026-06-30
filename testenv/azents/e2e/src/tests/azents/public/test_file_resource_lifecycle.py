@@ -123,7 +123,7 @@ def _run_new_session_until_complete(
             f"Team primary response did not include id: {session_payload!r}"
         )
     response = requests.post(
-        f"{public_url}/chat/v1/sessions/{session_id}/messages",
+        f"{public_url}/chat/v1/sessions/{session_id}/inputs",
         headers={**_headers(access_token), "Content-Type": "application/json"},
         json={
             "agent_id": agent_id,
@@ -240,7 +240,7 @@ def _run_message(
     """t session t message t REST write boundary t t."""
     del public_api_client
     response = requests.post(
-        f"{public_url}/chat/v1/sessions/{session_id}/messages",
+        f"{public_url}/chat/v1/sessions/{session_id}/inputs",
         headers={**_headers(access_token), "Content-Type": "application/json"},
         json={
             "agent_id": agent_id,
