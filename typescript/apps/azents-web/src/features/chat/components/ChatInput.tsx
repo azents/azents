@@ -737,20 +737,17 @@ export const ChatInput = memo(function ChatInput({
                 />
               )}
               <Box style={{ minWidth: 0, position: "relative" }}>
-                {todo !== null &&
-                  !editingMessageId &&
-                  selectedAction === null &&
-                  inputActionQuery === null && (
-                    <TodoPreviewBar
-                      goal={goal}
-                      isMobile={isMobile}
-                      todo={todo}
-                      onClearGoal={onClearGoal}
-                      onUpdateGoal={onUpdateGoal}
-                      onPauseGoal={onPauseGoal}
-                      onResumeGoal={onResumeGoal}
-                    />
-                  )}
+                {todo !== null && !editingMessageId && (
+                  <TodoPreviewBar
+                    goal={goal}
+                    isMobile={isMobile}
+                    todo={todo}
+                    onClearGoal={onClearGoal}
+                    onUpdateGoal={onUpdateGoal}
+                    onPauseGoal={onPauseGoal}
+                    onResumeGoal={onResumeGoal}
+                  />
+                )}
                 {selectedAction !== null && !editingMessageId && (
                   <Group
                     gap={rem(4)}
