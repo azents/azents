@@ -142,6 +142,7 @@ class ChatWriteService:
                     content=text,
                     idempotency_key=client_request_id,
                     metadata=metadata,
+                    action=None,
                     attachments=attachments,
                     file_parts=file_parts,
                 ),

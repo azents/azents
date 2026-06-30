@@ -56,12 +56,13 @@ import { SubagentDetailModal } from "./SubagentDetailModal";
 import { TurnDivider } from "./TurnDivider";
 import type {
   AuthorizationRequest,
+  ChatAction,
   ChatMessage,
   ChatTimelineState,
   ChatViewState,
   GoalStateSnapshot,
+  InputActionDefinition,
   PendingInputBuffer,
-  SlashCommand,
   TodoStateSnapshot,
 } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
@@ -227,12 +228,11 @@ interface ChatViewProps {
   isModelResponsePending: boolean;
   /** current workspace handle */
   handle: string;
-  onSendMessage: (
+  onSendInput: (
     message: string,
+    action?: ChatAction | null,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
-  /** send command selected from slash autocomplete */
-  onSendCommand: (command: string) => Promise<boolean>;
   /** delete pending input buffer */
   onDeletePendingInputBuffer: (bufferId: string) => void;
   /** Goal delete */
@@ -271,8 +271,8 @@ interface ChatViewProps {
   isStopPending: boolean;
   /** run stop request callback */
   onStopRequest: () => void;
-  /** server-managed textwhen text list */
-  slashCommands: SlashCommand[];
+  /** server-managed input action list */
+  inputActions: InputActionDefinition[];
   /** pending OAuth authorization request list */
   authorizationRequests: AuthorizationRequest[];
   /** auth complete when remove corresponding request */
@@ -295,8 +295,7 @@ export function ChatView({
   isResponsePending,
   isWritePending,
   isModelResponsePending,
-  onSendMessage,
-  onSendCommand,
+  onSendInput,
   onDeletePendingInputBuffer,
   onClearGoal,
   onUpdateGoal,
@@ -314,7 +313,7 @@ export function ChatView({
   isStopAvailable,
   isStopPending,
   onStopRequest,
-  slashCommands,
+  inputActions,
   authorizationRequests,
   onAuthorizationComplete,
   workspacePanel,
@@ -407,12 +406,16 @@ export function ChatView({
     setEditingMessage(null);
   }, []);
 
-  const handleSubmitMessage = useCallback(
-    async (message: string, attachments?: UploadedFile[]): Promise<boolean> => {
+  const handleSubmitInput = useCallback(
+    async (
+      message: string,
+      action?: ChatAction | null,
+      attachments?: UploadedFile[],
+    ): Promise<boolean> => {
       if (!editingMessage) {
-        return onSendMessage(message, attachments);
+        return onSendInput(message, action, attachments);
       }
-      if (isResponsePending) {
+      if (isResponsePending || action) {
         return false;
       }
       const sent = await onSubmitMessageEdit(
@@ -425,7 +428,7 @@ export function ChatView({
       }
       return sent;
     },
-    [editingMessage, isResponsePending, onSendMessage, onSubmitMessageEdit],
+    [editingMessage, isResponsePending, onSendInput, onSubmitMessageEdit],
   );
 
   // older messages prepend when preserve scroll position
@@ -1074,8 +1077,7 @@ export function ChatView({
                 onPauseGoal={onPauseGoal}
                 onResumeGoal={onResumeGoal}
                 uploadAll={uploadAll}
-                onSendMessage={handleSubmitMessage}
-                onSendCommand={onSendCommand}
+                onSendInput={handleSubmitInput}
                 clearDoneFiles={clearDoneFiles}
                 resetDoneFiles={resetDoneFiles}
                 addFiles={addFiles}
@@ -1086,7 +1088,7 @@ export function ChatView({
                 isStopAvailable={isStopAvailable}
                 isStopPending={isStopPending}
                 onStopRequest={onStopRequest}
-                slashCommands={slashCommands}
+                inputActions={inputActions}
                 editingMessageId={editingMessage?.messageId ?? null}
                 editingInitialValue={editingMessage?.content ?? null}
                 onCancelEdit={handleCancelEdit}

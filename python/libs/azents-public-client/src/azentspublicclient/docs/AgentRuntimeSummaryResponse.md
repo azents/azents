@@ -6,9 +6,9 @@ Agent Runtime summary response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**summary** | [**RuntimeSummary**](RuntimeSummary.md) |  |
-**actions** | [**AgentRuntimeActionsResponse**](AgentRuntimeActionsResponse.md) |  |
-**failure** | [**AgentRuntimeFailureResponse**](AgentRuntimeFailureResponse.md) |  |
+**summary** | [**RuntimeSummary**](RuntimeSummary.md) |  | 
+**actions** | [**AgentRuntimeActionsResponse**](AgentRuntimeActionsResponse.md) |  | 
+**failure** | [**AgentRuntimeFailureResponse**](AgentRuntimeFailureResponse.md) |  | 
 
 ## Example
 

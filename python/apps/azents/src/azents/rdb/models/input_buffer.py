@@ -61,6 +61,10 @@ class RDBInputBuffer(RDBModel):
         JSONB,
         nullable=False,
     )
+    action: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
     attachments: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     file_parts: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(

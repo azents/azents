@@ -215,6 +215,16 @@ function applySubagentEvent(
       });
     }
 
+    case "action_message": {
+      return upsertMessage(prev, {
+        id: event.id,
+        role: "user",
+        content: event.payload.message,
+        createdAt: event.created_at,
+        status: "complete",
+      });
+    }
+
     case "assistant_message": {
       const content = eventContentText(event.payload.content);
       const attachments = [

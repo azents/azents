@@ -6,9 +6,9 @@ Agent Runtime failure response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**generation** | **int** |  |
-**code** | **str** |  |
-**message** | **str** |  |
+**generation** | **int** |  | 
+**code** | **str** |  | 
+**message** | **str** |  | 
 
 ## Example
 

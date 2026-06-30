@@ -6,9 +6,9 @@ Device OAuth status response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**session_id** | **str** | OAuth session ID |
-**status** | [**ChatGPTOAuthSessionStatus**](ChatGPTOAuthSessionStatus.md) | Session status |
-**integration** | [**LLMProviderIntegrationResponse**](LLMProviderIntegrationResponse.md) |  | [optional]
+**session_id** | **str** | OAuth session ID | 
+**status** | [**ChatGPTOAuthSessionStatus**](ChatGPTOAuthSessionStatus.md) | Session status | 
+**integration** | [**LLMProviderIntegrationResponse**](LLMProviderIntegrationResponse.md) |  | [optional] 
 
 ## Example
 

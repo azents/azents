@@ -6,17 +6,17 @@ Latest model catalog sync attempt response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**status** | **str** |  |
-**started_at** | **datetime** |  |
-**finished_at** | **datetime** |  |
-**failure_code** | **str** |  |
-**failure_message** | **str** |  |
-**action_hint** | **str** |  |
-**fetched_count** | **int** |  |
-**matched_count** | **int** |  |
-**skipped_count** | **int** |  |
-**hidden_count** | **int** |  |
+**id** | **str** |  | 
+**status** | **str** |  | 
+**started_at** | **datetime** |  | 
+**finished_at** | **datetime** |  | 
+**failure_code** | **str** |  | 
+**failure_message** | **str** |  | 
+**action_hint** | **str** |  | 
+**fetched_count** | **int** |  | 
+**matched_count** | **int** |  | 
+**skipped_count** | **int** |  | 
+**hidden_count** | **int** |  | 
 
 ## Example
 

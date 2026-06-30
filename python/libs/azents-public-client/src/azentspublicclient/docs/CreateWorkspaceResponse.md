@@ -6,7 +6,7 @@ Workspace creation response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**workspace_handle** | **str** | Created Workspace handle |
+**workspace_handle** | **str** | Created Workspace handle | 
 
 ## Example
 

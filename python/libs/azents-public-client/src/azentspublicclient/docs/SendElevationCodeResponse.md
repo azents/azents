@@ -6,7 +6,7 @@ Elevation OTP send response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**csrf_token** | **str** | CSRF token |
+**csrf_token** | **str** | CSRF token | 
 
 ## Example
 

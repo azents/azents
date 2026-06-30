@@ -6,7 +6,7 @@ OAuth authorization URL response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**authorization_url** | **str** | OAuth2 authorization URL |
+**authorization_url** | **str** | OAuth2 authorization URL | 
 
 ## Example
 

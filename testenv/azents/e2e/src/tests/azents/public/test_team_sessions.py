@@ -141,7 +141,7 @@ def _write_message(
     return _post_json(
         server_url=server_url,
         token=token,
-        path=f"/chat/v1/sessions/{session_id}/messages",
+        path=f"/chat/v1/sessions/{session_id}/inputs",
         payload={
             "agent_id": agent_id,
             "client_request_id": client_request_id,

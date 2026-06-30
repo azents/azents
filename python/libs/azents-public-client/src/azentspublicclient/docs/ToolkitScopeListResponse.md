@@ -6,7 +6,7 @@ ToolkitScope list response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ToolkitScopeResponse]**](ToolkitScopeResponse.md) |  |
+**items** | [**List[ToolkitScopeResponse]**](ToolkitScopeResponse.md) |  | 
 
 ## Example
 

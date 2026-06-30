@@ -6,7 +6,7 @@ Agent Workspace mkdir request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**path** | **str** | Directory path to create |
+**path** | **str** | Directory path to create | 
 **parents** | **bool** | Create parent directories | [optional] [default to False]
 
 ## Example

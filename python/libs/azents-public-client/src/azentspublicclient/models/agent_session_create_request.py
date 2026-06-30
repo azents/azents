@@ -17,19 +17,18 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List
-from azentspublicclient.models.slash_command_response import SlashCommandResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
-class SlashCommandListResponse(BaseModel):
+class AgentSessionCreateRequest(BaseModel):
     """
-    Slash command list response.
+    REST non-primary AgentSession create request.
     """ # noqa: E501
-    items: List[SlashCommandResponse] = Field(description="Available slash command list")
+    project_paths: List[StrictStr] = Field(description="Exact Project paths to register on the created session")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["items"]
+    __properties: ClassVar[List[str]] = ["project_paths"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -49,7 +48,7 @@ class SlashCommandListResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of SlashCommandListResponse from a JSON string"""
+        """Create an instance of AgentSessionCreateRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,13 +71,6 @@ class SlashCommandListResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in items (list)
-        _items = []
-        if self.items:
-            for _item_items in self.items:
-                if _item_items:
-                    _items.append(_item_items.to_dict())
-            _dict['items'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -88,7 +80,7 @@ class SlashCommandListResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of SlashCommandListResponse from a dict"""
+        """Create an instance of AgentSessionCreateRequest from a dict"""
         if obj is None:
             return None
 
@@ -96,7 +88,7 @@ class SlashCommandListResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "items": [SlashCommandResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
+            "project_paths": obj.get("project_paths")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

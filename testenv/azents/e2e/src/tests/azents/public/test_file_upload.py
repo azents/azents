@@ -611,7 +611,7 @@ class TestUploadMessagePath:
             session_id=session_id,
         ) as ws:
             response = requests.post(
-                f"{azents_public_server_url}/chat/v1/sessions/{session_id}/messages",
+                f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
                 headers={**_headers(token), "Content-Type": "application/json"},
                 json={
                     "agent_id": agent_id,

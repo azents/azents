@@ -6,14 +6,14 @@ Session context statistics response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**total_events** | **int** | Raw event count |
-**user_messages** | **int** | User message count |
-**assistant_messages** | **int** | Assistant message count |
-**reasoning_events** | **int** | Reasoning event count |
-**tool_calls** | **int** | Tool call count |
-**tool_results** | **int** | Tool result count |
-**turn_markers** | **int** | Turn marker count |
-**total_cost_usd** | **float** |  | [optional]
+**total_events** | **int** | Raw event count | 
+**user_messages** | **int** | User message count | 
+**assistant_messages** | **int** | Assistant message count | 
+**reasoning_events** | **int** | Reasoning event count | 
+**tool_calls** | **int** | Tool call count | 
+**tool_results** | **int** | Tool result count | 
+**turn_markers** | **int** | Turn marker count | 
+**total_cost_usd** | **float** |  | [optional] 
 
 ## Example
 

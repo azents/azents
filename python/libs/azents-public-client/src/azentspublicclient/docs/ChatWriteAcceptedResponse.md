@@ -6,8 +6,8 @@ REST write accepted target.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Accepted target type |
-**id** | **str** | Accepted target ID |
+**type** | **str** | Accepted target type | 
+**id** | **str** | Accepted target ID | 
 
 ## Example
 

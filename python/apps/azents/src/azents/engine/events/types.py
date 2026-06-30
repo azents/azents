@@ -7,6 +7,7 @@ from azcommon.types import JSONObject
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation, model_validator
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.run.failure import (
     FailedRunFailureMetadata,
     FailedRunRetryState,
@@ -446,6 +447,7 @@ EventPayload = (
     | SubagentStartPayload
     | SubagentEndPayload
     | GoalBriefingPayload
+    | ActionMessagePayload
     | SystemReminderPayload
     | SystemErrorPayload
     | UnknownAdapterOutputPayload
@@ -456,6 +458,7 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.BACKGROUND_COMPLETION: UserMessagePayload,
     EventKind.GOAL_CONTINUATION: UserMessagePayload,
     EventKind.GOAL_UPDATED: UserMessagePayload,
+    EventKind.ACTION_MESSAGE: ActionMessagePayload,
     EventKind.GOAL_BRIEFING: GoalBriefingPayload,
     EventKind.ASSISTANT_MESSAGE: AssistantMessagePayload,
     EventKind.REASONING: ReasoningPayload,

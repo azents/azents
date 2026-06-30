@@ -37,7 +37,7 @@ class TestAgentWorkspaceBulkMoveResponse(unittest.TestCase):
             return AgentWorkspaceBulkMoveResponse(
                 entries = [
                     azentspublicclient.models.agent_workspace_move_response.AgentWorkspaceMoveResponse(
-                        source_path = '',
+                        source_path = '', 
                         destination_path = '', )
                     ]
             )
@@ -45,7 +45,7 @@ class TestAgentWorkspaceBulkMoveResponse(unittest.TestCase):
             return AgentWorkspaceBulkMoveResponse(
                 entries = [
                     azentspublicclient.models.agent_workspace_move_response.AgentWorkspaceMoveResponse(
-                        source_path = '',
+                        source_path = '', 
                         destination_path = '', )
                     ],
         )

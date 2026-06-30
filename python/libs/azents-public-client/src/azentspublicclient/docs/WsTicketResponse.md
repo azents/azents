@@ -6,7 +6,7 @@ Short-lived ticket response for WebSocket connection.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**ticket** | **str** | Short-lived HMAC-signed ticket, valid for 30 seconds |
+**ticket** | **str** | Short-lived HMAC-signed ticket, valid for 30 seconds | 
 
 ## Example
 

@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.slash_command_response import SlashCommandResponse
+from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction
 
-class TestSlashCommandResponse(unittest.TestCase):
-    """SlashCommandResponse unit test stubs"""
+class TestChatInputWriteRequestAction(unittest.TestCase):
+    """ChatInputWriteRequestAction unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,28 +25,29 @@ class TestSlashCommandResponse(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> SlashCommandResponse:
-        """Test SlashCommandResponse
+    def make_instance(self, include_optional) -> ChatInputWriteRequestAction:
+        """Test ChatInputWriteRequestAction
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `SlashCommandResponse`
+        # uncomment below to create an instance of `ChatInputWriteRequestAction`
         """
-        model = SlashCommandResponse()
+        model = ChatInputWriteRequestAction()
         if include_optional:
-            return SlashCommandResponse(
-                name = '',
-                description = ''
+            return ChatInputWriteRequestAction(
+                type = 'command',
+                name = '0',
+                skill_id = '0'
             )
         else:
-            return SlashCommandResponse(
-                name = '',
-                description = '',
+            return ChatInputWriteRequestAction(
+                name = '0',
+                skill_id = '0',
         )
         """
 
-    def testSlashCommandResponse(self):
-        """Test SlashCommandResponse"""
+    def testChatInputWriteRequestAction(self):
+        """Test ChatInputWriteRequestAction"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

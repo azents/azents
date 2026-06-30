@@ -7,8 +7,8 @@ Represents reasoning capability.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **supported** | **bool** |  | [optional] [default to False]
-**effort_levels** | [**List[ModelReasoningEffort]**](ModelReasoningEffort.md) |  | [optional]
-**summaries** | **bool** |  | [optional]
+**effort_levels** | [**List[ModelReasoningEffort]**](ModelReasoningEffort.md) |  | [optional] 
+**summaries** | **bool** |  | [optional] 
 
 ## Example
 

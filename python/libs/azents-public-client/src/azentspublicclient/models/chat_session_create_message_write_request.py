@@ -29,9 +29,10 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
     """ # noqa: E501
     client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
     message: StrictStr = Field(description="Message content")
+    project_paths: List[StrictStr] = Field(description="Exact Project paths to register on the created session")
     attachments: Optional[List[StrictStr]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["client_request_id", "message", "attachments"]
+    __properties: ClassVar[List[str]] = ["client_request_id", "message", "project_paths", "attachments"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -98,6 +99,7 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         _obj = cls.model_validate({
             "client_request_id": obj.get("client_request_id"),
             "message": obj.get("message"),
+            "project_paths": obj.get("project_paths"),
             "attachments": obj.get("attachments")
         })
         # store additional fields in additional_properties
@@ -106,3 +108,5 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
                 _obj.additional_properties[_key] = obj.get(_key)
 
         return _obj
+
+

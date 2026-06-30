@@ -6,7 +6,7 @@ WorkspaceUser role change request schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Role to change to (owner, manager, member) |
+**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Role to change to (owner, manager, member) | 
 
 ## Example
 

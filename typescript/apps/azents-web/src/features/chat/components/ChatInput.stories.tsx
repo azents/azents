@@ -3,23 +3,42 @@ import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
 import type { UploadedFile } from "../hooks/useFileUpload";
-import type { SlashCommand } from "../types";
+import type { InputActionDefinition } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const uploadAll = (): Promise<UploadedFile[]> => Promise.resolve([]);
-const sendMessage = (): Promise<boolean> => Promise.resolve(true);
-const sendCommand = (): Promise<boolean> => Promise.resolve(true);
+const sendInput = (): Promise<boolean> => Promise.resolve(true);
 const clearDoneFiles = (): void => {};
 const resetDoneFiles = (): void => {};
 const addFiles: (files: FileList) => void = () => {};
 const removeFile = (): void => {};
 const afterSend = (): void => {};
 const stopRequest = (): void => {};
-const slashCommands: SlashCommand[] = [
+const inputActions: InputActionDefinition[] = [
   {
-    name: "compact",
+    id: "command:compact",
+    keyword: "compact",
+    label: "Compact",
     description:
       "Summarize previous conversation and compact the context window.",
+    action: { type: "command", name: "compact" },
+    category: "command",
+    message: { policy: "optional", placeholder: "Send to run this command." },
+    attachments: { policy: "unsupported" },
+  },
+  {
+    id: "goal",
+    keyword: "goal",
+    label: "Goal",
+    description: "Create a session goal.",
+    action: { type: "goal" },
+    category: "turn",
+    message: {
+      policy: "required",
+      placeholder: "Describe the goal for this session.",
+      max_length: 4000,
+    },
+    attachments: { policy: "unsupported" },
   },
 ];
 
@@ -47,8 +66,7 @@ const baseArgs = {
   goal: null,
   todo: null,
   uploadAll,
-  onSendMessage: sendMessage,
-  onSendCommand: sendCommand,
+  onSendInput: sendInput,
   clearDoneFiles,
   resetDoneFiles,
   addFiles,
@@ -58,7 +76,7 @@ const baseArgs = {
   isStopAvailable: false,
   isStopPending: false,
   onStopRequest: stopRequest,
-  slashCommands,
+  inputActions,
 };
 
 export const Ready = {
@@ -86,7 +104,7 @@ export const CommandBlocked = {
   },
 } satisfies Story;
 
-export const SlashCommandSuggestions = {
+export const InputActionSuggestions = {
   args: {
     ...baseArgs,
     initialInputValue: "/",

@@ -29,11 +29,11 @@ import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentPreviewBar } from "./AttachmentPreviewBar";
 import { TodoPreviewBar } from "./TodoPreviewBar";
-import type { UploadedFile } from "../hooks/useFileUpload";
-import type { PendingFile } from "../hooks/useFileUpload";
+import type { PendingFile, UploadedFile } from "../hooks/useFileUpload";
 import type {
+  ChatAction,
   GoalStateSnapshot,
-  SlashCommand,
+  InputActionDefinition,
   TodoStateSnapshot,
 } from "../types";
 
@@ -74,13 +74,12 @@ interface ChatInputProps {
   onResumeGoal?: (hint?: string) => Promise<boolean>;
   /** file upload function */
   uploadAll: (agentId: string) => Promise<UploadedFile[]>;
-  /** message send callback */
-  onSendMessage: (
+  /** input send callback */
+  onSendInput: (
     message: string,
+    action?: ChatAction | null,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
-  /** send command selected from slash autocomplete */
-  onSendCommand: (command: string) => Promise<boolean>;
   /** complete file clear */
   clearDoneFiles: () => void;
   /** complete file status pending  with text. */
@@ -101,8 +100,8 @@ interface ChatInputProps {
   isStopPending: boolean;
   /** run stop request callback */
   onStopRequest: () => void;
-  /** server-managed textwhen text list */
-  slashCommands: SlashCommand[];
+  /** server-managed input action list */
+  inputActions: InputActionDefinition[];
   /** Storybook etc. in used to inject initial input value */
   initialInputValue?: string;
   /** currently edited message ID */
@@ -115,7 +114,35 @@ interface ChatInputProps {
   editSendDisabled?: boolean;
 }
 
-function getSlashCommandQuery(inputValue: string): string | null {
+function actionType(action: InputActionDefinition["action"]): string | null {
+  return typeof action.type === "string" ? action.type : null;
+}
+
+function normalizeAction(
+  action: InputActionDefinition["action"],
+): ChatAction | null {
+  const type = actionType(action);
+  if (
+    type === "command" &&
+    "name" in action &&
+    typeof action.name === "string"
+  ) {
+    return { type: "command", name: action.name };
+  }
+  if (type === "goal") {
+    return { type: "goal" };
+  }
+  if (
+    type === "skill" &&
+    "skill_id" in action &&
+    typeof action.skill_id === "string"
+  ) {
+    return { type: "skill", skill_id: action.skill_id };
+  }
+  return null;
+}
+
+function getInputActionQuery(inputValue: string): string | null {
   const trimmedStart = inputValue.trimStart();
   if (!trimmedStart.startsWith("/")) {
     return null;
@@ -127,6 +154,184 @@ function getSlashCommandQuery(inputValue: string): string | null {
   }
 
   return commandSegment.toLowerCase();
+}
+
+interface ComposerDraft {
+  message: string;
+  action: ChatAction | null;
+}
+
+interface RankedInputAction {
+  action: InputActionDefinition;
+  score: number;
+  ranges: number[];
+}
+
+function normalizeStoredAction(value: unknown): ChatAction | null {
+  if (typeof value !== "object" || value === null || !("type" in value)) {
+    return null;
+  }
+  const action = value as Record<string, unknown>;
+  if (action.type === "command" && typeof action.name === "string") {
+    return { type: "command", name: action.name };
+  }
+  if (action.type === "goal") {
+    return { type: "goal" };
+  }
+  if (action.type === "skill" && typeof action.skill_id === "string") {
+    return { type: "skill", skill_id: action.skill_id };
+  }
+  return null;
+}
+
+function parseComposerDraft(raw: string): ComposerDraft {
+  if (!raw) {
+    return { message: "", action: null };
+  }
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (typeof value === "object" && value !== null && "message" in value) {
+      const record = value as Record<string, unknown>;
+      return {
+        message: typeof record.message === "string" ? record.message : "",
+        action: normalizeStoredAction(record.action),
+      };
+    }
+  } catch {
+    // Legacy drafts were stored as plain message strings.
+  }
+  return { message: raw, action: null };
+}
+
+function serializeComposerDraft(
+  message: string,
+  action: ChatAction | null,
+): string {
+  if (!message && action === null) {
+    return "";
+  }
+  return JSON.stringify({ message, action });
+}
+
+function actionKey(action: ChatAction | null): string {
+  return JSON.stringify(action);
+}
+
+function fallbackActionDefinition(action: ChatAction): InputActionDefinition {
+  switch (action.type) {
+    case "command":
+      return {
+        id: `command:${action.name}`,
+        keyword: action.name,
+        label: action.name,
+        description: "",
+        action,
+        category: "command",
+        message: { policy: "optional", placeholder: null, max_length: null },
+        attachments: { policy: "unsupported" },
+        availability_hint: null,
+      };
+    case "goal":
+      return {
+        id: "goal",
+        keyword: "goal",
+        label: "Goal",
+        description: "",
+        action,
+        category: "turn",
+        message: { policy: "required", placeholder: null, max_length: 4000 },
+        attachments: { policy: "unsupported" },
+        availability_hint: null,
+      };
+    case "skill":
+      return {
+        id: `skill:${action.skill_id}`,
+        keyword: "skill",
+        label: "Skill",
+        description: "",
+        action,
+        category: "turn",
+        message: { policy: "optional", placeholder: null, max_length: null },
+        attachments: { policy: "optional" },
+        availability_hint: null,
+      };
+  }
+}
+
+function resolveActionDefinition(
+  action: ChatAction | null,
+  inputActions: InputActionDefinition[],
+): InputActionDefinition | null {
+  if (action === null) {
+    return null;
+  }
+  const key = actionKey(action);
+  return (
+    inputActions.find(
+      (definition) => actionKey(normalizeAction(definition.action)) === key,
+    ) ?? fallbackActionDefinition(action)
+  );
+}
+
+function rankInputAction(
+  action: InputActionDefinition,
+  query: string,
+): RankedInputAction | null {
+  const keyword = action.keyword.toLowerCase();
+  if (query === "") {
+    return { action, score: 1, ranges: [] };
+  }
+  if (keyword === query) {
+    return { action, score: 0, ranges: [...query].map((_, index) => index) };
+  }
+  if (keyword.startsWith(query)) {
+    return { action, score: 1, ranges: [...query].map((_, index) => index) };
+  }
+  const containsIndex = keyword.indexOf(query);
+  if (containsIndex >= 0) {
+    return {
+      action,
+      score: 2,
+      ranges: [...query].map((_, index) => containsIndex + index),
+    };
+  }
+  const ranges: number[] = [];
+  let cursor = 0;
+  for (const char of query) {
+    const index = keyword.indexOf(char, cursor);
+    if (index < 0) {
+      return null;
+    }
+    ranges.push(index);
+    cursor = index + 1;
+  }
+  return { action, score: 3, ranges };
+}
+
+function HighlightedKeyword({
+  keyword,
+  ranges,
+}: {
+  keyword: string;
+  ranges: number[];
+}): React.ReactElement {
+  const highlighted = new Set(ranges);
+  return (
+    <>
+      /
+      {[...keyword].map((char, index) => (
+        <Text
+          key={`${char}-${index}`}
+          component="span"
+          inherit
+          fw={highlighted.has(index) ? 800 : 500}
+          td={highlighted.has(index) ? "underline" : void 0}
+        >
+          {char}
+        </Text>
+      ))}
+    </>
+  );
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -142,8 +347,7 @@ export const ChatInput = memo(function ChatInput({
   onPauseGoal,
   onResumeGoal,
   uploadAll,
-  onSendMessage,
-  onSendCommand,
+  onSendInput,
   clearDoneFiles,
   resetDoneFiles,
   addFiles,
@@ -154,7 +358,7 @@ export const ChatInput = memo(function ChatInput({
   isStopAvailable,
   isStopPending,
   onStopRequest,
-  slashCommands,
+  inputActions,
   initialInputValue,
   editingMessageId = null,
   editingInitialValue = null,
@@ -174,57 +378,109 @@ export const ChatInput = memo(function ChatInput({
       defaultValue: "",
     },
   );
-  const [inputValue, setInputValue] = useState(initialInputValue ?? draftValue);
+  const parsedDraft = useMemo(
+    () => parseComposerDraft(draftValue),
+    [draftValue],
+  );
+  const [inputValue, setInputValue] = useState(
+    initialInputValue ?? parsedDraft.message,
+  );
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
+  const [selectedAction, setSelectedAction] =
+    useState<InputActionDefinition | null>(() =>
+      resolveActionDefinition(parsedDraft.action, inputActions),
+    );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previousEditingMessageIdRef = useRef<string | null>(null);
-  const slashCommandQuery = getSlashCommandQuery(inputValue);
-  const visibleSlashCommands =
-    slashCommandQuery === null
-      ? []
-      : slashCommands.filter((command) =>
-          command.name.toLowerCase().startsWith(slashCommandQuery),
-        );
+  const inputActionQuery = selectedAction
+    ? null
+    : getInputActionQuery(inputValue);
+  const visibleInputActions = useMemo(() => {
+    if (inputActionQuery === null) {
+      return [];
+    }
+    return inputActions
+      .flatMap((action) => {
+        const ranked = rankInputAction(action, inputActionQuery);
+        return ranked === null ? [] : [ranked];
+      })
+      .sort(
+        (a, b) =>
+          a.score - b.score || a.action.keyword.localeCompare(b.action.keyword),
+      );
+  }, [inputActionQuery, inputActions]);
 
   useEffect(() => {
     if (editingMessageId !== null) {
       return;
     }
-    if (typeof initialInputValue !== "undefined") {
+    if (initialInputValue !== void 0) {
       setInputValue(initialInputValue);
+      setSelectedAction(null);
       return;
     }
-    setInputValue(draftValue);
-  }, [draftValue, editingMessageId, initialInputValue]);
+    setInputValue(parsedDraft.message);
+    setSelectedAction(
+      resolveActionDefinition(parsedDraft.action, inputActions),
+    );
+  }, [editingMessageId, initialInputValue, inputActions, parsedDraft]);
+
+  useEffect(() => {
+    if (selectedAction === null) {
+      return;
+    }
+    const resolved = resolveActionDefinition(
+      normalizeAction(selectedAction.action),
+      inputActions,
+    );
+    if (
+      resolved !== null &&
+      (resolved.id !== selectedAction.id ||
+        resolved.description !== selectedAction.description ||
+        resolved.availability_hint?.message !==
+          selectedAction.availability_hint?.message)
+    ) {
+      setSelectedAction(resolved);
+    }
+  }, [inputActions, selectedAction]);
 
   const clearDraft = useCallback((): void => {
     clearStoredDraft();
   }, [clearStoredDraft]);
 
+  const persistDraft = useCallback(
+    (message: string, action: ChatAction | null): void => {
+      if (editingMessageId !== null || !draftStorageKey) {
+        return;
+      }
+      const serialized = serializeComposerDraft(message, action);
+      if (serialized === "") {
+        clearStoredDraft();
+        return;
+      }
+      setDraftValue(serialized);
+    },
+    [clearStoredDraft, draftStorageKey, editingMessageId, setDraftValue],
+  );
+
   const updateInputValue = useCallback(
     (nextValue: string): void => {
       setSendErrorVisible(false);
       setInputValue(nextValue);
-      if (editingMessageId !== null) {
-        return;
-      }
-      if (!draftStorageKey) {
-        return;
-      }
-      if (nextValue === "") {
-        clearStoredDraft();
-        return;
-      }
-      setDraftValue(nextValue);
+      persistDraft(
+        nextValue,
+        selectedAction === null ? null : normalizeAction(selectedAction.action),
+      );
     },
-    [clearStoredDraft, draftStorageKey, editingMessageId, setDraftValue],
+    [persistDraft, selectedAction],
   );
 
   useEffect(() => {
     if (editingMessageId !== previousEditingMessageIdRef.current) {
       previousEditingMessageIdRef.current = editingMessageId;
       if (editingMessageId !== null) {
+        setSelectedAction(null);
         setInputValue(editingInitialValue ?? "");
         textareaRef.current?.focus();
       }
@@ -233,19 +489,43 @@ export const ChatInput = memo(function ChatInput({
 
   const handleCancelEdit = useCallback(() => {
     setInputValue("");
+    setSelectedAction(null);
     clearDraft();
     previousEditingMessageIdRef.current = null;
     onCancelEdit?.();
   }, [clearDraft, onCancelEdit]);
 
+  const clearInputAfterSend = useCallback((): void => {
+    setSendErrorVisible(false);
+    setSelectedAction(null);
+    updateInputValue("");
+    clearDraft();
+    onAfterSend();
+  }, [clearDraft, onAfterSend, updateInputValue]);
+
   const handleSend = useCallback((): void => {
     const send = async (): Promise<void> => {
       const trimmed = inputValue.trim();
-      if (!trimmed || isUploading || editSendDisabled) {
+      const normalizedAction =
+        selectedAction === null ? null : normalizeAction(selectedAction.action);
+      if (isUploading || editSendDisabled) {
         return;
       }
 
       const hasAttachedFiles = pendingFiles.length > 0;
+      const messagePolicy = selectedAction?.message.policy ?? "required";
+      const attachmentPolicy = selectedAction?.attachments.policy ?? "optional";
+      if (!trimmed && !hasAttachedFiles && messagePolicy === "required") {
+        return;
+      }
+      if (hasAttachedFiles && attachmentPolicy === "unsupported") {
+        setSendErrorVisible(true);
+        return;
+      }
+      if (!hasAttachedFiles && attachmentPolicy === "required") {
+        setSendErrorVisible(true);
+        return;
+      }
 
       // file attachment existstextwhen Agent based on with upload after send.
       if (hasAttachedFiles) {
@@ -257,13 +537,10 @@ export const ChatInput = memo(function ChatInput({
           if (uploaded.length === 0) {
             return;
           }
-          const sent = await onSendMessage(trimmed, uploaded);
+          const sent = await onSendInput(trimmed, normalizedAction, uploaded);
           if (sent) {
-            setSendErrorVisible(false);
-            updateInputValue("");
-            clearDraft();
+            clearInputAfterSend();
             clearDoneFiles();
-            onAfterSend();
           } else {
             setSendErrorVisible(true);
             resetDoneFiles();
@@ -275,12 +552,9 @@ export const ChatInput = memo(function ChatInput({
         return;
       }
 
-      const sent = await onSendMessage(trimmed);
+      const sent = await onSendInput(trimmed, normalizedAction);
       if (sent) {
-        setSendErrorVisible(false);
-        updateInputValue("");
-        clearDraft();
-        onAfterSend();
+        clearInputAfterSend();
       } else {
         setSendErrorVisible(true);
       }
@@ -288,17 +562,16 @@ export const ChatInput = memo(function ChatInput({
     void send();
   }, [
     inputValue,
+    selectedAction,
     isUploading,
     editSendDisabled,
     pendingFiles,
     agentId,
     uploadAll,
-    onSendMessage,
+    onSendInput,
+    clearInputAfterSend,
     clearDoneFiles,
     resetDoneFiles,
-    onAfterSend,
-    clearDraft,
-    updateInputValue,
   ]);
 
   const handleKeyDown = useCallback(
@@ -331,34 +604,18 @@ export const ChatInput = memo(function ChatInput({
     [addFiles],
   );
 
-  const handleSelectSlashCommand = useCallback(
-    (commandName: string): void => {
-      const send = async (): Promise<void> => {
-        if (isUploading || editSendDisabled || pendingFiles.length > 0) {
-          return;
-        }
-        const sent = await onSendCommand(commandName);
-        if (!sent) {
-          setSendErrorVisible(true);
-          textareaRef.current?.focus();
-          return;
-        }
-        setSendErrorVisible(false);
-        updateInputValue("");
-        clearDraft();
-        onAfterSend();
-      };
-      void send();
+  const handleSelectInputAction = useCallback(
+    (definition: InputActionDefinition): void => {
+      const normalizedAction = normalizeAction(definition.action);
+      if (normalizedAction === null) {
+        return;
+      }
+      setSelectedAction(definition);
+      setInputValue("");
+      persistDraft("", normalizedAction);
+      textareaRef.current?.focus();
     },
-    [
-      clearDraft,
-      editSendDisabled,
-      isUploading,
-      onAfterSend,
-      onSendCommand,
-      pendingFiles.length,
-      updateInputValue,
-    ],
+    [persistDraft],
   );
 
   return (
@@ -380,7 +637,9 @@ export const ChatInput = memo(function ChatInput({
       <Stack gap="xs">
         {sendErrorVisible && (
           <Text size="xs" c="red">
-            Message failed to send. Try again.
+            {selectedAction
+              ? `${selectedAction.label} action failed. Edit it or try again.`
+              : "Message failed to send. Try again."}
           </Text>
         )}
         {editingMessageId && (
@@ -403,28 +662,38 @@ export const ChatInput = memo(function ChatInput({
             </Group>
           </Paper>
         )}
-        {visibleSlashCommands.length > 0 && (
+        {visibleInputActions.length > 0 && (
           <Paper withBorder radius="md" p="xs">
             <Stack gap={rem(2)}>
               <Text size="xs" c="dimmed" px="xs">
                 {t("slashCommands.title")}
               </Text>
-              {visibleSlashCommands.map((command) => (
+              {visibleInputActions.map((ranked) => (
                 <UnstyledButton
-                  key={command.name}
-                  onClick={() => handleSelectSlashCommand(command.name)}
+                  key={ranked.action.id}
+                  onClick={() => handleSelectInputAction(ranked.action)}
                   px="xs"
                   py={rem(6)}
-                  style={{ borderRadius: rem(8) }}
+                  style={{ borderRadius: rem(8), width: "100%" }}
                 >
-                  <Group justify="space-between" gap="sm" wrap="nowrap">
-                    <Text size="sm" fw={500}>
-                      /{command.name}
-                    </Text>
-                    <Text size="xs" c="dimmed" ta="right">
-                      {command.description}
-                    </Text>
-                  </Group>
+                  <Stack gap={rem(2)}>
+                    <Group justify="space-between" gap="sm" wrap="nowrap">
+                      <Text size="sm" fw={500}>
+                        <HighlightedKeyword
+                          keyword={ranked.action.keyword}
+                          ranges={ranked.ranges}
+                        />
+                      </Text>
+                      <Text size="xs" c="dimmed" ta="right">
+                        {ranked.action.description}
+                      </Text>
+                    </Group>
+                    {ranked.action.availability_hint?.message && (
+                      <Text size="xs" c="orange" ta="right">
+                        {ranked.action.availability_hint.message}
+                      </Text>
+                    )}
+                  </Stack>
                 </UnstyledButton>
               ))}
             </Stack>
@@ -435,7 +704,11 @@ export const ChatInput = memo(function ChatInput({
             size="input-sm"
             variant="subtle"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading || Boolean(editingMessageId)}
+            disabled={
+              isUploading ||
+              Boolean(editingMessageId) ||
+              selectedAction?.attachments.policy === "unsupported"
+            }
             aria-label={t("attachment.attach")}
           >
             <IconPaperclip size={18} />
@@ -447,6 +720,32 @@ export const ChatInput = memo(function ChatInput({
                   pendingFiles={pendingFiles}
                   onRemove={removeFile}
                 />
+              )}
+              {selectedAction !== null && !editingMessageId && (
+                <Paper withBorder radius="sm" px="sm" py="2xs">
+                  <Group justify="space-between" gap="sm" wrap="nowrap">
+                    <Text size="xs" c="dimmed" fw={500}>
+                      /{selectedAction.keyword} · {selectedAction.label}
+                    </Text>
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
+                      c="dimmed"
+                      onClick={() => {
+                        setSelectedAction(null);
+                        persistDraft(inputValue, null);
+                      }}
+                      aria-label={t("cancelEdit")}
+                    >
+                      <IconX size={14} />
+                    </ActionIcon>
+                  </Group>
+                  {selectedAction.availability_hint?.message && (
+                    <Text size="xs" c="orange" mt={rem(4)}>
+                      {selectedAction.availability_hint.message}
+                    </Text>
+                  )}
+                </Paper>
               )}
               <Box style={{ minWidth: 0, position: "relative" }}>
                 {todo !== null && !editingMessageId && (
@@ -463,9 +762,10 @@ export const ChatInput = memo(function ChatInput({
                 <Textarea
                   ref={textareaRef}
                   placeholder={
-                    isMobile
+                    selectedAction?.message.placeholder ??
+                    (isMobile
                       ? t("inputPlaceholder")
-                      : t("inputPlaceholderDesktop")
+                      : t("inputPlaceholderDesktop"))
                   }
                   value={inputValue}
                   onChange={(e) => updateInputValue(e.currentTarget.value)}
@@ -480,7 +780,7 @@ export const ChatInput = memo(function ChatInput({
               </Box>
             </Stack>
           </Box>
-          {isStopAvailable && !inputValue.trim() ? (
+          {isStopAvailable && !inputValue.trim() && selectedAction === null ? (
             <ActionIcon
               size="input-sm"
               variant="filled"
@@ -498,7 +798,11 @@ export const ChatInput = memo(function ChatInput({
               variant="filled"
               onClick={handleSend}
               onMouseDown={(e) => e.preventDefault()}
-              disabled={!inputValue.trim() || editSendDisabled}
+              disabled={
+                editSendDisabled ||
+                (!inputValue.trim() &&
+                  selectedAction?.message.policy === "required")
+              }
               loading={isUploading}
             >
               <IconSend size={18} />

@@ -23,6 +23,7 @@ import type { UploadedFile } from "../hooks/useFileUpload";
 import type {
   AgentRunPhase,
   AuthorizationRequest,
+  ChatAction,
   ChatEvent,
   ChatMessage,
   ChatTimelineState,
@@ -30,8 +31,8 @@ import type {
   ConnectionStatus,
   FileAttachment,
   GoalStateSnapshot,
+  InputActionDefinition,
   PendingInputBuffer,
-  SlashCommand,
   TodoStateSnapshot,
   TokenUsageSummary,
   ToolResultStatus,
@@ -80,12 +81,11 @@ export interface ChatSessionContainerOutput {
   /** newer messages loading */
   isLoadingNewer: boolean;
   /** message send */
-  onSendMessage: (
+  onSendInput: (
     message: string,
+    action?: ChatAction | null,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
-  /** send command selected from slash autocomplete */
-  onSendCommand: (command: string) => Promise<boolean>;
   /** delete pending input buffer */
   onDeletePendingInputBuffer: (bufferId: string) => void;
   /** Goal delete */
@@ -118,8 +118,8 @@ export interface ChatSessionContainerOutput {
   isStopPending: boolean;
   /** run stop request */
   onStopRequest: () => void;
-  /** server-managed textwhen text list */
-  slashCommands: SlashCommand[];
+  /** server-managed input action list */
+  inputActions: InputActionDefinition[];
   /** pending OAuth authorization request list */
   authorizationRequests: AuthorizationRequest[];
   /** auth complete when remove corresponding request */
@@ -142,6 +142,30 @@ function stringField(
 ): string | null {
   const value = record[key];
   return typeof value === "string" ? value : null;
+}
+
+function chatActionFromValue(value: unknown): ChatAction | null {
+  if (!isRecord(value) || typeof value.type !== "string") {
+    return null;
+  }
+  if (
+    value.type === "command" &&
+    "name" in value &&
+    typeof value.name === "string"
+  ) {
+    return { type: "command", name: value.name };
+  }
+  if (value.type === "goal") {
+    return { type: "goal" };
+  }
+  if (
+    value.type === "skill" &&
+    "skill_id" in value &&
+    typeof value.skill_id === "string"
+  ) {
+    return { type: "skill", skill_id: value.skill_id };
+  }
+  return null;
 }
 
 function toolResultStatusFromPayload(
@@ -488,6 +512,20 @@ function mapEvents(
           },
         ];
       }
+      case "action_message": {
+        return [
+          ...messages,
+          {
+            id: event.id,
+            role: "user",
+            content: stringField(payload, "message") ?? "",
+            action: chatActionFromValue(payload.action),
+            createdAt: event.created_at,
+            status: "complete",
+            metadata: eventMetadata(event),
+          },
+        ];
+      }
       case "assistant_message": {
         const content = contentText(payload.content);
         const attachments = [
@@ -780,6 +818,9 @@ function mapEvents(
 }
 
 function isInputBufferLiveEvent(event: ChatEventResponse): boolean {
+  if (event.kind === "action_message") {
+    return true;
+  }
   if (event.kind !== "user_message") {
     return false;
   }
@@ -793,6 +834,19 @@ function mapInputBufferLiveEvent(
   if (!isInputBufferLiveEvent(event)) {
     return null;
   }
+  if (event.kind === "action_message") {
+    return {
+      id: event.id,
+      sessionId: event.session_id,
+      content: stringField(event.payload, "message") ?? "",
+      action: chatActionFromValue(event.payload.action),
+      attachments: [],
+      attachmentFiles: [],
+      metadata: { action: "true" },
+      createdAt: event.created_at,
+      status: "pending",
+    };
+  }
   const metadata = event.payload.metadata;
   if (!isRecord(metadata)) {
     return null;
@@ -802,6 +856,7 @@ function mapInputBufferLiveEvent(
     id: inputBufferId,
     sessionId: event.session_id,
     content: contentText(event.payload.content),
+    action: null,
     attachments: eventAttachments(event.payload).map(
       (attachment) => attachment.uri,
     ),
@@ -1212,7 +1267,10 @@ export function useChatSessionContainer(
 
   // WebSocket connection text (ticket + wsUrl)
   const connectionInfoQuery = trpc.chat.getConnectionInfo.useQuery();
-  const slashCommandsQuery = trpc.chat.listSlashCommands.useQuery();
+  const inputActionsQuery = trpc.chat.listInputActions.useQuery(
+    { sessionId },
+    { enabled: isSubscribeReady },
+  );
 
   const queryClient = useQueryClient();
   const utils = trpc.useUtils();
@@ -1353,6 +1411,7 @@ export function useChatSessionContainer(
           ),
           pendingInputBuffers:
             responseEvent.kind === "user_message" ||
+            responseEvent.kind === "action_message" ||
             responseEvent.kind === "goal_continuation"
               ? prev.pendingInputBuffers.filter(
                   (buffer) =>
@@ -1686,9 +1745,8 @@ export function useChatSessionContainer(
     );
   }, []);
 
-  const sendMessageMutation = trpc.chat.sendMessage.useMutation();
+  const sendInputMutation = trpc.chat.sendInput.useMutation();
   const editMessageMutation = trpc.chat.editMessage.useMutation();
-  const sendCommandMutation = trpc.chat.sendCommand.useMutation();
   const stopSessionRunMutation = trpc.chat.stopSessionRun.useMutation();
   const deleteInputBufferMutation = trpc.chat.deleteInputBuffer.useMutation();
   const updateSessionGoalMutation = trpc.chat.updateSessionGoal.useMutation();
@@ -1761,23 +1819,29 @@ export function useChatSessionContainer(
     [applyWriteResponse, utils.chat.listSessionEvents],
   );
 
-  const onSendMessage = useCallback(
-    (message: string, attachments?: UploadedFile[]): Promise<boolean> => {
+  const onSendInput = useCallback(
+    (
+      message: string,
+      action?: ChatAction | null,
+      attachments?: UploadedFile[],
+    ): Promise<boolean> => {
       setWasRestCommandBlocked(false);
       const attachmentUris = attachments?.map((attachment) => attachment.uri);
       const writeKey = JSON.stringify({
-        type: "message",
+        type: "input",
         sessionId,
         message,
+        action: action ?? null,
         attachments: attachmentUris ?? [],
       });
       const clientRequestId = clientRequestIdForWrite(writeKey);
       return runWriteMutation(writeKey, clientRequestId, () =>
-        sendMessageMutation.mutateAsync({
+        sendInputMutation.mutateAsync({
           sessionId,
           agentId: agent.id,
           clientRequestId,
           message,
+          action,
           attachments: attachmentUris,
         }),
       );
@@ -1786,40 +1850,7 @@ export function useChatSessionContainer(
       agent.id,
       clientRequestIdForWrite,
       runWriteMutation,
-      sendMessageMutation,
-      sessionId,
-    ],
-  );
-
-  const onSendCommand = useCallback(
-    (command: string): Promise<boolean> => {
-      if (isResponsePending) {
-        setWasRestCommandBlocked(true);
-        return Promise.resolve(false);
-      }
-      setWasRestCommandBlocked(false);
-      const normalizedCommand = command.toLowerCase();
-      const writeKey = JSON.stringify({
-        type: "command",
-        sessionId,
-        command: normalizedCommand,
-      });
-      const clientRequestId = clientRequestIdForWrite(writeKey);
-      return runWriteMutation(writeKey, clientRequestId, () =>
-        sendCommandMutation.mutateAsync({
-          sessionId,
-          agentId: agent.id,
-          clientRequestId,
-          command: normalizedCommand,
-        }),
-      );
-    },
-    [
-      agent.id,
-      clientRequestIdForWrite,
-      isResponsePending,
-      runWriteMutation,
-      sendCommandMutation,
+      sendInputMutation,
       sessionId,
     ],
   );
@@ -2012,8 +2043,7 @@ export function useChatSessionContainer(
     hasMore,
     isLoadingMore,
     isLoadingNewer,
-    onSendMessage,
-    onSendCommand,
+    onSendInput,
     onDeletePendingInputBuffer,
     onClearGoal,
     onUpdateGoal,
@@ -2028,7 +2058,7 @@ export function useChatSessionContainer(
     isStopAvailable,
     isStopPending,
     onStopRequest,
-    slashCommands: slashCommandsQuery.data?.items ?? [],
+    inputActions: inputActionsQuery.data?.items ?? [],
     authorizationRequests,
     onAuthorizationComplete,
     tokenUsage,

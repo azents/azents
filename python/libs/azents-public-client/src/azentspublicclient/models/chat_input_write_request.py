@@ -18,20 +18,23 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
+from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ChatCommandWriteRequest(BaseModel):
+class ChatInputWriteRequest(BaseModel):
     """
-    REST slash command request.
+    REST composer input write request.
     """ # noqa: E501
     agent_id: StrictStr = Field(description="Agent ID")
     client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
-    command: StrictStr = Field(description="Command name, for example compact")
+    message: StrictStr = Field(description="Input message content")
+    action: Optional[ChatInputWriteRequestAction] = None
+    attachments: Optional[List[StrictStr]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_id", "client_request_id", "command"]
+    __properties: ClassVar[List[str]] = ["agent_id", "client_request_id", "message", "action", "attachments"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -51,7 +54,7 @@ class ChatCommandWriteRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ChatCommandWriteRequest from a JSON string"""
+        """Create an instance of ChatInputWriteRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -74,16 +77,29 @@ class ChatCommandWriteRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of action
+        if self.action:
+            _dict['action'] = self.action.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if action (nullable) is None
+        # and model_fields_set contains the field
+        if self.action is None and "action" in self.model_fields_set:
+            _dict['action'] = None
+
+        # set to None if attachments (nullable) is None
+        # and model_fields_set contains the field
+        if self.attachments is None and "attachments" in self.model_fields_set:
+            _dict['attachments'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ChatCommandWriteRequest from a dict"""
+        """Create an instance of ChatInputWriteRequest from a dict"""
         if obj is None:
             return None
 
@@ -93,7 +109,9 @@ class ChatCommandWriteRequest(BaseModel):
         _obj = cls.model_validate({
             "agent_id": obj.get("agent_id"),
             "client_request_id": obj.get("client_request_id"),
-            "command": obj.get("command")
+            "message": obj.get("message"),
+            "action": ChatInputWriteRequestAction.from_dict(obj["action"]) if obj.get("action") is not None else None,
+            "attachments": obj.get("attachments")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

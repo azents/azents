@@ -6,9 +6,9 @@ Agent Workspace directory response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**path** | **str** | Directory path |
-**entries** | [**List[AgentWorkspaceEntryResponse]**](AgentWorkspaceEntryResponse.md) | Entry list |
+**type** | **str** | Response type | 
+**path** | **str** | Directory path | 
+**entries** | [**List[AgentWorkspaceEntryResponse]**](AgentWorkspaceEntryResponse.md) | Entry list | 
 
 ## Example
 

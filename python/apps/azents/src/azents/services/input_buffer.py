@@ -1,6 +1,7 @@
 """Session input buffer service."""
 
 import dataclasses
+import datetime
 import logging
 from collections.abc import Sequence
 from typing import Annotated, assert_never
@@ -10,10 +11,16 @@ from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, InputBufferKind
-from azents.engine.events.types import Event, FileOutputPart
+from azents.engine.events.action_messages import (
+    ActionMessagePayload,
+    ChatAction,
+    GoalAction,
+)
+from azents.engine.events.types import Event, FileOutputPart, SystemErrorPayload
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.resolve import materialize_user_input_exchange_file_attachments
+from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
@@ -28,6 +35,7 @@ from azents.services.session_title import initial_title_from_event
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
+_CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -42,6 +50,7 @@ class InputBufferEnqueue:
     metadata: dict[str, str]
     attachments: list[str]
     file_parts: list[FileOutputPart]
+    action: dict[str, JSONValue] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -69,8 +78,10 @@ class _PromotedInputBuffer:
     """Result of converting InputBuffer to model input and durable event kind."""
 
     buffer: InputBuffer
-    user_message: RunUserMessage
+    user_message: RunUserMessage | None
     event_kind: EventKind
+    payload: dict[str, JSONValue]
+    external_id: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -115,6 +126,7 @@ class InputBufferService:
                 content=input.content,
                 idempotency_key=input.idempotency_key,
                 metadata=input.metadata,
+                action=input.action,
                 attachments=input.attachments,
                 file_parts=input.file_parts,
             )
@@ -246,14 +258,11 @@ class InputBufferService:
                     deduped_count=0,
                 )
 
-            promoted = [
-                _PromotedInputBuffer(
-                    buffer=buffer,
-                    user_message=await self._buffer_to_user_message(buffer),
-                    event_kind=_event_kind_for_input_buffer(buffer.kind),
-                )
-                for buffer in claimed
-            ]
+            promoted = await self._promote_claimed_buffers(
+                session,
+                session_id=session_id,
+                claimed=claimed,
+            )
             event_inserted = await self._append_input_buffer_events(
                 session,
                 session_id,
@@ -276,7 +285,7 @@ class InputBufferService:
             deduped = [
                 item
                 for item in promoted
-                if item.user_message.external_id not in inserted_external_ids
+                if item.external_id not in inserted_external_ids
             ]
             if deduped:
                 missing: list[str] = []
@@ -285,15 +294,15 @@ class InputBufferService:
                         await self.event_transcript_repository.get_by_external_id(
                             session,
                             session_id,
-                            item.user_message.external_id,
+                            item.external_id,
                         )
                     )
                     if existing is None:
-                        missing.append(item.user_message.external_id)
+                        missing.append(item.external_id)
                 if missing:
                     raise RuntimeError("Conflicted input buffer event was not found")
 
-            buffer_ids = [buffer.id for buffer in claimed]
+            buffer_ids = list(dict.fromkeys(item.buffer.id for item in promoted))
             deleted_count = await self.input_buffer_repository.delete_claimed_by_ids(
                 session,
                 session_id,
@@ -310,13 +319,140 @@ class InputBufferService:
                 )
 
         return PromotedInputBuffers(
-            user_messages=[item.user_message for item in promoted],
+            user_messages=[
+                item.user_message for item in promoted if item.user_message is not None
+            ],
             events=event_inserted,
             deleted_buffer_ids=buffer_ids,
-            claimed_count=len(claimed),
+            claimed_count=len(buffer_ids),
             inserted_count=len(event_inserted),
             deduped_count=len(deduped),
         )
+
+    async def _promote_claimed_buffers(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        claimed: list[InputBuffer],
+    ) -> list[_PromotedInputBuffer]:
+        """Convert the next FIFO barrier segment into durable event payloads."""
+        prefix = _next_flush_prefix(claimed)
+        promoted: list[_PromotedInputBuffer] = []
+        for buffer in prefix:
+            if buffer.kind == InputBufferKind.ACTION_MESSAGE:
+                promoted.extend(
+                    await self._promote_action_message_buffer(
+                        session,
+                        session_id=session_id,
+                        buffer=buffer,
+                    )
+                )
+            else:
+                user_message = await self._buffer_to_user_message(buffer)
+                promoted.append(
+                    _PromotedInputBuffer(
+                        buffer=buffer,
+                        user_message=user_message,
+                        event_kind=_event_kind_for_input_buffer(buffer.kind),
+                        payload=_JSON_OBJECT_ADAPTER.validate_python(
+                            user_message.payload.model_dump(
+                                mode="json",
+                                exclude_none=True,
+                            )
+                        ),
+                        external_id=user_message.external_id,
+                    )
+                )
+        return promoted
+
+    async def _promote_action_message_buffer(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        buffer: InputBuffer,
+    ) -> list[_PromotedInputBuffer]:
+        """Promote one action_message buffer and its side-effect events."""
+        if buffer.action is None:
+            raise ValueError("Action message input buffer requires action payload")
+        action = _CHAT_ACTION_ADAPTER.validate_python(buffer.action)
+        action_payload = ActionMessagePayload(action=action, message=buffer.content)
+        promoted = [
+            _PromotedInputBuffer(
+                buffer=buffer,
+                user_message=None,
+                event_kind=EventKind.ACTION_MESSAGE,
+                payload=_JSON_OBJECT_ADAPTER.validate_python(
+                    action_payload.model_dump(mode="json")
+                ),
+                external_id=buffer.id,
+            )
+        ]
+        match action:
+            case GoalAction():
+                promoted.extend(
+                    await self._promote_goal_action(
+                        session,
+                        session_id=session_id,
+                        buffer=buffer,
+                    )
+                )
+            case _:
+                promoted.append(
+                    _system_error_promoted_buffer(
+                        buffer,
+                        "This action is not supported yet.",
+                    )
+                )
+        return promoted
+
+    async def _promote_goal_action(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        buffer: InputBuffer,
+    ) -> list[_PromotedInputBuffer]:
+        """Apply Goal create side effect for one action_message buffer."""
+        objective = buffer.content.strip()
+        if not objective:
+            return [
+                _system_error_promoted_buffer(buffer, "Goal objective is required.")
+            ]
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            session_id,
+        )
+        if agent_session is None:
+            return [_system_error_promoted_buffer(buffer, "Session not found.")]
+        updated_at = datetime.datetime.now(datetime.UTC).isoformat()
+        store = GoalStateStore(session_manager=self.session_manager)
+
+        def mutate(current: GoalState) -> GoalState:
+            if current.status in {"active", "paused", "blocked"} and current.objective:
+                raise _GoalActionError("An unfinished goal already exists.")
+            return GoalState(
+                objective=objective,
+                status="active",
+                created_at=updated_at,
+                updated_at=updated_at,
+            )
+
+        try:
+            updated = await store.update(agent_session.agent_id, session_id, mutate)
+        except _GoalActionError as exc:
+            return [_system_error_promoted_buffer(buffer, exc.message)]
+        snapshot = GoalStateSnapshot.from_state(updated)
+        return [
+            _PromotedInputBuffer(
+                buffer=buffer,
+                user_message=None,
+                event_kind=EventKind.GOAL_UPDATED,
+                payload=_goal_updated_payload(snapshot, action="create"),
+                external_id=f"{buffer.id}:goal_updated",
+            )
+        ]
 
     async def _buffer_to_user_message(self, buffer: InputBuffer) -> RunUserMessage:
         """Convert InputBuffer domain row to event run user message."""
@@ -372,7 +508,7 @@ class InputBufferService:
             existing = await self.event_transcript_repository.get_by_external_id(
                 session,
                 session_id,
-                item.user_message.external_id,
+                item.external_id,
             )
             if existing is not None:
                 continue
@@ -382,17 +518,80 @@ class InputBufferService:
                     EventCreate(
                         session_id=session_id,
                         kind=item.event_kind,
-                        payload=_JSON_OBJECT_ADAPTER.validate_python(
-                            item.user_message.payload.model_dump(
-                                mode="json",
-                                exclude_none=True,
-                            )
-                        ),
-                        external_id=item.user_message.external_id,
+                        payload=item.payload,
+                        external_id=item.external_id,
                     ),
                 )
             )
         return inserted
+
+
+class _GoalActionError(Exception):
+    """User-visible Goal action failure."""
+
+    def __init__(self, message: str) -> None:
+        """Create error."""
+        super().__init__(message)
+        self.message = message
+
+
+def _next_flush_prefix(claimed: list[InputBuffer]) -> list[InputBuffer]:
+    """Return the next FIFO segment respecting action-message barriers."""
+    if not claimed:
+        return []
+    first = claimed[0]
+    if first.kind == InputBufferKind.ACTION_MESSAGE:
+        return [first]
+    prefix: list[InputBuffer] = []
+    for buffer in claimed:
+        if buffer.kind == InputBufferKind.ACTION_MESSAGE:
+            break
+        prefix.append(buffer)
+    return prefix
+
+
+def _system_error_promoted_buffer(
+    buffer: InputBuffer,
+    content: str,
+) -> _PromotedInputBuffer:
+    """Create a promoted system_error for an action-message failure."""
+    payload = SystemErrorPayload(
+        content=content,
+        severity="error",
+        recoverable=True,
+    )
+    return _PromotedInputBuffer(
+        buffer=buffer,
+        user_message=None,
+        event_kind=EventKind.SYSTEM_ERROR,
+        payload=_JSON_OBJECT_ADAPTER.validate_python(
+            payload.model_dump(mode="json", exclude_none=True)
+        ),
+        external_id=f"{buffer.id}:system_error",
+    )
+
+
+def _goal_updated_payload(
+    snapshot: GoalStateSnapshot,
+    *,
+    action: str,
+) -> dict[str, JSONValue]:
+    """Return goal_updated event payload for a Goal side effect."""
+    return _JSON_OBJECT_ADAPTER.validate_python(
+        {
+            "content": "",
+            "attachments": [],
+            "metadata": {
+                "source": "goal",
+                "provider_slug": "goal",
+                "goal_control_action": action,
+                "goal_objective": snapshot.objective or "",
+                "goal_status": snapshot.status or "",
+                "goal_created_at": snapshot.created_at or "",
+                "goal_updated_at": snapshot.updated_at or "",
+            },
+        }
+    )
 
 
 def _event_kind_for_input_buffer(kind: InputBufferKind) -> EventKind:
@@ -404,5 +603,7 @@ def _event_kind_for_input_buffer(kind: InputBufferKind) -> EventKind:
             return EventKind.BACKGROUND_COMPLETION
         case InputBufferKind.GOAL_CONTINUATION:
             return EventKind.GOAL_CONTINUATION
+        case InputBufferKind.ACTION_MESSAGE:
+            return EventKind.ACTION_MESSAGE
         case _:
             assert_never(kind)

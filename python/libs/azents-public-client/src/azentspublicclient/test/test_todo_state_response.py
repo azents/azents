@@ -37,7 +37,7 @@ class TestTodoStateResponse(unittest.TestCase):
             return TodoStateResponse(
                 items = [
                     azentspublicclient.models.todo_item_response.TodoItemResponse(
-                        content = '',
+                        content = '', 
                         status = 'pending', )
                     ]
             )
@@ -45,7 +45,7 @@ class TestTodoStateResponse(unittest.TestCase):
             return TodoStateResponse(
                 items = [
                     azentspublicclient.models.todo_item_response.TodoItemResponse(
-                        content = '',
+                        content = '', 
                         status = 'pending', )
                     ],
         )

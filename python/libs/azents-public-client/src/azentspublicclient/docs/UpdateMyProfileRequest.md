@@ -6,8 +6,8 @@ Own workspace profile update request schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** |  | [optional]
-**locale** | **str** |  | [optional]
+**name** | **str** |  | [optional] 
+**locale** | **str** |  | [optional] 
 
 ## Example
 

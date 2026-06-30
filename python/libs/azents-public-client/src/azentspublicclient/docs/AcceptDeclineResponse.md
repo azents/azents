@@ -6,8 +6,8 @@ Invitation accept/reject response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Invitation ID |
-**status** | [**InvitationStatus**](InvitationStatus.md) | Changed status |
+**id** | **str** | Invitation ID | 
+**status** | [**InvitationStatus**](InvitationStatus.md) | Changed status | 
 
 ## Example
 

@@ -6,7 +6,7 @@ Agent Workspace bulk move response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**entries** | [**List[AgentWorkspaceMoveResponse]**](AgentWorkspaceMoveResponse.md) | Moved entries |
+**entries** | [**List[AgentWorkspaceMoveResponse]**](AgentWorkspaceMoveResponse.md) | Moved entries | 
 
 ## Example
 

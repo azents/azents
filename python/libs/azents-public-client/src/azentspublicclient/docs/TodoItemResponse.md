@@ -6,8 +6,8 @@ Chat live todo item response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**content** | **str** | Todo text |
-**status** | **str** | Todo status |
+**content** | **str** | Todo text | 
+**status** | **str** | Todo status | 
 
 ## Example
 

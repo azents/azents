@@ -6,7 +6,7 @@ Password reset token redeem response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**success** | **bool** | Success state |
+**success** | **bool** | Success state | 
 
 ## Example
 

@@ -37,7 +37,14 @@ class TestChatLiveRunStateResponse(unittest.TestCase):
             return ChatLiveRunStateResponse(
                 run_id = '',
                 phase = 'idle',
-                status = 'running'
+                status = 'running',
+                retry = azentspublicclient.models.chat_live_run_retry_state_response.ChatLiveRunRetryStateResponse(
+                    status = '', 
+                    last_error_message = '', 
+                    failed_attempt_count = 56, 
+                    max_retries = 56, 
+                    backoff_seconds = 56, 
+                    next_retry_at = '', )
             )
         else:
             return ChatLiveRunStateResponse(

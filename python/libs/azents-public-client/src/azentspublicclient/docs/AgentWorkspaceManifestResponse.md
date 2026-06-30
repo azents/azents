@@ -6,10 +6,10 @@ Agent Workspace manifest response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**root** | **str** | Agent Workspace root |
-**cwd** | **str** | Initial working directory |
-**entries** | [**List[AgentWorkspaceEntryResponse]**](AgentWorkspaceEntryResponse.md) | Root entry list |
-**git** | **Dict[str, object]** |  | [optional]
+**root** | **str** | Agent Workspace root | 
+**cwd** | **str** | Initial working directory | 
+**entries** | [**List[AgentWorkspaceEntryResponse]**](AgentWorkspaceEntryResponse.md) | Root entry list | 
+**git** | **Dict[str, object]** |  | [optional] 
 
 ## Example
 

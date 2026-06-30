@@ -178,6 +178,7 @@ async def _create_session_with_buffer(
             content="pending input",
             idempotency_key=None,
             metadata={"source": "chat"},
+            action=None,
             attachments=[],
             file_parts=[],
         ),

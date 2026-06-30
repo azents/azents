@@ -6,7 +6,7 @@ Token refresh request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**refresh_token** | **str** | Refresh token |
+**refresh_token** | **str** | Refresh token | 
 
 ## Example
 

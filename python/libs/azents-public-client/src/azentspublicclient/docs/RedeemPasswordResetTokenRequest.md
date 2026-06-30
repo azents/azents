@@ -6,8 +6,8 @@ Password reset token redeem request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | **str** | Password reset token |
-**password** | **str** | New password |
+**token** | **str** | Password reset token | 
+**password** | **str** | New password | 
 
 ## Example
 

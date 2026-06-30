@@ -328,7 +328,7 @@ def create_chat_session_with_agent(
         )
 
     response = http_requests.post(
-        f"{server_url}/chat/v1/sessions/{session_id}/messages",
+        f"{server_url}/chat/v1/sessions/{session_id}/inputs",
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",

@@ -6,10 +6,10 @@ Agent Runtime lifecycle command response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  |
-**state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  |
-**command_type** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  |
-**desired_generation** | **int** |  |
+**runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  | 
+**state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  | 
+**command_type** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  | 
+**desired_generation** | **int** |  | 
 
 ## Example
 

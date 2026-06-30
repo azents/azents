@@ -236,7 +236,7 @@ def _run_message(
             )
     else:
         session_id_value = session_id
-    path = f"/chat/v1/sessions/{session_id_value}/messages"
+    path = f"/chat/v1/sessions/{session_id_value}/inputs"
     response = requests.post(
         f"{public_url}{path}",
         headers={

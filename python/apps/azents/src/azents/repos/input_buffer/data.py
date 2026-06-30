@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from azents.core.enums import InputBufferKind
 from azents.engine.events.types import FileOutputPart
+from azents.rdb.models.event import JSONValue
 
 
 class InputBuffer(BaseModel):
@@ -18,6 +19,10 @@ class InputBuffer(BaseModel):
     content: str = Field(description="Input body")
     idempotency_key: str | None = Field(description="Source idempotency key")
     metadata: dict[str, str] = Field(description="Input metadata snapshot")
+    action: dict[str, JSONValue] | None = Field(
+        default=None,
+        description="Action payload snapshot",
+    )
     attachments: list[str] = Field(description="Attachment URI snapshot")
     file_parts: list[FileOutputPart] = Field(
         description="Model input FilePart snapshot",
@@ -34,6 +39,10 @@ class InputBufferCreate(BaseModel):
     content: str = Field(description="Input body")
     idempotency_key: str | None = Field(description="Source idempotency key")
     metadata: dict[str, str] = Field(description="Input metadata snapshot")
+    action: dict[str, JSONValue] | None = Field(
+        default=None,
+        description="Action payload snapshot",
+    )
     attachments: list[str] = Field(description="Attachment URI snapshot")
     file_parts: list[FileOutputPart] = Field(
         description="Model input FilePart snapshot",

@@ -6,27 +6,27 @@ Agent Runtime raw state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**workspace_id** | **str** |  |
-**agent_id** | **str** |  |
-**runtime_provider_id** | **str** |  |
-**provider_config** | **Dict[str, object]** |  |
-**desired_state** | [**RuntimeDesiredState**](RuntimeDesiredState.md) |  |
-**desired_generation** | **int** |  |
-**last_lifecycle_command** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  |
-**reset_final_desired_state** | [**RuntimeDesiredState**](RuntimeDesiredState.md) |  |
-**provider_observed_state** | [**RuntimeProviderObservedState**](RuntimeProviderObservedState.md) |  |
-**provider_observed_generation** | **int** |  |
-**provider_connection_state** | [**RuntimeProviderConnectionState**](RuntimeProviderConnectionState.md) |  |
-**runner_state** | [**RuntimeRunnerState**](RuntimeRunnerState.md) |  |
-**runner_generation** | **int** |  |
-**workspace_path** | **str** |  |
-**failure_generation** | **int** |  |
-**failure_code** | **str** |  |
-**failure_message** | **str** |  |
-**last_state_change_at** | **datetime** |  |
-**created_at** | **datetime** |  |
-**updated_at** | **datetime** |  |
+**id** | **str** |  | 
+**workspace_id** | **str** |  | 
+**agent_id** | **str** |  | 
+**runtime_provider_id** | **str** |  | 
+**provider_config** | **Dict[str, object]** |  | 
+**desired_state** | [**RuntimeDesiredState**](RuntimeDesiredState.md) |  | 
+**desired_generation** | **int** |  | 
+**last_lifecycle_command** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  | 
+**reset_final_desired_state** | [**RuntimeDesiredState**](RuntimeDesiredState.md) |  | 
+**provider_observed_state** | [**RuntimeProviderObservedState**](RuntimeProviderObservedState.md) |  | 
+**provider_observed_generation** | **int** |  | 
+**provider_connection_state** | [**RuntimeProviderConnectionState**](RuntimeProviderConnectionState.md) |  | 
+**runner_state** | [**RuntimeRunnerState**](RuntimeRunnerState.md) |  | 
+**runner_generation** | **int** |  | 
+**workspace_path** | **str** |  | 
+**failure_generation** | **int** |  | 
+**failure_code** | **str** |  | 
+**failure_message** | **str** |  | 
+**last_state_change_at** | **datetime** |  | 
+**created_at** | **datetime** |  | 
+**updated_at** | **datetime** |  | 
 
 ## Example
 

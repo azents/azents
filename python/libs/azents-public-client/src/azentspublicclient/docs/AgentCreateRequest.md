@@ -6,20 +6,20 @@ Agent creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Agent name |
-**model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**description** | **str** |  | [optional]
-**model_parameters** | [**ModelParameters**](ModelParameters.md) |  | [optional]
-**system_prompt** | **str** |  | [optional]
+**name** | **str** | Agent name | 
+**model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**description** | **str** |  | [optional] 
+**model_parameters** | [**ModelParameters**](ModelParameters.md) |  | [optional] 
+**system_prompt** | **str** |  | [optional] 
 **enabled** | **bool** | Enabled state | [optional] [default to True]
-**type** | [**AgentType**](AgentType.md) | Visibility scope | [optional]
-**role** | [**AgentRole**](AgentRole.md) | Role (agent/subagent) | [optional]
-**runtime_provider_id** | **str** |  | [optional]
+**type** | [**AgentType**](AgentType.md) | Visibility scope | [optional] 
+**role** | [**AgentRole**](AgentRole.md) | Role (agent/subagent) | [optional] 
+**runtime_provider_id** | **str** |  | [optional] 
 **shell_enabled** | **bool** | Shell enabled state | [optional] [default to True]
 **memory_enabled** | **bool** | Memory enabled state | [optional] [default to True]
-**max_turns** | **int** |  | [optional]
-**toolkit_inherit_mode** | [**SubagentToolkitInheritMode**](SubagentToolkitInheritMode.md) | Toolkit inherit mode; default all, meaningful for role&#x3D;subagent | [optional]
+**max_turns** | **int** |  | [optional] 
+**toolkit_inherit_mode** | [**SubagentToolkitInheritMode**](SubagentToolkitInheritMode.md) | Toolkit inherit mode; default all, meaningful for role&#x3D;subagent | [optional] 
 
 ## Example
 

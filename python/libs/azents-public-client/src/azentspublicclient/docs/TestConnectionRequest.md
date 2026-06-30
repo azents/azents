@@ -7,9 +7,9 @@ Connection test request.  In edit mode, send ``toolkit_config_id`` to load crede
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **toolkit_type** | **str** | Toolkit type, such as mcp or github | [optional] [default to 'mcp']
-**config** | **Dict[str, object]** |  |
-**credentials** | **Dict[str, object]** |  | [optional]
-**toolkit_config_id** | **str** |  | [optional]
+**config** | **Dict[str, object]** |  | 
+**credentials** | **Dict[str, object]** |  | [optional] 
+**toolkit_config_id** | **str** |  | [optional] 
 
 ## Example
 

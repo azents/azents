@@ -6,11 +6,11 @@ Event chat event page response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Event list |
-**has_more** | **bool** | Whether older events exist |
+**items** | [**List[ChatEventResponse]**](ChatEventResponse.md) | Event list | 
+**has_more** | **bool** | Whether older events exist | 
 **has_newer** | **bool** | Whether newer events exist | [optional] [default to False]
-**next_cursor** | **str** |  | [optional]
-**previous_cursor** | **str** |  | [optional]
+**next_cursor** | **str** |  | [optional] 
+**previous_cursor** | **str** |  | [optional] 
 
 ## Example
 

@@ -6,8 +6,8 @@ Agent Workspace move response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**source_path** | **str** | Moved source path |
-**destination_path** | **str** | Move destination path |
+**source_path** | **str** | Moved source path | 
+**destination_path** | **str** | Move destination path | 
 
 ## Example
 

@@ -6,11 +6,11 @@ Workspace access status
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Response type |
-**reason** | **str** | Unavailable reason |
-**detail** | **str** | Status description |
-**retry_after_ms** | **int** | Recommended retry delay |
-**manifest** | [**AgentWorkspaceManifestResponse**](AgentWorkspaceManifestResponse.md) | Agent Workspace manifest |
+**type** | **str** | Response type | 
+**reason** | **str** | Unavailable reason | 
+**detail** | **str** | Status description | 
+**retry_after_ms** | **int** | Recommended retry delay | 
+**manifest** | [**AgentWorkspaceManifestResponse**](AgentWorkspaceManifestResponse.md) | Agent Workspace manifest | 
 
 ## Example
 

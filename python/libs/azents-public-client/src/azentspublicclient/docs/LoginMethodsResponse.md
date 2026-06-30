@@ -6,8 +6,8 @@ Login method lookup response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**has_password** | **bool** | Whether password is set |
-**email_available** | **bool** | Whether email OTP login is available |
+**has_password** | **bool** | Whether password is set | 
+**email_available** | **bool** | Whether email OTP login is available | 
 
 ## Example
 

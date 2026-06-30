@@ -6,14 +6,14 @@ Invitation response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | WorkspaceInvitation ID (UUID7 hex) |
-**workspace_id** | **str** | Workspace ID |
-**email** | **str** | Invitation target email |
-**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Invitation role |
-**invited_by** | **str** | Inviting WorkspaceUser ID |
-**status** | [**InvitationStatus**](InvitationStatus.md) | Invitation status |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | WorkspaceInvitation ID (UUID7 hex) | 
+**workspace_id** | **str** | Workspace ID | 
+**email** | **str** | Invitation target email | 
+**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Invitation role | 
+**invited_by** | **str** | Inviting WorkspaceUser ID | 
+**status** | [**InvitationStatus**](InvitationStatus.md) | Invitation status | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 

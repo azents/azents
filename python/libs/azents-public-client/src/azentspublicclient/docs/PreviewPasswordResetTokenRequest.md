@@ -6,7 +6,7 @@ Password reset token preview request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | **str** | Password reset token |
+**token** | **str** | Password reset token | 
 
 ## Example
 

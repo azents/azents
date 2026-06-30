@@ -6,7 +6,7 @@ GitHub Platform App installation list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**installations** | [**List[GitHubInstallationItem]**](GitHubInstallationItem.md) | Installation list |
+**installations** | [**List[GitHubInstallationItem]**](GitHubInstallationItem.md) | Installation list | 
 
 ## Example
 

@@ -7,8 +7,8 @@ Google Vertex AI settings, stored as plaintext.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'gcp_service_account']
-**project_id** | **str** | GCP project ID |
-**region** | **str** | GCP region |
+**project_id** | **str** | GCP project ID | 
+**region** | **str** | GCP region | 
 
 ## Example
 

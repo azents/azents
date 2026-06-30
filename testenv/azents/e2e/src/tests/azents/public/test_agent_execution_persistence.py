@@ -217,7 +217,7 @@ def _run_message(
             )
     else:
         session_id_value = session_id
-    path = f"/chat/v1/sessions/{session_id_value}/messages"
+    path = f"/chat/v1/sessions/{session_id_value}/inputs"
     response = requests.post(
         f"{public_url}{path}",
         headers={**_headers(token), "Content-Type": "application/json"},
@@ -250,12 +250,13 @@ def _run_command(
     """REST write boundary t command t runt history t t."""
     del public_api_client
     response = requests.post(
-        f"{public_url}/chat/v1/sessions/{session_id}/commands",
+        f"{public_url}/chat/v1/sessions/{session_id}/inputs",
         headers={**_headers(token), "Content-Type": "application/json"},
         json={
             "agent_id": agent_id,
             "client_request_id": f"agent-execution-command-{unique()}",
-            "command": command,
+            "message": "",
+            "action": {"type": "command", "name": command},
         },
         timeout=10,
     )

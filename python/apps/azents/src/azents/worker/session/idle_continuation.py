@@ -87,6 +87,7 @@ class IdleContinuationService:
             content=continuation.content,
             idempotency_key=None,
             metadata={str(k): str(v) for k, v in metadata.items()},
+            action=None,
             attachments=[],
             file_parts=[],
         )

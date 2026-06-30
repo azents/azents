@@ -17,19 +17,26 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class SlashCommandResponse(BaseModel):
+class InputActionAvailabilityHintResponse(BaseModel):
     """
-    Slash command response.
+    Non-authoritative composer action availability hint.
     """ # noqa: E501
-    name: StrictStr = Field(description="Command name without leading slash")
-    description: StrictStr = Field(description="Command description")
+    state: StrictStr = Field(description="Hint state")
+    message: Optional[StrictStr] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "description"]
+    __properties: ClassVar[List[str]] = ["state", "message"]
+
+    @field_validator('state')
+    def state_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['ready', 'warning']):
+            raise ValueError("must be one of enum values ('ready', 'warning')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -49,7 +56,7 @@ class SlashCommandResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of SlashCommandResponse from a JSON string"""
+        """Create an instance of InputActionAvailabilityHintResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -77,11 +84,16 @@ class SlashCommandResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if message (nullable) is None
+        # and model_fields_set contains the field
+        if self.message is None and "message" in self.model_fields_set:
+            _dict['message'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of SlashCommandResponse from a dict"""
+        """Create an instance of InputActionAvailabilityHintResponse from a dict"""
         if obj is None:
             return None
 
@@ -89,8 +101,8 @@ class SlashCommandResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "name": obj.get("name"),
-            "description": obj.get("description")
+            "state": obj.get("state"),
+            "message": obj.get("message")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -6,13 +6,13 @@ Toolkit Config update request, for partial updates.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**slug** | **str** | Workspace-unique slug. Use lowercase letters, numbers, and underscores only. | [optional]
-**name** | **str** | Display name | [optional]
-**description** | **str** |  | [optional]
-**config** | **Dict[str, object]** | Tool settings | [optional]
-**prompt** | **str** |  | [optional]
-**credentials** | **Dict[str, object]** |  | [optional]
-**enabled** | **bool** | Enabled flag | [optional]
+**slug** | **str** | Workspace-unique slug. Use lowercase letters, numbers, and underscores only. | [optional] 
+**name** | **str** | Display name | [optional] 
+**description** | **str** |  | [optional] 
+**config** | **Dict[str, object]** | Tool settings | [optional] 
+**prompt** | **str** |  | [optional] 
+**credentials** | **Dict[str, object]** |  | [optional] 
+**enabled** | **bool** | Enabled flag | [optional] 
 
 ## Example
 

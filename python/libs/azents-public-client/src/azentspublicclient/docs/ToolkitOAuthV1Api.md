@@ -53,8 +53,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
-    handle = 'handle_example' # str |
-    toolkit_config_id = 'toolkit_config_id_example' # str |
+    handle = 'handle_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
 
     try:
         # Connect Oauth
@@ -72,8 +72,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **toolkit_config_id** | **str**|  |
+ **handle** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
 
 ### Return type
 
@@ -133,8 +133,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
-    handle = 'handle_example' # str |
-    toolkit_config_id = 'toolkit_config_id_example' # str |
+    handle = 'handle_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
 
     try:
         # Disconnect Oauth Connection
@@ -150,8 +150,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **toolkit_config_id** | **str**|  |
+ **handle** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
 
 ### Return type
 
@@ -212,9 +212,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
-    handle = 'handle_example' # str |
-    toolkit_config_id = 'toolkit_config_id_example' # str |
-    o_auth_exchange_request = azentspublicclient.OAuthExchangeRequest() # OAuthExchangeRequest |
+    handle = 'handle_example' # str | 
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    o_auth_exchange_request = azentspublicclient.OAuthExchangeRequest() # OAuthExchangeRequest | 
 
     try:
         # Exchange Oauth Connection
@@ -230,9 +230,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **toolkit_config_id** | **str**|  |
- **o_auth_exchange_request** | [**OAuthExchangeRequest**](OAuthExchangeRequest.md)|  |
+ **handle** | **str**|  | 
+ **toolkit_config_id** | **str**|  | 
+ **o_auth_exchange_request** | [**OAuthExchangeRequest**](OAuthExchangeRequest.md)|  | 
 
 ### Return type
 
@@ -297,7 +297,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # Get Github Platform Install Url
@@ -315,7 +315,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -381,8 +381,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
-    handle = 'handle_example' # str |
-    git_hub_platform_installations_request = azentspublicclient.GitHubPlatformInstallationsRequest() # GitHubPlatformInstallationsRequest |
+    handle = 'handle_example' # str | 
+    git_hub_platform_installations_request = azentspublicclient.GitHubPlatformInstallationsRequest() # GitHubPlatformInstallationsRequest | 
 
     try:
         # Get Github Platform Installations
@@ -400,8 +400,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **git_hub_platform_installations_request** | [**GitHubPlatformInstallationsRequest**](GitHubPlatformInstallationsRequest.md)|  |
+ **handle** | **str**|  | 
+ **git_hub_platform_installations_request** | [**GitHubPlatformInstallationsRequest**](GitHubPlatformInstallationsRequest.md)|  | 
 
 ### Return type
 
@@ -465,7 +465,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # Get Github Platform Oauth Url
@@ -483,7 +483,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -546,8 +546,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str |
-    handle = 'handle_example' # str |
+    toolkit_config_id = 'toolkit_config_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Test Connection Saved
@@ -565,8 +565,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  |
- **handle** | **str**|  |
+ **toolkit_config_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -633,8 +633,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ToolkitOAuthV1Api(api_client)
-    handle = 'handle_example' # str |
-    test_connection_request = azentspublicclient.TestConnectionRequest() # TestConnectionRequest |
+    handle = 'handle_example' # str | 
+    test_connection_request = azentspublicclient.TestConnectionRequest() # TestConnectionRequest | 
 
     try:
         # Test Connection Unsaved
@@ -652,8 +652,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **test_connection_request** | [**TestConnectionRequest**](TestConnectionRequest.md)|  |
+ **handle** | **str**|  | 
+ **test_connection_request** | [**TestConnectionRequest**](TestConnectionRequest.md)|  | 
 
 ### Return type
 

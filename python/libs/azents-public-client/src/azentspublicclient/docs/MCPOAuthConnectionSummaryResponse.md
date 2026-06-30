@@ -6,11 +6,11 @@ MCP OAuth connection summary response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**status** | [**MCPOAuthConnectionStatus**](MCPOAuthConnectionStatus.md) |  |
-**issuer** | **str** |  | [optional]
-**resource** | **str** |  | [optional]
-**scope** | **str** |  | [optional]
-**expires_at** | **datetime** |  | [optional]
+**status** | [**MCPOAuthConnectionStatus**](MCPOAuthConnectionStatus.md) |  | 
+**issuer** | **str** |  | [optional] 
+**resource** | **str** |  | [optional] 
+**scope** | **str** |  | [optional] 
+**expires_at** | **datetime** |  | [optional] 
 
 ## Example
 

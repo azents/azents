@@ -6,10 +6,10 @@ Chat live goal state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**objective** | **str** |  | [optional]
-**status** | **str** |  | [optional]
-**created_at** | **str** |  | [optional]
-**updated_at** | **str** |  | [optional]
+**objective** | **str** |  | [optional] 
+**status** | **str** |  | [optional] 
+**created_at** | **str** |  | [optional] 
+**updated_at** | **str** |  | [optional] 
 
 ## Example
 

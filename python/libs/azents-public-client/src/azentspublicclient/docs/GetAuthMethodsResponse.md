@@ -6,7 +6,7 @@ Authentication method lookup response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**methods** | [**List[AuthMethod]**](AuthMethod.md) | Auth method list |
+**methods** | [**List[AuthMethod]**](AuthMethod.md) | Auth method list | 
 
 ## Example
 

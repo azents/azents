@@ -1,6 +1,10 @@
 /** Chat feature status type */
 
-import type { AgentResponse, ChatEventResponse } from "@azents/public-client";
+import type {
+  AgentResponse,
+  ChatEventResponse,
+  InputActionDefinitionResponse,
+} from "@azents/public-client";
 
 // --- WebSocket event type ---
 
@@ -100,6 +104,16 @@ export interface FilePart {
 export type OutputPart = TextPart | AttachmentPart | ArtifactPart | FilePart;
 
 export type UserContentPart = TextPart | FilePart;
+
+export type ChatAction =
+  | { type: "command"; name: string }
+  | { type: "goal" }
+  | { type: "skill"; skill_id: string };
+
+export interface ActionMessagePayload {
+  action: ChatAction;
+  message: string;
+}
 
 export interface UserMessagePayload {
   content: string | UserContentPart[];
@@ -256,6 +270,7 @@ export type ChatEventPayload =
   | SubagentStartPayload
   | SubagentEndPayload
   | GoalBriefingPayload
+  | ActionMessagePayload
   | SystemReminderPayload
   | SystemErrorPayload
   | UnknownAdapterOutputPayload;
@@ -291,6 +306,7 @@ export type ChatHistoryEvent =
   | EventBase<"goal_continuation", UserMessagePayload>
   | EventBase<"goal_updated", UserMessagePayload>
   | EventBase<"goal_briefing", GoalBriefingPayload>
+  | EventBase<"action_message", ActionMessagePayload>
   | EventBase<"system_reminder", SystemReminderPayload>
   | EventBase<"system_error", SystemErrorPayload>
   | EventBase<"unknown_adapter_output", UnknownAdapterOutputPayload>;
@@ -587,6 +603,7 @@ export interface PendingInputBuffer {
   id: string;
   sessionId: string;
   content: string;
+  action?: ChatAction | null;
   attachments: string[];
   fileParts?: FilePart[];
   attachmentFiles?: FileAttachment[];
@@ -595,10 +612,7 @@ export interface PendingInputBuffer {
   status: "sending" | "pending" | "deleting";
 }
 
-export interface SlashCommand {
-  name: string;
-  description: string;
-}
+export type InputActionDefinition = InputActionDefinitionResponse;
 
 /** WebSocket stop request */
 // --- UI status type ---
@@ -656,6 +670,8 @@ export interface ChatMessage {
   reasoningSummary?: string;
   /** textper token usage (turn_complete usage text toonly text) */
   usage?: Record<string, unknown> | null;
+  /** selected action for action-message user input */
+  action?: ChatAction | null;
   /** message metadata (subagent event etc.) */
   metadata?: Record<string, string> | null;
 }

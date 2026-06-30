@@ -6,8 +6,8 @@ Password login request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Email address |
-**password** | **str** | Password |
+**email** | **str** | Email address | 
+**password** | **str** | Password | 
 
 ## Example
 

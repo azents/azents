@@ -6,8 +6,8 @@ AgentSubagent creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**subagent_id** | **str** | Subagent ID to link |
-**description** | **str** | Description exposed to the LLM |
+**subagent_id** | **str** | Subagent ID to link | 
+**description** | **str** | Description exposed to the LLM | 
 **enabled** | **bool** | Enabled state | [optional] [default to True]
 
 ## Example

@@ -102,6 +102,7 @@ def _create_payload(
         content=content,
         idempotency_key=None,
         metadata={"timestamp": "2026-05-19T00:00:00+00:00", "source": "chat"},
+        action=None,
         attachments=["exchange://file-1"],
         file_parts=[],
     )

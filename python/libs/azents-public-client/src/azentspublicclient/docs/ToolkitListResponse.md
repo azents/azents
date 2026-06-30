@@ -6,7 +6,7 @@ Toolkit tool definition list response model.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[ToolkitResponse]**](ToolkitResponse.md) |  |
+**items** | [**List[ToolkitResponse]**](ToolkitResponse.md) |  | 
 
 ## Example
 

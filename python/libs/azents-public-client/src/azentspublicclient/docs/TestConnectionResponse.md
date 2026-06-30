@@ -6,11 +6,11 @@ Test connection response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**success** | **bool** | Connection success state |
-**message** | **str** | Result message |
-**discovered_auth_url** | **str** |  | [optional]
-**discovered_token_url** | **str** |  | [optional]
-**supports_dcr** | **bool** |  | [optional]
+**success** | **bool** | Connection success state | 
+**message** | **str** | Result message | 
+**discovered_auth_url** | **str** |  | [optional] 
+**discovered_token_url** | **str** |  | [optional] 
+**supports_dcr** | **bool** |  | [optional] 
 
 ## Example
 

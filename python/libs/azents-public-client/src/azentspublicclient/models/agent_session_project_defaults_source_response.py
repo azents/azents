@@ -17,22 +17,26 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ChatMessageWriteRequest(BaseModel):
+class AgentSessionProjectDefaultsSourceResponse(BaseModel):
     """
-    REST message write request.
+    New AgentSession Project defaults source metadata response.
     """ # noqa: E501
-    agent_id: StrictStr = Field(description="Agent ID")
-    client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
-    message: StrictStr = Field(description="Message content")
-    attachments: Optional[List[StrictStr]] = None
+    type: StrictStr = Field(description="Default source type")
+    session_id: Optional[StrictStr] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_id", "client_request_id", "message", "attachments"]
+    __properties: ClassVar[List[str]] = ["type", "session_id"]
+
+    @field_validator('type')
+    def type_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['empty', 'last_created_session']):
+            raise ValueError("must be one of enum values ('empty', 'last_created_session')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -52,7 +56,7 @@ class ChatMessageWriteRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ChatMessageWriteRequest from a JSON string"""
+        """Create an instance of AgentSessionProjectDefaultsSourceResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -80,16 +84,16 @@ class ChatMessageWriteRequest(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if attachments (nullable) is None
+        # set to None if session_id (nullable) is None
         # and model_fields_set contains the field
-        if self.attachments is None and "attachments" in self.model_fields_set:
-            _dict['attachments'] = None
+        if self.session_id is None and "session_id" in self.model_fields_set:
+            _dict['session_id'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ChatMessageWriteRequest from a dict"""
+        """Create an instance of AgentSessionProjectDefaultsSourceResponse from a dict"""
         if obj is None:
             return None
 
@@ -97,10 +101,8 @@ class ChatMessageWriteRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "agent_id": obj.get("agent_id"),
-            "client_request_id": obj.get("client_request_id"),
-            "message": obj.get("message"),
-            "attachments": obj.get("attachments")
+            "type": obj.get("type"),
+            "session_id": obj.get("session_id")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

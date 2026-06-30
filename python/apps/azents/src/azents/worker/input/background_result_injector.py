@@ -123,6 +123,7 @@ class BackgroundTaskResultInjector:
                             "task_id": task.task_id,
                             "tool_name": task.tool_name,
                         },
+                        action=None,
                         attachments=[],
                         file_parts=[],
                     ),

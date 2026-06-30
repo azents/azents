@@ -47,7 +47,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceV1Api(api_client)
-    create_workspace_request = azentspublicclient.CreateWorkspaceRequest() # CreateWorkspaceRequest |
+    create_workspace_request = azentspublicclient.CreateWorkspaceRequest() # CreateWorkspaceRequest | 
 
     try:
         # Create Workspace
@@ -65,7 +65,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **create_workspace_request** | [**CreateWorkspaceRequest**](CreateWorkspaceRequest.md)|  |
+ **create_workspace_request** | [**CreateWorkspaceRequest**](CreateWorkspaceRequest.md)|  | 
 
 ### Return type
 
@@ -116,7 +116,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.WorkspaceV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # Get Workspace By Handle
@@ -134,7 +134,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 

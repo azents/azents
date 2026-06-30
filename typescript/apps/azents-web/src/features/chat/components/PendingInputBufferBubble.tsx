@@ -24,6 +24,7 @@ export function PendingInputBufferBubble({
   return (
     <InputBufferBubbleFrame
       content={buffer.content}
+      action={buffer.action}
       attachments={buffer.attachments}
       attachmentFiles={buffer.attachmentFiles}
       opacity={deleting ? 0.45 : 0.6}

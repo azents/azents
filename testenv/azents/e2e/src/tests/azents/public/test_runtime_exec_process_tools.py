@@ -185,7 +185,7 @@ def _run_message(
 ) -> None:
     """Send a chat message through the REST write boundary."""
     response = requests.post(
-        f"{public_url}/chat/v1/sessions/{session_id}/messages",
+        f"{public_url}/chat/v1/sessions/{session_id}/inputs",
         headers={**_headers(token), "Content-Type": "application/json"},
         json={
             "agent_id": agent_id,

@@ -6,8 +6,8 @@ Workspace model settings update request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**default_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**default_lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
+**default_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**default_lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
 
 ## Example
 

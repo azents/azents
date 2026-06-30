@@ -4,6 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, MessageRole
+from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -75,6 +76,8 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return SubagentEndPayload.model_validate(row.payload)
         case EventKind.GOAL_CONTINUATION | EventKind.GOAL_UPDATED:
             return UserMessagePayload.model_validate(row.payload)
+        case EventKind.ACTION_MESSAGE:
+            return ActionMessagePayload.model_validate(row.payload)
         case EventKind.GOAL_BRIEFING:
             return GoalBriefingPayload.model_validate(row.payload)
         case EventKind.SYSTEM_REMINDER:
@@ -103,6 +106,20 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                 reasoning_summary=None,
                 usage=None,
                 metadata=payload.metadata or None,
+                created_at=row.created_at,
+            )
+        case ActionMessagePayload():
+            return ChatMessage(
+                id=row.id,
+                session_id=row.session_id,
+                role=MessageRole.USER,
+                content=payload.message,
+                tool_calls=None,
+                tool_call_id=None,
+                attachments=[],
+                reasoning_summary=None,
+                usage=None,
+                metadata={"action": payload.action.model_dump_json()},
                 created_at=row.created_at,
             )
         case AssistantMessagePayload():

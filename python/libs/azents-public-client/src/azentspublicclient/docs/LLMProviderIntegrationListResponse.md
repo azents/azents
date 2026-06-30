@@ -6,7 +6,7 @@ LLM Provider Integration list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[LLMProviderIntegrationResponse]**](LLMProviderIntegrationResponse.md) |  |
+**items** | [**List[LLMProviderIntegrationResponse]**](LLMProviderIntegrationResponse.md) |  | 
 
 ## Example
 
