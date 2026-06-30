@@ -283,7 +283,6 @@ class _Compactor:
 
     def __init__(self) -> None:
         self.summary: str | None = None
-        self.protected_token_budget: int | None = None
         self.reason: str | None = None
 
     async def compact(
@@ -294,13 +293,11 @@ class _Compactor:
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: SummaryGenerator,
-        protected_token_budget: int,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
     ) -> Event:
         """Call summary generator and return summary event."""
         del session, compaction_id
-        self.protected_token_budget = protected_token_budget
         self.reason = reason
         summary = await summarize(
             transcript,
@@ -332,7 +329,6 @@ class _FailingCompactor:
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: SummaryGenerator,
-        protected_token_budget: int,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
     ) -> Event | None:
@@ -343,7 +339,6 @@ class _FailingCompactor:
             transcript,
             compaction_id,
             summarize,
-            protected_token_budget,
             summary_context_window_tokens,
             reason,
         )
@@ -950,7 +945,6 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         "CompactionComplete",
     ]
     assert transcript_repo.head_event_id == "1" * 32
-    assert compactor.protected_token_budget == 0
     assert compactor.reason == "manual_command"
     assert compactor.summary == "summary::[User]: old request"
     assert "durable handoff checkpoint" in captured_prompts["system_prompt"]

@@ -498,7 +498,6 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
-        protected_token_budget=0,
         reason="manual_command",
     )
 
@@ -527,6 +526,99 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
     assert isinstance(payload, CompactionSummaryPayload)
     assert payload.covered_until_event_id == f"{2:032d}"
     assert payload.reason == "manual_command"
+    assert "## Recent Events for Continuity" in payload.content
+    assert "old" in payload.content
+    assert "recent" in payload.content
+
+
+async def test_compactor_continuity_uses_last_five_user_turns() -> None:
+    """Continuity excerpts include only the last five user turns."""
+    events: list[Event] = []
+    for turn in range(1, 7):
+        events.append(
+            _event(
+                str((turn * 2) - 1),
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(content=f"user turn {turn}"),
+            )
+        )
+        events.append(
+            _event(
+                str(turn * 2),
+                EventKind.ASSISTANT_MESSAGE,
+                AssistantMessagePayload(
+                    content=f"assistant turn {turn}",
+                    native_artifact=_native_artifact(),
+                ),
+            )
+        )
+    original_event_ids = [event.id for event in events]
+    transcript_repo = _TranscriptRepo(events)
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Return a summary that does not itself contain event text."""
+        del summary_budget
+        assert [event.id for event in old_events] == original_event_ids
+        return "summary"
+
+    summary = await EventCompactor(
+        transcript_repo=transcript_repo,
+        session_repo=_SessionRepo(),
+    ).compact(
+        _Session(),
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+    )
+
+    assert summary is not None
+    payload = summary.payload
+    assert isinstance(payload, CompactionSummaryPayload)
+    assert "user turn 1" not in payload.content
+    assert "assistant turn 1" not in payload.content
+    assert "user turn 2" in payload.content
+    assert "assistant turn 6" in payload.content
+
+
+async def test_compactor_truncates_large_continuity_events() -> None:
+    """Oversized continuity excerpts are independently truncated."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="x" * 10_000),
+        )
+    ]
+    transcript_repo = _TranscriptRepo(events)
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Return a summary that does not itself contain event text."""
+        del old_events, summary_budget
+        return "summary"
+
+    summary = await EventCompactor(
+        transcript_repo=transcript_repo,
+        session_repo=_SessionRepo(),
+    ).compact(
+        _Session(),
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+    )
+
+    assert summary is not None
+    payload = summary.payload
+    assert isinstance(payload, CompactionSummaryPayload)
+    assert "[Event truncated by Azents continuity guard.]" in payload.content
+    assert "x" * 9_000 not in payload.content
 
 
 async def test_compactor_propagates_summary_failure() -> None:
@@ -564,7 +656,6 @@ async def test_compactor_propagates_summary_failure() -> None:
             transcript=events,
             compaction_id="compact-1",
             summarize=summarize,
-            protected_token_budget=0,
         )
 
     assert session_repo.head_event_id is None
@@ -618,7 +709,6 @@ async def test_compactor_raises_when_summary_is_empty() -> None:
             transcript=events,
             compaction_id="compact-1",
             summarize=summarize,
-            protected_token_budget=0,
         )
 
     assert session_repo.head_event_id is None
@@ -632,7 +722,7 @@ async def test_compactor_raises_when_summary_is_empty() -> None:
 
 
 async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
-    """Auto compaction returns summary and protected tail over threshold."""
+    """Auto compaction returns a full summary with continuity events."""
     events = [
         _event(
             "1",
@@ -654,8 +744,8 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
     ) -> str:
         """Return summary result."""
         del summary_budget
-        assert [event.id for event in old_events] == [events[0].id]
-        return f"summary:{old_events[0].id}"
+        assert [event.id for event in old_events] == [events[0].id, events[1].id]
+        return f"summary:{old_events[-1].id}"
 
     result = await EventAutoCompactionFilter(
         session_id="session-1",
@@ -669,7 +759,7 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
     ).apply(_Session(), events)
 
     assert session_repo.head_event_id is not None
-    assert len(result) == 2
+    assert len(result) == 1
     assert result[0].kind == EventKind.COMPACTION_SUMMARY
     marker_payload = transcript_repo.events[2].payload
     assert isinstance(marker_payload, CompactionMarkerPayload)
@@ -677,7 +767,8 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
     summary_payload = result[0].payload
     assert isinstance(summary_payload, CompactionSummaryPayload)
     assert summary_payload.reason == "auto_threshold_exceeded"
-    assert result[1].payload == events[1].payload
+    assert "## Recent Events for Continuity" in summary_payload.content
+    assert "recent" in summary_payload.content
 
 
 async def test_auto_compaction_emits_started_before_summary_call() -> None:

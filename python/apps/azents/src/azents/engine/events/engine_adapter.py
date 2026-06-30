@@ -245,7 +245,6 @@ class AgentEngineAdapter:
                     request,
                     summarize=self.summary_model_call,
                 ),
-                protected_token_budget=0,
                 summary_context_window_tokens=request.effective_max_input_tokens,
                 reason="manual_command",
             )

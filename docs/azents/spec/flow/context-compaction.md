@@ -14,7 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-06-30
-spec_version: 13
+spec_version: 14
 ---
 
 # Context Compaction
@@ -40,17 +40,13 @@ back to estimating the full selected transcript.
 When compaction is required:
 
 1. Append `compaction_marker` with a new `compaction_id` and a durable reason (`auto_threshold_exceeded` for automatic compaction, `manual_command` for explicit `/compact`).
-2. Select the transcript slice that will be summarized.
-3. For automatic compaction, split the slice into:
-   - older events that are summarized; and
-   - preserved tail events that must remain raw in the next model input, capped at 10% of
-     the effective context window and 12,000 estimated tokens.
-4. Generate the summary from only the summarized older events.
-5. Append `compaction_summary` with the same `compaction_id` and reason.
-6. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event.
-7. For automatic compaction, assign the summary an intermediate model order before the preserved tail
-   so the future model input reads as `compaction_summary` followed by the preserved raw tail. The
-   preserved tail keeps its existing model order when a gap is available.
+2. Select the full model-input transcript slice that will be summarized.
+3. Generate the summary from the full selected transcript slice.
+4. Select continuity excerpts from the last five user turns in the same selected transcript.
+5. Truncate each continuity event excerpt independently before embedding it in the summary payload.
+6. Append `compaction_summary` with the same `compaction_id` and reason. The payload content contains
+   the generated checkpoint followed by a `Recent Events for Continuity` section.
+7. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event.
 
 Old events remain queryable. The head pointer and event model order only change which
 event range and ordering are used for future model input. Sequential appends leave gaps in
@@ -85,19 +81,18 @@ for the next agent. The prompt also tells the model not to answer the user, not 
 not to fill the budget unnecessarily, not to invent details, and to mark uncertain items as
 `Needs verification`.
 
-Automatic compaction does not include preserved tail events in the summary request. The preserved tail
-remains available as raw events after the summary in model order, which prevents duplicate
-knowledge between summary text and raw tail events. The prompt explicitly tells the model not to
-duplicate preserved tail content, while still preserving durable state from the compacted transcript.
+Auto and manual compaction include the full selected transcript in the summary request. The summary
+prompt asks for durable state from the whole compacted transcript and warns that no raw event should
+be assumed to remain available outside the checkpoint. After the model returns the checkpoint, the
+runtime appends a bounded `Recent Events for Continuity` section to the stored summary content.
 
 Previous compaction summaries are rendered as existing checkpoints and are integrated into one updated
 checkpoint. The prompt tells the model not to copy previous checkpoints verbatim, to drop obsolete
 details unless needed to continue, and to prefer the latest transcript evidence on conflict.
 
-Manual compaction and fallback compaction use the same prompt and budget policy as automatic
-compaction. They keep the full selected compaction slice behavior and do not preserve a separate raw
-tail. If summary generation fails, the runtime records the failure path and keeps recent context under
-the fallback budget rather than deleting prior events.
+Manual compaction uses the same prompt, budget policy, and continuity event policy as automatic
+compaction. If summary generation fails, the runtime records the failure path and keeps recent context
+under the fallback budget rather than deleting prior events.
 
 ## Token Estimation and Filters
 
@@ -113,16 +108,36 @@ run automatic compaction. They do not run Artifact, ExchangeFile, or ModelFile c
 scheduler-owned. They do not omit old tool outputs for context pressure. Adapter-native request guards
 run after lowering and do not mutate DB state.
 
+## Continuity Events
+
+After summary generation succeeds, the event compactor appends recent event excerpts to the summary
+payload content. This is not a separate raw tail in the event transcript. Future model input starts at
+the summary event, and the continuity excerpts are part of that summary event's model-visible text.
+
+Continuity selection uses the last five user turns from the compacted transcript. If fewer than five
+user turns exist, it includes from the first available user turn. If no user message exists, it falls
+back to all selected events. Each event is rendered using the same model-visible projection family as
+token estimation: user/assistant text, tool call name/arguments, tool output text, compaction summary
+reminders, system reminders, and bounded file/attachment/artifact metadata. Event IDs, timestamps,
+native artifacts, and storage-only metadata are not included.
+
+Each continuity event excerpt is truncated independently to 2,000 estimated tokens. Truncation is
+marked inline with `[Event truncated by Azents continuity guard.]`. This prevents a single large tool
+output from surviving compaction as an unbounded raw event while still preserving the immediate shape
+of the recent interaction.
+
 ## Invariants
 
 - Compaction is append-only.
 - Successful compaction writes the trigger reason to both `compaction_marker.payload.reason` and `compaction_summary.payload.reason` so context/debug views can explain why the checkpoint was created.
 - `model_input_head_event_id` points at the event summary event after successful compaction, and `model_input_head_model_order` stores the same head event model order for scheduler GC cursor comparisons.
 - Future model input is selected and sorted by event model order, not by physical append id.
-- Automatic compaction presents model input as `compaction_summary` followed by preserved raw tail
-  events capped at 10% of the effective context window and 12,000 estimated tokens.
-- Preserved tail events are excluded from automatic compaction summaries.
-- Manual compaction and fallback compaction do not preserve a separate raw tail.
+- Auto and manual compaction present future model input as one `compaction_summary` head event.
+- The summary model receives the full selected model-input transcript, not a transcript with a
+  protected tail removed.
+- The stored summary content includes a bounded `Recent Events for Continuity` section from the last
+  five user turns.
+- Each continuity event excerpt is independently truncated before it is embedded in the summary.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.
 - Summary model calls are non-streaming and carry API-level `max_output_tokens`.
 - Summary content is bounded by the runtime char guard after the model returns.
