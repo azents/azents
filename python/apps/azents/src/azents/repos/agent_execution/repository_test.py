@@ -14,7 +14,12 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
 )
-from azents.engine.events.types import ActiveToolCall, UserMessagePayload
+from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
+from azents.engine.events.types import (
+    ActiveToolCall,
+    UserMessagePayload,
+    validate_event_payload,
+)
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -83,6 +88,23 @@ async def _create_agent_runtime(
 def _agent_session_repository() -> AgentSessionRepository:
     """Create AgentSessionRepository for tests."""
     return AgentSessionRepository()
+
+
+def test_validate_event_payload_accepts_action_message() -> None:
+    """Action message is a first-class persisted event payload."""
+    payload = ActionMessagePayload(
+        action=GoalAction(),
+        message="Ship the goal",
+    )
+
+    validated = validate_event_payload(
+        EventKind.ACTION_MESSAGE,
+        payload.model_dump(mode="json"),
+    )
+
+    assert isinstance(validated, ActionMessagePayload)
+    assert isinstance(validated.action, GoalAction)
+    assert validated.message == "Ship the goal"
 
 
 class TestEventExecutionRepositories:
@@ -198,6 +220,41 @@ class TestEventExecutionRepositories:
             )
         )
         assert result.scalar_one() == 1
+
+    async def test_append_action_message_event_with_external_id(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Action message events validate and append with input-buffer external IDs."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        payload = ActionMessagePayload(
+            action=GoalAction(),
+            message="Ship the goal",
+        )
+
+        event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.ACTION_MESSAGE,
+                payload=payload.model_dump(mode="json"),
+                external_id="action-buffer-001",
+            ),
+        )
+
+        assert event.kind == EventKind.ACTION_MESSAGE
+        assert event.external_id == "action-buffer-001"
+        assert isinstance(event.payload, ActionMessagePayload)
+        assert isinstance(event.payload.action, GoalAction)
+        assert event.payload.message == "Ship the goal"
 
     async def test_append_auto_model_order_waits_for_session_lock(
         self,

@@ -4,7 +4,14 @@ import datetime
 from typing import Annotated, Literal, TypeAlias
 
 from azcommon.types import JSONObject
-from pydantic import BaseModel, ConfigDict, Field, SkipValidation, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SkipValidation,
+    TypeAdapter,
+    model_validator,
+)
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.action_messages import ActionMessagePayload
@@ -477,6 +484,20 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.SYSTEM_ERROR: SystemErrorPayload,
     EventKind.UNKNOWN_ADAPTER_OUTPUT: UnknownAdapterOutputPayload,
 }
+
+PAYLOAD_ADAPTER_BY_KIND: dict[EventKind, TypeAdapter[EventPayload]] = {
+    kind: TypeAdapter[EventPayload](payload_type)
+    for kind, payload_type in PAYLOAD_BY_KIND.items()
+}
+
+
+def validate_event_payload(
+    kind: EventKind,
+    payload: object,
+) -> EventPayload:
+    """Validate JSON payload with the payload model for the event kind."""
+    return PAYLOAD_ADAPTER_BY_KIND[kind].validate_python(payload)
+
 
 NATIVE_ARTIFACT_REQUIRED_KINDS = frozenset(
     {
