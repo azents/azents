@@ -486,8 +486,8 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
     ) -> str:
         """Return summary result."""
         del summary_budget
-        assert [event.id for event in old_events] == [events[0].id]
-        return f"summary:{old_events[0].id}"
+        assert [event.id for event in old_events] == [events[0].id, events[1].id]
+        return f"summary:{old_events[-1].id}"
 
     summary = await EventCompactor(
         transcript_repo=transcript_repo,
@@ -508,8 +508,8 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
     assert [event.model_order for event in transcript_repo.events] == [
         1000,
         2000,
-        1001,
-        1002,
+        2001,
+        2002,
     ]
     model_input_events = sorted(
         (
@@ -519,16 +519,13 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
         ),
         key=lambda event: event.model_order,
     )
-    assert [event.payload for event in model_input_events] == [
-        summary.payload,
-        events[1].payload,
-    ]
+    assert [event.payload for event in model_input_events] == [summary.payload]
     started_payload = transcript_repo.events[2].payload
     assert isinstance(started_payload, CompactionMarkerPayload)
     assert started_payload.reason == "manual_command"
     payload = summary.payload
     assert isinstance(payload, CompactionSummaryPayload)
-    assert payload.covered_until_event_id == f"{1:032d}"
+    assert payload.covered_until_event_id == f"{2:032d}"
     assert payload.reason == "manual_command"
 
 
@@ -668,7 +665,6 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
         ),
         summarize=summarize,
         max_input_tokens=10,
-        protection_ratio=0.1,
         compaction_id_factory=lambda: "compact-1",
     ).apply(_Session(), events)
 
@@ -722,7 +718,6 @@ async def test_auto_compaction_emits_started_before_summary_call() -> None:
         ),
         summarize=summarize,
         max_input_tokens=10,
-        protection_ratio=0.1,
         compaction_id_factory=lambda: "compact-1",
         on_compaction_started=on_compaction_started,
     ).apply(_Session(), events)
@@ -763,7 +758,6 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
         ),
         summarize=summarize,
         max_input_tokens=10,
-        protection_ratio=0.1,
         compaction_id_factory=lambda: "compact-1",
     )
 
@@ -799,7 +793,6 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
         ),
         summarize=summarize,
         max_input_tokens=1000,
-        protection_ratio=0.3,
         compaction_id_factory=lambda: "compact-1",
     ).apply(_Session(), events)
 
@@ -843,7 +836,6 @@ async def test_auto_compaction_uses_latest_turn_marker_usage() -> None:
         ),
         summarize=summarize,
         max_input_tokens=1000,
-        protection_ratio=0.3,
         compaction_id_factory=lambda: "compact-1",
     ).apply(_Session(), events)
 
@@ -883,7 +875,6 @@ async def test_auto_compaction_counts_events_after_latest_turn_marker() -> None:
         ),
         summarize=summarize,
         max_input_tokens=100,
-        protection_ratio=0.1,
         compaction_id_factory=lambda: "compact-1",
     ).apply(_Session(), events)
 

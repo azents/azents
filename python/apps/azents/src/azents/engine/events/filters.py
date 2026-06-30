@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, ExchangeFileStatus, ModelFileStatus
 from azents.engine.context.compaction import compute_summary_budget
-from azents.engine.context.window import compute_auto_compaction_threshold_tokens
+from azents.engine.context.window import (
+    compute_auto_compaction_protected_tokens,
+    compute_auto_compaction_threshold_tokens,
+)
 from azents.engine.events.file_parts import file_output_part_placeholder_text
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
@@ -233,7 +236,6 @@ class EventAutoCompactionFilter:
         compactor: ManualCompactor,
         summarize: SummaryGenerator,
         max_input_tokens: int,
-        protection_ratio: float,
         compaction_id_factory: Callable[[], str],
         on_compaction_started: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
@@ -244,7 +246,9 @@ class EventAutoCompactionFilter:
         self._threshold_tokens = compute_auto_compaction_threshold_tokens(
             max_input_tokens
         )
-        self._protection_tokens = int(max_input_tokens * protection_ratio)
+        self._protection_tokens = compute_auto_compaction_protected_tokens(
+            max_input_tokens
+        )
         self._compaction_id_factory = compaction_id_factory
         self._on_compaction_started = on_compaction_started
         self.was_compacted = False
@@ -671,6 +675,8 @@ def _find_keep_boundary(
     protected_token_budget: int,
 ) -> int:
     """Find old/recent event boundary for summary."""
+    if protected_token_budget <= 0:
+        return len(events)
     if len(events) <= 1:
         return 0
     running = 0

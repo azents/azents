@@ -27,9 +27,6 @@ from azents.engine.context.compaction import (
     enforce_summary_char_budget,
     summarize_text_with_model,
 )
-from azents.engine.context.window import (
-    PROTECTION_RATIO,
-)
 from azents.engine.events.engine_events import (
     CompactionComplete,
     CompactionStarted,
@@ -381,7 +378,6 @@ class AgentEngineAdapter:
                         summarize=self.summary_model_call,
                     ),
                     max_input_tokens=request.effective_max_input_tokens,
-                    protection_ratio=PROTECTION_RATIO,
                     compaction_id_factory=lambda: uuid7().hex,
                     on_compaction_started=lambda: emit_queue.put(
                         ephemeral(CompactionStarted(continuing=True))
