@@ -38,6 +38,7 @@ from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
 from azents.engine.events.protocols import (
     NormalizedAdapterOutput,
     OutputSink,
+    SummaryEnricher,
     SummaryGenerator,
 )
 from azents.engine.events.types import (
@@ -53,6 +54,8 @@ from azents.engine.events.types import (
 )
 from azents.engine.hooks.dispatcher import RuntimeHookDispatcher
 from azents.engine.hooks.types import (
+    CompactionSummaryHookContext,
+    CompactionSummaryReplace,
     RuntimeHooks,
     TurnInjectedPrompt,
     TurnStartHookContext,
@@ -295,14 +298,23 @@ class _Compactor:
         summarize: SummaryGenerator,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
+        summary_enricher: SummaryEnricher | None = None,
     ) -> Event:
         """Call summary generator and return summary event."""
-        del session, compaction_id
+        del session
         self.reason = reason
         summary = await summarize(
             transcript,
             compute_summary_budget(summary_context_window_tokens),
         )
+        if summary_enricher is not None:
+            summary = await summary_enricher(
+                summary=summary,
+                continuity_history="## Recent User Messages\n1. recent request",
+                compaction_id=compaction_id,
+                reason=reason,
+                covered_until_event_id=transcript[-1].id,
+            )
         self.summary = summary
         return Event(
             id="2" * 32,
@@ -331,6 +343,7 @@ class _FailingCompactor:
         summarize: SummaryGenerator,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
+        summary_enricher: SummaryEnricher | None = None,
     ) -> Event | None:
         """Raise compaction failure."""
         del (
@@ -341,6 +354,7 @@ class _FailingCompactor:
             summarize,
             summary_context_window_tokens,
             reason,
+            summary_enricher,
         )
         raise CompactionFailedError(
             "Compaction failed: summary model returned no text."
@@ -486,6 +500,32 @@ class _PromptHookToolkit(Toolkit[BaseModel]):
                     text="hidden prompt",
                 ),
             ]
+        )
+
+
+class _CompactionSummaryHookToolkit(Toolkit[BaseModel]):
+    """Toolkit for compaction summary hook tests."""
+
+    def __init__(self) -> None:
+        self.context: CompactionSummaryHookContext | None = None
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return active empty toolkit state."""
+        del context
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
+
+    def hooks(self) -> RuntimeHooks:
+        """Return compaction summary hook."""
+        return {"on_compaction_summary": self._on_compaction_summary}
+
+    async def _on_compaction_summary(
+        self,
+        context: CompactionSummaryHookContext,
+    ) -> CompactionSummaryReplace:
+        """Append hook enrichment before continuity is reattached."""
+        self.context = context
+        return CompactionSummaryReplace(
+            summary=context.summary + "\n\n## Toolkit Enrichment\n- extra"
         )
 
 
@@ -951,6 +991,74 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     assert "Do not answer the user" in captured_prompts["system_prompt"]
     assert "## Relevant Files and Symbols" in captured_prompts["user_prompt"]
     assert "existing checkpoints" in captured_prompts["user_prompt"]
+
+
+async def test_manual_compact_runs_compaction_summary_hook() -> None:
+    """Manual compaction passes summary and continuity history to hook pipeline."""
+    transcript_event = Event(
+        id="1" * 32,
+        session_id="session-1",
+        kind=EventKind.USER_MESSAGE,
+        payload=UserMessagePayload(content="old request"),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+    transcript_repo = _TranscriptRepo([transcript_event])
+    compactor = _Compactor()
+    toolkit = _CompactionSummaryHookToolkit()
+
+    async def summarize(
+        *,
+        provider: LLMProvider,
+        model: str,
+        credential_kwargs: dict[str, object],
+        system_prompt: str,
+        user_prompt: str,
+        conversation_text: str,
+        max_tokens: int,
+        session_id: str | None = None,
+    ) -> str:
+        """Return compact summary."""
+        del provider, model, credential_kwargs, system_prompt, user_prompt
+        del conversation_text, max_tokens, session_id
+        return "summary"
+
+    adapter = _agent_engine_adapter(
+        session_manager=_session_context,
+        artifact_service=_ArtifactService(),
+        exchange_file_service=_ExchangeFileService(),
+        model_file_service=_ModelFileService(),
+        run_repo=_RunRepo(),
+        agent_session_repo=_AgentSessionRepo(),
+        session_head_repo=_EventSessionHeadRepo("1" * 32),
+        transcript_repo=transcript_repo,
+        compactor=compactor,
+        summary_model_call=summarize,
+    )
+
+    _ = [
+        emit
+        async for emit in adapter.compact(
+            RunRequest(
+                session_id="session-1",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[ToolkitBinding(toolkit, "hookkit", True)],
+                model="gpt-5.1",
+                credential_kwargs={"api_key": "test"},
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+            )
+        )
+    ]
+
+    assert toolkit.context is not None
+    assert toolkit.context.summary == "summary"
+    assert (
+        toolkit.context.continuity_history
+        == "## Recent User Messages\n1. recent request"
+    )
+    assert toolkit.context.run_id is None
+    assert compactor.summary == "summary\n\n## Toolkit Enrichment\n- extra"
 
 
 async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> None:

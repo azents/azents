@@ -22,6 +22,7 @@ from azents.engine.events.protocols import (
     PostLowerFilter,
     PreLowerFilter,
     SessionHeadMoveRepository,
+    SummaryEnricher,
     SummaryGenerator,
 )
 from azents.engine.events.system_reminders import (
@@ -240,6 +241,7 @@ class EventAutoCompactionFilter:
         max_input_tokens: int,
         compaction_id_factory: Callable[[], str],
         on_compaction_started: Callable[[], Awaitable[None]] | None = None,
+        summary_enricher: SummaryEnricher | None = None,
     ) -> None:
         self._session_id = session_id
         self._compactor = compactor
@@ -250,6 +252,7 @@ class EventAutoCompactionFilter:
         )
         self._compaction_id_factory = compaction_id_factory
         self._on_compaction_started = on_compaction_started
+        self._summary_enricher = summary_enricher
         self.was_compacted = False
 
     async def apply(
@@ -274,6 +277,7 @@ class EventAutoCompactionFilter:
             summarize=self._summarize,
             summary_context_window_tokens=self._max_input_tokens,
             reason="auto_threshold_exceeded",
+            summary_enricher=self._summary_enricher,
         )
         if summary is None:
             return events
@@ -339,6 +343,7 @@ class EventCompactor:
         summarize: SummaryGenerator,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
+        summary_enricher: SummaryEnricher | None = None,
     ) -> Event | None:
         """Append summary event and move session model input head to summary."""
         old_events = list(transcript)
@@ -379,23 +384,38 @@ class EventCompactor:
             raise
 
         if not summary.strip():
-            await self.transcript_repo.append(
+            await self._append_empty_summary_failure(
                 session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.COMPACTION_MARKER,
-                    payload=CompactionMarkerPayload(
-                        compaction_id=compaction_id,
-                        status="failed",
-                        reason="empty_summary",
-                    ).model_dump(mode="json", exclude_none=True),
-                ),
+                session_id=session_id,
+                compaction_id=compaction_id,
             )
             raise CompactionFailedError(
                 "Compaction failed: summary model returned no text."
             )
 
-        summary_with_continuity = _append_continuity_events(summary, old_events)
+        continuity_history = _render_continuity_history(old_events)
+        if summary_enricher is not None:
+            summary = await summary_enricher(
+                summary=summary,
+                continuity_history=continuity_history,
+                compaction_id=compaction_id,
+                reason=reason,
+                covered_until_event_id=old_events[-1].id,
+            )
+        if not summary.strip():
+            await self._append_empty_summary_failure(
+                session,
+                session_id=session_id,
+                compaction_id=compaction_id,
+            )
+            raise CompactionFailedError(
+                "Compaction failed: summary enrichment returned no text."
+            )
+
+        summary_with_continuity = _append_continuity_history(
+            summary,
+            continuity_history,
+        )
         summary_event = await self.transcript_repo.append(
             session,
             EventCreate(
@@ -426,6 +446,27 @@ class EventCompactor:
             summary_event.id,
         )
         return summary_event.model_copy(update={"model_order": summary_order})
+
+    async def _append_empty_summary_failure(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        compaction_id: str,
+    ) -> None:
+        """Append failed compaction marker for empty summary content."""
+        await self.transcript_repo.append(
+            session,
+            EventCreate(
+                session_id=session_id,
+                kind=EventKind.COMPACTION_MARKER,
+                payload=CompactionMarkerPayload(
+                    compaction_id=compaction_id,
+                    status="failed",
+                    reason="empty_summary",
+                ).model_dump(mode="json", exclude_none=True),
+            ),
+        )
 
 
 def _compaction_input_tokens(events: Sequence[Event]) -> int:
@@ -685,8 +726,8 @@ class _ContinuityEventRender(NamedTuple):
     original_chars: int
 
 
-def _append_continuity_events(summary: str, events: Sequence[Event]) -> str:
-    """Append bounded recent event excerpts to the compaction summary."""
+def _render_continuity_history(events: Sequence[Event]) -> str:
+    """Render bounded recent event excerpts for compaction continuity."""
     rendered_user_messages = [
         rendered
         for event in _select_recent_user_message_events(
@@ -707,9 +748,9 @@ def _append_continuity_events(summary: str, events: Sequence[Event]) -> str:
         if (rendered := _render_continuity_event(event)) is not None
     ]
     if not rendered_user_messages and not rendered_events:
-        return summary
+        return ""
 
-    lines = [summary.rstrip(), ""]
+    lines: list[str] = []
     if rendered_user_messages:
         lines.extend(
             [
@@ -759,6 +800,15 @@ def _append_continuity_events(summary: str, events: Sequence[Event]) -> str:
             lines.append(rendered.text)
             lines.append("")
     return "\n".join(lines).strip()
+
+
+def _append_continuity_history(summary: str, continuity_history: str) -> str:
+    """Append already-rendered continuity history after summary."""
+    summary = summary.rstrip()
+    continuity_history = continuity_history.strip()
+    if not continuity_history:
+        return summary
+    return f"{summary}\n\n{continuity_history}"
 
 
 def _select_recent_user_message_events(

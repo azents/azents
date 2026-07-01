@@ -65,6 +65,7 @@ from azents.engine.events.protocols import (
     NormalizedAdapterOutput,
     SessionHeadRepository,
     StreamProjection,
+    SummaryEnricher,
     SummaryGenerator,
     TranscriptRepository,
 )
@@ -95,6 +96,7 @@ from azents.engine.hooks.dispatcher import (
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
     BeforeToolCallHookContext,
+    CompactionSummaryHookContext,
     ToolCallDeny,
     ToolOutputReplace,
     TurnEndHookContext,
@@ -247,6 +249,12 @@ class AgentEngineAdapter:
                 ),
                 summary_context_window_tokens=request.effective_max_input_tokens,
                 reason="manual_command",
+                summary_enricher=_compaction_summary_enricher(
+                    request,
+                    dispatcher=RuntimeHookDispatcher(),
+                    providers=_runtime_hook_provider_refs(request.toolkits),
+                    run_id=None,
+                ),
             )
         yield ephemeral(CompactionComplete())
 
@@ -380,6 +388,12 @@ class AgentEngineAdapter:
                     compaction_id_factory=lambda: uuid7().hex,
                     on_compaction_started=lambda: emit_queue.put(
                         ephemeral(CompactionStarted(continuing=True))
+                    ),
+                    summary_enricher=_compaction_summary_enricher(
+                        request,
+                        dispatcher=hook_dispatcher,
+                        providers=hook_providers,
+                        run_id=context.run_id,
                     ),
                 ),
             ]
@@ -671,6 +685,41 @@ def _make_input_poller(
         )
 
     return poll
+
+
+def _compaction_summary_enricher(
+    request: RunRequest,
+    *,
+    dispatcher: RuntimeHookDispatcher,
+    providers: Sequence[RuntimeHookProviderRef],
+    run_id: str | None,
+) -> SummaryEnricher:
+    """Create compaction summary enrichment hook pipeline bound to request."""
+
+    async def enrich(
+        *,
+        summary: str,
+        continuity_history: str,
+        compaction_id: str,
+        reason: str | None,
+        covered_until_event_id: str,
+    ) -> str:
+        return await dispatcher.dispatch_compaction_summary(
+            providers,
+            CompactionSummaryHookContext(
+                workspace_id=request.workspace_id,
+                agent_id=request.agent_id,
+                session_id=request.session_id,
+                run_id=run_id,
+                compaction_id=compaction_id,
+                reason=reason,
+                covered_until_event_id=covered_until_event_id,
+                summary=summary,
+                continuity_history=continuity_history,
+            ),
+        )
+
+    return enrich
 
 
 def _event_summary_generator(

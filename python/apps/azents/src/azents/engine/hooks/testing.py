@@ -10,6 +10,8 @@ from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
     BeforeToolCallHookContext,
+    CompactionSummaryDecision,
+    CompactionSummaryHookContext,
     RunEndHookContext,
     RunStartHookContext,
     RuntimeHibernateHookContext,
@@ -71,6 +73,8 @@ class DeterministicRuntimeHookProvider(Toolkit[BaseModel]):
             hooks["on_session_clear"] = self._on_session_clear
         if "on_session_compact" in self._actions:
             hooks["on_session_compact"] = self._on_session_compact
+        if "on_compaction_summary" in self._actions:
+            hooks["on_compaction_summary"] = self._on_compaction_summary
         if "on_run_start" in self._actions:
             hooks["on_run_start"] = self._on_run_start
         if "on_run_end" in self._actions:
@@ -97,6 +101,12 @@ class DeterministicRuntimeHookProvider(Toolkit[BaseModel]):
 
     async def _on_session_compact(self, context: SessionCompactHookContext) -> None:
         await self._run("on_session_compact", context)
+
+    async def _on_compaction_summary(
+        self, context: CompactionSummaryHookContext
+    ) -> CompactionSummaryDecision | None:
+        result = await self._run("on_compaction_summary", context)
+        return cast(CompactionSummaryDecision | None, result)
 
     async def _on_run_start(self, context: RunStartHookContext) -> None:
         await self._run("on_run_start", context)
@@ -168,6 +178,8 @@ def _summarize_context(context: object) -> dict[str, str | int | None]:
         "turn_index",
         "reason",
         "agent_runtime_id",
+        "compaction_id",
+        "covered_until_event_id",
     ):
         value = getattr(context, field_name, None)
         if isinstance(value, str | int) or value is None:

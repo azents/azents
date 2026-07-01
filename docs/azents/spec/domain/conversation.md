@@ -434,13 +434,14 @@ for UI/audit, and moves `agent_sessions.model_input_head_event_id` to the summar
 input starts from the compacted head.
 
 Future model input is selected and sorted by event `model_order`. Auto and manual compaction both
-summarize the full selected model-input transcript into one `compaction_summary` event. The summary
+summarize the full selected model-input transcript into one `compaction_summary` event. Runtime
+compaction summary hooks may enrich the generated summary before continuity is appended. The summary
 content also includes bounded `Recent User Messages` and `Recent Transcript` sections. The
 user-message section keeps the last five user messages visible even when a long tool-heavy run leaves
-no user messages in the recent turn window. The transcript section uses
-readable model-visible excerpts from the last five completed model turns. Each excerpt is truncated
-independently before it is embedded in the summary payload, so oversized tool output cannot remain as
-an unbounded raw tail or storage JSON dump.
+no user messages in the recent turn window. The transcript section uses readable model-visible
+excerpts from the last five completed model turns. Each excerpt is truncated independently before it
+is embedded in the summary payload, so oversized tool output cannot remain as an unbounded raw tail or
+storage JSON dump.
 
 ## 9. Invariants
 
