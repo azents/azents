@@ -5,7 +5,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Annotated, Any
 
 from azcommon.datetime import tznow
@@ -50,11 +50,13 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.background import BackgroundTaskRegistry
+from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import AgentEngineProtocol, RunContext, ToolkitBinding
-from azents.engine.run.emit import handle_engine_event
+from azents.engine.run.emit import Emit, handle_engine_event
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.failure import (
     FailedRunAttempt,
+    FailedRunAttemptSource,
     FailedRunFinalizationReason,
     FailedRunRetryability,
     FailedRunRetryState,
@@ -88,6 +90,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import PendingSessionCommand
 from azents.repos.agent_subagent import AgentSubagentRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
@@ -108,6 +111,7 @@ from azents.worker.deps import (
     get_background_registry,
     get_broadcast,
     get_builtin_toolkit_provider,
+    get_command_registry,
     get_exchange_file_service,
     get_toolkit_repository,
     get_worker_broker,
@@ -186,6 +190,9 @@ class RunExecutor:
     ]
     engine: Annotated[AgentEngineProtocol, Depends(AgentEngineAdapter)]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    command_registry: Annotated[
+        Mapping[str, CommandHandler], Depends(get_command_registry)
+    ]
     integration_repository: Annotated[
         LLMProviderIntegrationRepository,
         Depends(get_llm_provider_integration_repository),
@@ -251,6 +258,7 @@ class RunExecutor:
         prepare_toolkits: PrepareToolkits | None,
         shutdown_event: asyncio.Event,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+        command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Handle one session wake-up.
 
@@ -260,23 +268,41 @@ class RunExecutor:
         :param prepare_toolkits: Callback that prepares session-managed toolkits.
         :param shutdown_event: Worker shutdown event.
         :param dispatch_event: Event publication callback.
+        :param command: Pending runtime command to execute instead of normal model run.
         :return: Session-managed toolkits used by execution.
         """
-        initial_input = await self.poll_run_inputs(
-            session_id=message.session_id,
-            model=None,
-            poll_fn=None,
-        )
-        if not initial_input.has_actionable_work:
-            logger.info(
-                "Session wake-up ignored because no runtime input is pending",
-                extra={"session_id": message.session_id, "agent_id": message.agent_id},
+        command_handler: CommandHandler | None = None
+        if command is None:
+            initial_input = await self.poll_run_inputs(
+                session_id=message.session_id,
+                model=None,
+                poll_fn=None,
             )
-            return RunExecutionResult(
-                toolkits=[],
-                terminal_event_observed=False,
-                no_actionable_work=True,
-            )
+            if not initial_input.has_actionable_work:
+                logger.info(
+                    "Session wake-up ignored because no runtime input is pending",
+                    extra={
+                        "session_id": message.session_id,
+                        "agent_id": message.agent_id,
+                    },
+                )
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=False,
+                    no_actionable_work=True,
+                )
+        else:
+            command_handler = self.command_registry.get(command.name)
+            if command_handler is None:
+                logger.warning("Unknown command", extra={"command": command.name})
+                await self._clear_pending_command(
+                    message.session_id, command_id=command.id
+                )
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=False,
+                    no_actionable_work=False,
+                )
 
         loop = asyncio.get_running_loop()
         preparation_started_at = loop.time()
@@ -637,7 +663,9 @@ class RunExecutor:
         boundary_started_at = now
 
         active_tool_calls: list[ActiveToolCall] = []
-        active_phase: AgentRunPhase | None = None
+        active_phase: AgentRunPhase | None = (
+            AgentRunPhase.COMPACTING if command is not None else None
+        )
 
         async def refresh_session_activity() -> None:
             """Publish the current run phase and active tool calls to the broker."""
@@ -669,56 +697,77 @@ class RunExecutor:
         run_completed = False
         run_end_reason: RunEndReason = "unknown"
         terminal_run_status: AgentRunStatus | None = None
+
+        async def consume_emit(item: Emit) -> None:
+            """Apply run lifecycle side effects for one engine emit."""
+            nonlocal active_phase, run_completed, run_end_reason, terminal_run_status
+            match item.event:
+                case RunStarted():
+                    return
+                case RunComplete():
+                    run_completed = True
+                    run_end_reason = "completed"
+                    terminal_run_status = AgentRunStatus.COMPLETED
+                case RunStopped():
+                    run_end_reason = "cancelled"
+                    terminal_run_status = AgentRunStatus.STOPPED
+                case RunPhaseChanged(phase=phase):
+                    active_phase = phase
+                    await refresh_session_activity()
+                case _:
+                    pass
+            updated_tool_calls = apply_active_tool_call_event(
+                active_tool_calls, item.event
+            )
+            if updated_tool_calls != active_tool_calls:
+                active_tool_calls[:] = updated_tool_calls
+                await refresh_session_activity()
+                await self.live_event_projector.replace_active_tool_calls(
+                    message.session_id,
+                    active_tool_calls,
+                )
+            await handle_engine_event(
+                item,
+                publish=lambda ev: dispatch_event(message.session_id, ev),
+            )
+
         heartbeat_task = asyncio.create_task(
             self._run_session_heartbeat_loop(message.session_id)
+        )
+        failed_attempt_source: FailedRunAttemptSource = (
+            "command" if command_handler is not None else "model"
         )
 
         try:
             attempt_number = 1
             while True:
                 try:
-                    boundary_poll = self.make_boundary_poll(
-                        session_id=message.session_id,
-                        model=run_request.model,
-                        poll_fn=poll_fn,
-                    )
-                    engine_iter = self.engine.run(
-                        run_request,
-                        run_context,
-                        poll_messages=boundary_poll,
-                        check_stop=check_stop,
-                    )
+                    if command_handler is None:
+                        boundary_poll = self.make_boundary_poll(
+                            session_id=message.session_id,
+                            model=run_request.model,
+                            poll_fn=poll_fn,
+                        )
+                        engine_iter = self.engine.run(
+                            run_request,
+                            run_context,
+                            poll_messages=boundary_poll,
+                            check_stop=check_stop,
+                        )
+                    else:
+                        engine_iter = command_handler.execute(
+                            self.engine,
+                            run_request,
+                            run_context,
+                        )
 
                     async for item in engine_iter:
-                        match item.event:
-                            case RunStarted():
-                                continue
-                            case RunComplete():
-                                run_completed = True
-                                run_end_reason = "completed"
-                                terminal_run_status = AgentRunStatus.COMPLETED
-                            case RunStopped():
-                                run_end_reason = "cancelled"
-                                terminal_run_status = AgentRunStatus.STOPPED
-                            case RunPhaseChanged(phase=phase):
-                                active_phase = phase
-                                await refresh_session_activity()
-                            case _:
-                                pass
-                        updated_tool_calls = apply_active_tool_call_event(
-                            active_tool_calls, item.event
-                        )
-                        if updated_tool_calls != active_tool_calls:
-                            active_tool_calls = updated_tool_calls
-                            await refresh_session_activity()
-                            await self.live_event_projector.replace_active_tool_calls(
-                                message.session_id,
-                                active_tool_calls,
-                            )
-                        await handle_engine_event(
-                            item,
-                            publish=lambda ev: dispatch_event(message.session_id, ev),
-                        )
+                        await consume_emit(item)
+                    if command_handler is not None:
+                        await dispatch_event(message.session_id, RunComplete())
+                        run_completed = True
+                        run_end_reason = "completed"
+                        terminal_run_status = AgentRunStatus.COMPLETED
                     break
                 except UserVisibleRuntimeError as exc:
                     retry_state = await self._record_failed_run_attempt(
@@ -727,6 +776,7 @@ class RunExecutor:
                         attempt=self._failed_run_attempt_from_user_visible_error(
                             exc,
                             attempt_number=attempt_number,
+                            source=failed_attempt_source,
                         ),
                     )
                     finalization_reason = _failed_run_finalization_reason(retry_state)
@@ -775,7 +825,9 @@ class RunExecutor:
                             user_message=_INTERNAL_ERROR_MESSAGE,
                             internal_message=str(exc),
                             error_type=exc.__class__.__name__,
-                            source="engine",
+                            source=(
+                                "command" if command_handler is not None else "engine"
+                            ),
                             visibility="internal",
                             attempt_number=attempt_number,
                             occurred_at=datetime.datetime.now(datetime.UTC),
@@ -880,6 +932,10 @@ class RunExecutor:
                 )
             else:
                 await self.session_lifecycle.clear_session_activity(message.session_id)
+            if command is not None:
+                await self._clear_pending_command(
+                    message.session_id, command_id=command.id
+                )
 
         return RunExecutionResult(
             toolkits=run_request.toolkits,
@@ -889,11 +945,26 @@ class RunExecutor:
             terminal_run_status=terminal_run_status,
         )
 
+    async def _clear_pending_command(
+        self,
+        session_id: str,
+        *,
+        command_id: str,
+    ) -> None:
+        """Remove processed pending command."""
+        async with self.session_manager() as session:
+            await self.agent_session_repository.clear_pending_command(
+                session,
+                session_id=session_id,
+                command_id=command_id,
+            )
+
     def _failed_run_attempt_from_user_visible_error(
         self,
         exc: UserVisibleRuntimeError,
         *,
         attempt_number: int,
+        source: FailedRunAttemptSource,
     ) -> FailedRunAttempt:
         """Convert a user-visible exception into a failed-run attempt."""
         message = str(exc)
@@ -906,7 +977,7 @@ class RunExecutor:
             user_message=exc.user_message,
             internal_message=message,
             error_type=exc.__class__.__name__,
-            source="model",
+            source=source,
             visibility="user_visible",
             attempt_number=attempt_number,
             occurred_at=datetime.datetime.now(datetime.UTC),

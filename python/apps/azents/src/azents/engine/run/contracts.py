@@ -181,7 +181,7 @@ class AgentEngineProtocol(Protocol):
         """Save error message to session."""
         ...
 
-    def compact(self, request: RunRequest) -> AsyncIterator[Emit]:
+    def compact(self, request: RunRequest, context: RunContext) -> AsyncIterator[Emit]:
         """Run manual compaction."""
         ...
 

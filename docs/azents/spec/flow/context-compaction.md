@@ -9,12 +9,15 @@ code_paths:
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/events/**
+  - python/apps/azents/src/azents/engine/hooks/**
+  - python/apps/azents/src/azents/engine/run/commands.py
+  - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-06-30
-spec_version: 14
+last_verified_at: 2026-07-01
+spec_version: 15
 ---
 
 # Context Compaction
@@ -92,9 +95,11 @@ Previous compaction summaries are rendered as existing checkpoints and are integ
 checkpoint. The prompt tells the model not to copy previous checkpoints verbatim, to drop obsolete
 details unless needed to continue, and to prefer the latest transcript evidence on conflict.
 
-Manual compaction uses the same prompt, budget policy, and continuity event policy as automatic
-compaction. If summary generation fails, the runtime records the failure path and keeps recent context
-under the fallback budget rather than deleting prior events.
+Manual compaction uses the same prompt, budget policy, continuity event policy, and summary
+enrichment pipeline as automatic compaction. Manual compaction runs inside a `RunContext`, dispatches
+`on_session_compact` with that run id, and passes the same run id to `on_compaction_summary`. If
+summary generation fails, the runtime records the failure path and keeps recent context under the
+fallback budget rather than deleting prior events.
 
 ## Token Estimation and Filters
 
@@ -114,7 +119,7 @@ run after lowering and do not mutate DB state.
 
 After summary generation succeeds, the runtime dispatches the `on_compaction_summary` hook pipeline
 to active toolkit providers. The hook context receives the current summary and the rendered continuity
-history as separate strings, plus compaction/session metadata. Hook results may replace the current
+history as separate strings, plus compaction/session/run metadata. Hook results may replace the current
 summary. Providers that want additive behavior append to `context.summary` and return the full
 replacement summary. Hook exceptions fail open: the runtime records hook failure telemetry and keeps
 the current summary so compaction can continue. Toolkit implementations are not required to register
@@ -170,6 +175,7 @@ the immediate shape of the recent interaction.
 - Each continuity excerpt is rendered as readable model-visible transcript text, not event storage JSON.
 - Each continuity excerpt is independently truncated before it is embedded in the summary.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.
+- Manual compaction uses the command run context when dispatching session compaction and summary enrichment hooks.
 - Summary model calls are non-streaming and carry API-level `max_output_tokens`.
 - Summary content is bounded by the runtime char guard after the model returns.
 - UI/audit history continues to include pre-compaction events. ModelFile GC may later delete unpinned ModelFile blobs whose single FilePart event is behind the head cursor, but it does not delete events or history metadata.

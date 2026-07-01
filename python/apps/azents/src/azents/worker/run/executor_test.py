@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import datetime
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from typing import Any, cast
@@ -13,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import azents.worker.run.executor as run_executor_module
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
-from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.tools import ToolkitProvider
-from azents.engine.events.engine_events import RunComplete
+from azents.engine.events.engine_events import RunComplete, RunPhaseChanged
 from azents.engine.events.types import (
     Event,
     RunMarkerPayload,
@@ -23,9 +24,10 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.engine.run.background import BackgroundTaskRegistry
-from azents.engine.run.contracts import AgentEngineProtocol, RunRequest
+from azents.engine.run.commands import CommandHandler
+from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequest
 from azents.engine.run.emit import Emit, ephemeral
-from azents.engine.run.errors import ModelCallError
+from azents.engine.run.errors import ModelCallError, UserVisibleRuntimeError
 from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
 from azents.engine.tools.builtin import BuiltinToolkitProvider
@@ -35,6 +37,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import PendingSessionCommand
 from azents.repos.agent_subagent import AgentSubagentRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
@@ -81,6 +84,9 @@ class _SessionLifecycle:
         self.order = order
         self.heartbeat_session_ids: list[str] = []
         self.retry_states: list[FailedRunRetryState | None] = []
+        self.activities: list[tuple[str, str, object]] = []
+        self.cleared_session_ids: list[str] = []
+        self.terminal_runs: list[tuple[str, AgentRunStatus]] = []
 
     async def set_session_activity(
         self,
@@ -90,12 +96,13 @@ class _SessionLifecycle:
         phase: object,
         active_tool_calls: object = None,
     ) -> None:
-        """Do not record session activity in this test double."""
-        del session_id, run_id, phase, active_tool_calls
+        """Record session activity updates."""
+        del active_tool_calls
+        self.activities.append((session_id, run_id, phase))
 
     async def clear_session_activity(self, session_id: str) -> None:
-        """Do not clear session activity in this test double."""
-        del session_id
+        """Record session activity cleanup."""
+        self.cleared_session_ids.append(session_id)
         if self.order is not None:
             self.order.append("clear_session_activity")
 
@@ -106,8 +113,9 @@ class _SessionLifecycle:
         run_id: str,
         status: object,
     ) -> None:
-        """Do not mutate AgentRun state in this test double."""
-        del session_id, run_id, status
+        """Record terminal run updates."""
+        del session_id
+        self.terminal_runs.append((run_id, cast(AgentRunStatus, status)))
 
     async def update_agent_run_retry_state(
         self,
@@ -136,6 +144,20 @@ class _AgentRepository:
 
 class _AgentSessionRepository:
     """AgentSessionRepository test double."""
+
+    def __init__(self) -> None:
+        self.cleared_commands: list[tuple[str, str]] = []
+
+    async def clear_pending_command(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        command_id: str,
+    ) -> None:
+        """Record pending command cleanup."""
+        del session
+        self.cleared_commands.append((session_id, command_id))
 
     async def claim_lifecycle_start(
         self,
@@ -166,14 +188,15 @@ class _LiveEventProjector:
 
     def __init__(self) -> None:
         self.flushed_session_ids: list[str] = []
+        self.active_tool_calls: list[tuple[str, object]] = []
 
     async def replace_active_tool_calls(
         self,
         session_id: str,
         active_tool_calls: object,
     ) -> None:
-        """No-op active tool call projection."""
-        del session_id, active_tool_calls
+        """Record active tool call projection replacements."""
+        self.active_tool_calls.append((session_id, active_tool_calls))
 
     async def flush_session(self, session_id: str) -> None:
         """Record flushed sessions."""
@@ -188,9 +211,9 @@ class _Engine:
         del session_id, content
         raise AssertionError("save_error_message should not be called")
 
-    def compact(self, request: RunRequest) -> AsyncIterator[Emit]:
+    def compact(self, request: RunRequest, context: object) -> AsyncIterator[Emit]:
         """Manual compaction is not used by these tests."""
-        del request
+        del request, context
         raise AssertionError("compact should not be called")
 
     def run(
@@ -262,6 +285,43 @@ class _AlwaysFailingEngine(_Engine):
         return iterator()
 
 
+class _CommandHandler:
+    """Command handler test double."""
+
+    def __init__(self, emits: list[Emit]) -> None:
+        self.emits = emits
+        self.requests: list[RunRequest] = []
+        self.contexts: list[RunContext] = []
+
+    async def execute(
+        self,
+        engine: AgentEngineProtocol,
+        request: RunRequest,
+        context: RunContext,
+    ) -> AsyncIterator[Emit]:
+        """Record the command run and yield configured emits."""
+        del engine
+        self.requests.append(request)
+        self.contexts.append(context)
+        for item in self.emits:
+            yield item
+
+
+class _FailingCommandHandler:
+    """Command handler that raises a user-visible failure."""
+
+    async def execute(
+        self,
+        engine: AgentEngineProtocol,
+        request: RunRequest,
+        context: RunContext,
+    ) -> AsyncIterator[Emit]:
+        """Fail command execution."""
+        del engine, request, context
+        raise UserVisibleRuntimeError("command failed")
+        yield  # pragma: no cover
+
+
 class _FailedRunFinalizer:
     """Failed-run finalizer test double."""
 
@@ -285,6 +345,9 @@ def _executor(
     *,
     engine: AgentEngineProtocol | None = None,
     failed_run_finalizer: object | None = None,
+    command_registry: dict[str, CommandHandler] | None = None,
+    agent_session_repository: _AgentSessionRepository | None = None,
+    live_event_projector: _LiveEventProjector | None = None,
 ) -> RunExecutor:
     """Create a RunExecutor for resolve-failure tests."""
     if session_lifecycle is None:
@@ -293,11 +356,18 @@ def _executor(
         engine = cast(AgentEngineProtocol, _Engine())
     if failed_run_finalizer is None:
         failed_run_finalizer = _FailedRunFinalizer()
+    if command_registry is None:
+        command_registry = {}
+    if agent_session_repository is None:
+        agent_session_repository = _AgentSessionRepository()
+    if live_event_projector is None:
+        live_event_projector = _LiveEventProjector()
     return RunExecutor(
         broker=cast(SessionBroker, object()),
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
         engine=engine,
         agent_repository=cast(AgentRepository, _AgentRepository()),
+        command_registry=command_registry,
         integration_repository=cast(LLMProviderIntegrationRepository, object()),
         toolkit_registry=cast(dict[str, ToolkitProvider[Any]], {}),
         agent_toolkit_repository=cast(AgentToolkitRepository, object()),
@@ -306,7 +376,7 @@ def _executor(
         agent_runtime_repository=cast(AgentRuntimeRepository, object()),
         agent_session_repository=cast(
             AgentSessionRepository,
-            _AgentSessionRepository(),
+            agent_session_repository,
         ),
         event_transcript_repository=cast(Any, object()),
         session_lifecycle=cast(SessionLifecycleService, session_lifecycle),
@@ -319,7 +389,7 @@ def _executor(
         model_file_service=cast(ModelFileService, object()),
         input_buffer_service=cast(InputBufferService, object()),
         session_title_service=cast(SessionTitleService, _SessionTitleService()),
-        live_event_projector=cast(LiveEventProjector, _LiveEventProjector()),
+        live_event_projector=cast(LiveEventProjector, live_event_projector),
         user_stop_finalizer=cast(UserStopFinalizer, object()),
         failed_run_finalizer=cast(Any, failed_run_finalizer),
         background_registry=cast(BackgroundTaskRegistry, object()),
@@ -327,6 +397,64 @@ def _executor(
         todo_toolkit_provider=cast(TodoToolkitProvider, object()),
         goal_toolkit_provider=cast(GoalToolkitProvider, object()),
         broadcast=cast(WebSocketBroadcast, object()),
+    )
+
+
+def _message() -> SessionWakeUp:
+    """Create a standard session wake-up for executor tests."""
+    return SessionWakeUp(
+        agent_id="agent-001",
+        session_id="session-001",
+        user_id="user-001",
+        additional_system_prompt=None,
+        interface=None,
+        workspace_id="workspace-001",
+        workspace_handle=None,
+    )
+
+
+def _pending_command(name: str = "compact") -> PendingSessionCommand:
+    """Create a pending command for executor tests."""
+    return PendingSessionCommand(
+        id="command-001",
+        name=name,
+        payload={},
+        user_id="user-001",
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+async def _resolve_success(*args: object, **kwargs: object) -> object:
+    """Return a minimal run request from resolve input."""
+    del args, kwargs
+    return Success(
+        RunRequest(
+            session_id="session-001",
+            user_messages=[],
+            agent_prompt=None,
+            toolkits=[],
+            model="gpt-test",
+            credential_kwargs={},
+            workspace_id="workspace-001",
+            agent_id="agent-001",
+        )
+    )
+
+
+async def _resolve_no_tools(*args: object, **kwargs: object) -> list[object]:
+    """Return no dynamic tools."""
+    del args, kwargs
+    return []
+
+
+def _patch_successful_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Patch RunExecutor dependencies to resolve a basic run request."""
+    monkeypatch.setattr(run_executor_module, "resolve_invoke_input", _resolve_success)
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_subagent_tools", _resolve_no_tools
     )
 
 
@@ -443,6 +571,151 @@ async def test_execute_ignores_wake_up_without_runtime_input(
         no_actionable_work=True,
     )
     assert dispatched == []
+
+
+@pytest.mark.asyncio
+async def test_execute_runs_pending_command_inside_run_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RunExecutor resolves and executes pending commands inside the run boundary."""
+    _patch_successful_resolution(monkeypatch)
+    dispatched: list[tuple[str, PublishedEvent]] = []
+    lifecycle = _SessionLifecycle()
+    session_repository = _AgentSessionRepository()
+    live_event_projector = _LiveEventProjector()
+    handler = _CommandHandler(
+        [
+            ephemeral(
+                RunPhaseChanged(
+                    run_id="command-run",
+                    phase=AgentRunPhase.NORMALIZING_OUTPUT,
+                )
+            )
+        ]
+    )
+    executor = _executor(
+        lifecycle,
+        command_registry={"compact": cast(CommandHandler, handler)},
+        agent_session_repository=session_repository,
+        live_event_projector=live_event_projector,
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        dispatched.append((session_id, event))
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        command=_pending_command(),
+    )
+
+    assert len(handler.requests) == 1
+    assert len(handler.contexts) == 1
+    run_id = result.run_id
+    assert run_id is not None
+    assert handler.contexts[0].run_id == run_id
+    assert lifecycle.activities == [
+        ("session-001", run_id, AgentRunPhase.COMPACTING),
+        ("session-001", run_id, AgentRunPhase.NORMALIZING_OUTPUT),
+    ]
+    assert [type(event).__name__ for _, event in dispatched] == [
+        "RunStarted",
+        "RunPhaseChanged",
+        "RunComplete",
+    ]
+    assert live_event_projector.flushed_session_ids == ["session-001"]
+    assert lifecycle.cleared_session_ids == ["session-001"]
+    assert lifecycle.terminal_runs == [(run_id, AgentRunStatus.COMPLETED)]
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert session_repository.cleared_commands == [("session-001", "command-001")]
+
+
+@pytest.mark.asyncio
+async def test_execute_ignores_unknown_command_without_run_boundary() -> None:
+    """Unknown commands are cleared before a run id is created."""
+    dispatched: list[PublishedEvent] = []
+    lifecycle = _SessionLifecycle()
+    session_repository = _AgentSessionRepository()
+    live_event_projector = _LiveEventProjector()
+    executor = _executor(
+        lifecycle,
+        agent_session_repository=session_repository,
+        live_event_projector=live_event_projector,
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id
+        dispatched.append(event)
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        command=_pending_command("unknown"),
+    )
+
+    assert result == RunExecutionResult(
+        toolkits=[],
+        terminal_event_observed=False,
+        no_actionable_work=False,
+    )
+    assert dispatched == []
+    assert lifecycle.activities == []
+    assert lifecycle.cleared_session_ids == []
+    assert lifecycle.terminal_runs == []
+    assert session_repository.cleared_commands == [("session-001", "command-001")]
+    assert live_event_projector.flushed_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_execute_finalizes_command_error_through_failed_run_finalizer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Command run-stopping errors use shared failed-run finalization."""
+    monkeypatch.setattr(run_executor_module, "_FAILED_RUN_MAX_RETRIES", 1)
+    _patch_successful_resolution(monkeypatch)
+    lifecycle = _SessionLifecycle()
+    session_repository = _AgentSessionRepository()
+    finalizer = _FailedRunFinalizer()
+    executor = _executor(
+        lifecycle,
+        command_registry={"compact": cast(CommandHandler, _FailingCommandHandler())},
+        agent_session_repository=session_repository,
+        failed_run_finalizer=finalizer,
+    )
+    dispatched: list[tuple[str, PublishedEvent]] = []
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        dispatched.append((session_id, event))
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        command=_pending_command(),
+    )
+
+    assert [type(event).__name__ for _, event in dispatched] == ["RunStarted"]
+    assert len(finalizer.inputs) == 1
+    finalization_input = finalizer.inputs[0]
+    assert finalization_input.session_id == "session-001"
+    assert finalization_input.run_id == result.run_id
+    assert finalization_input.user_message == "command failed"
+    assert finalization_input.retry_state.last_source == "command"
+    assert finalization_input.retry_state.last_error_type == "UserVisibleRuntimeError"
+    assert finalization_input.reason == "retry_exhausted"
+    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert session_repository.cleared_commands == [("session-001", "command-001")]
 
 
 @pytest.mark.asyncio

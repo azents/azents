@@ -12,6 +12,7 @@ from azents.engine.run.types import (
     CheckStop,
     PollMessages,
 )
+from azents.repos.agent_session.data import PendingSessionCommand
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
@@ -102,6 +103,7 @@ class RunTaskSupervisor:
         check_stop: CheckStop,
         prepare_toolkits: PrepareToolkits,
         drain_stop_signals: Callable[[], None],
+        command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Create engine execution task and apply stop/shutdown policy."""
         engine_task: asyncio.Task[RunExecutionResult] = asyncio.create_task(
@@ -112,6 +114,7 @@ class RunTaskSupervisor:
                 prepare_toolkits=prepare_toolkits,
                 shutdown_event=self.shutdown_event,
                 dispatch_event=self.event_publisher.dispatch_event,
+                command=command,
             )
         )
         self.stop_controller.register_active_task(engine_task)

@@ -14,7 +14,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.services.input_buffer import InputBufferService
 from azents.worker.events.publisher import WorkerEventPublisher
-from azents.worker.run.command_executor import CommandExecutor
 from azents.worker.run.executor import RunExecutor
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.lifecycle import SessionLifecycleService
@@ -42,7 +41,6 @@ class SessionRunnerFactory:
     ]
     user_stop_finalizer: Annotated[UserStopFinalizer, Depends(UserStopFinalizer)]
     run_executor: Annotated[RunExecutor, Depends(RunExecutor)]
-    command_executor: Annotated[CommandExecutor, Depends(CommandExecutor)]
     engine: Annotated[AgentEngineProtocol, Depends(AgentEngineAdapter)]
 
     def create(self, *, shutdown_event: asyncio.Event) -> SessionRunner:
@@ -57,6 +55,5 @@ class SessionRunnerFactory:
             idle_continuation_service=self.idle_continuation_service,
             user_stop_finalizer=self.user_stop_finalizer,
             run_executor=self.run_executor,
-            command_executor=self.command_executor,
             engine=self.engine,
         )

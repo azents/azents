@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Protocol
 
-from azents.engine.run.contracts import AgentEngineProtocol, RunRequest
+from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequest
 from azents.engine.run.emit import Emit
 
 
@@ -28,6 +28,7 @@ class CommandHandler(Protocol):
         self,
         engine: AgentEngineProtocol,
         request: RunRequest,
+        context: RunContext,
     ) -> AsyncIterator[Emit]: ...
 
 
@@ -43,9 +44,10 @@ class CompactCommand:
         self,
         engine: AgentEngineProtocol,
         request: RunRequest,
+        context: RunContext,
     ) -> AsyncIterator[Emit]:
         """Run compaction and yield events."""
-        async for event in engine.compact(request):
+        async for event in engine.compact(request, context):
             yield event
 
 
