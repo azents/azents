@@ -15,8 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-06-29
-spec_version: 7
+last_verified_at: 2026-07-01
+spec_version: 8
 ---
 
 # Goal Domain Spec
@@ -175,7 +175,9 @@ stores normalized state and metadata, then materializes model-visible prompt pro
 The Goal Toolkit prompt itself is fixed instruction text. It does not include the current Goal
 objective or status. A model that needs exact current state must call `get_goal`; active-goal idle
 continuation carries the objective through continuation metadata instead of duplicating it in the
-Toolkit prompt.
+Toolkit prompt. During compaction, Goal Toolkit appends a readable `Goal Snapshot` to the summary
+only when Goal state is unfinished and non-empty. Empty or completed Goal state does not render a
+Goal snapshot section.
 
 Lowering rules:
 
@@ -235,3 +237,8 @@ Primary checks:
 - `cd python/apps/azents && uv run pyright`
 - `cd typescript && pnpm run lint --filter=@azents/web`
 - `cd typescript && pnpm run typecheck --filter=@azents/web`
+
+
+## Changelog
+
+- **2026-07-01** (spec_version 8) — Added unfinished Goal compaction summary enrichment behavior.
