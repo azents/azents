@@ -130,7 +130,10 @@ class TestSummaryPrompt:
         assert "existing checkpoints" in SUMMARY_USER_TEMPLATE
         assert "Do not copy previous checkpoints verbatim" in SUMMARY_USER_TEMPLATE
         assert "full compacted transcript" in SUMMARY_USER_TEMPLATE
-        assert "bounded recent event excerpts" in SUMMARY_USER_TEMPLATE
+        assert (
+            "bounded recent user-message and transcript excerpts"
+            in SUMMARY_USER_TEMPLATE
+        )
 
 
 class TestSummarizeTextWithModel:

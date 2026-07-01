@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 _TOKEN_BYTES = 4
 _CONTINUITY_RECENT_TURNS = 5
+_CONTINUITY_RECENT_USER_MESSAGES = 5
 _CONTINUITY_MAX_EVENT_TOKENS = 2_000
 _CONTINUITY_MAX_EVENT_CHARS = _CONTINUITY_MAX_EVENT_TOKENS * _TOKEN_BYTES
 _CONTINUITY_TRUNCATION_MARKER = "\n\n[Event truncated by Azents continuity guard.]"
@@ -478,29 +479,101 @@ def _estimate_event_visible_bytes(event: Event) -> int:
     return _compact_json_bytes(visible_value)
 
 
-def _visible_input_content(content: str | list[UserContentPart]) -> object:
-    """Return only model-visible values from user content."""
+def _visible_input_content(content: str | Sequence[UserContentPart]) -> str:
+    """Return only model-visible text from user content."""
     if isinstance(content, str):
         return content
-    return [_visible_part(part) for part in content]
+    return _join_visible_parts(content)
 
 
-def _visible_output_content(content: str | list[OutputContentPart]) -> object:
-    """Return only model-visible values from assistant/output content."""
+def _visible_output_content(content: str | Sequence[OutputContentPart]) -> str:
+    """Return only model-visible text from assistant/output content."""
     if isinstance(content, str):
         return content
-    return [_visible_part(part) for part in content]
+    return _join_visible_parts(content)
 
 
-def _visible_tool_output(output: ToolOutput) -> object:
-    """Return only model-visible values from tool output."""
+def _visible_tool_output(output: ToolOutput) -> str:
+    """Return only model-visible text from tool output."""
     if isinstance(output, str):
         return output
-    return [_visible_part(part) for part in output]
+    return _join_visible_parts(output)
 
 
-def _visible_part(part: UserContentPart | OutputContentPart) -> object:
-    """Return model-visible projection of content part."""
+def _join_visible_parts(
+    parts: Sequence[UserContentPart | OutputContentPart | ToolOutputPart],
+) -> str:
+    """Join model-visible text projections of content parts."""
+    rendered = [_visible_part(part).strip() for part in parts]
+    return "\n".join(part for part in rendered if part)
+
+
+def _visible_part(part: UserContentPart | OutputContentPart | ToolOutputPart) -> str:
+    """Return model-visible text projection of one content part."""
+    if isinstance(part, InputTextPart | OutputTextPart):
+        return part.text
+    if isinstance(part, FileOutputPart):
+        return _format_visible_metadata(
+            "File",
+            name=part.name,
+            media_type=part.media_type,
+            kind=part.kind,
+            detail=part.detail,
+            caption=part.caption,
+            alt_text=part.alt_text,
+        )
+    if isinstance(part, AttachmentOutputPart):
+        return _format_visible_metadata(
+            "Attachment",
+            name=part.name,
+            media_type=part.media_type,
+            availability=part.availability,
+        )
+    return _format_visible_metadata(
+        "Artifact",
+        name=getattr(part, "name", None),
+        media_type=getattr(part, "media_type", None),
+        status=getattr(part, "status", None),
+    )
+
+
+def _format_visible_metadata(label: str, **fields: object) -> str:
+    """Render non-empty metadata as compact human-readable text."""
+    values = [
+        f"{key}={value}"
+        for key, value in fields.items()
+        if value is not None and value != ""
+    ]
+    if not values:
+        return f"[{label}]"
+    return f"[{label}: {'; '.join(values)}]"
+
+
+def _visible_input_content_value(content: str | Sequence[UserContentPart]) -> object:
+    """Return only model-visible structured values from user content."""
+    if isinstance(content, str):
+        return content
+    return [_visible_part_value(part) for part in content]
+
+
+def _visible_output_content_value(content: str | Sequence[OutputContentPart]) -> object:
+    """Return only model-visible structured values from assistant content."""
+    if isinstance(content, str):
+        return content
+    return [_visible_part_value(part) for part in content]
+
+
+def _visible_tool_output_value(output: ToolOutput) -> object:
+    """Return only model-visible structured values from tool output."""
+    if isinstance(output, str):
+        return output
+    return [_visible_part_value(part) for part in output]
+
+
+def _visible_part_value(
+    part: UserContentPart | OutputContentPart | ToolOutputPart,
+) -> object:
+    """Return model-visible structured projection of one content part."""
     if isinstance(part, InputTextPart | OutputTextPart):
         return {"type": part.type, "text": part.text}
     if isinstance(part, FileOutputPart):
@@ -524,39 +597,65 @@ def _visible_part(part: UserContentPart | OutputContentPart) -> object:
         }
     return {
         "type": "artifact",
-        "name": part.name,
-        "media_type": part.media_type,
-        "status": part.status,
+        "name": getattr(part, "name", None),
+        "media_type": getattr(part, "media_type", None),
+        "status": getattr(part, "status", None),
     }
-
-
-def _provider_tool_call_text(payload: ProviderToolCallPayload) -> str:
-    """Return model-visible text of provider tool call."""
-    return f"[Provider tool call: {payload.name}({payload.arguments or ''})]"
-
-
-def _provider_tool_result_text(payload: ProviderToolResultPayload) -> str:
-    """Return model-visible text of provider tool result."""
-    return (
-        f"[Provider tool result: {payload.name or 'unknown'} {payload.status}] "
-        f"{_tool_output_text(payload.output)}"
-    )
-
-
-def _tool_output_text(output: ToolOutput) -> str:
-    """Join text bodies of tool output."""
-    if isinstance(output, str):
-        return output
-    texts: list[str] = []
-    for part in iter_output_parts(output):
-        if isinstance(part, OutputTextPart):
-            texts.append(part.text)
-    return "\n".join(texts)
 
 
 def _drop_none_values(value: dict[str, object | None]) -> dict[str, object]:
     """Return dict excluding None values."""
     return {key: item for key, item in value.items() if item is not None}
+
+
+def _provider_tool_call_text(payload: ProviderToolCallPayload) -> str:
+    """Return model-visible text of provider tool call."""
+    return _format_tool_call_text(
+        title=f"Provider tool call: {payload.name}",
+        call_id=None,
+        arguments=payload.arguments,
+    )
+
+
+def _provider_tool_result_text(payload: ProviderToolResultPayload) -> str:
+    """Return model-visible text of provider tool result."""
+    return _format_tool_result_text(
+        title=f"Provider tool result: {payload.name or 'unknown'} {payload.status}",
+        call_id=None,
+        output=_visible_tool_output(payload.output),
+    )
+
+
+def _format_tool_call_text(
+    *,
+    title: str,
+    call_id: str | None,
+    arguments: str | None,
+) -> str:
+    """Render a tool call as readable transcript text."""
+    lines = [title]
+    if call_id:
+        lines.append(f"call_id: {call_id}")
+    if arguments:
+        lines.append("arguments:")
+        lines.append(arguments)
+    return "\n".join(lines)
+
+
+def _format_tool_result_text(
+    *,
+    title: str,
+    call_id: str | None,
+    output: str,
+) -> str:
+    """Render a tool result as readable transcript text."""
+    lines = [title]
+    if call_id:
+        lines.append(f"call_id: {call_id}")
+    if output:
+        lines.append("output:")
+        lines.append(output)
+    return "\n".join(lines)
 
 
 def _compact_json_bytes(value: object) -> int:
@@ -588,38 +687,98 @@ class _ContinuityEventRender(NamedTuple):
 
 def _append_continuity_events(summary: str, events: Sequence[Event]) -> str:
     """Append bounded recent event excerpts to the compaction summary."""
+    rendered_user_messages = [
+        rendered
+        for event in _select_recent_user_message_events(
+            events,
+            _CONTINUITY_RECENT_USER_MESSAGES,
+        )
+        if (rendered := _render_continuity_event(event)) is not None
+    ]
     rendered_events = [
         rendered
         for event in _select_recent_turn_events(events, _CONTINUITY_RECENT_TURNS)
         if (rendered := _render_continuity_event(event)) is not None
     ]
-    if not rendered_events:
+    if not rendered_user_messages and not rendered_events:
         return summary
 
-    lines = [
-        summary.rstrip(),
-        "",
-        "## Recent Events for Continuity",
-        (
-            "The following are raw excerpts from the most recent compacted events "
-            "so the next agent can continue from the immediate context. The full "
-            "compacted transcript was already included in the summary above. Each "
-            "event excerpt is independently bounded and may be truncated."
-        ),
-        f"Recent turn window: last {_CONTINUITY_RECENT_TURNS} completed model turns.",
-        f"Per-event excerpt cap: {_CONTINUITY_MAX_EVENT_TOKENS} estimated tokens.",
-        "",
-    ]
-    for index, rendered in enumerate(rendered_events, start=1):
-        lines.append(f"### Recent Event {index}")
-        if rendered.truncated:
-            lines.append(
-                "This event excerpt was truncated "
-                f"from {rendered.original_chars} characters."
-            )
-        lines.append(rendered.text)
-        lines.append("")
+    lines = [summary.rstrip(), ""]
+    if rendered_user_messages:
+        lines.extend(
+            [
+                "## Recent User Messages for Continuity",
+                (
+                    "The following are the last "
+                    f"{_CONTINUITY_RECENT_USER_MESSAGES} user messages from the "
+                    "compacted transcript. This section is independent of the "
+                    "recent transcript window, so long tool-heavy runs still keep "
+                    "the user's latest requests visible."
+                ),
+                (
+                    "Per-message excerpt cap: "
+                    f"{_CONTINUITY_MAX_EVENT_TOKENS} estimated tokens."
+                ),
+                "",
+            ]
+        )
+        for index, rendered in enumerate(rendered_user_messages, start=1):
+            lines.append(f"### Recent User Message {index}")
+            if rendered.truncated:
+                lines.append(
+                    "This user message excerpt was truncated "
+                    f"from {rendered.original_chars} characters."
+                )
+            lines.append(rendered.text)
+            lines.append("")
+
+    if rendered_events:
+        lines.extend(
+            [
+                "## Recent Transcript for Continuity",
+                (
+                    "The following are model-visible excerpts from the most recent "
+                    "compacted events so the next agent can continue from the "
+                    "immediate context. The full compacted transcript was already "
+                    "included in the summary above. Each excerpt is independently "
+                    "bounded and may be truncated."
+                ),
+                (
+                    "Recent turn window: last "
+                    f"{_CONTINUITY_RECENT_TURNS} completed model turns."
+                ),
+                (
+                    "Per-event excerpt cap: "
+                    f"{_CONTINUITY_MAX_EVENT_TOKENS} estimated tokens."
+                ),
+                "",
+            ]
+        )
+        for index, rendered in enumerate(rendered_events, start=1):
+            lines.append(f"### Recent Transcript Event {index}")
+            if rendered.truncated:
+                lines.append(
+                    "This event excerpt was truncated "
+                    f"from {rendered.original_chars} characters."
+                )
+            lines.append(rendered.text)
+            lines.append("")
     return "\n".join(lines).strip()
+
+
+def _select_recent_user_message_events(
+    events: Sequence[Event], max_messages: int
+) -> list[Event]:
+    """Return the last user-message events from the selected transcript."""
+    if max_messages <= 0:
+        return []
+    selected = [
+        event
+        for event in events
+        if event.kind == EventKind.USER_MESSAGE
+        and isinstance(event.payload, UserMessagePayload)
+    ]
+    return selected[-max_messages:]
 
 
 def _select_recent_turn_events(events: Sequence[Event], max_turns: int) -> list[Event]:
@@ -641,19 +800,9 @@ def _select_recent_turn_events(events: Sequence[Event], max_turns: int) -> list[
 
 def _render_continuity_event(event: Event) -> _ContinuityEventRender | None:
     """Render one event as a bounded model-visible continuity excerpt."""
-    visible_value = _model_visible_event_value(event)
-    if visible_value is None:
+    event_text = _model_visible_event_text(event)
+    if event_text is None:
         return None
-    event_text = json.dumps(
-        {
-            "kind": event.kind.value,
-            "model_order": event.model_order,
-            "content": visible_value,
-        },
-        ensure_ascii=False,
-        indent=2,
-        sort_keys=True,
-    )
     original_chars = len(event_text)
     if original_chars <= _CONTINUITY_MAX_EVENT_CHARS:
         return _ContinuityEventRender(
@@ -673,10 +822,11 @@ def _render_continuity_event(event: Event) -> _ContinuityEventRender | None:
 
 
 def _model_visible_event_value(event: Event) -> object | None:
-    """Return model-visible content for continuity rendering."""
+    """Return model-visible structured content for token estimation."""
     payload = event.payload
     if event.kind == EventKind.GOAL_CONTINUATION and isinstance(
-        payload, UserMessagePayload
+        payload,
+        UserMessagePayload,
     ):
         return {
             "role": "user",
@@ -687,11 +837,14 @@ def _model_visible_event_value(event: Event) -> object | None:
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):
         return {"role": "user", "content": _format_goal_updated_event_reminder(payload)}
     if isinstance(payload, UserMessagePayload):
-        return {"role": "user", "content": _visible_input_content(payload.content)}
+        return {
+            "role": "user",
+            "content": _visible_input_content_value(payload.content),
+        }
     if isinstance(payload, AssistantMessagePayload):
         return {
             "role": "assistant",
-            "content": _visible_output_content(payload.content),
+            "content": _visible_output_content_value(payload.content),
         }
     if isinstance(payload, ClientToolCallPayload):
         return {
@@ -704,7 +857,7 @@ def _model_visible_event_value(event: Event) -> object | None:
         return {
             "type": "function_call_output",
             "call_id": payload.call_id,
-            "output": _visible_tool_output(payload.output),
+            "output": _visible_tool_output_value(payload.output),
         }
     if isinstance(payload, ProviderToolCallPayload):
         return {"role": "assistant", "content": _provider_tool_call_text(payload)}
@@ -727,6 +880,87 @@ def _model_visible_event_value(event: Event) -> object | None:
             ),
         }
     return None
+
+
+def _model_visible_event_text(event: Event) -> str | None:
+    """Return readable model-visible content for continuity rendering."""
+    payload = event.payload
+    if event.kind == EventKind.GOAL_CONTINUATION and isinstance(
+        payload,
+        UserMessagePayload,
+    ):
+        return _format_continuity_block(
+            "User message",
+            format_goal_continuation_reminder(payload.metadata.get("goal_objective")),
+        )
+    if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):
+        return _format_continuity_block(
+            "User message",
+            _format_goal_updated_event_reminder(payload),
+        )
+    if isinstance(payload, UserMessagePayload):
+        return _format_continuity_block(
+            "User message",
+            _visible_input_content(payload.content),
+        )
+    if isinstance(payload, AssistantMessagePayload):
+        return _format_continuity_block(
+            "Assistant message",
+            _visible_output_content(payload.content),
+        )
+    if isinstance(payload, ClientToolCallPayload):
+        return _format_continuity_block(
+            "Tool call",
+            _format_tool_call_text(
+                title=payload.name,
+                call_id=payload.call_id,
+                arguments=payload.arguments,
+            ),
+        )
+    if isinstance(payload, ClientToolResultPayload):
+        return _format_continuity_block(
+            "Tool result",
+            _format_tool_result_text(
+                title="function_call_output",
+                call_id=payload.call_id,
+                output=_visible_tool_output(payload.output),
+            ),
+        )
+    if isinstance(payload, ProviderToolCallPayload):
+        return _format_continuity_block(
+            "Assistant message",
+            _provider_tool_call_text(payload),
+        )
+    if isinstance(payload, ProviderToolResultPayload):
+        return _format_continuity_block(
+            "Assistant message",
+            _provider_tool_result_text(payload),
+        )
+    if isinstance(payload, CompactionSummaryPayload):
+        return _format_continuity_block(
+            "User message",
+            format_compaction_summary_reminder(payload.content),
+        )
+    if isinstance(payload, InterruptedPayload):
+        return _format_continuity_block("User message", format_interrupted_reminder())
+    if isinstance(payload, SystemReminderPayload):
+        return _format_continuity_block(
+            "User message",
+            format_system_reminder(
+                reminder_type="system_reminder",
+                instruction=payload.text,
+                data=(),
+            ),
+        )
+    return None
+
+
+def _format_continuity_block(label: str, body: str) -> str:
+    """Render one continuity item without exposing event storage JSON."""
+    body = body.strip()
+    if not body:
+        body = "(no model-visible content)"
+    return f"{label}:\n{body}"
 
 
 def _exchange_attachment_object_keys(

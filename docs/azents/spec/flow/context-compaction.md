@@ -84,7 +84,8 @@ not to fill the budget unnecessarily, not to invent details, and to mark uncerta
 Auto and manual compaction include the full selected transcript in the summary request. The summary
 prompt asks for durable state from the whole compacted transcript and warns that no raw event should
 be assumed to remain available outside the checkpoint. After the model returns the checkpoint, the
-runtime appends a bounded `Recent Events for Continuity` section to the stored summary content.
+runtime appends bounded `Recent User Messages for Continuity` and `Recent Transcript for Continuity`
+sections to the stored summary content.
 
 Previous compaction summaries are rendered as existing checkpoints and are integrated into one updated
 checkpoint. The prompt tells the model not to copy previous checkpoints verbatim, to drop obsolete
@@ -110,22 +111,29 @@ run after lowering and do not mutate DB state.
 
 ## Continuity Events
 
-After summary generation succeeds, the event compactor appends recent event excerpts to the summary
-payload content. This is not a separate raw tail in the event transcript. Future model input starts at
-the summary event, and the continuity excerpts are part of that summary event's model-visible text.
+After summary generation succeeds, the event compactor appends bounded continuity excerpts to the
+summary payload content. This is not a separate raw tail in the event transcript. Future model input
+starts at the summary event, and the continuity excerpts are part of that summary event's
+model-visible text.
 
-Continuity selection uses `turn_marker` events as completed model-turn boundaries. It includes events
-after the marker preceding the last five completed turns. If five or fewer completed turns exist, or
-if no turn marker exists, it falls back to all selected events. Each event is rendered using the same
-model-visible projection family as
-token estimation: user/assistant text, tool call name/arguments, tool output text, compaction summary
-reminders, system reminders, and bounded file/attachment/artifact metadata. Event IDs, timestamps,
-native artifacts, and storage-only metadata are not included.
+The `Recent User Messages for Continuity` section contains the last five real `user_message` events
+from the selected transcript. It is selected independently from recent model-turn boundaries so a long
+tool-heavy request can still surface the user's latest requests even when the recent transcript window
+contains no user messages.
 
-Each continuity event excerpt is truncated independently to 2,000 estimated tokens. Truncation is
-marked inline with `[Event truncated by Azents continuity guard.]`. This prevents a single large tool
-output from surviving compaction as an unbounded raw event while still preserving the immediate shape
-of the recent interaction.
+The `Recent Transcript for Continuity` section uses `turn_marker` events as completed model-turn
+boundaries. It includes events after the marker preceding the last five completed turns. If five or
+fewer completed turns exist, or if no turn marker exists, it falls back to all selected events. Each
+excerpt is rendered as readable model-visible transcript text rather than event storage JSON. The
+projection family matches token estimation: user/assistant text, tool call name/arguments, tool
+output text, compaction summary reminders, system reminders, and bounded file/attachment/artifact
+metadata. Event IDs, timestamps, native artifacts, event kind, model order, and storage-only metadata
+are not included.
+
+Each user-message or transcript excerpt is truncated independently to 2,000 estimated tokens.
+Truncation is marked inline with `[Event truncated by Azents continuity guard.]`. This prevents a
+single large tool output from surviving compaction as an unbounded raw event while still preserving
+the immediate shape of the recent interaction.
 
 ## Invariants
 
@@ -136,9 +144,11 @@ of the recent interaction.
 - Auto and manual compaction present future model input as one `compaction_summary` head event.
 - The summary model receives the full selected model-input transcript, not a transcript with a
   protected tail removed.
-- The stored summary content includes a bounded `Recent Events for Continuity` section from the last
+- The stored summary content includes a bounded `Recent User Messages for Continuity` section from
+  the last five user messages and a bounded `Recent Transcript for Continuity` section from the last
   five completed model turns, using `turn_marker` boundaries.
-- Each continuity event excerpt is independently truncated before it is embedded in the summary.
+- Each continuity excerpt is rendered as readable model-visible transcript text, not event storage JSON.
+- Each continuity excerpt is independently truncated before it is embedded in the summary.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.
 - Summary model calls are non-streaming and carry API-level `max_output_tokens`.
 - Summary content is bounded by the runtime char guard after the model returns.

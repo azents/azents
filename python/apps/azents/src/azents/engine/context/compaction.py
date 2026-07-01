@@ -98,10 +98,10 @@ needed to continue.
 
 _SUMMARY_USER_TEMPLATE = """\
 Create an updated handoff checkpoint for the full compacted transcript below.
-The runtime may append bounded recent event excerpts after your checkpoint for
-immediate continuity. Still summarize durable state from the whole compacted
-transcript; do not assume any raw event will remain available outside this
-checkpoint.
+The runtime may append bounded recent user-message and transcript excerpts after
+your checkpoint for immediate continuity. Still summarize durable state from the
+whole compacted transcript; do not assume any raw event will remain available
+outside this checkpoint.
 
 If existing checkpoints are present, integrate them into one updated checkpoint.
 Do not copy previous checkpoints verbatim. Keep durable instructions and

@@ -526,9 +526,12 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
     assert isinstance(payload, CompactionSummaryPayload)
     assert payload.covered_until_event_id == f"{2:032d}"
     assert payload.reason == "manual_command"
-    assert "## Recent Events for Continuity" in payload.content
-    assert "old" in payload.content
-    assert "recent" in payload.content
+    assert "## Recent User Messages for Continuity" in payload.content
+    assert "## Recent Transcript for Continuity" in payload.content
+    assert "User message:\nold" in payload.content
+    assert "User message:\nrecent" in payload.content
+    assert '"kind"' not in payload.content
+    assert '"model_order"' not in payload.content
 
 
 async def test_compactor_continuity_uses_last_five_completed_turns() -> None:
@@ -584,10 +587,85 @@ async def test_compactor_continuity_uses_last_five_completed_turns() -> None:
     assert summary is not None
     payload = summary.payload
     assert isinstance(payload, CompactionSummaryPayload)
-    assert "initial request" not in payload.content
-    assert "assistant turn 1" not in payload.content
-    assert "assistant turn 2" in payload.content
-    assert "assistant turn 6" in payload.content
+    assert "## Recent User Messages for Continuity" in payload.content
+    assert "## Recent Transcript for Continuity" in payload.content
+    assert payload.content.index(
+        "## Recent User Messages for Continuity"
+    ) < payload.content.index("## Recent Transcript for Continuity")
+    user_message_section = payload.content.split(
+        "## Recent Transcript for Continuity",
+        maxsplit=1,
+    )[0]
+    transcript_section = payload.content.split(
+        "## Recent Transcript for Continuity",
+        maxsplit=1,
+    )[1]
+    assert "initial request" in user_message_section
+    assert "initial request" not in transcript_section
+    assert "assistant turn 1" not in transcript_section
+    assert "Assistant message:\nassistant turn 2" in transcript_section
+    assert "Assistant message:\nassistant turn 6" in transcript_section
+
+
+async def test_compactor_continuity_user_message_section_uses_last_five_users() -> None:
+    """Recent user messages are selected independently of recent turn events."""
+    events: list[Event] = []
+    for turn in range(1, 7):
+        events.append(
+            _event(
+                str((turn * 3) - 2),
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(content=f"user request {turn}"),
+            )
+        )
+        events.append(
+            _event(
+                str((turn * 3) - 1),
+                EventKind.ASSISTANT_MESSAGE,
+                AssistantMessagePayload(
+                    content=f"assistant turn {turn}",
+                    native_artifact=_native_artifact(),
+                ),
+            )
+        )
+        events.append(
+            _event(
+                str(turn * 3),
+                EventKind.TURN_MARKER,
+                TurnMarkerPayload(run_id="run-1", usage=_usage(prompt_tokens=turn)),
+            )
+        )
+    transcript_repo = _TranscriptRepo(events)
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Return a summary that does not itself contain event text."""
+        del old_events, summary_budget
+        return "summary"
+
+    summary = await EventCompactor(
+        transcript_repo=transcript_repo,
+        session_repo=_SessionRepo(),
+    ).compact(
+        _Session(),
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+    )
+
+    assert summary is not None
+    payload = summary.payload
+    assert isinstance(payload, CompactionSummaryPayload)
+    user_message_section = payload.content.split(
+        "## Recent Transcript for Continuity",
+        maxsplit=1,
+    )[0]
+    assert "user request 1" not in user_message_section
+    for turn in range(2, 7):
+        assert f"User message:\nuser request {turn}" in user_message_section
 
 
 async def test_compactor_truncates_large_continuity_events() -> None:
@@ -773,8 +851,9 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
     summary_payload = result[0].payload
     assert isinstance(summary_payload, CompactionSummaryPayload)
     assert summary_payload.reason == "auto_threshold_exceeded"
-    assert "## Recent Events for Continuity" in summary_payload.content
-    assert "recent" in summary_payload.content
+    assert "## Recent User Messages for Continuity" in summary_payload.content
+    assert "## Recent Transcript for Continuity" in summary_payload.content
+    assert "User message:\nrecent" in summary_payload.content
 
 
 async def test_auto_compaction_emits_started_before_summary_call() -> None:
