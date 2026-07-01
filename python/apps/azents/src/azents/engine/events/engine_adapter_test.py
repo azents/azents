@@ -976,7 +976,8 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
-            )
+            ),
+            _run_context(),
         )
     ]
 
@@ -1047,7 +1048,8 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
-            )
+            ),
+            _run_context(),
         )
     ]
 
@@ -1057,7 +1059,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         toolkit.context.continuity_history
         == "## Recent User Messages\n1. recent request"
     )
-    assert toolkit.context.run_id is None
+    assert toolkit.context.run_id == "0" * 32
     assert compactor.summary == "summary\n\n## Toolkit Enrichment\n- extra"
 
 
@@ -1156,7 +1158,8 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
                 agent_id="agent-1",
                 max_input_tokens=12_000,
                 compaction_max_input_tokens=12_000,
-            )
+            ),
+            _run_context(),
         )
     ]
 
@@ -1205,7 +1208,8 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
             credential_kwargs={"api_key": "test"},
             workspace_id="workspace-1",
             agent_id="agent-1",
-        )
+        ),
+        _run_context(),
     )
 
     first = await anext(iterator)
@@ -1268,6 +1272,15 @@ def _agent_session() -> AgentSession:
 
 async def _noop_publish(_event: object) -> None:
     """No-op publish."""
+
+
+def _run_context() -> RunContext:
+    """Return manual compaction run context for tests."""
+    return RunContext(
+        user_id="user-1",
+        run_id="0" * 32,
+        publish_event=_noop_publish,
+    )
 
 
 def _session_context() -> _SessionContext:

@@ -30,9 +30,10 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/model_file.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/worker/worker.py
+  - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-06-30
-spec_version: 49
+last_verified_at: 2026-07-01
+spec_version: 50
 ---
 
 # Agent Execution Loop
@@ -110,11 +111,12 @@ boundary appends the terminal `system_error` with failed-run metadata, appends t
 and marks the run `failed` while clearing retry state. The worker finalizer then emits `RunComplete`
 and clears live activity.
 
-Command run-stopping failures use the same failed-run finalizer boundary once a command run has been
-created. Command resolve failures that happen before an `agent_runs` row exists remain direct
-message-processing failures. `SessionRunner` top-level message-processing errors also remain outside
-the failed-run scope unless they are already inside a concrete run boundary such as `RunExecutor` or
-`CommandExecutor`.
+Command wake-ups execute through the same `RunExecutor` boundary as normal model runs. A pending
+command is resolved before the `agent_runs` row is created; unknown-command or pre-run resolve
+failures remain direct message-processing failures. Once a command run exists, command failures use
+the same failed-run retry/finalizer boundary as normal runs. `SessionRunner` top-level
+message-processing errors also remain outside the failed-run scope unless they are already inside the
+concrete `RunExecutor` boundary.
 
 Failed-run terminal `system_error` events carry a user-safe `failure` payload with `kind =
 failed_run`. Frontend history/live mapping must preserve this metadata on the rendered error message.
@@ -331,10 +333,13 @@ Web chat user writes enter through REST commit endpoints. Message writes create 
 idle-only: the REST transaction rewrites durable history state, clears pending input buffers,
 creates an `edited_user_message` input buffer, marks the session running, and sends a wake-up.
 Command writes are idle-only control actions: the REST transaction stores one pending command on
-`agent_sessions`, marks the session running, and sends a wake-up. Running sessions, existing pending
-commands, or pending input buffers reject command/edit writes with `409 Conflict`. Stop uses the REST
-control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable DB stop intent and
-sends a best-effort broker stop signal for immediate cancellation. WebSocket message/edit/command/stop
+`agent_sessions`, marks the session running, and sends a wake-up. `SessionRunner` reads the pending
+command from the session and passes it into `RunExecutor`, which prepares the same `RunRequest` and
+`RunContext` used by normal runs before invoking the registered command handler. Running sessions,
+existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
+Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
+DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
+message/edit/command/stop
 payloads and the old `/chat/v1/sessions/new` WebSocket first-message route are no longer
 execution-loop entrypoints. WebSocket is a server-to-client projection transport only.
 
@@ -437,5 +442,6 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-01** (spec_version 50) — Unified pending runtime commands into the `RunExecutor` run boundary.
 - **2026-06-28** (spec_version 47) — Added failed-run retry state foundation, live retry projection contract, and Goal continuation gating by successful terminal run status.
 - **2026-06-28** (spec_version 46) — Promoted generic client tool result metadata and runtime process tool execution (`exec_command`/`write_stdin`) into the execution loop spec.

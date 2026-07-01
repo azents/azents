@@ -97,6 +97,7 @@ from azents.engine.hooks.types import (
     AfterToolCallHookContext,
     BeforeToolCallHookContext,
     CompactionSummaryHookContext,
+    SessionCompactHookContext,
     ToolCallDeny,
     ToolOutputReplace,
     TurnEndHookContext,
@@ -223,7 +224,9 @@ class AgentEngineAdapter:
                 ),
             )
 
-    async def compact(self, request: RunRequest) -> AsyncIterator[Emit]:
+    async def compact(
+        self, request: RunRequest, context: RunContext
+    ) -> AsyncIterator[Emit]:
         """Run manual event compaction in append-only style."""
         yield ephemeral(CompactionStarted())
         async with self.session_manager() as session:
@@ -238,6 +241,18 @@ class AgentEngineAdapter:
                 session_repo=self.session_head_repo,
                 transcript_repo=self.transcript_repo,
             )
+            hook_dispatcher = RuntimeHookDispatcher()
+            hook_providers = _runtime_hook_provider_refs(request.toolkits)
+            await hook_dispatcher.dispatch_observation(
+                hook_providers,
+                "on_session_compact",
+                SessionCompactHookContext(
+                    workspace_id=request.workspace_id,
+                    agent_id=request.agent_id,
+                    session_id=request.session_id,
+                    run_id=context.run_id,
+                ),
+            )
             await self.compactor.compact(
                 session,
                 session_id=request.session_id,
@@ -251,9 +266,9 @@ class AgentEngineAdapter:
                 reason="manual_command",
                 summary_enricher=_compaction_summary_enricher(
                     request,
-                    dispatcher=RuntimeHookDispatcher(),
-                    providers=_runtime_hook_provider_refs(request.toolkits),
-                    run_id=None,
+                    dispatcher=hook_dispatcher,
+                    providers=hook_providers,
+                    run_id=context.run_id,
                 ),
             )
         yield ephemeral(CompactionComplete())

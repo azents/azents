@@ -53,7 +53,6 @@ from azents.repos.agent_session.data import PendingSessionCommand
 from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
-from azents.worker.run.command_executor import CommandExecutor
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.helpers import (
     apply_active_tool_call_event,
@@ -299,44 +298,27 @@ class _RunExecutor:
         prepare_toolkits: PrepareToolkits | None,
         shutdown_event: asyncio.Event,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+        command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Delegate to Host message handling fake."""
         del shutdown_event, dispatch_event
+        if command is not None:
+            self.host.commands.append(command)
+            self.host.command_processed.set()
+            if self.host.command_error is not None:
+                raise self.host.command_error
+            self.host.pending_command_result = False
+            return RunExecutionResult(
+                toolkits=[],
+                terminal_event_observed=True,
+                no_actionable_work=False,
+                terminal_run_status=AgentRunStatus.COMPLETED,
+            )
         return await self.host.process_message(
             message,
             poll_fn=poll_fn,
             check_stop=check_stop,
             prepare_toolkits=prepare_toolkits,
-        )
-
-
-class _CommandExecutor:
-    """CommandExecutor test double."""
-
-    def __init__(self, host: "_Host") -> None:
-        self.host = host
-        self.commands: list[PendingSessionCommand] = []
-
-    async def execute(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-        command: PendingSessionCommand,
-        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
-    ) -> RunExecutionResult:
-        """Record delivered command and raise test-specified exception."""
-        del agent_id, session_id, dispatch_event
-        self.commands.append(command)
-        self.host.command_processed.set()
-        if self.host.command_error is not None:
-            raise self.host.command_error
-        self.host.pending_command_result = False
-        return RunExecutionResult(
-            toolkits=[],
-            terminal_event_observed=True,
-            no_actionable_work=False,
-            terminal_run_status=AgentRunStatus.COMPLETED,
         )
 
 
@@ -430,6 +412,7 @@ class _Host:
         self.terminal_event_observed = True
         self.no_actionable_message_numbers: set[int] = set()
         self.command_error: Exception | None = None
+        self.commands: list[PendingSessionCommand] = []
         self.dispatched_events: list[tuple[str, PublishedEvent]] = []
         self.event_dispatched = asyncio.Event()
 
@@ -580,7 +563,6 @@ def _make_session_runner(host: _Host) -> SessionRunner:
         ),
         user_stop_finalizer=cast(UserStopFinalizer, _UserStopFinalizer(host)),
         run_executor=cast(RunExecutor, _RunExecutor(host)),
-        command_executor=cast(CommandExecutor, _CommandExecutor(host)),
         engine=cast(AgentEngineProtocol, host),
     )
 

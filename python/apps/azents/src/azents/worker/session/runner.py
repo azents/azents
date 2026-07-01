@@ -23,7 +23,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_session.data import PendingSessionCommand
 from azents.services.input_buffer import InputBufferService
 from azents.worker.events.publisher import WorkerEventPublisher
-from azents.worker.run.command_executor import CommandExecutor
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.errors import SessionRunnerErrorReporter
@@ -88,7 +87,6 @@ class SessionRunner:
         idle_continuation_service: IdleContinuationService,
         user_stop_finalizer: UserStopFinalizer,
         run_executor: RunExecutor,
-        command_executor: CommandExecutor,
         engine: AgentEngineProtocol,
     ) -> None:
         self.shutdown_event = shutdown_event
@@ -98,7 +96,6 @@ class SessionRunner:
         self.agent_session_repository = agent_session_repository
         self.input_buffer_service = input_buffer_service
         self.idle_continuation_service = idle_continuation_service
-        self.command_executor = command_executor
         self.inbox = SessionRunnerInbox()
         self.runner_shutdown = asyncio.Event()
         self.terminated_event = asyncio.Event()
@@ -227,6 +224,8 @@ class SessionRunner:
     async def _run_with_timeout(
         self,
         message: SessionWakeUp,
+        *,
+        command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Delegate engine execution to stop/shutdown supervisor."""
         return await self.run_supervisor.run(
@@ -235,6 +234,7 @@ class SessionRunner:
             check_stop=self._make_check_stop_fn(message.session_id),
             prepare_toolkits=self.prepare_toolkits,
             drain_stop_signals=self._drain_stop_signals,
+            command=command,
         )
 
     async def _clear_activity_after_failed_message(
@@ -510,12 +510,10 @@ class SessionRunner:
 
     async def _process_wake_up(self, message: SessionWakeUp) -> RunExecutionResult:
         """Handle command/run/continuation lifecycle for one SessionWakeUp."""
-        command_result = await self._process_pending_command(message)
-        if command_result is not None:
-            return command_result
+        command = await self._get_pending_command(message.session_id)
         self.run_active = True
         try:
-            result = await self._run_with_timeout(message)
+            result = await self._run_with_timeout(message, command=command)
         finally:
             self.run_active = False
             if (
@@ -528,23 +526,15 @@ class SessionRunner:
             self._drain_stop_signals()
         return result
 
-    async def _process_pending_command(
+    async def _get_pending_command(
         self,
-        message: SessionWakeUp,
-    ) -> RunExecutionResult | None:
-        """Consume wake-up through command path when pending command exists."""
+        session_id: str,
+    ) -> PendingSessionCommand | None:
+        """Fetch pending runtime command, if one exists."""
         async with self.session_manager() as db_session:
-            command = (
+            return (
                 await self.agent_session_repository.get_pending_command_by_session_id(
                     db_session,
-                    message.session_id,
+                    session_id,
                 )
             )
-        if command is None:
-            return None
-        return await self.command_executor.execute(
-            agent_id=message.agent_id,
-            session_id=message.session_id,
-            command=command,
-            dispatch_event=self.event_publisher.dispatch_event,
-        )
