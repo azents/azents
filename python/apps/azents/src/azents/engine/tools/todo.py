@@ -16,6 +16,11 @@ from azents.core.tools import (
     TurnContext,
 )
 from azents.engine.events.engine_events import TodoStateChanged
+from azents.engine.hooks.types import (
+    CompactionSummaryHookContext,
+    CompactionSummaryReplace,
+    RuntimeHooks,
+)
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tooling.toolkit_state import (
@@ -171,6 +176,25 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         self.set_agent_id(context.subagent_id)
         self.set_session_id(context.subagent_session_id)
 
+    def hooks(self) -> RuntimeHooks:
+        """Return Todo lifecycle hooks."""
+        return {"on_compaction_summary": self._on_compaction_summary}
+
+    async def _on_compaction_summary(
+        self,
+        context: CompactionSummaryHookContext,
+    ) -> CompactionSummaryReplace | None:
+        """Append current Todo state to compaction summary."""
+        if not self._agent_id or not self._session_id:
+            return None
+        state = await self._store.load(self._agent_id, self._session_id)
+        snapshot = render_todo_snapshot(state)
+        if snapshot is None:
+            return None
+        return CompactionSummaryReplace(
+            summary=f"{context.summary.rstrip()}\n\n{snapshot}"
+        )
+
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return current todo prompt and update_todo tool."""
         if not self._session_id:
@@ -223,6 +247,15 @@ def render_todo_prompt(state: TodoState | None = None) -> str:
     """Render stable prompt fragment for todo tools."""
     del state
     return _TODO_PROMPT
+
+
+def render_todo_snapshot(state: TodoState) -> str | None:
+    """Render Todo state for compaction summary enrichment."""
+    if not state.items:
+        return None
+    lines = ["## Todo Snapshot", "", "Session Todo state at compaction time:"]
+    lines.extend(f"- [{item.status}] {item.content}" for item in state.items)
+    return "\n".join(lines)
 
 
 def make_update_todo_tool(
