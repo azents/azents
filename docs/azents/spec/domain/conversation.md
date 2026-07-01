@@ -435,9 +435,9 @@ input starts from the compacted head.
 
 Future model input is selected and sorted by event `model_order`. Auto and manual compaction both
 summarize the full selected model-input transcript into one `compaction_summary` event. The summary
-content also includes bounded `Recent User Messages for Continuity` and `Recent Transcript for
-Continuity` sections. The user-message section keeps the last five user messages visible even when a
-long tool-heavy run leaves no user messages in the recent turn window. The transcript section uses
+content also includes bounded `Recent User Messages` and `Recent Transcript` sections. The
+user-message section keeps the last five user messages visible even when a long tool-heavy run leaves
+no user messages in the recent turn window. The transcript section uses
 readable model-visible excerpts from the last five completed model turns. Each excerpt is truncated
 independently before it is embedded in the summary payload, so oversized tool output cannot remain as
 an unbounded raw tail or storage JSON dump.
