@@ -693,7 +693,13 @@ def _append_continuity_events(summary: str, events: Sequence[Event]) -> str:
             events,
             _CONTINUITY_RECENT_USER_MESSAGES,
         )
-        if (rendered := _render_continuity_event(event)) is not None
+        if (
+            rendered := _render_continuity_event(
+                event,
+                include_label=False,
+            )
+        )
+        is not None
     ]
     rendered_events = [
         rendered
@@ -707,60 +713,49 @@ def _append_continuity_events(summary: str, events: Sequence[Event]) -> str:
     if rendered_user_messages:
         lines.extend(
             [
-                "## Recent User Messages for Continuity",
+                "## Recent User Messages",
                 (
-                    "The following are the last "
+                    "Last "
                     f"{_CONTINUITY_RECENT_USER_MESSAGES} user messages from the "
-                    "compacted transcript. This section is independent of the "
-                    "recent transcript window, so long tool-heavy runs still keep "
-                    "the user's latest requests visible."
+                    "compacted transcript, kept independent of the recent "
+                    "transcript window."
                 ),
-                (
-                    "Per-message excerpt cap: "
-                    f"{_CONTINUITY_MAX_EVENT_TOKENS} estimated tokens."
-                ),
+                f"Per-message cap: {_CONTINUITY_MAX_EVENT_TOKENS} estimated tokens.",
                 "",
             ]
         )
         for index, rendered in enumerate(rendered_user_messages, start=1):
-            lines.append(f"### Recent User Message {index}")
             if rendered.truncated:
-                lines.append(
-                    "This user message excerpt was truncated "
-                    f"from {rendered.original_chars} characters."
-                )
-            lines.append(rendered.text)
+                lines.append(f"{index}.")
+                lines.append(f"Truncated from {rendered.original_chars} characters.")
+                lines.append(rendered.text)
+            elif "\n" in rendered.text:
+                lines.append(f"{index}.")
+                lines.append(rendered.text)
+            else:
+                lines.append(f"{index}. {rendered.text}")
             lines.append("")
 
     if rendered_events:
         lines.extend(
             [
-                "## Recent Transcript for Continuity",
+                "## Recent Transcript",
                 (
-                    "The following are model-visible excerpts from the most recent "
-                    "compacted events so the next agent can continue from the "
-                    "immediate context. The full compacted transcript was already "
-                    "included in the summary above. Each excerpt is independently "
-                    "bounded and may be truncated."
+                    "Recent model-visible excerpts from the compacted transcript. "
+                    "Each excerpt is bounded and may be truncated."
                 ),
                 (
                     "Recent turn window: last "
                     f"{_CONTINUITY_RECENT_TURNS} completed model turns."
                 ),
-                (
-                    "Per-event excerpt cap: "
-                    f"{_CONTINUITY_MAX_EVENT_TOKENS} estimated tokens."
-                ),
+                f"Per-event cap: {_CONTINUITY_MAX_EVENT_TOKENS} estimated tokens.",
                 "",
             ]
         )
         for index, rendered in enumerate(rendered_events, start=1):
-            lines.append(f"### Recent Transcript Event {index}")
+            lines.append(f"### {index}")
             if rendered.truncated:
-                lines.append(
-                    "This event excerpt was truncated "
-                    f"from {rendered.original_chars} characters."
-                )
+                lines.append(f"Truncated from {rendered.original_chars} characters.")
             lines.append(rendered.text)
             lines.append("")
     return "\n".join(lines).strip()
@@ -798,9 +793,13 @@ def _select_recent_turn_events(events: Sequence[Event], max_turns: int) -> list[
     return list(events[start_index:])
 
 
-def _render_continuity_event(event: Event) -> _ContinuityEventRender | None:
+def _render_continuity_event(
+    event: Event,
+    *,
+    include_label: bool = True,
+) -> _ContinuityEventRender | None:
     """Render one event as a bounded model-visible continuity excerpt."""
-    event_text = _model_visible_event_text(event)
+    event_text = _model_visible_event_text(event, include_label=include_label)
     if event_text is None:
         return None
     original_chars = len(event_text)
@@ -882,7 +881,11 @@ def _model_visible_event_value(event: Event) -> object | None:
     return None
 
 
-def _model_visible_event_text(event: Event) -> str | None:
+def _model_visible_event_text(
+    event: Event,
+    *,
+    include_label: bool = True,
+) -> str | None:
     """Return readable model-visible content for continuity rendering."""
     payload = event.payload
     if event.kind == EventKind.GOAL_CONTINUATION and isinstance(
@@ -890,76 +893,93 @@ def _model_visible_event_text(event: Event) -> str | None:
         UserMessagePayload,
     ):
         return _format_continuity_block(
-            "User message",
+            "User",
             format_goal_continuation_reminder(payload.metadata.get("goal_objective")),
+            include_label=include_label,
         )
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):
         return _format_continuity_block(
-            "User message",
+            "User",
             _format_goal_updated_event_reminder(payload),
+            include_label=include_label,
         )
     if isinstance(payload, UserMessagePayload):
         return _format_continuity_block(
-            "User message",
+            "User",
             _visible_input_content(payload.content),
+            include_label=include_label,
         )
     if isinstance(payload, AssistantMessagePayload):
         return _format_continuity_block(
-            "Assistant message",
+            "Assistant",
             _visible_output_content(payload.content),
+            include_label=include_label,
         )
     if isinstance(payload, ClientToolCallPayload):
         return _format_continuity_block(
             "Tool call",
             _format_tool_call_text(
                 title=payload.name,
-                call_id=payload.call_id,
+                call_id=None,
                 arguments=payload.arguments,
             ),
+            include_label=include_label,
         )
     if isinstance(payload, ClientToolResultPayload):
         return _format_continuity_block(
             "Tool result",
-            _format_tool_result_text(
-                title="function_call_output",
-                call_id=payload.call_id,
-                output=_visible_tool_output(payload.output),
-            ),
+            _visible_tool_output(payload.output),
+            include_label=include_label,
         )
     if isinstance(payload, ProviderToolCallPayload):
         return _format_continuity_block(
-            "Assistant message",
+            "Assistant",
             _provider_tool_call_text(payload),
+            include_label=include_label,
         )
     if isinstance(payload, ProviderToolResultPayload):
         return _format_continuity_block(
-            "Assistant message",
+            "Assistant",
             _provider_tool_result_text(payload),
+            include_label=include_label,
         )
     if isinstance(payload, CompactionSummaryPayload):
         return _format_continuity_block(
-            "User message",
+            "User",
             format_compaction_summary_reminder(payload.content),
+            include_label=include_label,
         )
     if isinstance(payload, InterruptedPayload):
-        return _format_continuity_block("User message", format_interrupted_reminder())
+        return _format_continuity_block(
+            "User",
+            format_interrupted_reminder(),
+            include_label=include_label,
+        )
     if isinstance(payload, SystemReminderPayload):
         return _format_continuity_block(
-            "User message",
+            "User",
             format_system_reminder(
                 reminder_type="system_reminder",
                 instruction=payload.text,
                 data=(),
             ),
+            include_label=include_label,
         )
     return None
 
 
-def _format_continuity_block(label: str, body: str) -> str:
+def _format_continuity_block(
+    label: str,
+    body: str,
+    *,
+    include_label: bool = True,
+) -> str:
     """Render one continuity item without exposing event storage JSON."""
     body = body.strip()
     if not body:
         body = "(no model-visible content)"
+    if not include_label:
+        return body
     return f"{label}:\n{body}"
 
 

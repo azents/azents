@@ -42,11 +42,12 @@ When compaction is required:
 1. Append `compaction_marker` with a new `compaction_id` and a durable reason (`auto_threshold_exceeded` for automatic compaction, `manual_command` for explicit `/compact`).
 2. Select the full model-input transcript slice that will be summarized.
 3. Generate the summary from the full selected transcript slice.
-4. Select continuity excerpts from the last five completed model turns in the same selected transcript.
-5. Truncate each continuity event excerpt independently before embedding it in the summary payload.
-6. Append `compaction_summary` with the same `compaction_id` and reason. The payload content contains
-   the generated checkpoint followed by a `Recent Events for Continuity` section.
-7. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event.
+4. Select recent user-message continuity from the last five user messages in the same selected transcript.
+5. Select transcript continuity excerpts from the last five completed model turns in the same selected transcript.
+6. Truncate each continuity excerpt independently before embedding it in the summary payload.
+7. Append `compaction_summary` with the same `compaction_id` and reason. The payload content contains
+   the generated checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
+8. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event.
 
 Old events remain queryable. The head pointer and event model order only change which
 event range and ordering are used for future model input. Sequential appends leave gaps in
@@ -84,7 +85,7 @@ not to fill the budget unnecessarily, not to invent details, and to mark uncerta
 Auto and manual compaction include the full selected transcript in the summary request. The summary
 prompt asks for durable state from the whole compacted transcript and warns that no raw event should
 be assumed to remain available outside the checkpoint. After the model returns the checkpoint, the
-runtime appends bounded `Recent User Messages for Continuity` and `Recent Transcript for Continuity`
+runtime appends bounded `Recent User Messages` and `Recent Transcript`
 sections to the stored summary content.
 
 Previous compaction summaries are rendered as existing checkpoints and are integrated into one updated
@@ -116,19 +117,21 @@ summary payload content. This is not a separate raw tail in the event transcript
 starts at the summary event, and the continuity excerpts are part of that summary event's
 model-visible text.
 
-The `Recent User Messages for Continuity` section contains the last five real `user_message` events
+The `Recent User Messages` section contains the last five real `user_message` events
 from the selected transcript. It is selected independently from recent model-turn boundaries so a long
 tool-heavy request can still surface the user's latest requests even when the recent transcript window
-contains no user messages.
+contains no user messages. Items are numbered without repeating a per-item user-message label.
 
-The `Recent Transcript for Continuity` section uses `turn_marker` events as completed model-turn
+The `Recent Transcript` section uses `turn_marker` events as completed model-turn
 boundaries. It includes events after the marker preceding the last five completed turns. If five or
 fewer completed turns exist, or if no turn marker exists, it falls back to all selected events. Each
-excerpt is rendered as readable model-visible transcript text rather than event storage JSON. The
-projection family matches token estimation: user/assistant text, tool call name/arguments, tool
-output text, compaction summary reminders, system reminders, and bounded file/attachment/artifact
-metadata. Event IDs, timestamps, native artifacts, event kind, model order, and storage-only metadata
-are not included.
+excerpt is rendered as concise, readable model-visible transcript text rather than event storage JSON.
+Transcript labels stay short (`User`, `Assistant`, `Tool call`, `Tool result`), and client tool
+results render only their model-visible output rather than wrapper fields such as `function_call_output`,
+`call_id`, or `output`. The projection family matches token estimation: user/assistant text, tool call
+name/arguments, tool result text, compaction summary reminders, system reminders, and bounded
+file/attachment/artifact metadata. Event IDs, timestamps, native artifacts, event kind, model order,
+and storage-only metadata are not included.
 
 Each user-message or transcript excerpt is truncated independently to 2,000 estimated tokens.
 Truncation is marked inline with `[Event truncated by Azents continuity guard.]`. This prevents a
@@ -144,8 +147,8 @@ the immediate shape of the recent interaction.
 - Auto and manual compaction present future model input as one `compaction_summary` head event.
 - The summary model receives the full selected model-input transcript, not a transcript with a
   protected tail removed.
-- The stored summary content includes a bounded `Recent User Messages for Continuity` section from
-  the last five user messages and a bounded `Recent Transcript for Continuity` section from the last
+- The stored summary content includes a bounded `Recent User Messages` section from
+  the last five user messages and a bounded `Recent Transcript` section from the last
   five completed model turns, using `turn_marker` boundaries.
 - Each continuity excerpt is rendered as readable model-visible transcript text, not event storage JSON.
 - Each continuity excerpt is independently truncated before it is embedded in the summary.
