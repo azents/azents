@@ -6,14 +6,36 @@ from unittest.mock import AsyncMock
 import pytest
 
 from azents.core.tools import TurnContext
-from azents.engine.hooks.types import SessionIdleHookContext
+from azents.engine.hooks.types import (
+    CompactionSummaryHookContext,
+    CompactionSummaryReplace,
+    SessionIdleHookContext,
+)
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.goal import (
     GoalState,
     GoalStatus,
     GoalToolkit,
     render_goal_prompt,
+    render_goal_snapshot,
 )
+
+
+def _compaction_context(
+    summary: str = "Existing summary",
+) -> CompactionSummaryHookContext:
+    """Create a compaction summary hook context for Goal tests."""
+    return CompactionSummaryHookContext(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        run_id="run-1",
+        compaction_id="compaction-1",
+        reason="manual_command",
+        covered_until_event_id="event-1",
+        summary=summary,
+        continuity_history="Recent context",
+    )
 
 
 async def test_goal_toolkit_exposes_goal_tools() -> None:
@@ -39,6 +61,80 @@ async def test_goal_toolkit_exposes_goal_tools() -> None:
     ]
     assert "Ship goal" not in (await toolkit.get_static_prompt(context))
     store.load.assert_not_awaited()
+
+
+def test_goal_snapshot_renders_unfinished_goal() -> None:
+    """Goal compaction snapshot renders unfinished Goal state."""
+    snapshot = render_goal_snapshot(
+        GoalState(
+            objective="Finish stacked PRs",
+            status="active",
+            created_at="2026-07-01T00:00:00+00:00",
+            updated_at="2026-07-01T01:00:00+00:00",
+        )
+    )
+
+    assert snapshot == (
+        "## Goal Snapshot\n"
+        "\n"
+        "Session Goal state at compaction time:\n"
+        "- Objective: Finish stacked PRs\n"
+        "- Status: active\n"
+        "- Created at: 2026-07-01T00:00:00+00:00\n"
+        "- Updated at: 2026-07-01T01:00:00+00:00"
+    )
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        GoalState(),
+        GoalState(objective="Done", status="complete"),
+    ],
+)
+def test_goal_snapshot_omits_empty_or_complete_goal(state: GoalState) -> None:
+    """Empty and completed Goals do not render compaction snapshots."""
+    assert render_goal_snapshot(state) is None
+
+
+async def test_goal_compaction_summary_hook_appends_snapshot() -> None:
+    """Goal hook appends unfinished Goal snapshot to the generated summary."""
+    store = AsyncMock()
+    store.load.return_value = GoalState(
+        objective="Finish stacked PRs",
+        status="active",
+    )
+    toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
+    hook = toolkit.hooks().get("on_compaction_summary")
+    assert hook is not None
+
+    result = await hook(_compaction_context("Existing summary\n"))
+
+    assert isinstance(result, CompactionSummaryReplace)
+    assert result.summary == (
+        "Existing summary\n"
+        "\n"
+        "## Goal Snapshot\n"
+        "\n"
+        "Session Goal state at compaction time:\n"
+        "- Objective: Finish stacked PRs\n"
+        "- Status: active"
+    )
+    store.load.assert_awaited_once_with("agent-1", "session-1")
+
+
+async def test_goal_compaction_summary_hook_omits_complete_goal() -> None:
+    """Goal hook leaves summary unchanged when Goal is complete."""
+    store = AsyncMock()
+    store.load.return_value = GoalState(objective="Done", status="complete")
+    toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
+    hook = toolkit.hooks().get("on_compaction_summary")
+    assert hook is not None
+
+    result = await hook(_compaction_context())
+
+    assert result is None
+    store.load.assert_awaited_once_with("agent-1", "session-1")
 
 
 def test_goal_prompt_is_stable_across_state() -> None:

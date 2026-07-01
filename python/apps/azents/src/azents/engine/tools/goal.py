@@ -19,6 +19,8 @@ from azents.core.tools import (
     TurnContext,
 )
 from azents.engine.hooks.types import (
+    CompactionSummaryHookContext,
+    CompactionSummaryReplace,
     RuntimeHooks,
     SessionContinuationInput,
     SessionIdleHookContext,
@@ -230,8 +232,26 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         )
 
     def hooks(self) -> RuntimeHooks:
-        """Return Goal continuation hook."""
-        return {"on_session_idle": self._on_session_idle}
+        """Return Goal lifecycle hooks."""
+        return {
+            "on_session_idle": self._on_session_idle,
+            "on_compaction_summary": self._on_compaction_summary,
+        }
+
+    async def _on_compaction_summary(
+        self,
+        context: CompactionSummaryHookContext,
+    ) -> CompactionSummaryReplace | None:
+        """Append current unfinished Goal state to compaction summary."""
+        if not self._session_id:
+            return None
+        goal_state = await self._store.load(self._agent_id, self._session_id)
+        snapshot = render_goal_snapshot(goal_state)
+        if snapshot is None:
+            return None
+        return CompactionSummaryReplace(
+            summary=f"{context.summary.rstrip()}\n\n{snapshot}"
+        )
 
     async def _on_session_idle(
         self, context: SessionIdleHookContext
@@ -281,6 +301,24 @@ class GoalToolkitProvider(ToolkitProvider[GoalToolkitConfig]):
         """Return executable Goal Toolkit."""
         del config, context
         return GoalToolkit(store=self._store)
+
+
+def render_goal_snapshot(state: GoalState) -> str | None:
+    """Render unfinished Goal state for compaction summary enrichment."""
+    if not _unfinished(state) or state.objective is None or state.status is None:
+        return None
+    lines = [
+        "## Goal Snapshot",
+        "",
+        "Session Goal state at compaction time:",
+        f"- Objective: {state.objective}",
+        f"- Status: {state.status}",
+    ]
+    if state.created_at:
+        lines.append(f"- Created at: {state.created_at}")
+    if state.updated_at:
+        lines.append(f"- Updated at: {state.updated_at}")
+    return "\n".join(lines)
 
 
 def render_goal_prompt(state: GoalState | None = None) -> str:
