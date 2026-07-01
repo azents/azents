@@ -7,6 +7,9 @@ from typing import get_args, get_origin
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
     BeforeToolCallHookContext,
+    CompactionSummaryDecision,
+    CompactionSummaryHookContext,
+    CompactionSummaryReplace,
     RuntimeHookName,
     RuntimeHooks,
     SessionStartHookContext,
@@ -20,6 +23,7 @@ from azents.engine.hooks.types import (
     TurnStartResult,
     normalize_after_tool_call_result,
     normalize_before_tool_call_result,
+    normalize_compaction_summary_result,
     normalize_turn_start_result,
 )
 
@@ -42,6 +46,13 @@ async def _after_tool_hook(
     return ToolOutputUnchanged()
 
 
+async def _compaction_summary_hook(
+    context: CompactionSummaryHookContext,
+) -> CompactionSummaryDecision | None:
+    """Compaction summary callback for signature smoke."""
+    return CompactionSummaryReplace(summary=context.summary + "\n\nextra")
+
+
 def test_runtime_hooks_is_total_false_typeddict() -> None:
     """Verify RuntimeHooks is total=False TypedDict."""
     assert RuntimeHooks.__total__ is False
@@ -49,6 +60,7 @@ def test_runtime_hooks_is_total_false_typeddict() -> None:
         "on_session_start",
         "on_session_clear",
         "on_session_compact",
+        "on_compaction_summary",
         "on_session_idle",
         "on_run_start",
         "on_run_end",
@@ -67,6 +79,7 @@ def test_runtime_hooks_callback_signature_import_smoke() -> None:
         "on_session_start": _session_start_hook,
         "on_before_tool_call": _before_tool_hook,
         "on_after_tool_call": _after_tool_hook,
+        "on_compaction_summary": _compaction_summary_hook,
     }
     before_hook: Callable[
         [BeforeToolCallHookContext], Awaitable[ToolCallDecision | None]
@@ -104,6 +117,10 @@ def test_result_kind_discriminators_and_normalization() -> None:
     replace = ToolOutputReplace(output_text="redacted")
     assert normalize_after_tool_call_result(replace) is replace
 
+    assert normalize_compaction_summary_result(None).kind == "unchanged"
+    summary_replace = CompactionSummaryReplace(summary="replacement")
+    assert normalize_compaction_summary_result(summary_replace) is summary_replace
+
     assert normalize_turn_start_result(None).injected_prompts == []
     injected = TurnStartResult(
         injected_prompts=[
@@ -120,6 +137,7 @@ def test_result_union_uses_annotated_discriminator() -> None:
     """Result union keeps discriminator metadata."""
     assert get_origin(ToolCallDecision) is not None
     assert get_origin(ToolOutputDecision) is not None
+    assert get_origin(CompactionSummaryDecision) is not None
 
 
 def test_empty_string_defaults_are_not_used_for_contexts() -> None:

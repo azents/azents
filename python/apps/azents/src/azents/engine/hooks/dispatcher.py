@@ -16,6 +16,10 @@ from azents.engine.hooks.trace import (
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
     BeforeToolCallHookContext,
+    CompactionSummaryDecision,
+    CompactionSummaryHookContext,
+    CompactionSummaryReplace,
+    CompactionSummaryUnchanged,
     ObservationRuntimeHookName,
     RuntimeHookName,
     RuntimeHooks,
@@ -31,6 +35,7 @@ from azents.engine.hooks.types import (
     TurnStartResult,
     normalize_after_tool_call_result,
     normalize_before_tool_call_result,
+    normalize_compaction_summary_result,
     normalize_session_idle_result,
     normalize_turn_start_result,
 )
@@ -48,12 +53,16 @@ BeforeToolCallHook = Callable[
 AfterToolCallHook = Callable[
     [AfterToolCallHookContext], Awaitable[ToolOutputDecision | None]
 ]
+CompactionSummaryHook = Callable[
+    [CompactionSummaryHookContext], Awaitable[CompactionSummaryDecision | None]
+]
 RuntimeHook = (
     ObservationHook
     | TurnStartHook
     | SessionIdleHook
     | BeforeToolCallHook
     | AfterToolCallHook
+    | CompactionSummaryHook
 )
 
 
@@ -212,6 +221,51 @@ class RuntimeHookDispatcher:
             )
         return merged
 
+    async def dispatch_compaction_summary(
+        self,
+        providers: Sequence[RuntimeHookProviderRef],
+        context: CompactionSummaryHookContext,
+    ) -> str:
+        """Run compaction summary replacement pipeline in provider order."""
+        lifecycle: RuntimeHookName = "on_compaction_summary"
+        current_summary = context.summary
+        for provider in providers:
+            hook = await self._resolve_hook(provider, lifecycle)
+            if hook is None:
+                continue
+            provider_context = dataclasses.replace(context, summary=current_summary)
+            started_at = await self._record_started(provider.slug, lifecycle)
+            try:
+                decision = normalize_compaction_summary_result(
+                    await hook(provider_context)
+                )
+            except asyncio.CancelledError:
+                await self._record_cancelled(provider.slug, lifecycle, started_at)
+                raise
+            except Exception as exc:
+                decision = CompactionSummaryUnchanged()
+                await self._record_failed(provider.slug, lifecycle, started_at, exc)
+                self._logger.warning(
+                    "Runtime hook failed",
+                    exc_info=True,
+                    extra={
+                        "provider_slug": provider.slug,
+                        "lifecycle": lifecycle,
+                        "exception_class": type(exc).__name__,
+                    },
+                )
+                continue
+            if isinstance(decision, CompactionSummaryReplace):
+                current_summary = decision.summary
+            await self._record_completed(
+                provider.slug,
+                lifecycle,
+                started_at,
+                result_kind=decision.kind,
+                short_circuit=False,
+            )
+        return current_summary
+
     async def dispatch_before_tool_call(
         self,
         providers: Sequence[RuntimeHookProviderRef],
@@ -335,6 +389,13 @@ class RuntimeHookDispatcher:
         provider: RuntimeHookProviderRef,
         lifecycle: Literal["on_after_tool_call"],
     ) -> AfterToolCallHook | None: ...
+
+    @overload
+    async def _resolve_hook(
+        self,
+        provider: RuntimeHookProviderRef,
+        lifecycle: Literal["on_compaction_summary"],
+    ) -> CompactionSummaryHook | None: ...
 
     async def _resolve_hook(
         self,

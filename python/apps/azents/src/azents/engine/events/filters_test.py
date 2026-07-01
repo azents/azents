@@ -599,6 +599,87 @@ async def test_compactor_continuity_uses_concise_transcript_labels() -> None:
     assert "\noutput:\n" not in payload.content
 
 
+async def test_compactor_summary_enricher_runs_before_continuity_append() -> None:
+    """Summary enrichment can insert content before final continuity history."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old request"),
+        )
+    ]
+    covered_until_event_id = events[-1].id
+    transcript_repo = _TranscriptRepo(events)
+    captured: dict[str, str | None] = {}
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Return base summary."""
+        del old_events, summary_budget
+        return "summary"
+
+    async def enrich(
+        *,
+        summary: str,
+        continuity_history: str,
+        compaction_id: str,
+        reason: str | None,
+        covered_until_event_id: str,
+    ) -> str:
+        """Append enrichment before continuity is reattached."""
+        captured["summary"] = summary
+        captured["continuity_history"] = continuity_history
+        captured["compaction_id"] = compaction_id
+        captured["reason"] = reason
+        captured["covered_until_event_id"] = covered_until_event_id
+        return summary + "\n\n## Toolkit Enrichment\n- extra"
+
+    summary = await EventCompactor(
+        transcript_repo=transcript_repo,
+        session_repo=_SessionRepo(),
+    ).compact(
+        _Session(),
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+        reason="manual_command",
+        summary_enricher=enrich,
+    )
+
+    assert summary is not None
+    payload = summary.payload
+    assert isinstance(payload, CompactionSummaryPayload)
+    assert captured == {
+        "summary": "summary",
+        "continuity_history": (
+            "## Recent User Messages\n"
+            "Last 5 user messages from the compacted transcript, kept independent "
+            "of the recent transcript window.\n"
+            "Per-message cap: 2000 estimated tokens.\n\n"
+            "1. old request\n\n"
+            "## Recent Transcript\n"
+            "Recent model-visible excerpts from the compacted transcript. Each "
+            "excerpt is bounded and may be truncated.\n"
+            "Recent turn window: last 5 completed model turns.\n"
+            "Per-event cap: 2000 estimated tokens.\n\n"
+            "### 1\n"
+            "User:\nold request"
+        ),
+        "compaction_id": "compact-1",
+        "reason": "manual_command",
+        "covered_until_event_id": covered_until_event_id,
+    }
+    assert payload.content.index("summary") < payload.content.index(
+        "## Toolkit Enrichment"
+    )
+    assert payload.content.index("## Toolkit Enrichment") < payload.content.index(
+        "## Recent User Messages"
+    )
+
+
 async def test_compactor_continuity_uses_last_five_completed_turns() -> None:
     """Continuity excerpts include only the last five completed model turns."""
     events: list[Event] = [

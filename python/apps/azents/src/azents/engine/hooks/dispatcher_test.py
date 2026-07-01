@@ -21,6 +21,8 @@ from azents.engine.hooks.trace import (
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
     BeforeToolCallHookContext,
+    CompactionSummaryHookContext,
+    CompactionSummaryReplace,
     RunStartHookContext,
     ToolCallDeny,
     ToolOutputReplace,
@@ -97,6 +99,21 @@ def _after_context() -> AfterToolCallHookContext:
         run_id="run-1",
         output_text="RAW-OUTPUT-MARKER",
         error_message=None,
+    )
+
+
+def _compaction_summary_context() -> CompactionSummaryHookContext:
+    """Create compaction summary context for tests."""
+    return CompactionSummaryHookContext(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        run_id="run-1",
+        compaction_id="compact-1",
+        reason="manual_command",
+        covered_until_event_id="event-1",
+        summary="summary",
+        continuity_history="RAW-CONTINUITY-MARKER",
     )
 
 
@@ -358,6 +375,70 @@ async def test_after_tool_none_unchanged_and_replacement_pipeline() -> None:
     assert isinstance(decision, ToolOutputReplace)
     assert decision.output_text == "b"
     assert replace_b.calls[0].context_summary["tool_name"] == "read_file"
+
+
+async def test_compaction_summary_replacement_pipeline() -> None:
+    """Compaction summary hooks receive current summary in provider order."""
+    replace_a = DeterministicRuntimeHookProvider(
+        slug="replace-a",
+        actions={
+            "on_compaction_summary": [
+                DeterministicHookAction(
+                    result=CompactionSummaryReplace(summary="summary-a")
+                )
+            ]
+        },
+    )
+    replace_b = DeterministicRuntimeHookProvider(
+        slug="replace-b",
+        actions={
+            "on_compaction_summary": [
+                DeterministicHookAction(
+                    result=CompactionSummaryReplace(summary="summary-b")
+                )
+            ]
+        },
+    )
+    dispatcher = RuntimeHookDispatcher(trace_sink=InMemoryRuntimeHookTraceSink())
+
+    result = await dispatcher.dispatch_compaction_summary(
+        [_provider_ref(replace_a), _provider_ref(replace_b)],
+        _compaction_summary_context(),
+    )
+
+    assert result == "summary-b"
+    assert replace_a.calls[0].context_summary["compaction_id"] == "compact-1"
+    assert replace_b.calls[0].context_summary["compaction_id"] == "compact-1"
+
+
+async def test_compaction_summary_exception_keeps_current_summary() -> None:
+    """Compaction summary hook exceptions fail open with current summary."""
+    failing = DeterministicRuntimeHookProvider(
+        slug="failing",
+        actions={
+            "on_compaction_summary": [
+                DeterministicHookAction(exception=RuntimeError("boom"))
+            ]
+        },
+    )
+    replace = DeterministicRuntimeHookProvider(
+        slug="replace",
+        actions={
+            "on_compaction_summary": [
+                DeterministicHookAction(
+                    result=CompactionSummaryReplace(summary="replacement")
+                )
+            ]
+        },
+    )
+    dispatcher = RuntimeHookDispatcher(trace_sink=InMemoryRuntimeHookTraceSink())
+
+    result = await dispatcher.dispatch_compaction_summary(
+        [_provider_ref(failing), _provider_ref(replace)],
+        _compaction_summary_context(),
+    )
+
+    assert result == "replacement"
 
 
 async def test_after_tool_exception_normalizes_to_unchanged() -> None:

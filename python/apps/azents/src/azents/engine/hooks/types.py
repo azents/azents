@@ -10,6 +10,7 @@ RuntimeHookName = Literal[
     "on_session_start",
     "on_session_clear",
     "on_session_compact",
+    "on_compaction_summary",
     "on_session_idle",
     "on_run_start",
     "on_run_end",
@@ -65,6 +66,21 @@ class SessionCompactHookContext:
     agent_id: str
     session_id: str
     run_id: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class CompactionSummaryHookContext:
+    """compaction summary enrichment hook context."""
+
+    workspace_id: str
+    agent_id: str
+    session_id: str
+    run_id: str | None
+    compaction_id: str
+    reason: str | None
+    covered_until_event_id: str
+    summary: str
+    continuity_history: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -205,6 +221,25 @@ ToolOutputDecision = Annotated[
 ]
 
 
+class CompactionSummaryUnchanged(BaseModel):
+    """compaction summary keep decision."""
+
+    kind: Literal["unchanged"] = "unchanged"
+
+
+class CompactionSummaryReplace(BaseModel):
+    """compaction summary replacement decision."""
+
+    kind: Literal["replace_summary"] = "replace_summary"
+    summary: str
+
+
+CompactionSummaryDecision = Annotated[
+    CompactionSummaryUnchanged | CompactionSummaryReplace,
+    Field(discriminator="kind"),
+]
+
+
 class TurnInjectedPrompt(BaseModel):
     """prompt injected by turn start hook."""
 
@@ -241,6 +276,9 @@ class RuntimeHooks(TypedDict, total=False):
     on_session_start: Callable[[SessionStartHookContext], Awaitable[None]]
     on_session_clear: Callable[[SessionClearHookContext], Awaitable[None]]
     on_session_compact: Callable[[SessionCompactHookContext], Awaitable[None]]
+    on_compaction_summary: Callable[
+        [CompactionSummaryHookContext], Awaitable[CompactionSummaryDecision | None]
+    ]
     on_session_idle: Callable[
         [SessionIdleHookContext], Awaitable[SessionIdleResult | None]
     ]
@@ -280,6 +318,15 @@ def normalize_after_tool_call_result(
     """Normalize after tool hook result with unchanged default."""
     if result is None:
         return ToolOutputUnchanged()
+    return result
+
+
+def normalize_compaction_summary_result(
+    result: CompactionSummaryDecision | None,
+) -> CompactionSummaryDecision:
+    """Normalize compaction summary hook result with unchanged default."""
+    if result is None:
+        return CompactionSummaryUnchanged()
     return result
 
 

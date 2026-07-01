@@ -301,13 +301,14 @@ Compaction is append-only:
 - sequential appends leave gaps in model order so later model-visible system events can be inserted
   without renumbering the whole transcript.
 
-Automatic compaction summarizes the full selected model-input transcript. The compaction summary
-payload then embeds bounded `Recent User Messages` and `Recent Transcript` sections. The
-user-message section contains the last five user messages independent of turn boundaries; the
-transcript section contains readable model-visible excerpts from the last five
+Automatic compaction summarizes the full selected model-input transcript, then runs the
+`on_compaction_summary` hook pipeline against the generated summary before appending continuity. The
+compaction summary payload then embeds bounded `Recent User Messages` and `Recent Transcript`
+sections. The user-message section contains the last five user messages independent of turn
+boundaries; the transcript section contains readable model-visible excerpts from the last five
 completed model turns of the same compacted transcript. The next model step therefore sees a single
-`compaction_summary` head event that contains both the durable checkpoint and recent continuity
-context.
+`compaction_summary` head event that contains the durable checkpoint, any hook enrichment, and recent
+continuity context.
 
 Successful automatic compaction writes `auto_threshold_exceeded` to both the marker and summary
 payload reason. Explicit `/compact` writes `manual_command` to both payloads.

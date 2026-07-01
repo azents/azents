@@ -42,11 +42,11 @@ When compaction is required:
 1. Append `compaction_marker` with a new `compaction_id` and a durable reason (`auto_threshold_exceeded` for automatic compaction, `manual_command` for explicit `/compact`).
 2. Select the full model-input transcript slice that will be summarized.
 3. Generate the summary from the full selected transcript slice.
-4. Select recent user-message continuity from the last five user messages in the same selected transcript.
-5. Select transcript continuity excerpts from the last five completed model turns in the same selected transcript.
-6. Truncate each continuity excerpt independently before embedding it in the summary payload.
+4. Render bounded continuity history from the selected transcript, but keep it separate from the generated summary.
+5. Dispatch the compaction summary enrichment hook pipeline with the generated summary and rendered continuity history.
+6. Append the continuity history after the enriched summary.
 7. Append `compaction_summary` with the same `compaction_id` and reason. The payload content contains
-   the generated checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
+   the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
 8. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event.
 
 Old events remain queryable. The head pointer and event model order only change which
@@ -85,8 +85,8 @@ not to fill the budget unnecessarily, not to invent details, and to mark uncerta
 Auto and manual compaction include the full selected transcript in the summary request. The summary
 prompt asks for durable state from the whole compacted transcript and warns that no raw event should
 be assumed to remain available outside the checkpoint. After the model returns the checkpoint, the
-runtime appends bounded `Recent User Messages` and `Recent Transcript`
-sections to the stored summary content.
+runtime renders bounded continuity history separately, dispatches compaction summary enrichment hooks,
+and then appends the continuity history to the stored summary content.
 
 Previous compaction summaries are rendered as existing checkpoints and are integrated into one updated
 checkpoint. The prompt tells the model not to copy previous checkpoints verbatim, to drop obsolete
@@ -110,9 +110,23 @@ run automatic compaction. They do not run Artifact, ExchangeFile, or ModelFile c
 scheduler-owned. They do not omit old tool outputs for context pressure. Adapter-native request guards
 run after lowering and do not mutate DB state.
 
+## Summary Enrichment Hooks
+
+After summary generation succeeds, the runtime dispatches the `on_compaction_summary` hook pipeline
+to active toolkit providers. The hook context receives the current summary and the rendered continuity
+history as separate strings, plus compaction/session metadata. Hook results may replace the current
+summary. Providers that want additive behavior append to `context.summary` and return the full
+replacement summary. Hook exceptions fail open: the runtime records hook failure telemetry and keeps
+the current summary so compaction can continue. Toolkit implementations are not required to register
+this hook.
+
+The hook pipeline may only replace the summary portion. The runtime always appends continuity history
+after the pipeline completes, so toolkit enrichment can be inserted between the model-generated
+checkpoint and continuity, while continuity remains last in the stored `compaction_summary` content.
+
 ## Continuity Events
 
-After summary generation succeeds, the event compactor appends bounded continuity excerpts to the
+After summary enrichment completes, the event compactor appends bounded continuity excerpts to the
 summary payload content. This is not a separate raw tail in the event transcript. Future model input
 starts at the summary event, and the continuity excerpts are part of that summary event's
 model-visible text.
@@ -147,9 +161,12 @@ the immediate shape of the recent interaction.
 - Auto and manual compaction present future model input as one `compaction_summary` head event.
 - The summary model receives the full selected model-input transcript, not a transcript with a
   protected tail removed.
+- Compaction summary hooks may replace only the summary portion; continuity history is appended after
+  hook dispatch completes.
 - The stored summary content includes a bounded `Recent User Messages` section from
   the last five user messages and a bounded `Recent Transcript` section from the last
   five completed model turns, using `turn_marker` boundaries.
+- Continuity sections are always the last sections in the stored compaction summary content.
 - Each continuity excerpt is rendered as readable model-visible transcript text, not event storage JSON.
 - Each continuity excerpt is independently truncated before it is embedded in the summary.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.

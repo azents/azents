@@ -321,6 +321,22 @@ class SessionHeadRepository(Protocol):
         ...
 
 
+class SummaryEnricher(Protocol):
+    """Compaction summary enrichment callback protocol."""
+
+    async def __call__(
+        self,
+        *,
+        summary: str,
+        continuity_history: str,
+        compaction_id: str,
+        reason: str | None,
+        covered_until_event_id: str,
+    ) -> str:
+        """Return enriched summary without continuity appended."""
+        ...
+
+
 class ManualCompactor(Protocol):
     """Manual event compaction protocol."""
 
@@ -334,6 +350,7 @@ class ManualCompactor(Protocol):
         summarize: "SummaryGenerator",
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
+        summary_enricher: SummaryEnricher | None = None,
     ) -> Event | None:
         """Run append-only compaction."""
         ...
