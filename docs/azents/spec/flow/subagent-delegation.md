@@ -7,6 +7,7 @@ owner: "@Hardtack"
 touches_domains: [agent, conversation]
 code_paths:
   - python/apps/azents/src/azents/engine/tools/subagent.py
+  - python/apps/azents/src/azents/engine/tools/todo.py
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
@@ -22,8 +23,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
-last_verified_at: 2026-06-16
-spec_version: 12
+last_verified_at: 2026-07-01
+spec_version: 13
 ---
 
 # Subagent Delegation Flow
@@ -47,7 +48,7 @@ Subagent composition is a pattern where a parent agent calls **another agent** s
 
 - **Subagent = single integrated tool** — even if multiple subagents are connected, LLM sees one `subagent` tool and selects target via `agent` argument ([`tools/subagent.py:153-170`](../../../python/apps/azents/src/azents/engine/tools/subagent.py)).
 - **1-hop cycle blocked** — DB-level CHECK constraint `ck_agent_subagents_no_self_ref` on `agent_subagents` prevents self-loop where `agent_id = subagent_id`. Multi-step cycle (A→B→A) is **not blocked** — it relies on operational role separation (`role=AGENT` vs `role=SUBAGENT`) and the fact that parent synchronously calls subagent. See `[parent-child-no-self-ref]` in [`spec/domain/agent.md` §4](../domain/agent.md).
-- **Share parent AgentSession sandbox** — after 2026-04-24 per-session sandbox cutover (ADR-0001), subagent reuses parent **session** sandbox. Subagent tool handler binds builtin toolkit sandbox scope to parent session with `set_sandbox_agent_id(parent_agent_id)` + `set_sandbox_session_id(parent_session_id)` (avoids cold start and lock contention). Tools that can destroy parent environment such as `shell_recreate_sandbox` are excluded with `_EXCLUDED_TOOL_NAMES` ([`tools/subagent.py:320-329`](../../../python/apps/azents/src/azents/engine/tools/subagent.py)).
+- **Share parent AgentSession sandbox** — after 2026-04-24 per-session sandbox cutover (ADR-0001), subagent reuses parent **session** sandbox. Subagent tool handler binds builtin toolkit sandbox scope to parent session with `set_sandbox_agent_id(parent_agent_id)` + `set_sandbox_session_id(parent_session_id)` (avoids cold start and lock contention). Tools that can destroy parent environment such as `shell_recreate_sandbox` are excluded with `_EXCLUDED_TOOL_NAMES` ([`tools/subagent.py:320-329`](../../../python/apps/azents/src/azents/engine/tools/subagent.py)). Todo is the exception: `TodoToolkit.configure_for_subagent()` binds Todo state to the subagent agent/session so delegated work does not mutate the parent visible Todo list.
 - **Current parent run context binding** — parent `subagent` tool is exposed through session-scoped toolkit wrapper, but actual unified tool handler is created every turn from `TurnContext`. Therefore parent `run_id`, `publish_event`, `check_stop`, and current actor use active run values and never reuse previous run values.
 - **AgentRuntime / AgentSession based execution** — Subagent uses target subagent's `AgentRuntime` and active `AgentSession`. There is no legacy `ConversationSession` parent row / `parent_session_id`. Only result is delivered to parent, while subagent detailed turns are stored independently in subagent `AgentSession`.
 - **Model snapshot / Toolkit Inherit** — subagent has its own main/lightweight model selection snapshot. Parent model runtime inheritance was removed. Toolkit inherit remains at agent row level (`agents.toolkit_inherit_mode ∈ {'none','all'}`). Detailed rationale is in [`adr/0063-agent-model-selection-snapshot.md`](../../adr/0063-agent-model-selection-snapshot.md), and toolkit rules are in [`spec/domain/toolkit.md` "Main-Only Toolkit" / "Toolkit Inherit (Subagent)" sections](../domain/toolkit.md).
@@ -110,7 +111,7 @@ sequenceDiagram
         Note right of TOOL: existing path — subagent own toolkits
     end
     TOOL->>TOOL: common resolve: sandbox=parent_domain_config,<br/>memory_enabled=False<br/>(tools/subagent.py:305-340)
-    TOOL->>TOOL: force Parent session sandbox:<br/>set_sandbox_agent_id(parent_agent_id) +<br/>set_sandbox_session_id(parent_session_id) +<br/>set_excluded_tools(BuiltinToolkit.SUBAGENT_EXCLUDED_TOOLS)
+    TOOL->>TOOL: apply subagent context adjustments:<br/>builtin sandbox uses parent session;<br/>todo state uses subagent session;<br/>excluded tools applied
     TOOL->>CT: append subagent_start (parent session)
     TOOL->>BK: publish subagent_start
     TOOL->>SE: engine.run(run_request, check_stop=wrapped)
@@ -162,7 +163,7 @@ See [`rdb/models/agent_session.py`](../../../python/apps/azents/src/azents/rdb/m
 Both sessions store events through event transcript repository.
 
 - **Parent session** — `subagent_start`, `subagent_end`, and parent's own `client_tool_call` / `client_tool_result`. Start/End are durable markers for UI progress display.
-- **Subagent session** — all turn events of subagent. They are not delivered to parent. Event runtime append path stores durably and broker publish emits to subagent session channel so UI can view subagent trace separately ([`tools/subagent.py:379-402`](../../../python/apps/azents/src/azents/engine/tools/subagent.py)).
+- **Subagent session** — all turn events of subagent. They are not delivered to parent. Event runtime append path stores durably and broker publish emits to subagent session channel so UI can view subagent trace separately ([`tools/subagent.py:379-402`](../../../python/apps/azents/src/azents/engine/tools/subagent.py)). Subagent Todo state is also keyed by the subagent agent/session, so `update_todo` inside the subagent does not update the parent session Todo preview.
 
 ### 5.3 File storage
 
@@ -185,6 +186,7 @@ Model source is always subagent's own Agent row. There is no parent model runtim
 | `system_prompt`, `model_parameters`, `workspace_id` | fixed | always based on subagent row | — |
 | `BuiltinToolkit` (shell/read/write, etc.) | subagent `shell_enabled`, forced `memory_enabled=False` | always based on subagent | — |
 | Worker dynamic inject (`subagent`, `background_task`, `schedule`) | worker engine injection presence | not injected in subagent resolve path | — |
+| Auto-bound Todo state | fixed | always subagent agent/session through `configure_for_subagent()` | — |
 
 Code references: model snapshot resolve [`engine/tools/subagent.py`](../../../python/apps/azents/src/azents/engine/tools/subagent.py), toolkit branch and main-only filter [`engine/tools/subagent.py`](../../../python/apps/azents/src/azents/engine/tools/subagent.py), resolve helper [`engine/run/resolve.py`](../../../python/apps/azents/src/azents/engine/run/resolve.py).
 
@@ -263,7 +265,13 @@ This section defines minimum coverage for future E2E / integration tests. Curren
 2. Call S as subagent tool from P.
 3. Verify: subagent engine runs with S's Sonnet snapshot and credentials (check model identifier in subagent event). P's model snapshot is not inherited at runtime.
 
-### 7.9 TC — interrupted during shutdown
+### 7.9 TC — independent subagent Todo
+
+1. Parent P has an existing Todo list.
+2. P delegates work to S, and S calls `update_todo`.
+3. Verify: S Todo state changes under S's `AgentSession`; P's Todo snapshot remains unchanged.
+
+### 7.10 TC — interrupted during shutdown
 
 1. Send worker SIGTERM while P's subagent call is in progress.
 2. Verify: parent tool execution is interrupted by `ShutdownInterruptError` and `client_tool_result` is not appended (no result row matching call_id). After restart, pending tool resume path (`spec/domain/agent.md` §3.1 step 5) reexecutes subagent tool. However, saved arguments do not contain `session_id`, so a new subagent session is created (§9 drift).
@@ -288,6 +296,7 @@ Mismatches/improvement candidates discovered when writing this spec:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-01 | 13 | Scoped subagent Todo state to the subagent agent/session instead of the parent session | current PR |
 | 2026-06-16 | 12 | Updated to subagent own model snapshot + toolkit inherit structure after ModelConfig runtime inherit removal | [`adr/0063-agent-model-selection-snapshot.md`](../../adr/0063-agent-model-selection-snapshot.md) |
 | 2026-04-20 | 1 | Initial creation (P8, issue #2792) | this PR |
 | 2026-04-24 | 2 | Added §1.3 inherit option summary, two model/toolkit source branches in §4 Sequence, new §5.5 Inherit branch table, three error cases in §6 (InvalidModelPair / ParentModelUnavailable / main-only filter), TC 7.7-7.9 (issue #2967) | `design/subagent-inherit.md` |
