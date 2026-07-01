@@ -17,7 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-07-01
-spec_version: 15
+spec_version: 16
 ---
 
 # Context Compaction
@@ -128,6 +128,8 @@ this hook.
 The hook pipeline may only replace the summary portion. The runtime always appends continuity history
 after the pipeline completes, so toolkit enrichment can be inserted between the model-generated
 checkpoint and continuity, while continuity remains last in the stored `compaction_summary` content.
+Todo Toolkit uses this hook to append a readable `Todo Snapshot` section when the session Todo list is
+non-empty; it does not render a Todo section for empty state.
 
 ## Continuity Events
 
@@ -168,6 +170,7 @@ the immediate shape of the recent interaction.
   protected tail removed.
 - Compaction summary hooks may replace only the summary portion; continuity history is appended after
   hook dispatch completes.
+- Todo summary enrichment appends a `Todo Snapshot` section only when Todo state is non-empty.
 - The stored summary content includes a bounded `Recent User Messages` section from
   the last five user messages and a bounded `Recent Transcript` section from the last
   five completed model turns, using `turn_marker` boundaries.

@@ -17,7 +17,7 @@ Details of all living specs. Synchronized from frontmatter.
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-06-29 | 7 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-05-10 | 1 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-01 | 41 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-01 | 42 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-06-29 | 5 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-06-29 | 23 |
 
@@ -31,7 +31,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Background Tool Call](flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-06-13 | 6 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
-| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-01 | 15 |
+| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-01 | 16 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-06-27 | 8 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |

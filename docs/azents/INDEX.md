@@ -20,7 +20,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-06-29 | 7 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-05-10 | 1 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-01 | 41 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-01 | 42 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-29 | 5 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-06-29 | 23 |
 
@@ -36,7 +36,7 @@ _8 documents_
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-06-13 | 6 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-01 | 15 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-01 | 16 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-06-27 | 8 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |

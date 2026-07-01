@@ -4,6 +4,10 @@ import json
 from unittest.mock import AsyncMock
 
 from azents.core.tools import SubagentToolkitContext, TurnContext
+from azents.engine.hooks.types import (
+    CompactionSummaryHookContext,
+    CompactionSummaryReplace,
+)
 from azents.engine.tools.todo import (
     TodoItem,
     TodoState,
@@ -12,7 +16,25 @@ from azents.engine.tools.todo import (
     UpdateTodoInput,
     apply_todo_update,
     render_todo_prompt,
+    render_todo_snapshot,
 )
+
+
+def _compaction_context(
+    summary: str = "Existing summary",
+) -> CompactionSummaryHookContext:
+    """Create a compaction summary hook context for Todo tests."""
+    return CompactionSummaryHookContext(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        run_id="run-1",
+        compaction_id="compaction-1",
+        reason="manual_command",
+        covered_until_event_id="event-1",
+        summary=summary,
+        continuity_history="Recent context",
+    )
 
 
 def test_replace_sets_full_todo_list() -> None:
@@ -58,6 +80,69 @@ def test_clear_resets_todo_list() -> None:
     cleared = apply_todo_update(current, UpdateTodoInput(operation="clear"))
 
     assert cleared.items == []
+
+
+def test_todo_snapshot_is_omitted_for_empty_state() -> None:
+    """Empty Todo state does not render a compaction snapshot section."""
+    assert render_todo_snapshot(TodoState()) is None
+
+
+def test_todo_snapshot_renders_current_items() -> None:
+    """Todo compaction snapshot renders readable current state."""
+    snapshot = render_todo_snapshot(
+        TodoState(
+            items=[
+                TodoItem(content="Review plan", status="completed"),
+                TodoItem(content="Implement change", status="in_progress"),
+            ]
+        )
+    )
+
+    assert snapshot == (
+        "## Todo Snapshot\n"
+        "\n"
+        "Session Todo state at compaction time:\n"
+        "- [completed] Review plan\n"
+        "- [in_progress] Implement change"
+    )
+
+
+async def test_todo_compaction_summary_hook_appends_snapshot() -> None:
+    """Todo hook appends Todo snapshot to the generated summary."""
+    store = AsyncMock()
+    store.load.return_value = TodoState(
+        items=[TodoItem(content="Current work", status="in_progress")]
+    )
+    toolkit = TodoToolkit(store=store, agent_id="agent-1", session_id="session-1")
+    hook = toolkit.hooks().get("on_compaction_summary")
+    assert hook is not None
+
+    result = await hook(_compaction_context("Existing summary\n"))
+
+    assert isinstance(result, CompactionSummaryReplace)
+    assert result.summary == (
+        "Existing summary\n"
+        "\n"
+        "## Todo Snapshot\n"
+        "\n"
+        "Session Todo state at compaction time:\n"
+        "- [in_progress] Current work"
+    )
+    store.load.assert_awaited_once_with("agent-1", "session-1")
+
+
+async def test_todo_compaction_summary_hook_omits_empty_state() -> None:
+    """Todo hook leaves summary unchanged when Todo is empty."""
+    store = AsyncMock()
+    store.load.return_value = TodoState()
+    toolkit = TodoToolkit(store=store, agent_id="agent-1", session_id="session-1")
+    hook = toolkit.hooks().get("on_compaction_summary")
+    assert hook is not None
+
+    result = await hook(_compaction_context())
+
+    assert result is None
+    store.load.assert_awaited_once_with("agent-1", "session-1")
 
 
 async def test_todo_toolkit_exposes_unprefixed_update_tool() -> None:
