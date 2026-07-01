@@ -167,9 +167,9 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         self._session_id = session_id
 
     def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
-        """Adjust Subagent execution to update parent session todo."""
-        self.set_agent_id(context.parent_agent_id)
-        self.set_session_id(context.parent_session_id)
+        """Adjust Subagent execution to update the subagent session todo."""
+        self.set_agent_id(context.subagent_id)
+        self.set_session_id(context.subagent_session_id)
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return current todo prompt and update_todo tool."""

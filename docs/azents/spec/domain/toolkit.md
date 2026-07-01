@@ -33,8 +33,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-06-29
-spec_version: 40
+last_verified_at: 2026-07-01
+spec_version: 41
 ---
 
 # Toolkit
@@ -307,7 +307,7 @@ Subagent can optionally inherit parent's DB-registered toolkits. Inherit is cont
 
 **Inherit target** — only DB-registered toolkits stored in `agent_toolkits` table. These are **not** inherited regardless of inherit mode:
 
-- **Auto-bound** — `BuiltinToolkit` (shell + file + grep, etc.; only memory part turned off for subagent with `memory_enabled` flag), `Schedule`. They are injected directly by worker engine rather than DB junction.
+- **Auto-bound** — `BuiltinToolkit` (shell + file + grep, etc.; only memory part turned off for subagent with `memory_enabled` flag), `Schedule`, and session-scoped `TodoToolkit`. They are injected directly by worker engine rather than DB junction. For subagent calls, Todo is rebound to the subagent agent/session so delegated `update_todo` calls do not mutate the parent Todo list.
 - **Worker dynamic inject** — `subagent`, `background_task`, etc. Not intentionally injected into subagent tool resolve to prevent recursion (A → B → A).
 
 **Design rationale**: "general-purpose subagent — subagent inheriting tools used by parent as-is" use case from issue [#2967](https://github.com/azents/azents/issues/2967). See [`design/subagent-inherit.md` § DP6](../../design/subagent-inherit.md) for Exclusive (no merge) rationale.
@@ -471,6 +471,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-01** (spec_version 41) — Clarified that subagent Todo state is scoped to the subagent agent/session.
 - **2026-06-28** (spec_version 37) — Promoted Runtime Exec Process Tools behavior: runtime shell command execution is exposed as `exec_command`/`write_stdin`, `bash` is removed from model-visible runtime shell tools, and process tool results preserve generic metadata.
 - **2026-06-13** (spec_version 23) — Split TodoToolkit into separate always-on toolkit and reflected `update_todo` tool plus chat live state exposure contract.
 - **2026-06-15** (spec_version 24) — Removed deleted external chat platform toolkit provider and auto-binding description; updated to current ToolkitType surface.

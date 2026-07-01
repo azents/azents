@@ -20,7 +20,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-06-29 | 7 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-05-10 | 1 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-06-29 | 40 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-01 | 41 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-29 | 5 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-06-29 | 23 |
 
@@ -42,7 +42,7 @@ _8 documents_
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-06-28 | 8 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-06-27 | 9 |
-| [Subagent Delegation Flow](spec/flow/subagent-delegation.md) | @Hardtack | 2026-06-16 | 12 |
+| [Subagent Delegation Flow](spec/flow/subagent-delegation.md) | @Hardtack | 2026-07-01 | 13 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |
 
 _14 documents_

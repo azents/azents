@@ -17,7 +17,7 @@ Details of all living specs. Synchronized from frontmatter.
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-06-29 | 7 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-05-10 | 1 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-06-29 | 40 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-01 | 41 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-06-29 | 5 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-06-29 | 23 |
 
@@ -37,5 +37,5 @@ Details of all living specs. Synchronized from frontmatter.
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-06-28 | 8 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-06-27 | 9 |
-| [Subagent Delegation Flow](flow/subagent-delegation.md) | @Hardtack | 2026-06-16 | 12 |
+| [Subagent Delegation Flow](flow/subagent-delegation.md) | @Hardtack | 2026-07-01 | 13 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |
