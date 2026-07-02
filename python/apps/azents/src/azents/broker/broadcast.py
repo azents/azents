@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 _CHANNEL_PREFIX = "azents:ws:"
 
 
+class WebSocketBroadcastPublishError(Exception):
+    """WebSocket broadcast publish failed."""
+
+
 class WebSocketBroadcast:
     """Worker to WebSocket event broadcast based on Redis Pub/Sub."""
 
@@ -32,7 +36,10 @@ class WebSocketBroadcast:
         """
         channel = f"{_CHANNEL_PREFIX}{session_id}"
         data = json.dumps(event_json, ensure_ascii=False)
-        await self._redis.publish(channel, data)
+        try:
+            await self._redis.publish(channel, data)
+        except (RedisConnectionError, OSError) as exc:
+            raise WebSocketBroadcastPublishError from exc
 
     @asynccontextmanager
     async def subscribe(

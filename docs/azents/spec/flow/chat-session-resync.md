@@ -10,10 +10,12 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/transport/chat.py
+  - python/apps/azents/src/azents/engine/tools/skill.py
+  - python/apps/azents/src/azents/worker/deps.py
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-06-13
-spec_version: 6
+last_verified_at: 2026-07-02
+spec_version: 7
 ---
 
 # Chat Session Resync
@@ -66,6 +68,7 @@ sequenceDiagram
 | `history_event_appended` | server → client | `session_id`, `event` | persisted event append. |
 | `live_event_upserted` | server → client | `session_id`, `event` | non-durable live event projection upsert. |
 | `live_event_removed` | server → client | `session_id`, `event_id` | non-durable live projection removal. |
+| `input_actions_updated` | server → client | `session_id` | composer action definitions changed; client reloads `/actions`. |
 | `todo_state_changed` | server → client | `todo` | session todo Toolkit State snapshot changed. |
 
 Client does not query history/live REST baseline before `subscribed` ack. If health check ack timeout or socket close occurs, switch to ticket refresh/reconnect path.
