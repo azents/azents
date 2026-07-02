@@ -717,6 +717,26 @@ class TestRuntimeToolkitUpdateContext:
         assert "present_file" in names
 
     @pytest.mark.asyncio
+    async def test_update_context_registers_instruction_context(self) -> None:
+        """Runtime instruction context is shared after update_context()."""
+        toolkit = _make_toolkit(
+            projects=[
+                _make_project(path="/workspace/agent/zeta"),
+                _make_project(path="/workspace/agent/alpha"),
+            ]
+        )
+
+        await toolkit.update_context(_make_context())
+
+        instruction_context = cast(Any, toolkit)._agents_context
+        assert instruction_context is not None
+        assert [project.path for project in instruction_context.projects] == [
+            "/workspace/agent/alpha",
+            "/workspace/agent/zeta",
+        ]
+        assert hasattr(instruction_context.file_storage, "get")
+
+    @pytest.mark.asyncio
     async def test_prompt_includes_runtime_files(self) -> None:
         """Check that prompt includes Runtime Files section."""
         toolkit = _make_toolkit()

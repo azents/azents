@@ -69,6 +69,7 @@ from azents.engine.tools.memory import (
 from azents.engine.tools.present_file import make_present_file_tool
 from azents.engine.tools.read_image import make_read_image_tool
 from azents.engine.tools.read_text import make_read_text_tool
+from azents.engine.tools.runtime_instruction_context import RuntimeInstructionContext
 from azents.engine.tools.runtime_io import (
     RuntimeFileListEntry,
     RuntimeFileStatResult,
@@ -92,7 +93,12 @@ from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.file_storage import GrepFileMatch, GrepLineMatch, GrepResult
+from azents.services.file_storage import (
+    FileStorage,
+    GrepFileMatch,
+    GrepLineMatch,
+    GrepResult,
+)
 from azents.services.model_file import ModelFileService
 from azents.services.runtime_storage_error import (
     RuntimeStorageError,
@@ -492,8 +498,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self._agent_runtime_repo = agent_runtime_repo
         self._project_repo = project_repo
         self._agents_store = agents_store
-        self._last_projects: list[SessionWorkspaceProject] = []
-        self._agents_file_storage = None
+        self._agents_context: RuntimeInstructionContext | None = None
 
     def set_peer_toolkits(self, peers: Sequence[RuntimeEnvProvider]) -> None:
         """Register peer toolkits that collect env during Shell execution.
@@ -658,11 +663,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         if self._excluded_tools:
             tools = [t for t in tools if t.spec.name not in self._excluded_tools]
 
-        projects = sorted(
-            await self._load_projects(session_id=self._session_id),
-            key=lambda project: project.path,
-        )
-        self.register_agents_context(file_storage=file_ss, projects=projects)
+        instruction_context = await self._make_instruction_context(file_ss)
+        self.register_agents_context(instruction_context)
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
     async def get_static_prompt(self, context: TurnContext) -> str:
@@ -675,6 +677,20 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             has_agent_id=bool(self._agent_id),
             user_id=context.user_id,
             projects=projects,
+        )
+
+    async def _make_instruction_context(
+        self,
+        file_storage: FileStorage,
+    ) -> RuntimeInstructionContext:
+        """Build shared Runtime context for instruction appendix providers."""
+        projects = sorted(
+            await self._load_projects(session_id=self._session_id),
+            key=lambda project: project.path,
+        )
+        return RuntimeInstructionContext(
+            file_storage=file_storage,
+            projects=tuple(projects),
         )
 
     async def _load_projects(
