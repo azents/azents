@@ -32,8 +32,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-01
-spec_version: 50
+last_verified_at: 2026-07-02
+spec_version: 51
 ---
 
 # Agent Execution Loop
@@ -147,6 +147,8 @@ Durable event kinds:
 - `system_reminder`
 - `goal_continuation`
 - `goal_updated`
+- `action_message`
+- `skill_loaded`
 - `goal_briefing`
 - `system_error`
 - `unknown_adapter_output`
@@ -195,7 +197,7 @@ provider tool call/result events with attachments or text payloads. These provid
 enter the client tool execution loop and do not by themselves continue the model turn.
 
 Synthetic model-visible reminders are durable events or control events whose model lowering role is
-`user`, even though they are not user-authored chat messages. The lowerer renders all
+`user`, even though they are not user-authored chat messages. The lowerer renders most
 reminder-like inputs through the same XML envelope:
 
 ```xml
@@ -225,6 +227,14 @@ renderer. The XML structure is fixed across reminder types: event-specific value
 `goal_objective`, `summary`, or `reason` are represented only as `<item name="...">` entries under
 `<data>`. Reminder types without event-specific data render an empty `<data />` element. UI must not
 render these reminders as user-authored bubbles.
+
+`skill_loaded` is the exception to the shared XML reminder envelope. A Skill turn action promotes a
+`skill_loaded` event followed by a normal `user_message` event when the action message is non-empty.
+The `skill_loaded` payload stores the exact Skill path, full body, content hash, source hints, and the
+original user action message. The Responses lowerer injects it as a user-role instruction that says
+the Skill has been loaded, requires the model to read and follow the embedded body, and points to the
+following normal user message for the request. The durable Skill `action_message` is audit data and is
+not actionable model input.
 
 ## 5. Tool Loop
 

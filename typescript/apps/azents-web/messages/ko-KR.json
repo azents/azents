@@ -1334,7 +1334,11 @@
       "nonRetryableTitle": "재시도하지 않고 실행 실패",
       "attempts": "실패한 시도: {failedAttemptCount} / {maxRetries}"
     },
-    "projectPickerSelectDirectory": "선택"
+    "projectPickerSelectDirectory": "선택",
+    "skillLoaded": {
+      "title": "Skill 로드됨: {name}",
+      "unknownSkill": "Skill"
+    }
   },
   "oauth": {
     "title": "인증",

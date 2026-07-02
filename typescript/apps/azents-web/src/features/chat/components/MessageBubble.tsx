@@ -22,6 +22,7 @@ import {
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import {
   IconAlertTriangle,
+  IconBook,
   IconCheck,
   IconChevronRight,
   IconClock,
@@ -619,6 +620,73 @@ function GoalControlMessage({ label }: { label: string }): React.ReactElement {
   );
 }
 
+function SkillLoadedControlMessage({
+  message,
+}: {
+  message: ChatMessage;
+}): React.ReactElement {
+  const t = useTranslations("chat");
+  const [opened, { toggle }] = useDisclosure(false);
+  const name = message.metadata?.name || t("skillLoaded.unknownSkill");
+  const path = message.metadata?.skill_path || "";
+
+  return (
+    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
+      <Stack gap={rem(6)} maw={rem(720)}>
+        <Group
+          gap={rem(6)}
+          c="dimmed"
+          wrap="nowrap"
+          role="button"
+          tabIndex={0}
+          style={{ cursor: "pointer", userSelect: "none" }}
+          onClick={toggle}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              toggle();
+            }
+          }}
+        >
+          <IconChevronRight
+            aria-hidden="true"
+            size={14}
+            stroke={1.8}
+            style={{
+              flexShrink: 0,
+              transform: opened ? "rotate(90deg)" : "none",
+              transition: "transform 160ms",
+            }}
+          />
+          <IconBook aria-hidden="true" size={14} stroke={1.8} />
+          <Text size="xs" fw={600} lineClamp={1} style={{ minWidth: 0 }}>
+            {t("skillLoaded.title", { name })}
+          </Text>
+          {path && (
+            <Text size="xs" c="dimmed" lineClamp={1} style={{ minWidth: 0 }}>
+              {path}
+            </Text>
+          )}
+        </Group>
+        <Collapse expanded={opened}>
+          <Paper withBorder radius="md" p="sm" bg="var(--mantine-color-body)">
+            <Stack gap="xs">
+              {path && (
+                <Text size="xs" c="dimmed" style={{ overflowWrap: "anywhere" }}>
+                  {path}
+                </Text>
+              )}
+              <ScrollArea.Autosize mah={rem(360)}>
+                <MarkdownContent>{message.content ?? ""}</MarkdownContent>
+              </ScrollArea.Autosize>
+            </Stack>
+          </Paper>
+        </Collapse>
+      </Stack>
+    </Box>
+  );
+}
+
 function InterruptedControlMessage(): React.ReactElement {
   const t = useTranslations("chat");
 
@@ -872,6 +940,14 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <Box opacity={dimmed ? 0.45 : 1}>
         <GoalControlMessage label={t("goalUpdatedIndicator")} />
+      </Box>
+    );
+  }
+
+  if (message.role === "skill_loaded") {
+    return (
+      <Box opacity={dimmed ? 0.45 : 1}>
+        <SkillLoadedControlMessage message={message} />
       </Box>
     );
   }

@@ -1334,7 +1334,11 @@
       "nonRetryableTitle": "再試行せずに実行が失敗しました",
       "attempts": "失敗した試行: {failedAttemptCount} / {maxRetries}"
     },
-    "projectPickerSelectDirectory": "選択"
+    "projectPickerSelectDirectory": "選択",
+    "skillLoaded": {
+      "title": "Skill loaded: {name}",
+      "unknownSkill": "Skill"
+    }
   },
   "oauth": {
     "title": "認証",

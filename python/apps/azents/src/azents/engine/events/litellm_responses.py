@@ -65,6 +65,7 @@ from azents.engine.events.types import (
     ProviderToolResultPayload,
     ReasoningPayload,
     RunMarkerPayload,
+    SkillLoadedPayload,
     SystemReminderPayload,
     TokenUsagePayload,
     ToolOutput,
@@ -94,6 +95,28 @@ def _format_goal_updated_event_reminder(payload: UserMessagePayload) -> str:
             resume_hint=payload.metadata.get("resume_hint"),
         )
     return format_goal_updated_reminder(payload.metadata.get("goal_objective"))
+
+
+def _format_skill_loaded_event(payload: SkillLoadedPayload) -> str:
+    """Render model-visible Skill body injection for a loaded Skill event."""
+    user_message_note = (
+        "The user's request is provided in the next user message."
+        if payload.user_message.strip()
+        else "No additional user request was provided."
+    )
+    return "\n".join(
+        [
+            f"Skill `{payload.name}` has been loaded.",
+            "Read and follow the following Skill body.",
+            user_message_note,
+            "",
+            f"Skill path: `{payload.skill_path}`",
+            "",
+            "<skill_body>",
+            payload.body,
+            "</skill_body>",
+        ]
+    )
 
 
 @runtime_checkable
@@ -307,6 +330,13 @@ class LiteLLMResponsesLowerer:
             return {
                 "role": "user",
                 "content": _format_goal_updated_event_reminder(event.payload),
+            }
+        if event.kind == EventKind.SKILL_LOADED and isinstance(
+            event.payload, SkillLoadedPayload
+        ):
+            return {
+                "role": "user",
+                "content": _format_skill_loaded_event(event.payload),
             }
         match event.payload:
             case UserMessagePayload(content=content, attachments=attachments):

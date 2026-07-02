@@ -58,6 +58,7 @@ from azents.engine.events.types import (
     ProviderToolResultPayload,
     ReasoningPayload,
     RunMarkerPayload,
+    SkillLoadedPayload,
     SystemReminderPayload,
     UserMessagePayload,
     build_native_compat_key,
@@ -143,6 +144,47 @@ class TestLiteLLMResponsesLowerer:
         assert request.input == [
             {"role": "user", "content": "hello"},
             {"type": "message"},
+        ]
+
+    def test_skill_loaded_event_injects_skill_body_before_user_message(self) -> None:
+        """Skill loaded events lower to model-visible Skill body injection."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        transcript = [
+            _event(
+                EventKind.SKILL_LOADED,
+                SkillLoadedPayload(
+                    name="review",
+                    skill_path="/workspace/agent/app/.claude/skills/review/SKILL.md",
+                    body="# Review\nFollow this checklist.",
+                    user_message="Review this PR",
+                    content_hash="hash-1",
+                    source_label="app",
+                    relative_hint=".claude/skills/review",
+                ),
+            ),
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(content="Review this PR"),
+            ),
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [
+            {
+                "role": "user",
+                "content": (
+                    "Skill `review` has been loaded.\n"
+                    "Read and follow the following Skill body.\n"
+                    "The user's request is provided in the next user message.\n\n"
+                    "Skill path: "
+                    "`/workspace/agent/app/.claude/skills/review/SKILL.md`\n\n"
+                    "<skill_body>\n"
+                    "# Review\nFollow this checklist.\n"
+                    "</skill_body>"
+                ),
+            },
+            {"role": "user", "content": "Review this PR"},
         ]
 
     def test_openai_prompt_cache_key_uses_session_scope(self) -> None:

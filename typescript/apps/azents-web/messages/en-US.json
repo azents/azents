@@ -1334,7 +1334,11 @@
       "nonRetryableTitle": "Run failed without retrying",
       "attempts": "Failed attempts: {failedAttemptCount} / {maxRetries}"
     },
-    "projectPickerSelectDirectory": "Select"
+    "projectPickerSelectDirectory": "Select",
+    "skillLoaded": {
+      "title": "Skill loaded: {name}",
+      "unknownSkill": "Skill"
+    }
   },
   "oauth": {
     "title": "Authorization",

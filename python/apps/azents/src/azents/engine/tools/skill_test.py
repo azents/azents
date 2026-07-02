@@ -12,7 +12,6 @@ from azents.engine.tools.skill import (
     SkillProjectionSnapshot,
     SkillProjectionState,
     make_load_skill_tool,
-    render_skill_action_reminder,
     render_skill_prompt,
     resolve_active_skill,
     skill_actions_from_snapshot,
@@ -197,16 +196,6 @@ class TestSkillAction:
             resolve_active_skill(state, skill_path="/workspace/agent/other/SKILL.md")
             is None
         )
-
-    def test_render_skill_action_reminder_uses_path(self) -> None:
-        """Reminder instructs the model to load the selected path."""
-        item = _skill_item()
-
-        reminder = render_skill_action_reminder(item, user_message="Review PR #1")
-
-        assert "The user selected the Skill `review`." in reminder
-        assert f"`{item.skill_path}`" in reminder
-        assert "Review PR #1" in reminder
 
 
 def test_projection_state_dump_is_json_safe() -> None:

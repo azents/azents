@@ -20,16 +20,16 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import (
     Event,
     FileOutputPart,
+    SkillLoadedPayload,
     SystemErrorPayload,
-    SystemReminderPayload,
 )
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.resolve import materialize_user_input_exchange_file_attachments
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.skill import (
+    SkillProjectionItem,
     SkillStateStore,
-    render_skill_action_reminder,
     resolve_active_skill,
 )
 from azents.rdb.deps import get_session_manager
@@ -499,22 +499,45 @@ class InputBufferService:
                     "Selected Skill is not available in the active projection.",
                 )
             ]
-        payload = SystemReminderPayload(
-            text=render_skill_action_reminder(item, user_message=buffer.content)
-        )
-        return [
+        loaded_payload = _skill_loaded_payload(item, user_message=buffer.content)
+        promoted = [
             _PromotedInputBuffer(
                 buffer=buffer,
                 user_message=None,
-                event_kind=EventKind.SYSTEM_REMINDER,
+                event_kind=EventKind.SKILL_LOADED,
                 payload=_JSON_OBJECT_ADAPTER.validate_python(
-                    payload.model_dump(mode="json")
+                    loaded_payload.model_dump(mode="json")
                 ),
-                external_id=f"{buffer.id}:skill_reminder",
+                external_id=f"{buffer.id}:skill_loaded",
             )
         ]
+        if buffer.content.strip():
+            user_message = await self._buffer_to_user_message(
+                buffer,
+                external_id=f"{buffer.id}:user_message",
+            )
+            promoted.append(
+                _PromotedInputBuffer(
+                    buffer=buffer,
+                    user_message=user_message,
+                    event_kind=EventKind.USER_MESSAGE,
+                    payload=_JSON_OBJECT_ADAPTER.validate_python(
+                        user_message.payload.model_dump(
+                            mode="json",
+                            exclude_none=True,
+                        )
+                    ),
+                    external_id=user_message.external_id,
+                )
+            )
+        return promoted
 
-    async def _buffer_to_user_message(self, buffer: InputBuffer) -> RunUserMessage:
+    async def _buffer_to_user_message(
+        self,
+        buffer: InputBuffer,
+        *,
+        external_id: str | None = None,
+    ) -> RunUserMessage:
         """Convert InputBuffer domain row to event run user message."""
         attachments = []
         file_parts = list(buffer.file_parts)
@@ -552,7 +575,7 @@ class InputBufferService:
             metadata=buffer.metadata,
             attachments=attachments,
             file_parts=file_parts,
-            external_id=buffer.id,
+            external_id=external_id or buffer.id,
             attachment_source="input_buffer",
         )
 
@@ -628,6 +651,23 @@ def _system_error_promoted_buffer(
             payload.model_dump(mode="json", exclude_none=True)
         ),
         external_id=f"{buffer.id}:system_error",
+    )
+
+
+def _skill_loaded_payload(
+    item: SkillProjectionItem,
+    *,
+    user_message: str,
+) -> SkillLoadedPayload:
+    """Return skill_loaded event payload for a Skill action side effect."""
+    return SkillLoadedPayload(
+        name=item.name,
+        skill_path=item.skill_path,
+        body=item.body,
+        user_message=user_message,
+        content_hash=item.content_hash,
+        source_label=item.source_label,
+        relative_hint=item.relative_hint,
     )
 
 

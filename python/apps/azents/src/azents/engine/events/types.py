@@ -406,6 +406,20 @@ class GoalBriefingPayload(BaseModel):
     )
 
 
+class SkillLoadedPayload(BaseModel):
+    """Loaded Skill payload."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(min_length=1, description="Skill display name")
+    skill_path: str = Field(min_length=1, description="Exact SKILL.md path")
+    body: str = Field(description="Full SKILL.md body")
+    user_message: str = Field(description="User-authored action input")
+    content_hash: str = Field(min_length=1, description="SHA-256 content hash")
+    source_label: str = Field(min_length=1, description="Compact source label")
+    relative_hint: str = Field(min_length=1, description="Compact relative path hint")
+
+
 class SystemReminderPayload(BaseModel):
     """System reminder payload."""
 
@@ -455,6 +469,7 @@ EventPayload = (
     | SubagentEndPayload
     | GoalBriefingPayload
     | ActionMessagePayload
+    | SkillLoadedPayload
     | SystemReminderPayload
     | SystemErrorPayload
     | UnknownAdapterOutputPayload
@@ -466,6 +481,7 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.GOAL_CONTINUATION: UserMessagePayload,
     EventKind.GOAL_UPDATED: UserMessagePayload,
     EventKind.ACTION_MESSAGE: ActionMessagePayload,
+    EventKind.SKILL_LOADED: SkillLoadedPayload,
     EventKind.GOAL_BRIEFING: GoalBriefingPayload,
     EventKind.ASSISTANT_MESSAGE: AssistantMessagePayload,
     EventKind.REASONING: ReasoningPayload,
