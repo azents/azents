@@ -38,6 +38,8 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/admins
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents
+  - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
+  - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/models
@@ -45,8 +47,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-06-18
-spec_version: 35
+last_verified_at: 2026-07-02
+spec_version: 36
 ---
 
 # Agent Domain Spec
@@ -163,6 +165,18 @@ GET /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{
 
 After verifying integration ownership and enabled state, returns normalized model candidate list. This endpoint is picker source for Agent/Workspace settings UI.
 
+### 2.4 Agent Memory management
+
+```http
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/memories?scope={agent|user}
+POST /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+PATCH /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+```
+
+These routes are Agent-scoped because Memory belongs to Agent. The Agent settings UI also updates `memory_enabled` through the normal Agent update endpoint. Detailed Memory visibility, conflict, and scope semantics are defined in [`memory.md`](memory.md).
+
 Public integration model listing API does not use materialized DB catalog cache. Even in production, request path calls integration-scoped dynamic listing adapter. Providers for which public catalog is enough, such as OpenAI, Anthropic, Google Gemini, ChatGPT OAuth, can use Models.dev based adapter; providers where exposed models differ by account/project/region, such as AWS Bedrock and Google Vertex AI, use integration credential/config-based provider API adapter. Listing result is not saved to DB and is used only for snapshot normalization at Agent/Workspace submit time.
 
 Deterministic fixture in local/test environment is development/QA support path activated only by integration name marker. General integration listing fetch failure is not modeled as service result failure variant and is propagated as original exception. Route code does not directly raise 5xx `HTTPException`; FastAPI/server error handling treats unexpected/internal failure as 500.
@@ -241,6 +255,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-02 | 36 | Added Agent Memory management routes and settings UI boundary |
 | 2026-06-18 | 35 | Corrected integration model listing fetch failure to propagate original exception instead of failure variant/5xx HTTPException |
 | 2026-06-18 | 34 | Reflected static catalog cache removal and integration-scoped dynamic listing restoration |
 | 2026-06-17 | 33 | Reflected contract that catalog cache listing excludes legacy provider model rows |
