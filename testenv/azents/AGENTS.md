@@ -2,7 +2,7 @@
 
 This directory is the test substrate for preparing local infrastructure, fixtures, and external prerequisite snapshots required by azents E2E tests. Product behavior verification belongs primarily in E2E tests. Feature QA plans and evidence belong in design, issue, PR, or report context. `testenv` is not a long-term verification catalog or an E2E wrapper, and it does not primarily own product behavior validation.
 
-Coding and operational conventions for this area live in `.claude/rules/testenv-azents-conventions.md`, including the no-direct-DB-write rule and live credential snapshot rules.
+Coding and operational conventions for this area live in `.claude/rules/testenv-conventions.md`, including the no-direct-DB-write rule and live credential snapshot rules.
 
 ## Event Preparation Path
 

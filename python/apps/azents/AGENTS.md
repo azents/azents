@@ -1,6 +1,6 @@
 # azents
 
-Coding conventions for `python/apps/azents/` live in `.claude/rules/python-azents-conventions.md` (plus the broader `python-conventions.md`).
+Coding conventions for `python/apps/azents/` live in `.claude/rules/python-conventions.md`.
 
 ## Commands
 

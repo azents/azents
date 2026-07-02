@@ -42,13 +42,11 @@ END_MARKER = "<!-- END_TABLE -->"
 SCOPE_CONFIG: dict[str, dict[str, str]] = {
     "global": {"index": "conventions.md"},
     "python": {"index": "python-conventions.md"},
-    "python-azents": {"index": "python-azents-conventions.md"},
     "typescript": {"index": "typescript-conventions.md"},
-    "typescript-azents-web": {"index": "typescript-azents-web-conventions.md"},
     "infra": {"index": "infra-conventions.md"},
     "github-actions": {"index": "github-actions-conventions.md"},
     "opencode": {"index": "opencode-conventions.md"},
-    "testenv-azents": {"index": "testenv-azents-conventions.md"},
+    "testenv": {"index": "testenv-conventions.md"},
 }
 
 

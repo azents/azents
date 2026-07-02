@@ -1,5 +1,5 @@
 ---
-title: "API routes call services, services call repositories, repositories own SQLAlchemy — never let routes call repositories directly or services touch SQLAlchemy. Applies to azents and azents, which both follow this layering."
+title: "API routes call services, services call repositories, repositories own SQLAlchemy — never let routes call repositories directly or services touch SQLAlchemy."
 ---
 
 # Layered Architecture, Don't Skip Layers

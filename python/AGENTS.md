@@ -1,6 +1,6 @@
 # Python Project Rules
 
-This file covers commands, structure, and workflow for Python code under `python/`. Coding conventions live in `.claude/rules/python-conventions.md` and `.claude/rules/python-azents-conventions.md`.
+This file covers commands, structure, and workflow for Python code under `python/`. Coding conventions live in `.claude/rules/python-conventions.md`.
 
 ## Commands
 
@@ -47,7 +47,7 @@ $ uv run pytest ./src
 
 1. Identify the subproject.
 2. Read existing code before editing.
-3. Check `.claude/rules/python-conventions.md` and `.claude/rules/python-azents-conventions.md` for applicable rules.
+3. Check `.claude/rules/python-conventions.md` for applicable rules.
 4. Run quality checks after each logical unit of work.
 5. Before completing backend changes, run the relevant Ruff, Pyright, and Pytest checks.
 

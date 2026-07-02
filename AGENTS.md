@@ -34,9 +34,9 @@ Azents is an AI agent platform. This repository contains the backend, runtime pr
 Detailed coding rules live under `.claude/conventions/` and are indexed by `.claude/rules/`.
 
 - Always start with `.claude/rules/conventions.md`.
-- For Python work, also read `.claude/rules/python-conventions.md` and `.claude/rules/python-azents-conventions.md` when relevant.
-- For TypeScript work, also read `.claude/rules/typescript-conventions.md` and `.claude/rules/typescript-azents-web-conventions.md` when relevant.
-- For test substrate work, read `.claude/rules/testenv-azents-conventions.md`.
+- For Python work, also read `.claude/rules/python-conventions.md` when relevant.
+- For TypeScript work, also read `.claude/rules/typescript-conventions.md` when relevant.
+- For test substrate work, read `.claude/rules/testenv-conventions.md`.
 - For infrastructure/Helm work, read `.claude/rules/infra-conventions.md`.
 - Do not bulk-read every convention body. Read only bodies whose title applies to the change.
 

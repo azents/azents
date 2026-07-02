@@ -1,10 +1,10 @@
 ---
-title: In azents RDB models, assign SQLAlchemy constraints and indexes to named class constants before listing them in `__table_args__` so schema objects are reusable and reviewable.
+title: In RDB models, assign SQLAlchemy constraints and indexes to named class constants before listing them in `__table_args__` so schema objects are reusable and reviewable.
 ---
 
 # RDB Index Constants
 
-azents RDB models keep table constraints and indexes visible as named class attributes before wiring them into `__table_args__`.
+RDB models keep table constraints and indexes visible as named class attributes before wiring them into `__table_args__`.
 
 - ALWAYS assign `sa.Index(...)` and `sa.UniqueConstraint(...)` objects to descriptive class constants such as `IX_WORKSPACE_ID` or `UQ_PROVIDER_MODEL_IDENTIFIER`.
 - ALWAYS list those constants in `__table_args__` instead of constructing schema objects inline.
