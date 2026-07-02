@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.model_file_refs import unique_model_file_ids
 from azents.engine.events.protocols import (
-    AdapterLowerer,
     AdapterOutputNormalizer,
     ClientToolExecutor,
     ModelAdapter,
@@ -123,8 +122,6 @@ class AgentRunExecutionRequest:
     session_id: str
     model: str
     run_index: int = 1
-    system_prompt: str | None = None
-    system_prompt_analysis: SystemPromptAnalysisPayload | None = None
     max_turns: int | None = None
 
 
@@ -149,9 +146,7 @@ class AgentRunExecution:
         post_lower_filter: PostLowerFilter,
         model_adapter: ModelAdapter,
         output_normalizer: AdapterOutputNormalizer,
-        model_call_preparer: ModelCallPreparer | None = None,
-        lowerer: AdapterLowerer | None = None,
-        tool_executor: ClientToolExecutor | None = None,
+        model_call_preparer: ModelCallPreparer,
         pre_lower_filter: PreLowerFilter | None = None,
         output_sink: OutputSink | None = None,
         phase_sink: PhaseSink | None = None,
@@ -162,16 +157,9 @@ class AgentRunExecution:
         session_repo: SessionHeadRepository | None = None,
     ) -> None:
         """Inject loop dependencies."""
-        if model_call_preparer is None and (lowerer is None or tool_executor is None):
-            raise ValueError(
-                "AgentRunExecution requires either model_call_preparer or both "
-                "lowerer and tool_executor."
-            )
-        self._lowerer = lowerer
         self._post_lower_filter = post_lower_filter
         self._model_adapter = model_adapter
         self._output_normalizer = output_normalizer
-        self._tool_executor = tool_executor
         self._pre_lower_filter = pre_lower_filter
         self._model_call_preparer = model_call_preparer
         self._output_sink = output_sink
@@ -260,8 +248,6 @@ class AgentRunExecution:
                 prepared = await self._prepare_model_call(
                     transcript=model_input_transcript,
                     model=request.model,
-                    system_prompt=request.system_prompt,
-                    system_prompt_analysis=request.system_prompt_analysis,
                 )
                 turn_end_callback = prepared.on_turn_end
                 turn_ended = False
@@ -415,28 +401,11 @@ class AgentRunExecution:
         *,
         transcript: Sequence[Event],
         model: str,
-        system_prompt: str | None,
-        system_prompt_analysis: SystemPromptAnalysisPayload | None,
     ) -> PreparedModelCall:
-        """Prepare model request with either static or turn-local dependencies."""
-        if self._model_call_preparer is not None:
-            return await self._model_call_preparer(
-                transcript=transcript,
-                model=model,
-            )
-        lowerer = self._lowerer
-        tool_executor = self._tool_executor
-        if lowerer is None or tool_executor is None:
-            raise RuntimeError("Static model-call dependencies are not configured.")
-        return PreparedModelCall(
-            native_request=lowerer.lower(
-                transcript,
-                model=model,
-                system_prompt=system_prompt,
-            ),
-            system_prompt_analysis=system_prompt_analysis,
-            tool_executor=tool_executor,
-            on_turn_end=None,
+        """Prepare turn-local model request and tool executor."""
+        return await self._model_call_preparer(
+            transcript=transcript,
+            model=model,
         )
 
     async def _stream_model(

@@ -12,6 +12,7 @@ from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.execution import (
     AgentRunExecution,
     AgentRunExecutionRequest,
+    ModelCallPreparer,
     PreparedModelCall,
     TurnEndReason,
 )
@@ -435,6 +436,34 @@ class _CancellingToolExecutor:
         self.cancelled_calls.append(call)
 
 
+def _model_call_preparer(
+    *,
+    lowerer: _Lowerer | _RecordingLowerer | None = None,
+    tool_executor: _ToolExecutor
+    | _FailingToolExecutor
+    | _CancellingToolExecutor
+    | None = None,
+    system_prompt: SystemPromptAnalysisPayload | None = None,
+) -> ModelCallPreparer:
+    """Create a turn-local model call preparer for tests."""
+    resolved_lowerer = lowerer or _Lowerer()
+    resolved_tool_executor = tool_executor or _ToolExecutor()
+
+    async def prepare_model_call(
+        *,
+        transcript: Sequence[Event],
+        model: str,
+    ) -> PreparedModelCall:
+        return PreparedModelCall(
+            native_request=resolved_lowerer.lower(transcript, model=model),
+            system_prompt_analysis=system_prompt,
+            tool_executor=resolved_tool_executor,
+            on_turn_end=None,
+        )
+
+    return prepare_model_call
+
+
 def _artifact() -> NativeArtifact:
     """Create native artifact for tests."""
     return NativeArtifact(
@@ -526,16 +555,6 @@ def _event(
     )
 
 
-def test_requires_static_or_turn_local_model_call_dependencies() -> None:
-    """Reject execution construction without any model-call dependencies."""
-    with pytest.raises(ValueError, match="model_call_preparer"):
-        AgentRunExecution(
-            post_lower_filter=_PostFilter(),
-            model_adapter=_ModelAdapter(),
-            output_normalizer=_Normalizer([_assistant_event()]),
-        )
-
-
 async def test_text_run_completes() -> None:
     """End as completed when there are no tool calls."""
     run_repo = _RunRepo()
@@ -546,11 +565,12 @@ async def test_text_run_completes() -> None:
         emitted_phases.append(phase)
 
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         phase_sink=collect_phase,
         run_repo=run_repo,
         transcript_repo=transcript_repo,
@@ -587,11 +607,12 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
         committed_event_counts_at_sink.append(session.commits[-1])
 
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         output_sink=output_sink,
         run_repo=run_repo,
         transcript_repo=transcript_repo,
@@ -625,11 +646,12 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
         sink_kinds.append([event.kind for event in appended])
 
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         output_sink=output_sink,
         run_repo=run_repo,
         transcript_repo=transcript_repo,
@@ -682,11 +704,14 @@ async def test_model_usage_is_appended_as_turn_marker(
         ),
     )
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()], usage=usage),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=_ToolExecutor(),
+            system_prompt=system_prompt,
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -699,7 +724,6 @@ async def test_model_usage_is_appended_as_turn_marker(
                 session_id="session-1",
                 model="gpt-5.1",
                 run_index=7,
-                system_prompt_analysis=system_prompt,
             ),
         )
 
@@ -735,11 +759,12 @@ async def test_model_input_uses_session_head_event_id() -> None:
     """After compaction, model input is fetched from session head."""
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=_RunRepo(),
         transcript_repo=transcript_repo,
         session_repo=_SessionRepo("2" * 32),
@@ -762,11 +787,12 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event(), _assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -793,7 +819,6 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -802,7 +827,9 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
                 [_assistant_event()],
             ]
         ),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -935,7 +962,6 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -943,7 +969,9 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
                 [_provider_tool_call_event()],
             ]
         ),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -972,7 +1000,6 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -980,7 +1007,9 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
                 [_provider_tool_call_event(), _assistant_event()],
             ]
         ),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1030,11 +1059,12 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
     )
 
     execution = AgentRunExecution(
-        lowerer=lowerer,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=lowerer, tool_executor=_ToolExecutor()
+        ),
         pre_lower_filter=_PreFilter([summary_event, run_marker]),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
@@ -1084,7 +1114,6 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
         ]
 
     execution = AgentRunExecution(
-        lowerer=lowerer,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1093,7 +1122,9 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
                 [_assistant_event()],
             ]
         ),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=lowerer, tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1129,11 +1160,12 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     transcript_repo.events.append(_tool_call_event())
     lowerer = _RecordingLowerer()
     execution = AgentRunExecution(
-        lowerer=lowerer,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=lowerer, tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1177,11 +1209,12 @@ async def test_active_orphan_tool_call_is_not_cancelled_before_lowering() -> Non
     transcript_repo.events.append(_tool_call_event())
     lowerer = _RecordingLowerer()
     execution = AgentRunExecution(
-        lowerer=lowerer,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=lowerer, tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1216,11 +1249,12 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
         ReasoningPayload(text="hidden", native_artifact=_artifact()),
     )
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([assistant, reasoning, _tool_call_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1250,11 +1284,12 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1280,11 +1315,12 @@ async def test_non_user_tool_cancellation_reraises_without_repair() -> None:
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
-        tool_executor=tool_executor,
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=tool_executor
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1315,11 +1351,12 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor(user_stop=True)
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
-        tool_executor=tool_executor,
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=tool_executor
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1365,11 +1402,12 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
         sink_kinds.append([event.kind for event in appended])
 
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         output_sink=output_sink,
         run_repo=run_repo,
         transcript_repo=transcript_repo,
@@ -1394,11 +1432,12 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
-        tool_executor=_FailingToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_FailingToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1431,11 +1470,12 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
 async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
     """File lifecycle cleanup is scheduler-owned, not run-loop-owned."""
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=_RunRepo(),
         transcript_repo=_TranscriptRepo(),
         session_repo=_SessionRepo(None),
@@ -1470,11 +1510,12 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     lowerer = _RecordingLowerer()
     hook = _PreModelLowerHook()
     execution = AgentRunExecution(
-        lowerer=lowerer,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=lowerer, tool_executor=_ToolExecutor()
+        ),
         run_repo=_RunRepo(),
         transcript_repo=transcript_repo,
         session_repo=_SessionRepo(None),
@@ -1501,11 +1542,12 @@ async def test_empty_model_output_propagates_for_retry() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1534,11 +1576,12 @@ async def test_blank_assistant_message_propagates_for_retry() -> None:
         AssistantMessagePayload(content=" ", native_artifact=_artifact()),
     )
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([blank_message]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1562,11 +1605,12 @@ async def test_model_call_error_propagates_for_retry() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([]),
-        tool_executor=_ToolExecutor(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
