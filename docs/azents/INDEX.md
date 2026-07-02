@@ -138,8 +138,9 @@ _14 documents_
 - [ADR-0086: Chat Action Messages](adr/0086-chat-action-messages.md)
 - [ADR-0086: New Session Project Selection](adr/0086-new-session-project-selection.md)
 - [ADR-0087: Filesystem Skill Projection Revisions](adr/0087-filesystem-skill-projection-revisions.md)
+- [ADR-0088: Agent Settings Pages and Memory UI](adr/0088-agent-settings-pages-and-memory-ui.md)
 
-_89 documents_
+_90 documents_
 
 ## Issues (Bug Tracking)
 
@@ -170,4 +171,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 326
+- Total documents: 328
