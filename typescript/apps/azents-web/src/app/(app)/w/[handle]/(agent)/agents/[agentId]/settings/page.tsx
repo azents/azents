@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { notFound } from "next/navigation";
-import { AgentSettingsPage } from "@/features/agents/AgentSettingsPage";
+import { AgentSettingsHubPage } from "@/features/agents/AgentSettingsHubPage";
 import { trpc } from "@/trpc/server";
 
 export default async function Page({
@@ -11,7 +11,7 @@ export default async function Page({
   const { handle, agentId } = await params;
   try {
     const agent = await trpc.agent.get({ handle, agentId });
-    return <AgentSettingsPage handle={handle} agent={agent} />;
+    return <AgentSettingsHubPage handle={handle} agent={agent} />;
   } catch (e) {
     if (e instanceof TRPCError && e.code === "NOT_FOUND") {
       notFound();

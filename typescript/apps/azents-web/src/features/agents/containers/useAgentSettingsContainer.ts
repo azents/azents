@@ -8,23 +8,26 @@
  */
 
 import { useAgentFormContainer } from "./useAgentFormContainer";
+import type { AgentFormSection } from "../components/AgentForm";
 import type { AgentFormContainerOutput } from "./useAgentFormContainer";
 import type { AgentResponse } from "@azents/public-client";
 
 export interface AgentSettingsContainerProps {
   handle: string;
   agent: AgentResponse;
+  section: AgentFormSection | "danger";
 }
 
 export type AgentSettingsContainerOutput = AgentFormContainerOutput & {
   handle: string;
   agent: AgentResponse;
+  section: AgentFormSection | "danger";
 };
 
 export function useAgentSettingsContainer(
   props: AgentSettingsContainerProps,
 ): AgentSettingsContainerOutput {
-  const { handle, agent } = props;
+  const { handle, agent, section } = props;
   const basePath = `/w/${handle}/agents/${agent.id}/settings`;
 
   const formOutput = useAgentFormContainer({
@@ -37,5 +40,6 @@ export function useAgentSettingsContainer(
     ...formOutput,
     handle,
     agent,
+    section,
   };
 }
