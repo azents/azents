@@ -1140,6 +1140,8 @@
       "cancelGoalEdit": "Annuler",
       "editGoal": "Modifier",
       "deleteGoal": "Supprimer",
+      "deleteGoalConfirmTitle": "Supprimer l’objectif ?",
+      "deleteGoalConfirmDescription": "Cela supprimera l’objectif actuel. La conversation et la liste de tâches seront conservées.",
       "goalStatus": {
         "active": "Actif",
         "paused": "En pause",

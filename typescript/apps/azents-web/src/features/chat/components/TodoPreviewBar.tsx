@@ -201,9 +201,9 @@ function GoalSection({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(goal.objective ?? "");
   const [submitting, setSubmitting] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<"pause" | "resume" | null>(
-    null,
-  );
+  const [confirmAction, setConfirmAction] = useState<
+    "delete" | "pause" | "resume" | null
+  >(null);
   const [resumeHint, setResumeHint] = useState("");
 
   const saveGoal = (): void => {
@@ -225,7 +225,13 @@ function GoalSection({
       return;
     }
     setSubmitting(true);
-    void onClearGoal().finally(() => setSubmitting(false));
+    void onClearGoal()
+      .then((ok) => {
+        if (ok) {
+          closeConfirm();
+        }
+      })
+      .finally(() => setSubmitting(false));
   };
 
   const closeConfirm = (): void => {
@@ -235,6 +241,10 @@ function GoalSection({
 
   const confirmGoalAction = (): void => {
     const action = confirmAction;
+    if (action === "delete") {
+      clearGoal();
+      return;
+    }
     if (action === "pause") {
       if (!onPauseGoal) {
         return;
@@ -264,6 +274,45 @@ function GoalSection({
 
   const canPause = status === "active";
   const canResume = status === "paused" || status === "blocked";
+
+  const confirmTitle = (): string => {
+    switch (confirmAction) {
+      case "delete":
+        return t("deleteGoalConfirmTitle");
+      case "pause":
+        return t("pauseGoalConfirmTitle");
+      case "resume":
+        return t("resumeGoalConfirmTitle");
+      case null:
+        return "";
+    }
+  };
+
+  const confirmDescription = (): string => {
+    switch (confirmAction) {
+      case "delete":
+        return t("deleteGoalConfirmDescription");
+      case "pause":
+        return t("pauseGoalConfirmDescription");
+      case "resume":
+        return t("resumeGoalConfirmDescription");
+      case null:
+        return "";
+    }
+  };
+
+  const confirmLabel = (): string => {
+    switch (confirmAction) {
+      case "delete":
+        return t("deleteGoal");
+      case "pause":
+        return t("pauseGoal");
+      case "resume":
+        return t("resumeGoal");
+      case null:
+        return "";
+    }
+  };
 
   return (
     <>
@@ -385,7 +434,7 @@ function GoalSection({
                   color="red"
                   loading={submitting}
                   disabled={!onClearGoal}
-                  onClick={clearGoal}
+                  onClick={() => setConfirmAction("delete")}
                 >
                   {t("deleteGoal")}
                 </Button>
@@ -397,20 +446,12 @@ function GoalSection({
       <Modal
         opened={confirmAction !== null}
         onClose={closeConfirm}
-        title={
-          confirmAction === "resume"
-            ? t("resumeGoalConfirmTitle")
-            : t("pauseGoalConfirmTitle")
-        }
+        title={confirmTitle()}
         centered
         size="sm"
       >
         <Stack gap="md">
-          <Text size="sm">
-            {confirmAction === "resume"
-              ? t("resumeGoalConfirmDescription")
-              : t("pauseGoalConfirmDescription")}
-          </Text>
+          <Text size="sm">{confirmDescription()}</Text>
           {confirmAction === "resume" && (
             <Textarea
               value={resumeHint}
@@ -430,8 +471,13 @@ function GoalSection({
             <Button size="xs" variant="subtle" onClick={closeConfirm}>
               {t("cancelGoalEdit")}
             </Button>
-            <Button size="xs" loading={submitting} onClick={confirmGoalAction}>
-              {confirmAction === "resume" ? t("resumeGoal") : t("pauseGoal")}
+            <Button
+              size="xs"
+              color={confirmAction === "delete" ? "red" : "blue"}
+              loading={submitting}
+              onClick={confirmGoalAction}
+            >
+              {confirmLabel()}
             </Button>
           </Group>
         </Stack>

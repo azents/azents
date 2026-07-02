@@ -1140,6 +1140,8 @@
       "cancelGoalEdit": "취소",
       "editGoal": "수정",
       "deleteGoal": "삭제",
+      "deleteGoalConfirmTitle": "Goal을 삭제할까요?",
+      "deleteGoalConfirmDescription": "현재 Goal을 삭제합니다. 대화와 할 일 목록은 유지됩니다.",
       "goalStatus": {
         "active": "진행 중",
         "paused": "일시정지",
