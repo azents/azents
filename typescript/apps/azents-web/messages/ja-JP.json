@@ -660,6 +660,28 @@
         "hostedToolsBadge": "ホスト型ツール",
         "toolCallingBadge": "ツール呼び出し",
         "syncingWithoutSnapshot": "カタログを同期中です。最初の snapshot が成功するとモデルが表示されます。"
+      },
+      "memorySettings": {
+        "title": "Agent メモリ",
+        "description": "この Agent が会話をまたいで参照できる永続メモリを確認・編集します。",
+        "enabledLabel": "メモリを有効化",
+        "agentScope": "Agent メモリ",
+        "userScope": "自分のメモリ",
+        "searchPlaceholder": "メモリを検索",
+        "create": "メモリを追加",
+        "createTitle": "メモリを追加",
+        "editTitle": "メモリを編集",
+        "typeLabel": "タイプ",
+        "nameLabel": "名前",
+        "descriptionLabel": "説明",
+        "contentLabel": "内容",
+        "cancel": "キャンセル",
+        "save": "保存",
+        "edit": "編集",
+        "delete": "削除",
+        "emptyTitle": "メモリが見つかりません",
+        "emptyDescription": "メモリを作成するか、検索条件を調整してください。",
+        "deleteConfirm": "メモリ「{name}」を削除しますか？この操作は元に戻せません。"
       }
     },
     "toolkits": {

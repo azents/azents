@@ -1,10 +1,11 @@
 import { TRPCError } from "@trpc/server";
 import { notFound } from "next/navigation";
+import { AgentMemorySettingsPage } from "@/features/agents/AgentMemorySettingsPage";
 import { AgentSettingsPage } from "@/features/agents/AgentSettingsPage";
 import { trpc } from "@/trpc/server";
 import type { AgentFormSection } from "@/features/agents/components/AgentForm";
 
-type SettingsSection = AgentFormSection | "danger";
+type SettingsSection = AgentFormSection | "memory" | "danger";
 
 function parseSection(value: string): SettingsSection | null {
   switch (value) {
@@ -12,6 +13,7 @@ function parseSection(value: string): SettingsSection | null {
     case "model":
     case "capabilities":
     case "admins":
+    case "memory":
     case "danger":
       return value;
     default:
@@ -31,6 +33,9 @@ export default async function Page({
   }
   try {
     const agent = await trpc.agent.get({ handle, agentId });
+    if (section === "memory") {
+      return <AgentMemorySettingsPage handle={handle} agent={agent} />;
+    }
     return (
       <AgentSettingsPage handle={handle} agent={agent} section={section} />
     );

@@ -524,3 +524,139 @@ class TestMemoryRepository:
 
         assert await repo.count(rdb_session, agent_id=agent_id, user_id=None) == 2
         assert await repo.count(rdb_session, agent_id=agent_id, user_id=user_id) == 1
+
+
+class TestMemoryRepositoryStrictCrud:
+    """Strict CRUD methods used by human Memory UI."""
+
+    async def test_create_and_get_by_id(self, rdb_session: AsyncSession) -> None:
+        """Create and fetch Memory by immutable ID."""
+        workspace_id = await _create_workspace(rdb_session, handle="mem-crud-get-ws")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            model_slug="mem-crud-get-model",
+            integration_name="mem-crud-get-int",
+        )
+        repo = MemoryRepository()
+
+        created = await repo.create(
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            create=MemoryCreate(
+                scope=MemoryScope.AGENT,
+                type="project",
+                name="strict-create",
+                description="Strict create",
+                content="Strict create content",
+            ),
+        )
+
+        found = await repo.get_by_id(rdb_session, created.id)
+        assert found is not None
+        assert found.id == created.id
+        assert found.name == "strict-create"
+
+    async def test_list_returns_full_memory_rows(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """List full Memory rows for one exact scope."""
+        workspace_id = await _create_workspace(rdb_session, handle="mem-crud-list-ws")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            model_slug="mem-crud-list-model",
+            integration_name="mem-crud-list-int",
+        )
+        repo = MemoryRepository()
+        await repo.create(
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            create=MemoryCreate(
+                scope=MemoryScope.AGENT,
+                type="project",
+                name="agent-memory",
+                description="Agent memory",
+                content="Agent content",
+            ),
+        )
+        await repo.create(
+            rdb_session,
+            agent_id=agent_id,
+            user_id="user-1",
+            create=MemoryCreate(
+                scope=MemoryScope.USER,
+                type="user",
+                name="user-memory",
+                description="User memory",
+                content="User content",
+            ),
+        )
+
+        rows = await repo.list(rdb_session, agent_id=agent_id, user_id=None)
+
+        assert len(rows) == 1
+        assert rows[0].name == "agent-memory"
+        assert rows[0].content == "Agent content"
+
+    async def test_update_by_id_renames_memory(self, rdb_session: AsyncSession) -> None:
+        """Update Memory by immutable ID, including changing name."""
+        workspace_id = await _create_workspace(rdb_session, handle="mem-crud-upd-ws")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            model_slug="mem-crud-upd-model",
+            integration_name="mem-crud-upd-int",
+        )
+        repo = MemoryRepository()
+        created = await repo.create(
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            create=MemoryCreate(
+                scope=MemoryScope.AGENT,
+                type="project",
+                name="before-name",
+                description="Before",
+                content="Before content",
+            ),
+        )
+
+        updated = await repo.update_by_id(
+            rdb_session,
+            created.id,
+            {"name": "after-name", "description": "After"},
+        )
+
+        assert updated is not None
+        assert updated.id == created.id
+        assert updated.name == "after-name"
+        assert updated.description == "After"
+
+    async def test_delete_by_id(self, rdb_session: AsyncSession) -> None:
+        """Delete Memory by immutable ID."""
+        workspace_id = await _create_workspace(rdb_session, handle="mem-crud-del-ws")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            model_slug="mem-crud-del-model",
+            integration_name="mem-crud-del-int",
+        )
+        repo = MemoryRepository()
+        created = await repo.create(
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            create=MemoryCreate(
+                scope=MemoryScope.AGENT,
+                type="project",
+                name="delete-by-id",
+                description="Delete",
+                content="Delete content",
+            ),
+        )
+
+        assert await repo.delete_by_id(rdb_session, created.id) is True
+        assert await repo.get_by_id(rdb_session, created.id) is None

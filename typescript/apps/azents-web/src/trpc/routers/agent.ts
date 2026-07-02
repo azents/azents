@@ -10,15 +10,20 @@
 import {
   agentV1AddAgentAdmin,
   agentV1CreateAgent,
+  agentV1CreateAgentMemory,
   agentV1DeleteAgent,
+  agentV1DeleteAgentMemory,
   agentV1FinalizeAvatar,
   agentV1GetAgent,
+  agentV1GetAgentMemory,
   agentV1ListAgentAdmins,
+  agentV1ListAgentMemories,
   agentV1ListAgents,
   agentV1RemoveAgentAdmin,
   agentV1RemoveAvatar,
   agentV1RequestAvatarUpload,
   agentV1UpdateAgent,
+  agentV1UpdateAgentMemory,
 } from "@azents/public-client";
 import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
@@ -26,6 +31,7 @@ import { publicProcedure, router } from "../init";
 
 const agentTypeEnum = z.enum(["public", "private"]);
 const agentRoleEnum = z.enum(["agent", "subagent"]);
+const memoryScopeEnum = z.enum(["agent", "user"]);
 
 const modelSelectionInputSchema = z
   .object({
@@ -287,6 +293,181 @@ export const agentRouter = router({
           404: "NOT_FOUND",
           409: "CONFLICT",
           422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  /** Agent memory list fetch */
+  listMemories: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        scope: memoryScopeEnum,
+        type: z.string().min(1).nullable().optional(),
+        query: z.string().nullable().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1ListAgentMemories({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          query: {
+            scope: input.scope,
+            type: input.type ?? null,
+            query: input.query ?? null,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  /** Agent memory detail fetch */
+  getMemory: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        memoryId: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1GetAgentMemory({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            memory_id: input.memoryId,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  /** Agent memory create */
+  createMemory: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        scope: memoryScopeEnum,
+        type: z.string().min(1).max(50),
+        name: z.string().min(1).max(255),
+        description: z.string().min(1),
+        content: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1CreateAgentMemory({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: {
+            scope: input.scope,
+            type: input.type,
+            name: input.name,
+            description: input.description,
+            content: input.content,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  /** Agent memory update */
+  updateMemory: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        memoryId: z.string().min(1),
+        type: z.string().min(1).max(50).optional(),
+        name: z.string().min(1).max(255).optional(),
+        description: z.string().min(1).optional(),
+        content: z.string().min(1).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1UpdateAgentMemory({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            memory_id: input.memoryId,
+          },
+          body: {
+            type: input.type,
+            name: input.name,
+            description: input.description,
+            content: input.content,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  /** Agent memory delete */
+  deleteMemory: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        memoryId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await agentV1DeleteAgentMemory({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            memory_id: input.memoryId,
+          },
+          throwOnError: true,
+        });
+        return null;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
         });
       }
     }),

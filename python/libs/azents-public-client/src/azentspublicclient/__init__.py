@@ -180,6 +180,11 @@ __all__ = [
     "MCPOAuthConnectionStatus",
     "MCPOAuthConnectionSummaryResponse",
     "MeResponse",
+    "MemoryCreateRequest",
+    "MemoryListResponse",
+    "MemoryResponse",
+    "MemoryScope",
+    "MemoryUpdateRequest",
     "ModelBuiltInToolCapabilities",
     "ModelCapabilities",
     "ModelCatalogEntryListResponse",
@@ -444,6 +449,11 @@ from azentspublicclient.models.login_methods_response import LoginMethodsRespons
 from azentspublicclient.models.mcpo_auth_connection_status import MCPOAuthConnectionStatus as MCPOAuthConnectionStatus
 from azentspublicclient.models.mcpo_auth_connection_summary_response import MCPOAuthConnectionSummaryResponse as MCPOAuthConnectionSummaryResponse
 from azentspublicclient.models.me_response import MeResponse as MeResponse
+from azentspublicclient.models.memory_create_request import MemoryCreateRequest as MemoryCreateRequest
+from azentspublicclient.models.memory_list_response import MemoryListResponse as MemoryListResponse
+from azentspublicclient.models.memory_response import MemoryResponse as MemoryResponse
+from azentspublicclient.models.memory_scope import MemoryScope as MemoryScope
+from azentspublicclient.models.memory_update_request import MemoryUpdateRequest as MemoryUpdateRequest
 from azentspublicclient.models.model_built_in_tool_capabilities import ModelBuiltInToolCapabilities as ModelBuiltInToolCapabilities
 from azentspublicclient.models.model_capabilities import ModelCapabilities as ModelCapabilities
 from azentspublicclient.models.model_catalog_entry_list_response import ModelCatalogEntryListResponse as ModelCatalogEntryListResponse

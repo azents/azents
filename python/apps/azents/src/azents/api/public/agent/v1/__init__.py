@@ -4,15 +4,16 @@ Workspace-scoped Agent CRUD and Admin management endpoints.
 """
 
 from textwrap import dedent
-from typing import Annotated, assert_never
+from typing import Annotated, NoReturn, assert_never
 
 from azcommon.result import Failure, Success
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.repos.agent.data import NotFound
 from azents.repos.agent_subagent.data import DuplicateAgentSubagent
 from azents.repos.agent_subagent.data import NotFound as AgentSubagentNotFound
+from azents.repos.memory.data import MemoryScope
 from azents.services.agent import AgentService
 from azents.services.agent.data import (
     AdminNotFound,
@@ -38,6 +39,13 @@ from azents.services.agent_subagent.data import (
     InvalidAgentRole,
     SubagentNotFound,
 )
+from azents.services.memory import MemoryService
+from azents.services.memory.data import (
+    DuplicateMemory,
+    MemoryCreateInput,
+    MemoryNotFound,
+    MemoryUpdateInput,
+)
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
@@ -55,6 +63,10 @@ from .data import (
     AvatarFinalizeRequest,
     AvatarUploadRequest,
     AvatarUploadTicketResponse,
+    MemoryCreateRequest,
+    MemoryListResponse,
+    MemoryResponse,
+    MemoryUpdateRequest,
 )
 
 router = APIRouter()
@@ -340,6 +352,246 @@ async def delete_agent(
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Not allowed to manage this agent.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+# --- Agent Memory ---
+
+
+def _raise_memory_agent_not_found() -> NoReturn:
+    """Raise a consistent Memory agent visibility error."""
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Agent not found.",
+    )
+
+
+def _raise_memory_not_found() -> NoReturn:
+    """Raise a consistent Memory visibility error."""
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Memory not found.",
+    )
+
+
+def _build_memory_update_input(
+    request_body: MemoryUpdateRequest,
+) -> MemoryUpdateInput:
+    """Convert an API request to the service input model."""
+    result = MemoryUpdateInput()
+    if "type" in request_body:
+        result["type"] = request_body["type"]
+    if "name" in request_body:
+        result["name"] = request_body["name"]
+    if "description" in request_body:
+        result["description"] = request_body["description"]
+    if "content" in request_body:
+        result["content"] = request_body["content"]
+    return result
+
+
+@router.get("/workspaces/{handle}/agents/{agent_id}/memories")
+async def list_agent_memories(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[MemoryService, Depends()],
+    *,
+    agent_id: str,
+    scope: Annotated[MemoryScope, Query(description="Memory scope")],
+    type: Annotated[str | None, Query(description="Memory type filter")] = None,
+    query: Annotated[str | None, Query(description="Search query")] = None,
+) -> MemoryListResponse:
+    """List memories for one Agent and scope.
+
+    Agent-scope Memory is readable by users who can view the Agent. User-scope
+    Memory lists only the current user's entries.
+    """
+    result = await service.list_by_agent(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+        scope=scope,
+        type=type,
+        query=query,
+    )
+    match result:
+        case Success(value):
+            return MemoryListResponse(
+                items=[MemoryResponse.convert_from(a) for a in value.items]
+            )
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                    _raise_memory_agent_not_found()
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}/memories",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_agent_memory(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[MemoryService, Depends()],
+    *,
+    agent_id: str,
+    request_body: MemoryCreateRequest,
+) -> MemoryResponse:
+    """Create Memory with strict conflict semantics."""
+    result = await service.create(
+        agent_id,
+        MemoryCreateInput(
+            scope=request_body.scope,
+            type=request_body.type,
+            name=request_body.name,
+            description=request_body.description,
+            content=request_body.content,
+        ),
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+    )
+    match result:
+        case Success(value):
+            return MemoryResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                    _raise_memory_agent_not_found()
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage agent-scope memory.",
+                    )
+                case DuplicateMemory():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Memory name already exists in this scope.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}")
+async def get_agent_memory(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[MemoryService, Depends()],
+    *,
+    agent_id: str,
+    memory_id: str,
+) -> MemoryResponse:
+    """Get one visible Memory by ID."""
+    result = await service.get_by_id(
+        agent_id,
+        memory_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+    )
+    match result:
+        case Success(value):
+            return MemoryResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                    _raise_memory_agent_not_found()
+                case MemoryNotFound():
+                    _raise_memory_not_found()
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.patch("/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}")
+async def update_agent_memory(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[MemoryService, Depends()],
+    *,
+    agent_id: str,
+    memory_id: str,
+    request_body: MemoryUpdateRequest,
+) -> MemoryResponse:
+    """Update one Memory by ID."""
+    result = await service.update_by_id(
+        agent_id,
+        memory_id,
+        _build_memory_update_input(request_body),
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+    )
+    match result:
+        case Success(value):
+            return MemoryResponse.convert_from(value)
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                    _raise_memory_agent_not_found()
+                case MemoryNotFound():
+                    _raise_memory_not_found()
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage agent-scope memory.",
+                    )
+                case DuplicateMemory():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Memory name already exists in this scope.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.delete(
+    "/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_agent_memory(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[MemoryService, Depends()],
+    *,
+    agent_id: str,
+    memory_id: str,
+) -> None:
+    """Delete one Memory by ID."""
+    result = await service.delete_by_id(
+        agent_id,
+        memory_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+    )
+    match result:
+        case Success():
+            return
+        case Failure(error):
+            match error:
+                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                    _raise_memory_agent_not_found()
+                case MemoryNotFound():
+                    _raise_memory_not_found()
+                case NotAdmin():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not allowed to manage agent-scope memory.",
                     )
                 case _:
                     assert_never(error)

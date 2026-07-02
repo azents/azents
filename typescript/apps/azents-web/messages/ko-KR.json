@@ -660,6 +660,28 @@
         "hostedToolsBadge": "호스티드 도구",
         "toolCallingBadge": "도구 호출",
         "syncingWithoutSnapshot": "카탈로그 동기화 중입니다. 첫 스냅샷이 성공하면 모델이 표시됩니다."
+      },
+      "memorySettings": {
+        "title": "Agent 메모리",
+        "description": "이 Agent가 대화 전반에서 다시 참고할 수 있는 영구 메모리를 확인하고 수정합니다.",
+        "enabledLabel": "메모리 사용",
+        "agentScope": "Agent 메모리",
+        "userScope": "내 메모리",
+        "searchPlaceholder": "메모리 검색",
+        "create": "메모리 추가",
+        "createTitle": "메모리 추가",
+        "editTitle": "메모리 수정",
+        "typeLabel": "유형",
+        "nameLabel": "이름",
+        "descriptionLabel": "설명",
+        "contentLabel": "내용",
+        "cancel": "취소",
+        "save": "저장",
+        "edit": "수정",
+        "delete": "삭제",
+        "emptyTitle": "메모리가 없습니다",
+        "emptyDescription": "메모리를 만들거나 검색 조건을 조정하세요.",
+        "deleteConfirm": "메모리 \"{name}\"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다."
       }
     },
     "toolkits": {

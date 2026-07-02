@@ -660,6 +660,28 @@
         "hostedToolsBadge": "Hosted tools",
         "toolCallingBadge": "Tool calling",
         "syncingWithoutSnapshot": "Catalog sync is running. Models will appear after the first successful snapshot."
+      },
+      "memorySettings": {
+        "title": "Agent Memory",
+        "description": "Inspect and edit persistent memories this agent can recall across conversations.",
+        "enabledLabel": "Enable Memory",
+        "agentScope": "Agent memory",
+        "userScope": "My memory",
+        "searchPlaceholder": "Search memories",
+        "create": "Add memory",
+        "createTitle": "Add memory",
+        "editTitle": "Edit memory",
+        "typeLabel": "Type",
+        "nameLabel": "Name",
+        "descriptionLabel": "Description",
+        "contentLabel": "Content",
+        "cancel": "Cancel",
+        "save": "Save",
+        "edit": "Edit",
+        "delete": "Delete",
+        "emptyTitle": "No memories found",
+        "emptyDescription": "Create a memory or adjust the search filter.",
+        "deleteConfirm": "Delete memory \"{name}\"? This cannot be undone."
       }
     },
     "toolkits": {

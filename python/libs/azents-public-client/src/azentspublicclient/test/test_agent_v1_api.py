@@ -40,6 +40,13 @@ class TestAgentV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_v1_create_agent_memory(self) -> None:
+        """Test case for agent_v1_create_agent_memory
+
+        Create Agent Memory
+        """
+        pass
+
     def test_agent_v1_create_agent_subagent(self) -> None:
         """Test case for agent_v1_create_agent_subagent
 
@@ -51,6 +58,13 @@ class TestAgentV1Api(unittest.TestCase):
         """Test case for agent_v1_delete_agent
 
         Delete Agent
+        """
+        pass
+
+    def test_agent_v1_delete_agent_memory(self) -> None:
+        """Test case for agent_v1_delete_agent_memory
+
+        Delete Agent Memory
         """
         pass
 
@@ -75,10 +89,24 @@ class TestAgentV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_v1_get_agent_memory(self) -> None:
+        """Test case for agent_v1_get_agent_memory
+
+        Get Agent Memory
+        """
+        pass
+
     def test_agent_v1_list_agent_admins(self) -> None:
         """Test case for agent_v1_list_agent_admins
 
         List Agent Admins
+        """
+        pass
+
+    def test_agent_v1_list_agent_memories(self) -> None:
+        """Test case for agent_v1_list_agent_memories
+
+        List Agent Memories
         """
         pass
 
@@ -121,6 +149,13 @@ class TestAgentV1Api(unittest.TestCase):
         """Test case for agent_v1_update_agent
 
         Update Agent
+        """
+        pass
+
+    def test_agent_v1_update_agent_memory(self) -> None:
+        """Test case for agent_v1_update_agent_memory
+
+        Update Agent Memory
         """
         pass
 

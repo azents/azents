@@ -6,18 +6,23 @@ Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**agent_v1_add_agent_admin**](AgentV1Api.md#agent_v1_add_agent_admin) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | Add Agent Admin
 [**agent_v1_create_agent**](AgentV1Api.md#agent_v1_create_agent) | **POST** /agent/v1/workspaces/{handle}/agents | Create Agent
+[**agent_v1_create_agent_memory**](AgentV1Api.md#agent_v1_create_agent_memory) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | Create Agent Memory
 [**agent_v1_create_agent_subagent**](AgentV1Api.md#agent_v1_create_agent_subagent) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents | Create Agent Subagent
 [**agent_v1_delete_agent**](AgentV1Api.md#agent_v1_delete_agent) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id} | Delete Agent
+[**agent_v1_delete_agent_memory**](AgentV1Api.md#agent_v1_delete_agent_memory) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Delete Agent Memory
 [**agent_v1_delete_agent_subagent**](AgentV1Api.md#agent_v1_delete_agent_subagent) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents/{agent_subagent_id} | Delete Agent Subagent
 [**agent_v1_finalize_avatar**](AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 [**agent_v1_get_agent**](AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
+[**agent_v1_get_agent_memory**](AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
 [**agent_v1_list_agent_admins**](AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
+[**agent_v1_list_agent_memories**](AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
 [**agent_v1_list_agent_subagents**](AgentV1Api.md#agent_v1_list_agent_subagents) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents | List Agent Subagents
 [**agent_v1_list_agents**](AgentV1Api.md#agent_v1_list_agents) | **GET** /agent/v1/workspaces/{handle}/agents | List Agents
 [**agent_v1_remove_agent_admin**](AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
 [**agent_v1_remove_avatar**](AgentV1Api.md#agent_v1_remove_avatar) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar | Remove Avatar
 [**agent_v1_request_avatar_upload**](AgentV1Api.md#agent_v1_request_avatar_upload) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/upload-url | Request Avatar Upload
 [**agent_v1_update_agent**](AgentV1Api.md#agent_v1_update_agent) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id} | Update Agent
+[**agent_v1_update_agent_memory**](AgentV1Api.md#agent_v1_update_agent_memory) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Update Agent Memory
 [**agent_v1_update_agent_subagent**](AgentV1Api.md#agent_v1_update_agent_subagent) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents/{agent_subagent_id} | Update Agent Subagent
 
 
@@ -61,9 +66,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
-    agent_admin_add_request = azentspublicclient.AgentAdminAddRequest() # AgentAdminAddRequest | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
+    agent_admin_add_request = azentspublicclient.AgentAdminAddRequest() # AgentAdminAddRequest |
 
     try:
         # Add Agent Admin
@@ -81,9 +86,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
- **agent_admin_add_request** | [**AgentAdminAddRequest**](AgentAdminAddRequest.md)|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
+ **agent_admin_add_request** | [**AgentAdminAddRequest**](AgentAdminAddRequest.md)|  |
 
 ### Return type
 
@@ -148,8 +153,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    handle = 'handle_example' # str | 
-    agent_create_request = azentspublicclient.AgentCreateRequest() # AgentCreateRequest | 
+    handle = 'handle_example' # str |
+    agent_create_request = azentspublicclient.AgentCreateRequest() # AgentCreateRequest |
 
     try:
         # Create Agent
@@ -167,12 +172,96 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
- **agent_create_request** | [**AgentCreateRequest**](AgentCreateRequest.md)|  | 
+ **handle** | **str**|  |
+ **agent_create_request** | [**AgentCreateRequest**](AgentCreateRequest.md)|  |
 
 ### Return type
 
 [**AgentResponse**](AgentResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**201** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_v1_create_agent_memory**
+> MemoryResponse agent_v1_create_agent_memory(agent_id, handle, memory_create_request)
+
+Create Agent Memory
+
+Create Memory with strict conflict semantics.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.memory_create_request import MemoryCreateRequest
+from azentspublicclient.models.memory_response import MemoryResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
+    memory_create_request = azentspublicclient.MemoryCreateRequest() # MemoryCreateRequest |
+
+    try:
+        # Create Agent Memory
+        api_response = api_instance.agent_v1_create_agent_memory(agent_id, handle, memory_create_request)
+        print("The response of AgentV1Api->agent_v1_create_agent_memory:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_create_agent_memory: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
+ **memory_create_request** | [**MemoryCreateRequest**](MemoryCreateRequest.md)|  |
+
+### Return type
+
+[**MemoryResponse**](MemoryResponse.md)
 
 ### Authorization
 
@@ -230,9 +319,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
-    agent_subagent_create_request = azentspublicclient.AgentSubagentCreateRequest() # AgentSubagentCreateRequest | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
+    agent_subagent_create_request = azentspublicclient.AgentSubagentCreateRequest() # AgentSubagentCreateRequest |
 
     try:
         # Create Agent Subagent
@@ -250,9 +339,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
- **agent_subagent_create_request** | [**AgentSubagentCreateRequest**](AgentSubagentCreateRequest.md)|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
+ **agent_subagent_create_request** | [**AgentSubagentCreateRequest**](AgentSubagentCreateRequest.md)|  |
 
 ### Return type
 
@@ -314,8 +403,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Delete Agent
@@ -331,8 +420,88 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_v1_delete_agent_memory**
+> agent_v1_delete_agent_memory(agent_id, memory_id, handle)
+
+Delete Agent Memory
+
+Delete one Memory by ID.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str |
+    memory_id = 'memory_id_example' # str |
+    handle = 'handle_example' # str |
+
+    try:
+        # Delete Agent Memory
+        api_instance.agent_v1_delete_agent_memory(agent_id, memory_id, handle)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_delete_agent_memory: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  |
+ **memory_id** | **str**|  |
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -392,9 +561,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    agent_subagent_id = 'agent_subagent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    agent_subagent_id = 'agent_subagent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Delete Agent Subagent
@@ -410,9 +579,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **agent_subagent_id** | **str**|  | 
- **handle** | **str**|  | 
+ **agent_id** | **str**|  |
+ **agent_subagent_id** | **str**|  |
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -478,9 +647,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
-    avatar_finalize_request = azentspublicclient.AvatarFinalizeRequest() # AvatarFinalizeRequest | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
+    avatar_finalize_request = azentspublicclient.AvatarFinalizeRequest() # AvatarFinalizeRequest |
 
     try:
         # Finalize Avatar
@@ -498,9 +667,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
- **avatar_finalize_request** | [**AvatarFinalizeRequest**](AvatarFinalizeRequest.md)|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
+ **avatar_finalize_request** | [**AvatarFinalizeRequest**](AvatarFinalizeRequest.md)|  |
 
 ### Return type
 
@@ -564,8 +733,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Get Agent
@@ -583,12 +752,95 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
 
 ### Return type
 
 [**AgentResponse**](AgentResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_v1_get_agent_memory**
+> MemoryResponse agent_v1_get_agent_memory(agent_id, memory_id, handle)
+
+Get Agent Memory
+
+Get one visible Memory by ID.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.memory_response import MemoryResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str |
+    memory_id = 'memory_id_example' # str |
+    handle = 'handle_example' # str |
+
+    try:
+        # Get Agent Memory
+        api_response = api_instance.agent_v1_get_agent_memory(agent_id, memory_id, handle)
+        print("The response of AgentV1Api->agent_v1_get_agent_memory:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_get_agent_memory: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  |
+ **memory_id** | **str**|  |
+ **handle** | **str**|  |
+
+### Return type
+
+[**MemoryResponse**](MemoryResponse.md)
 
 ### Authorization
 
@@ -647,8 +899,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # List Agent Admins
@@ -666,12 +918,103 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
 
 ### Return type
 
 [**AgentAdminListResponse**](AgentAdminListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_v1_list_agent_memories**
+> MemoryListResponse agent_v1_list_agent_memories(agent_id, handle, scope, type=type, query=query)
+
+List Agent Memories
+
+List memories for one Agent and scope.
+
+Agent-scope Memory is readable by users who can view the Agent. User-scope
+Memory lists only the current user's entries.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.memory_list_response import MemoryListResponse
+from azentspublicclient.models.memory_scope import MemoryScope
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
+    scope = azentspublicclient.MemoryScope() # MemoryScope | Memory scope
+    type = 'type_example' # str | Memory type filter (optional)
+    query = 'query_example' # str | Search query (optional)
+
+    try:
+        # List Agent Memories
+        api_response = api_instance.agent_v1_list_agent_memories(agent_id, handle, scope, type=type, query=query)
+        print("The response of AgentV1Api->agent_v1_list_agent_memories:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_list_agent_memories: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
+ **scope** | [**MemoryScope**](.md)| Memory scope |
+ **type** | **str**| Memory type filter | [optional]
+ **query** | **str**| Search query | [optional]
+
+### Return type
+
+[**MemoryListResponse**](MemoryListResponse.md)
 
 ### Authorization
 
@@ -728,8 +1071,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # List Agent Subagents
@@ -747,8 +1090,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -813,7 +1156,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    handle = 'handle_example' # str | 
+    handle = 'handle_example' # str |
 
     try:
         # List Agents
@@ -831,7 +1174,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -894,9 +1237,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    admin_workspace_user_id = 'admin_workspace_user_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    admin_workspace_user_id = 'admin_workspace_user_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Remove Agent Admin
@@ -912,9 +1255,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **admin_workspace_user_id** | **str**|  | 
- **handle** | **str**|  | 
+ **agent_id** | **str**|  |
+ **admin_workspace_user_id** | **str**|  |
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -978,8 +1321,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Remove Avatar
@@ -997,8 +1340,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -1064,9 +1407,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
-    avatar_upload_request = azentspublicclient.AvatarUploadRequest() # AvatarUploadRequest | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
+    avatar_upload_request = azentspublicclient.AvatarUploadRequest() # AvatarUploadRequest |
 
     try:
         # Request Avatar Upload
@@ -1084,9 +1427,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
- **avatar_upload_request** | [**AvatarUploadRequest**](AvatarUploadRequest.md)|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
+ **avatar_upload_request** | [**AvatarUploadRequest**](AvatarUploadRequest.md)|  |
 
 ### Return type
 
@@ -1150,9 +1493,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
-    agent_update_request = azentspublicclient.AgentUpdateRequest() # AgentUpdateRequest | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
+    agent_update_request = azentspublicclient.AgentUpdateRequest() # AgentUpdateRequest |
 
     try:
         # Update Agent
@@ -1170,13 +1513,99 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **handle** | **str**|  | 
- **agent_update_request** | [**AgentUpdateRequest**](AgentUpdateRequest.md)|  | 
+ **agent_id** | **str**|  |
+ **handle** | **str**|  |
+ **agent_update_request** | [**AgentUpdateRequest**](AgentUpdateRequest.md)|  |
 
 ### Return type
 
 [**AgentResponse**](AgentResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_v1_update_agent_memory**
+> MemoryResponse agent_v1_update_agent_memory(agent_id, memory_id, handle, memory_update_request)
+
+Update Agent Memory
+
+Update one Memory by ID.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.memory_response import MemoryResponse
+from azentspublicclient.models.memory_update_request import MemoryUpdateRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str |
+    memory_id = 'memory_id_example' # str |
+    handle = 'handle_example' # str |
+    memory_update_request = azentspublicclient.MemoryUpdateRequest() # MemoryUpdateRequest |
+
+    try:
+        # Update Agent Memory
+        api_response = api_instance.agent_v1_update_agent_memory(agent_id, memory_id, handle, memory_update_request)
+        print("The response of AgentV1Api->agent_v1_update_agent_memory:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_update_agent_memory: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  |
+ **memory_id** | **str**|  |
+ **handle** | **str**|  |
+ **memory_update_request** | [**MemoryUpdateRequest**](MemoryUpdateRequest.md)|  |
+
+### Return type
+
+[**MemoryResponse**](MemoryResponse.md)
 
 ### Authorization
 
@@ -1234,10 +1663,10 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    agent_subagent_id = 'agent_subagent_id_example' # str | 
-    handle = 'handle_example' # str | 
-    agent_subagent_update_request = azentspublicclient.AgentSubagentUpdateRequest() # AgentSubagentUpdateRequest | 
+    agent_id = 'agent_id_example' # str |
+    agent_subagent_id = 'agent_subagent_id_example' # str |
+    handle = 'handle_example' # str |
+    agent_subagent_update_request = azentspublicclient.AgentSubagentUpdateRequest() # AgentSubagentUpdateRequest |
 
     try:
         # Update Agent Subagent
@@ -1255,10 +1684,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **agent_subagent_id** | **str**|  | 
- **handle** | **str**|  | 
- **agent_subagent_update_request** | [**AgentSubagentUpdateRequest**](AgentSubagentUpdateRequest.md)|  | 
+ **agent_id** | **str**|  |
+ **agent_subagent_id** | **str**|  |
+ **handle** | **str**|  |
+ **agent_subagent_update_request** | [**AgentSubagentUpdateRequest**](AgentSubagentUpdateRequest.md)|  |
 
 ### Return type
 
