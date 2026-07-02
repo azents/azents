@@ -23,6 +23,7 @@ from azents.engine.tooling.toolkit_state import (
     ToolkitStateModel,
     ToolkitStateStore,
 )
+from azents.engine.tools.runtime_instruction_context import RuntimeInstructionContext
 from azents.rdb.session import SessionManager
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.file_storage import FileStorage
@@ -204,8 +205,7 @@ class AgentsAppendixMixin:
     """Append AGENTS.md instructions to successful read tool results."""
 
     _agents_store: AgentsAppendixDedupeStateStore
-    _last_projects: list[SessionWorkspaceProject]
-    _agents_file_storage: FileStorage | None
+    _agents_context: RuntimeInstructionContext | None
     _runtime_agent_id: str
     _runtime_session_id: str
 
@@ -268,15 +268,15 @@ class AgentsAppendixMixin:
         target_path = refs[0].path
         if not _is_under_workspace_root(target_path):
             return None
-        file_storage = self._agents_file_storage
-        if file_storage is None:
+        instruction_context = self._agents_context
+        if instruction_context is None:
             return None
 
         dedupe = await self._load_appendix_dedupe_state()
         already_appended = set(dedupe.appended_paths)
         candidates = _agents_appendix_candidates_for_path(
             target_path,
-            self._last_projects,
+            instruction_context.projects,
             directory=refs[0].directory,
         )
         dedupe_skipped_count = sum(1 for path in candidates if path in already_appended)
@@ -285,7 +285,10 @@ class AgentsAppendixMixin:
             for path in candidates
             if path != target_path and path not in already_appended
         ]
-        files = await self._read_existing_agents_files(file_storage, candidates)
+        files = await self._read_existing_agents_files(
+            instruction_context.file_storage,
+            candidates,
+        )
         if not files:
             return None
 
@@ -306,15 +309,9 @@ class AgentsAppendixMixin:
             output_text=f"{outcome.output}\n\n{render_agents_appendix(files)}"
         )
 
-    def register_agents_context(
-        self,
-        *,
-        file_storage: FileStorage,
-        projects: Sequence[SessionWorkspaceProject],
-    ) -> None:
-        """Register runtime storage and sorted projects for read-result appendices."""
-        self._agents_file_storage = file_storage
-        self._last_projects = sorted(projects, key=lambda project: project.path)
+    def register_agents_context(self, context: RuntimeInstructionContext) -> None:
+        """Register runtime context for read-result appendices."""
+        self._agents_context = context
 
     async def _read_existing_agents_files(
         self,
