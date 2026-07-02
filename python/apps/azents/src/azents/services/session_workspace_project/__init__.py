@@ -15,6 +15,8 @@ from azents.core.enums import (
     RuntimeRunnerState,
     SessionWorkspaceProjectRegistrationRequestStatus,
 )
+from azents.engine.tools.deps import get_skill_state_store
+from azents.engine.tools.skill import SkillStateStore
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
@@ -174,6 +176,9 @@ class SessionWorkspaceProjectService:
         RuntimeRunnerOperationClient | None,
         Depends(get_runtime_runner_operation_client),
     ] = None
+    skill_store: Annotated[SkillStateStore | None, Depends(get_skill_state_store)] = (
+        None
+    )
 
     async def create_project(
         self,
@@ -506,6 +511,13 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
+            project = await self.repository.get_project_by_id(session, project_id)
+            if project is None or project.session_id != context.session_id:
+                return Failure(ProjectNotFound())
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                context.session_id,
+            )
             deleted = await self.repository.delete_project(
                 session,
                 project_id,
@@ -513,6 +525,14 @@ class SessionWorkspaceProjectService:
             )
             if not deleted:
                 return Failure(ProjectNotFound())
+            if self.skill_store is not None and agent_session is not None:
+                await self.skill_store.invalidate_project(
+                    context.agent_id,
+                    context.session_id,
+                    project_id=project.id,
+                    project_path=project.path,
+                    session_run_state=agent_session.run_state,
+                )
             await session.commit()
             return Success(None)
 

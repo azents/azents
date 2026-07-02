@@ -136,6 +136,14 @@ class InputActionDefinitionResponse(BaseModel):
         default=None,
         description="Non-authoritative availability hint",
     )
+    source_label: str | None = Field(
+        default=None,
+        description="Compact source label for display",
+    )
+    relative_hint: str | None = Field(
+        default=None,
+        description="Compact source-relative path hint for display",
+    )
 
 
 class InputActionListResponse(BaseModel):

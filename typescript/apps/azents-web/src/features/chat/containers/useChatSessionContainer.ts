@@ -160,10 +160,10 @@ function chatActionFromValue(value: unknown): ChatAction | null {
   }
   if (
     value.type === "skill" &&
-    "skill_id" in value &&
-    typeof value.skill_id === "string"
+    "skill_path" in value &&
+    typeof value.skill_path === "string"
   ) {
-    return { type: "skill", skill_id: value.skill_id };
+    return { type: "skill", skill_path: value.skill_path };
   }
   return null;
 }
@@ -2088,7 +2088,10 @@ export function useChatSessionContainer(
     isStopAvailable,
     isStopPending,
     onStopRequest,
-    inputActions: inputActionsQuery.data?.items ?? [],
+    inputActions: (inputActionsQuery.data?.items ?? []).flatMap((item) => {
+      const action = chatActionFromValue(item.action);
+      return action === null ? [] : [{ ...item, action }];
+    }),
     authorizationRequests,
     onAuthorizationComplete,
     tokenUsage,

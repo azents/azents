@@ -15,12 +15,23 @@ from azents.engine.events.action_messages import (
     ActionMessagePayload,
     ChatAction,
     GoalAction,
+    SkillAction,
 )
-from azents.engine.events.types import Event, FileOutputPart, SystemErrorPayload
+from azents.engine.events.types import (
+    Event,
+    FileOutputPart,
+    SystemErrorPayload,
+    SystemReminderPayload,
+)
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.resolve import materialize_user_input_exchange_file_attachments
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
+from azents.engine.tools.skill import (
+    SkillStateStore,
+    render_skill_action_reminder,
+    resolve_active_skill,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
@@ -398,6 +409,15 @@ class InputBufferService:
                         buffer=buffer,
                     )
                 )
+            case SkillAction():
+                promoted.extend(
+                    await self._promote_skill_action(
+                        session,
+                        session_id=session_id,
+                        buffer=buffer,
+                        action=action,
+                    )
+                )
             case _:
                 promoted.append(
                     _system_error_promoted_buffer(
@@ -451,6 +471,46 @@ class InputBufferService:
                 event_kind=EventKind.GOAL_UPDATED,
                 payload=_goal_updated_payload(snapshot, action="create"),
                 external_id=f"{buffer.id}:goal_updated",
+            )
+        ]
+
+    async def _promote_skill_action(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        buffer: InputBuffer,
+        action: SkillAction,
+    ) -> list[_PromotedInputBuffer]:
+        """Create durable reminder for one Skill action_message buffer."""
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            session_id,
+        )
+        if agent_session is None:
+            return [_system_error_promoted_buffer(buffer, "Session not found.")]
+        store = SkillStateStore(session_manager=self.session_manager)
+        state = await store.load(agent_session.agent_id, session_id)
+        item = resolve_active_skill(state, skill_path=action.skill_path)
+        if item is None:
+            return [
+                _system_error_promoted_buffer(
+                    buffer,
+                    "Selected Skill is not available in the active projection.",
+                )
+            ]
+        payload = SystemReminderPayload(
+            text=render_skill_action_reminder(item, user_message=buffer.content)
+        )
+        return [
+            _PromotedInputBuffer(
+                buffer=buffer,
+                user_message=None,
+                event_kind=EventKind.SYSTEM_REMINDER,
+                payload=_JSON_OBJECT_ADAPTER.validate_python(
+                    payload.model_dump(mode="json")
+                ),
+                external_id=f"{buffer.id}:skill_reminder",
             )
         ]
 

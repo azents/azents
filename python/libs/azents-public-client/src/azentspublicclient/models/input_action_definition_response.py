@@ -39,8 +39,10 @@ class InputActionDefinitionResponse(BaseModel):
     message: InputActionMessagePolicyResponse = Field(description="Message policy")
     attachments: InputActionAttachmentPolicyResponse = Field(description="Attachment policy")
     availability_hint: Optional[InputActionAvailabilityHintResponse] = None
+    source_label: Optional[StrictStr] = None
+    relative_hint: Optional[StrictStr] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "keyword", "label", "description", "action", "category", "message", "attachments", "availability_hint"]
+    __properties: ClassVar[List[str]] = ["id", "keyword", "label", "description", "action", "category", "message", "attachments", "availability_hint", "source_label", "relative_hint"]
 
     @field_validator('category')
     def category_validate_enum(cls, value):
@@ -112,6 +114,16 @@ class InputActionDefinitionResponse(BaseModel):
         if self.availability_hint is None and "availability_hint" in self.model_fields_set:
             _dict['availability_hint'] = None
 
+        # set to None if source_label (nullable) is None
+        # and model_fields_set contains the field
+        if self.source_label is None and "source_label" in self.model_fields_set:
+            _dict['source_label'] = None
+
+        # set to None if relative_hint (nullable) is None
+        # and model_fields_set contains the field
+        if self.relative_hint is None and "relative_hint" in self.model_fields_set:
+            _dict['relative_hint'] = None
+
         return _dict
 
     @classmethod
@@ -132,7 +144,9 @@ class InputActionDefinitionResponse(BaseModel):
             "category": obj.get("category"),
             "message": InputActionMessagePolicyResponse.from_dict(obj["message"]) if obj.get("message") is not None else None,
             "attachments": InputActionAttachmentPolicyResponse.from_dict(obj["attachments"]) if obj.get("attachments") is not None else None,
-            "availability_hint": InputActionAvailabilityHintResponse.from_dict(obj["availability_hint"]) if obj.get("availability_hint") is not None else None
+            "availability_hint": InputActionAvailabilityHintResponse.from_dict(obj["availability_hint"]) if obj.get("availability_hint") is not None else None,
+            "source_label": obj.get("source_label"),
+            "relative_hint": obj.get("relative_hint")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

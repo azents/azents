@@ -75,6 +75,7 @@ from azents.engine.tools.deps import (
     get_toolkit_registry,
 )
 from azents.engine.tools.goal import GoalToolkitProvider
+from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import (
     SubagentToolContext,
     create_unified_subagent_tool,
@@ -113,6 +114,7 @@ from azents.worker.deps import (
     get_builtin_toolkit_provider,
     get_command_registry,
     get_exchange_file_service,
+    get_skill_toolkit_provider,
     get_toolkit_repository,
     get_worker_broker,
     get_worker_config,
@@ -239,6 +241,9 @@ class RunExecutor:
     ]
     goal_toolkit_provider: Annotated[
         GoalToolkitProvider, Depends(get_goal_toolkit_provider)
+    ]
+    skill_toolkit_provider: Annotated[
+        SkillToolkitProvider, Depends(get_skill_toolkit_provider)
     ]
     broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)]
     failed_run_finalizer: Annotated[
@@ -439,6 +444,7 @@ class RunExecutor:
                 builtin_toolkit_provider=self.builtin_toolkit_provider,
                 todo_toolkit_provider=self.todo_toolkit_provider,
                 goal_toolkit_provider=self.goal_toolkit_provider,
+                skill_toolkit_provider=self.skill_toolkit_provider,
                 memory_enabled=agent_memory_enabled,
                 runtime_tools_enabled=runtime_tools_enabled,
             )
@@ -510,6 +516,7 @@ class RunExecutor:
                 builtin_toolkit_provider=self.builtin_toolkit_provider,
                 todo_toolkit_provider=self.todo_toolkit_provider,
                 goal_toolkit_provider=self.goal_toolkit_provider,
+                skill_toolkit_provider=self.skill_toolkit_provider,
                 web_url=self.worker_config.web_url,
                 oauth_secret_key=self.worker_config.oauth_secret_key,
                 mcp_proxy_url=self.worker_config.mcp_proxy_url,

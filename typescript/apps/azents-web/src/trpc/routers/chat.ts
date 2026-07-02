@@ -50,7 +50,7 @@ import { publicProcedure, router } from "../init";
 const inputActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("command"), name: z.string().min(1) }),
   z.object({ type: z.literal("goal") }),
-  z.object({ type: z.literal("skill"), skill_id: z.string().min(1) }),
+  z.object({ type: z.literal("skill"), skill_path: z.string().min(1) }),
 ]);
 
 export const chatRouter = router({

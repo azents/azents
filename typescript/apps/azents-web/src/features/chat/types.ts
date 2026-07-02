@@ -108,7 +108,7 @@ export type UserContentPart = TextPart | FilePart;
 export type ChatAction =
   | { type: "command"; name: string }
   | { type: "goal" }
-  | { type: "skill"; skill_id: string };
+  | { type: "skill"; skill_path: string };
 
 export interface ActionMessagePayload {
   action: ChatAction;
@@ -612,7 +612,14 @@ export interface PendingInputBuffer {
   status: "sending" | "pending" | "deleting";
 }
 
-export type InputActionDefinition = InputActionDefinitionResponse;
+export type InputActionDefinition = Omit<
+  InputActionDefinitionResponse,
+  "action"
+> & {
+  action: ChatAction;
+  source_label?: string | null;
+  relative_hint?: string | null;
+};
 
 /** WebSocket stop request */
 // --- UI status type ---

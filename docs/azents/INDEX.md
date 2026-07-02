@@ -137,8 +137,9 @@ _14 documents_
 - [ADR-0085: Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/0085-deterministic-tool-catalog-and-mcp-snapshots.md)
 - [ADR-0086: Chat Action Messages](adr/0086-chat-action-messages.md)
 - [ADR-0086: New Session Project Selection](adr/0086-new-session-project-selection.md)
+- [ADR-0087: Filesystem Skill Projection Revisions](adr/0087-filesystem-skill-projection-revisions.md)
 
-_88 documents_
+_89 documents_
 
 ## Issues (Bug Tracking)
 
@@ -169,4 +170,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 324
+- Total documents: 326

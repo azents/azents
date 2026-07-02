@@ -418,6 +418,19 @@ class AgentEngineAdapter:
                 on_turn_end=on_turn_end,
             )
 
+        async def on_auto_compaction_started() -> None:
+            await emit_queue.put(ephemeral(CompactionStarted(continuing=True)))
+            await hook_dispatcher.dispatch_observation(
+                run_hook_providers,
+                "on_session_compact",
+                SessionCompactHookContext(
+                    workspace_id=request.workspace_id,
+                    agent_id=request.agent_id,
+                    session_id=request.session_id,
+                    run_id=context.run_id,
+                ),
+            )
+
         pre_lower_filter = EventPreLowerFilterPipeline(
             [
                 EventAttachmentAvailabilityFilter(),
@@ -431,9 +444,7 @@ class AgentEngineAdapter:
                     ),
                     max_input_tokens=request.effective_max_input_tokens,
                     compaction_id_factory=lambda: uuid7().hex,
-                    on_compaction_started=lambda: emit_queue.put(
-                        ephemeral(CompactionStarted(continuing=True))
-                    ),
+                    on_compaction_started=on_auto_compaction_started,
                     summary_enricher=_compaction_summary_enricher(
                         request,
                         dispatcher=hook_dispatcher,

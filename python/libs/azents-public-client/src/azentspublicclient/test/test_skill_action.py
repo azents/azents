@@ -36,11 +36,11 @@ class TestSkillAction(unittest.TestCase):
         if include_optional:
             return SkillAction(
                 type = 'skill',
-                skill_id = '0'
+                skill_path = '0'
             )
         else:
             return SkillAction(
-                skill_id = '0',
+                skill_path = '0',
         )
         """
 

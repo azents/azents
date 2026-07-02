@@ -11296,6 +11296,30 @@
               }
             ],
             "description": "Non-authoritative availability hint"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label",
+            "description": "Compact source label for display"
+          },
+          "relative_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Hint",
+            "description": "Compact source-relative path hint for display"
           }
         },
         "type": "object",
@@ -13906,16 +13930,16 @@
             "title": "Type",
             "default": "skill"
           },
-          "skill_id": {
+          "skill_path": {
             "type": "string",
             "minLength": 1,
-            "title": "Skill Id",
-            "description": "Skill ID"
+            "title": "Skill Path",
+            "description": "Exact SKILL.md path"
           }
         },
         "type": "object",
         "required": [
-          "skill_id"
+          "skill_path"
         ],
         "title": "SkillAction",
         "description": "Skill invocation turn action."

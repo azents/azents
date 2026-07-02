@@ -52,6 +52,7 @@ from azents.engine.run.types import (
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
+from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -152,6 +153,7 @@ class SubagentToolContext:
     builtin_toolkit_provider: BuiltinToolkitProvider | None
     todo_toolkit_provider: TodoToolkitProvider | None
     goal_toolkit_provider: GoalToolkitProvider | None
+    skill_toolkit_provider: SkillToolkitProvider | None
     web_url: str
     oauth_secret_key: str
     mcp_proxy_url: str | None
@@ -389,6 +391,7 @@ def create_unified_subagent_tool(
                 builtin_toolkit_provider=builtin_provider,
                 todo_toolkit_provider=ctx.todo_toolkit_provider,
                 goal_toolkit_provider=ctx.goal_toolkit_provider,
+                skill_toolkit_provider=ctx.skill_toolkit_provider,
                 memory_enabled=False,
             )
 
