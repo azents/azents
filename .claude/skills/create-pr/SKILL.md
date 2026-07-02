@@ -1,78 +1,78 @@
 ---
 name: create-pr
-description: "현재 브랜치에서 GitHub PR을 생성한다. Proactively use when: (1) '/create-pr', (2) 'PR 만들어줘', 'PR 올려줘', 'open/create/submit a PR', (3) 이미 준비된 브랜치를 PR로 열 때. 코드 리뷰나 spec-review는 실행하지 않고 PR 생성에만 집중한다."
+description: "Create a GitHub PR from the current branch. Proactively use when: (1) '/create-pr', (2) requests such as 'create a PR', 'open a PR', 'submit a PR', (3) opening an already prepared branch as a PR. Focus only on PR creation; do not run code review or spec review."
 ---
 
-# PR 생성 (/create-pr)
+# Create PR (/create-pr)
 
-현재 브랜치를 GitHub PR로 만든다. 이 스킬은 PR 생성만 담당한다. 품질 게이트(`/code-review`)나 nointern living spec 게이트(`/spec-review`)가 필요한 출하 플로우에서는 `/ship-pr`이 이 스킬을 호출한다.
+Create a GitHub PR from the current branch. This skill is responsible only for PR creation. When a shipping flow needs quality gates such as `/code-review` or `/spec-review`, `/ship-pr` calls this skill.
 
-## 실행 순서
+## Steps
 
-### 1. 상태 확인
+### 1. Check status
 
-- 현재 브랜치를 확인한다: `git branch --show-current`.
-- 열린 PR이 이미 있는지 확인한다: `gh pr list --head "$(git branch --show-current)" --state open --json number,url`.
-- 열린 PR이 있으면 새 PR을 만들지 말고 기존 PR URL만 보고한다.
-- base branch는 기본 `main`으로 둔다. branch가 명확히 다른 base에서 갈라졌다면 upstream 또는 사용자 지시를 따른다.
-- `git log <base>..HEAD`와 `git status --short`가 모두 비어 있으면 PR 대상 변경이 없으므로 중단한다.
+- Check the current branch: `git branch --show-current`.
+- Check whether an open PR already exists: `gh pr list --head "$(git branch --show-current)" --state open --json number,url`.
+- If an open PR exists, do not create another PR; report the existing PR URL.
+- Use `main` as the default base branch. If the branch clearly forked from another base, follow the upstream base or the user's instruction.
+- If both `git log <base>..HEAD` and `git status --short` are empty, stop because there is nothing to open as a PR.
 
-### 2. 미커밋 변경 정리
+### 2. Prepare uncommitted changes
 
-`git status --short`가 비어 있으면 이 단계는 건너뛴다. 변경이 있으면 관련 파일만 stage해서 한 커밋으로 정리한다.
+If `git status --short` is empty, skip this step. If there are changes, stage only related files and create one focused commit.
 
-- `git add -A` 대신 PR에 포함할 파일 경로를 명시한다.
-- `.env`, credential, 큰 바이너리, 임시 scratch 파일처럼 보이는 파일은 stage 전에 사용자에게 확인한다.
-- 명확히 무관한 변경이 섞여 있으면 커밋 분리 여부를 사용자에게 묻는다.
-- 최근 커밋 스타일을 확인한다: `git log --oneline -5`.
-- 커밋 메시지는 conventional style을 기본으로 한다: `<type>(<scope>): <summary>`.
-- hook 실패 시 원인을 고치고 새 커밋을 만든다.
+- Specify the file paths to include in the PR instead of using `git add -A` blindly.
+- Ask before staging files that look like `.env`, credentials, large binaries, or temporary scratch files.
+- If clearly unrelated changes are mixed in, ask whether to split the commit.
+- Check recent commit style: `git log --oneline -5`.
+- Use conventional commit style by default: `<type>(<scope>): <summary>`.
+- If hooks fail, fix the cause and create a new commit.
 
 ### 3. Push
 
-- remote tracking이 없으면 `git push -u origin <branch>`를 사용한다.
-- fast-forward 가능한 일반 push는 자동으로 수행한다.
-- remote가 diverged되어 history rewrite가 필요한 경우 사용자 확인을 받는다.
-- 사용자의 요청 자체가 amend, rebase, squash, 커밋 정리처럼 history rewrite를 전제로 한 작업이면 `--force-with-lease`를 사용할 수 있다.
-- `--force`는 사용하지 않는다.
+- If remote tracking is missing, use `git push -u origin <branch>`.
+- Perform a normal push automatically when it is fast-forward safe.
+- If the remote diverged and history rewrite is required, ask the user first.
+- If the user's request explicitly implies history rewrite, such as amend, rebase, squash, or commit cleanup, `--force-with-lease` is allowed.
+- Do not use `--force`.
 
-### 4. PR 제목 작성
+### 4. Write the PR title
 
-PR title은 최근 commit/PR 스타일을 참고하되, 기본은 conventional style이다.
+Follow recent commit/PR style, defaulting to conventional style.
 
-예:
+Examples:
 
 ```text
-fix(nointern): stabilize chat session event ordering
-chore(opencode): tune DCP context nudges
+fix(runtime): preserve tool-call observation status
+chore(skills): remove stale project-specific skills
 ```
 
-### 5. PR 본문 작성
+### 5. Write the PR body
 
-PR body는 파일로 작성하고 `--body-file`로 전달한다. inline heredoc을 `gh pr create` 인자에 직접 넣지 않는다.
+Write the PR body to a file and pass it with `--body-file`. Do not put an inline heredoc directly into `gh pr create` arguments.
 
-PR title과 body의 언어는 현재 대화 언어를 따른다. 한국어로 대화하고 있었다면 한국어로, 영어로 대화하고 있었다면 영어로 쓴다. 사용자가 특정 언어를 요청하면 그 언어를 따른다.
+For Azents, write the PR title and body in English unless the user explicitly requests otherwise.
 
-#### Summary 원칙
+#### Summary principles
 
-- PR body는 `## Summary`로 시작한다.
-- 첫 문장은 이 PR의 정체를 바로 식별한다.
-- 배경, 동기, 구현 히스토리로 시작하지 않는다.
-- 파일 목록이나 diff 해설을 쓰지 않는다. Files changed 탭이 이미 그 역할을 한다.
-- 변경을 동작, 기능, 정책 단위로 설명한다.
-- 간단한 PR은 한 문장 또는 1-3개 bullet로 끝낸다.
-- 긴 `so ...`, `which ...` 문장은 action과 effect를 나눠서 쓴다.
+- Start the PR body with `## Summary`.
+- The first sentence should immediately identify what the PR is.
+- Do not start with background, motivation, or implementation history.
+- Do not list files or narrate the diff. The Files changed tab already does that.
+- Describe changes by behavior, feature, or policy.
+- For simple PRs, use one sentence or one to three bullets.
+- Split long `so ...` or `which ...` sentences into action and effect.
 
 Bad:
 
 ```markdown
 ## Summary
 
-기존 흐름에 문제가 있어서 필요했습니다.
+This was needed because the existing flow had problems.
 
-- engine_adapter.py를 변경함
-- model_factory.py를 변경함
-- 파일을 S3에 저장해서 parent agent가 나중에 읽을 수 있음
+- Changed engine_adapter.py
+- Changed model_factory.py
+- Saves files to S3 so the parent agent can read them later
 ```
 
 Good:
@@ -80,63 +80,63 @@ Good:
 ```markdown
 ## Summary
 
-nointern agent run에서 SDK builtin tool routing을 복구합니다.
+Restores SDK builtin tool routing for Azents agent runs.
 
-- builtin tool 요청을 provider별 adapter로 routing합니다.
-- 생성 이미지를 event history에 base64로 저장하지 않고 attachment로 보존합니다.
-- 생성 파일을 S3에 저장합니다. parent agent가 나중에 읽을 수 있습니다.
+- Routes builtin tool requests through provider-specific adapters.
+- Preserves generated images as attachments instead of storing base64 data in event history.
+- Stores generated files in S3. Parent agents can read them later.
 ```
 
-#### 선택적 block
+#### Optional blocks
 
-복잡한 PR에서만 필요한 block을 추가한다. block 이름은 제목처럼 단독 줄에 두고, 설명은 다음 문단이나 bullet에 쓴다.
+Add these blocks only for complex PRs. Put the block name on its own line, then explain in the following paragraph or bullets.
 
-- `**Background**`: 구현 히스토리가 아니라 왜 필요한지, 어떤 사용자/운영상 문제를 줄이는지, 어떤 판단 맥락이 있는지를 설명한다.
-- `**What changed**`: 파일별 목록이 아니라 동작, 기능, 정책 단위로 묶는다.
-- `**Review focus**`: 특히 확인해야 할 리스크, 경계조건, 의도적으로 하지 않은 일을 적는다.
-- `**Screenshots**`: UI/UX 변경이 있을 때만 넣는다.
-- `## Test Plan`: 검증 내용을 남기는 것이 PR 이해에 도움이 될 때만 넣는다.
-- `## Spec Impact`: spec 영향이 명확할 때만 넣는다. 확실하지 않으면 생략하거나 사용자에게 짧게 확인한다.
+- `**Background**`: Explain why the change is needed, what user or operational problem it reduces, and what decision context matters. Do not use this for implementation history.
+- `**What changed**`: Group by behavior, feature, or policy instead of listing files.
+- `**Review focus**`: Call out risks, boundaries, and intentionally omitted work.
+- `**Screenshots**`: Include only for UI/UX changes.
+- `## Test Plan`: Include only when validation details help reviewers understand the PR.
+- `## Spec Impact`: Include only when the spec impact is clear. If uncertain, omit it or ask the user briefly.
 
-예:
+Example:
 
 ```markdown
 ## Summary
 
-중단된 nointern agent run의 shutdown recovery를 복구합니다.
+Restores shutdown recovery for interrupted Azents agent runs.
 
 **Background**
 
-shutdown이 terminal failure로 기록되어 중단된 run을 resume할 수 없었습니다.
+A shutdown was recorded as a terminal failure, so interrupted runs could not be resumed.
 
 **What changed**
 
-- shutdown으로 중단된 run을 recovery 대상으로 보존합니다.
-- 명시적인 실패는 계속 terminal 상태로 유지합니다.
+- Preserves shutdown-interrupted runs as recovery candidates.
+- Keeps explicit failures in a terminal state.
 
 **Review focus**
 
-- shutdown 경로와 실제 실패 경로가 계속 올바르게 분리되는지 확인합니다.
+- Confirm that shutdown paths and real failure paths remain separated.
 ```
 
-### 6. PR 생성
+### 6. Create the PR
 
-본문 파일 내용을 확인한 뒤 PR을 만든다.
+Review the body file content, then create the PR.
 
 ```bash
 gh pr create --base <base> --head <branch> --title "<title>" --body-file <body-file>
 ```
 
-### 7. 결과 보고
+### 7. Report the result
 
 - PR URL
-- 새 커밋을 만들었는지 여부
-- push 방식: normal / upstream set / force-with-lease
-- 실행한 검증 또는 미실행 사유
-- `Spec Impact` 섹션을 넣었는지 여부
+- Whether a new commit was created
+- Push mode: normal / upstream set / force-with-lease
+- Validation that was run, or why validation was skipped
+- Whether a `Spec Impact` section was included
 
-## 안전장치
+## Safety guards
 
-- 기존 PR이 있으면 새 PR을 만들지 않는다.
-- secret, credential, 큰 바이너리 의심 파일은 사용자 확인 없이 commit하지 않는다.
-- destructive git 명령을 사용하지 않는다.
+- If an existing PR is open, do not create a new PR.
+- Do not commit suspicious secrets, credentials, or large binaries without user confirmation.
+- Do not use destructive git commands.

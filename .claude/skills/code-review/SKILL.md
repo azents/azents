@@ -1,135 +1,134 @@
 ---
 name: code-review
-description: "코드 리뷰 수행. 사용 시점: (1) '/code-review'로 현재 브랜치 변경사항 리뷰, (2) '/code-review PR #123'으로 특정 PR 리뷰, (3) '/code-review staged'로 staged changes 리뷰, (4) '코드 리뷰해줘', '리뷰 부탁'."
+description: "Perform code review. Use for: (1) '/code-review' to review the current branch changes, (2) '/code-review PR #123' to review a specific PR, (3) '/code-review staged' to review staged changes, (4) requests such as 'review this code' or 'please review'."
 ---
 
-# 코드 리뷰 (/code-review)
+# Code Review (/code-review)
 
-변경된 코드를 리뷰하고, 문제점과 개선사항을 심각도별로 리포트한다.
+Review changed code and report issues and improvements grouped by severity.
 
-**별도의 지시가 없으면 리뷰 결과를 항상 코드에 반영한다.** Critical/Warning은 즉시 수정하고, Suggestion/Consistency는 합리적이면 반영한다.
+**Unless instructed otherwise, always apply review findings to the code.** Fix Critical and Warning findings immediately. Apply Suggestion and Consistency findings when they are reasonable.
 
-## 워크플로우
+## Workflow
 
-### 1. 리뷰 대상 결정
+### 1. Determine the review target
 
-인자에 따라 diff 대상을 결정한다:
+Determine the diff target from the argument:
 
-| 인자         | 대상                                   |
-| ------------ | -------------------------------------- |
-| (없음)       | 상위 브랜치 대비 현재 브랜치 전체 diff |
-| `staged`     | staged changes (`git diff --cached`)   |
-| `last`       | 마지막 커밋 (`git diff HEAD~1`)        |
-| `PR #N`      | 해당 PR의 diff (`gh pr diff N`)        |
-| `<file ...>` | 지정된 파일만 상위 브랜치 대비 diff    |
+| Argument | Target |
+| --- | --- |
+| (none) | Full current branch diff against the parent branch |
+| `staged` | Staged changes (`git diff --cached`) |
+| `last` | Last commit (`git diff HEAD~1`) |
+| `PR #N` | Diff for that PR (`gh pr diff N`) |
+| `<file ...>` | Only the specified files, diffed against the parent branch |
 
-상위 브랜치는 다음 순서로 결정:
+Determine the parent branch in this order:
 
-1. `gh pr view --json baseRefName`으로 PR의 base branch 확인
-2. PR이 없으면 `git log --oneline --merges -1` 등으로 분기점 추정
-3. 그래도 불명확하면 `main` 사용
+1. Use `gh pr view --json baseRefName` to identify the PR base branch.
+2. If there is no PR, infer the branch point from sources such as `git log --oneline --merges -1`.
+3. If still unclear, use `main`.
 
-### 2. 컨텍스트 수집
+### 2. Collect context
 
-리뷰 전에 다음을 수집한다:
+Before reviewing, collect the following:
 
-**a. 프로젝트 규칙**
+**a. Project rules**
 
-- 변경된 파일 경로에서 프로젝트 루트까지 거슬러 올라가며 모든 `CLAUDE.md`, `AGENTS.md`, `.claude/CLAUDE.md`를 읽는다
-- 예: `python/apps/azents/src/handler.py` 변경 시 →
-  1. `python/apps/azents/CLAUDE.md` (또는 `AGENTS.md`, `.claude/CLAUDE.md`)
+- Read every applicable `CLAUDE.md`, `AGENTS.md`, and `.claude/CLAUDE.md` while walking from the changed file path up to the project root.
+- Example: when `python/apps/azents/src/handler.py` changes, read:
+  1. `python/apps/azents/CLAUDE.md` (or `AGENTS.md`, `.claude/CLAUDE.md`)
   2. `python/apps/CLAUDE.md`
   3. `python/CLAUDE.md`
-  4. 루트 `CLAUDE.md`
-- 하위 규칙이 상위 규칙보다 우선하되, 모든 레벨의 규칙을 리뷰 기준에 반영
+  4. Root `CLAUDE.md`
+- Lower-level rules override higher-level rules, but include every applicable level in the review criteria.
 
-**b. 기존 패턴 (일관성 검사용)**
+**b. Existing patterns for consistency checks**
 
-- 변경된 파일이 속한 앱을 식별 (예: `python/apps/azents/`, `typescript/apps/azents-web/`)
-- 해당 앱 내에서 변경 내용과 유사한 기존 구현을 탐색:
-  - API 엔드포인트 추가 → 기존 엔드포인트 패턴
-  - 서비스 추가 → 기존 서비스 클래스 패턴
-  - 리포지토리 추가 → 기존 리포지토리 패턴
-  - 테스트 추가 → 기존 테스트 패턴
-  - 등등
-- 네이밍 컨벤션, import 스타일, 에러 처리 방식, 디렉토리 구조 등을 파악
+- Identify the app that owns the changed file, for example `python/apps/azents/` or `typescript/apps/azents-web/`.
+- Search that app for existing implementations similar to the change:
+  - New API endpoint → existing endpoint patterns
+  - New service → existing service class patterns
+  - New repository → existing repository patterns
+  - New test → existing test patterns
+  - And similar cases
+- Identify naming conventions, import style, error handling, and directory structure.
 
-### 3. 리뷰 실행
+### 3. Run the review
 
-repo-level OpenCode 설정이 있는 환경에서는 **`code-review` subagent 프로필**을 우선 사용한다.
+When the runtime has repo-level OpenCode configuration, prefer the **`code-review` subagent profile**.
 
-- 정의 위치: `.opencode/agents/code-review.md`
-- 기본 모델: `openai/gpt-5.4`
+- Definition path: `.opencode/agents/code-review.md`
+- Default model: `openai/gpt-5.4`
 
-spawn 시 전달할 내용:
+Pass this content when spawning the subagent:
 
 ```
 Agent(subagent_type="code-review"):
-  - diff 내용 전달
-  - 프로젝트 규칙 전달
-  - 기존 패턴 참조 파일 경로 전달
-  - 아래 리뷰 기준과 출력 형식을 프롬프트에 포함
-  - grounding rules: 실제 코드에 근거한 지적만, 추측 금지
-  - dig deeper: second-order 실패, edge case, 롤백 위험 체크
+  - Provide the diff.
+  - Provide project rules.
+  - Provide reference file paths for existing patterns.
+  - Include the review criteria and output format below in the prompt.
+  - Grounding rules: only report findings grounded in actual code; do not speculate.
+  - Dig deeper: check second-order failures, edge cases, and rollback risk.
 ```
 
-해당 프로필이 없는 런타임에서는 `general-purpose` 를 fallback 으로 사용하되, 위 제약을
-프롬프트로 직접 전달한다.
+If that profile is unavailable in the runtime, fall back to `general-purpose` and pass the same constraints directly in the prompt.
 
-### 4. 리뷰 기준
+### 4. Review criteria
 
-우선순위 순으로 검토한다:
+Review in priority order:
 
-| 우선순위 | 카테고리          | 검토 내용                                                 |
-| -------- | ----------------- | --------------------------------------------------------- |
-| 1        | **정확성**        | 로직 오류, off-by-one, null/undefined 미처리, 타입 불일치 |
-| 2        | **보안**          | injection, auth 우회, 데이터 노출, OWASP top 10           |
-| 3        | **데이터 무결성** | race condition, 트랜잭션 경계, migration 안전성           |
-| 4        | **에러 처리**     | 실패 모드, 복구 경로, 에러 메시지 품질                    |
-| 5        | **성능**          | N+1 쿼리, 불필요한 연산, 메모리 누수                      |
-| 6        | **설계**          | 결합도, 책임 분리, 테스트 용이성                          |
-| 7        | **일관성**        | 같은 앱 내 기존 패턴과의 일치 여부                        |
-| 8        | **프로젝트 규칙** | CLAUDE.md/AGENTS.md 규칙 준수 (한글 주석, 영어 로그 등)   |
+| Priority | Category | What to check |
+| --- | --- | --- |
+| 1 | **Correctness** | Logic errors, off-by-one errors, missing null/undefined handling, type mismatches |
+| 2 | **Security** | Injection, auth bypasses, data exposure, OWASP Top 10 |
+| 3 | **Data integrity** | Race conditions, transaction boundaries, migration safety |
+| 4 | **Error handling** | Failure modes, recovery paths, error-message quality |
+| 5 | **Performance** | N+1 queries, unnecessary work, memory leaks |
+| 6 | **Design** | Coupling, separation of responsibilities, testability |
+| 7 | **Consistency** | Alignment with existing patterns in the same app |
+| 8 | **Project rules** | Compliance with CLAUDE.md/AGENTS.md rules, such as comment and log language requirements |
 
-**리뷰하지 않는 것:**
+**Do not review:**
 
-- 포매팅/스타일 (linter 영역)
-- 근거 없는 취향 차이
-- 타입체커/린터가 잡는 문제
-- 변경되지 않은 기존 코드의 문제
+- Formatting/style covered by linters
+- Ungrounded personal preferences
+- Issues already caught by the type checker or linter
+- Pre-existing problems in unchanged code
 
-### 5. 출력 형식
+### 5. Output format
 
-심각도별로 그룹핑하여 출력한다. 발견사항이 없는 심각도는 생략.
+Group findings by severity. Omit severities with no findings.
 
 ```
-## 코드 리뷰 결과
+## Code Review Result
 
-리뷰 대상: `feat/my-feature` vs `main` (15 files changed)
+Review target: `feat/my-feature` vs `main` (15 files changed)
 
 ### Critical
-- **file.py:42** — DB 트랜잭션 밖에서 외부 API 호출 후 commit
-  데이터 불일치 위험. API 호출을 트랜잭션 이후로 이동 필요.
+- **file.py:42** — External API call occurs inside the DB transaction before commit
+  This risks data inconsistency. Move the API call after the transaction commits.
 
 ### Warning
-- **service.ts:15** — catch 블록에서 에러를 삼키고 있음
-  디버깅 시 원인 추적 불가. logger.error 추가 권장.
+- **service.ts:15** — The catch block swallows the error
+  The root cause will be hard to trace during debugging. Add `logger.error`.
 
 ### Suggestion
-- **handler.py:88** — 동일 쿼리가 루프 안에서 반복 실행
-  N+1 쿼리 패턴. prefetch/batch 쿼리로 변경 권장.
+- **handler.py:88** — The same query runs repeatedly inside a loop
+  This is an N+1 query pattern. Use prefetching or a batch query.
 
 ### Consistency
-- **new_service.py:1** — 기존 서비스는 `BaseService` 상속 패턴 사용 (참고: `user_service.py`)
-  새 서비스도 동일 패턴 적용 권장.
+- **new_service.py:1** — Existing services inherit from `BaseService` (reference: `user_service.py`)
+  Use the same pattern for the new service.
 ```
 
-발견사항이 없으면:
+If there are no findings:
 
 ```
-## 코드 리뷰 결과
+## Code Review Result
 
-리뷰 대상: `feat/my-feature` vs `main` (3 files changed)
+Review target: `feat/my-feature` vs `main` (3 files changed)
 
-발견된 문제 없음.
+No issues found.
 ```
