@@ -25,12 +25,11 @@ Current scopes:
 | --- | --- |
 | `global` | Every file in the repo |
 | `python` | `python/**` |
-| `python-azents` | `python/apps/azents/**` |
 | `typescript` | `typescript/**` |
-| `typescript-azents-web` | `typescript/apps/azents-web/**` |
 | `infra` | `infra/**` |
 | `github-actions` | `.github/workflows/**` |
-| `testenv-azents` | `testenv/azents/**` |
+| `opencode` | `.opencode/agents/*.md` |
+| `testenv` | `testenv/**` |
 
 If no scope fits, **stop and ask the user** — adding a scope is a separate change (new entry in `SCOPE_CONFIG`, new index file in `.claude/rules/`, new directory in `.claude/conventions/`). When uncertain between two scopes, prefer the more specific one; when uncertain whether anything fits, prefer `global`.
 

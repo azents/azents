@@ -1,6 +1,6 @@
 # TypeScript Monorepo Rules
 
-This file covers commands, structure, and workflow for the TypeScript portion of Azents. Coding conventions live in `.claude/rules/typescript-conventions.md` and `.claude/rules/typescript-azents-web-conventions.md`.
+This file covers commands, structure, and workflow for the TypeScript portion of Azents. Coding conventions live in `.claude/rules/typescript-conventions.md`.
 
 Azents uses pnpm workspaces and Turborepo.
 

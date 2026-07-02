@@ -2,7 +2,7 @@
 
 Azents AI agent platform web frontend. Next.js 16 App Router + Mantine UI 8.
 
-Coding conventions for this app live in `.claude/rules/typescript-azents-web-conventions.md` plus the broader `typescript-conventions.md`.
+Coding conventions for this app live in `.claude/rules/typescript-conventions.md`.
 
 ## Commands
 
@@ -58,4 +58,4 @@ Color mode utilities:
 4. Add container hooks under `containers/`.
 5. Add UI components under `components/`.
 6. Add a `[Name]Page.tsx` entry point.
-7. Import directly from `app/[name]/page.tsx`; do not use `index.ts` files. See `.claude/conventions/typescript-azents-web/no-index-files.md`.
+7. Import directly from `app/[name]/page.tsx`; do not use `index.ts` files. See `.claude/conventions/typescript/no-index-files.md`.
