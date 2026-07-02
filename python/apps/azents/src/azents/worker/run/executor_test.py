@@ -31,6 +31,7 @@ from azents.engine.run.errors import ModelCallError, UserVisibleRuntimeError
 from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
 from azents.engine.tools.builtin import BuiltinToolkitProvider
+from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
@@ -395,6 +396,7 @@ def _executor(
         failed_run_finalizer=cast(Any, failed_run_finalizer),
         background_registry=cast(BackgroundTaskRegistry, object()),
         builtin_toolkit_provider=cast(BuiltinToolkitProvider, object()),
+        claude_rules_toolkit_provider=cast(ClaudeRulesToolkitProvider, object()),
         todo_toolkit_provider=cast(TodoToolkitProvider, object()),
         goal_toolkit_provider=cast(GoalToolkitProvider, object()),
         skill_toolkit_provider=cast(SkillToolkitProvider, object()),

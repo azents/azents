@@ -172,6 +172,7 @@ def _make_ctx(
         publish_event=AsyncMock(),
         broker=MagicMock(),
         builtin_toolkit_provider=None,
+        claude_rules_toolkit_provider=None,
         todo_toolkit_provider=None,
         goal_toolkit_provider=None,
         skill_toolkit_provider=None,

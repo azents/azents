@@ -69,7 +69,10 @@ from azents.engine.tools.memory import (
 from azents.engine.tools.present_file import make_present_file_tool
 from azents.engine.tools.read_image import make_read_image_tool
 from azents.engine.tools.read_text import make_read_text_tool
-from azents.engine.tools.runtime_instruction_context import RuntimeInstructionContext
+from azents.engine.tools.runtime_instruction_context import (
+    RuntimeInstructionContext,
+    RuntimeInstructionContextStore,
+)
 from azents.engine.tools.runtime_io import (
     RuntimeFileListEntry,
     RuntimeFileStatResult,
@@ -499,6 +502,13 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self._project_repo = project_repo
         self._agents_store = agents_store
         self._agents_context: RuntimeInstructionContext | None = None
+        self._instruction_context_store: RuntimeInstructionContextStore | None = None
+
+    def set_instruction_context_store(
+        self, store: RuntimeInstructionContextStore
+    ) -> None:
+        """Register shared Runtime instruction context store."""
+        self._instruction_context_store = store
 
     def set_peer_toolkits(self, peers: Sequence[RuntimeEnvProvider]) -> None:
         """Register peer toolkits that collect env during Shell execution.
@@ -665,6 +675,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
         instruction_context = await self._make_instruction_context(file_ss)
         self.register_agents_context(instruction_context)
+        if self._instruction_context_store is not None:
+            self._instruction_context_store.set(instruction_context)
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
     async def get_static_prompt(self, context: TurnContext) -> str:

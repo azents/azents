@@ -51,6 +51,7 @@ from azents.engine.run.types import (
 )
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.builtin import BuiltinToolkitProvider
+from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
@@ -129,6 +130,7 @@ class SubagentToolContext:
     :param oauth_secret_key: OAuth HMAC signing key
     :param parent_runtime_domain_config: parent runtime domain settings
         injected into subagent
+    :param claude_rules_toolkit_provider: Claude rules provider for runtime reads
     :param shutdown_event: Worker shutdown event; no shutdown detection when None
     """
 
@@ -151,6 +153,7 @@ class SubagentToolContext:
     publish_event: Callable[[PublishedEvent], Awaitable[None]]
     broker: SessionBroker
     builtin_toolkit_provider: BuiltinToolkitProvider | None
+    claude_rules_toolkit_provider: ClaudeRulesToolkitProvider | None
     todo_toolkit_provider: TodoToolkitProvider | None
     goal_toolkit_provider: GoalToolkitProvider | None
     skill_toolkit_provider: SkillToolkitProvider | None
@@ -389,6 +392,11 @@ def create_unified_subagent_tool(
                 mcp_proxy_url=ctx.mcp_proxy_url,
                 runtime_domain_config=ctx.parent_runtime_domain_config,
                 builtin_toolkit_provider=builtin_provider,
+                claude_rules_toolkit_provider=(
+                    ctx.claude_rules_toolkit_provider
+                    if builtin_provider is not None
+                    else None
+                ),
                 todo_toolkit_provider=ctx.todo_toolkit_provider,
                 goal_toolkit_provider=ctx.goal_toolkit_provider,
                 skill_toolkit_provider=ctx.skill_toolkit_provider,
