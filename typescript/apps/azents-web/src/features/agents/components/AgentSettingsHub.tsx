@@ -15,6 +15,7 @@ import {
 } from "@mantine/core";
 import {
   IconAdjustments,
+  IconBrain,
   IconChevronRight,
   IconRobot,
   IconSettings,
@@ -162,6 +163,15 @@ export function AgentSettingsHub({
           value: agent.shell_enabled
             ? t("values.shellEnabled")
             : t("values.shellDisabled"),
+        },
+        {
+          href: `${basePath}/memory`,
+          icon: <IconBrain size={rem(18)} />,
+          label: t("memory.label"),
+          description: t("memory.description"),
+          value: agent.memory_enabled
+            ? t("values.enabled")
+            : t("values.disabled"),
         },
       ],
     },

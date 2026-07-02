@@ -10,11 +10,41 @@ from .data import (
     MemoryCreate,
     MemoryScope,
     MemorySummary,
+    MemoryUpdate,
 )
 
 
 class MemoryRepository:
     """Memory CRUD repository."""
+
+    async def create(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        user_id: str | None,
+        create: MemoryCreate,
+    ) -> Memory:
+        """Create a memory without upsert semantics.
+
+        :param session: Database session
+        :param agent_id: Agent ID
+        :param user_id: User ID (None=agent scope)
+        :param create: Create data
+        :return: Created Memory
+        """
+        rdb = RDBAgentMemory(
+            agent_id=agent_id,
+            user_id=user_id,
+            scope=create.scope.value,
+            type=create.type,
+            name=create.name,
+            description=create.description,
+            content=create.content,
+        )
+        session.add(rdb)
+        await session.flush()
+        return self._build(rdb)
 
     async def upsert(
         self,
@@ -102,6 +132,141 @@ class MemoryRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        memory_id: str,
+    ) -> Memory | None:
+        """Fetch memory by ID.
+
+        :param session: Database session
+        :param memory_id: Memory ID
+        :return: Memory or None
+        """
+        rdb = await session.get(RDBAgentMemory, memory_id)
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
+    async def list(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        user_id: str | None,
+        type: str | None = None,
+    ) -> list[Memory]:
+        """Fetch full memory list for one exact scope.
+
+        :param session: Database session
+        :param agent_id: Agent ID
+        :param user_id: User ID (None=agent scope)
+        :param type: Type to filter (optional)
+        :return: Memory list
+        """
+        stmt = sa.select(RDBAgentMemory).where(RDBAgentMemory.agent_id == agent_id)
+        if user_id is None:
+            stmt = stmt.where(RDBAgentMemory.user_id.is_(None))
+        else:
+            stmt = stmt.where(RDBAgentMemory.user_id == user_id)
+
+        if type is not None:
+            stmt = stmt.where(RDBAgentMemory.type == type)
+
+        stmt = stmt.order_by(RDBAgentMemory.type, RDBAgentMemory.name).limit(100)
+
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+        return [self._build(r) for r in rows]
+
+    async def search_full(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        user_id: str | None,
+        query: str,
+        type: str | None = None,
+    ) -> list[Memory]:
+        """Search full memory rows for one exact scope.
+
+        :param session: Database session
+        :param agent_id: Agent ID
+        :param user_id: User ID (None=agent scope)
+        :param query: Search string
+        :param type: Type to filter (optional)
+        :return: Memory list
+        """
+        pattern = f"%{query}%"
+        like_filter = sa.or_(
+            RDBAgentMemory.name.ilike(pattern),
+            RDBAgentMemory.description.ilike(pattern),
+            RDBAgentMemory.content.ilike(pattern),
+        )
+        stmt = sa.select(RDBAgentMemory).where(
+            RDBAgentMemory.agent_id == agent_id,
+            like_filter,
+        )
+        if user_id is None:
+            stmt = stmt.where(RDBAgentMemory.user_id.is_(None))
+        else:
+            stmt = stmt.where(RDBAgentMemory.user_id == user_id)
+
+        if type is not None:
+            stmt = stmt.where(RDBAgentMemory.type == type)
+
+        stmt = stmt.order_by(RDBAgentMemory.type, RDBAgentMemory.name).limit(100)
+
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+        return [self._build(r) for r in rows]
+
+    async def update_by_id(
+        self,
+        session: AsyncSession,
+        memory_id: str,
+        update: MemoryUpdate,
+    ) -> Memory | None:
+        """Update memory by ID.
+
+        :param session: Database session
+        :param memory_id: Memory ID
+        :param update: Partial update data
+        :return: Updated Memory or None when absent
+        """
+        rdb = await session.get(RDBAgentMemory, memory_id)
+        if rdb is None:
+            return None
+
+        if "type" in update:
+            rdb.type = update["type"]
+        if "name" in update:
+            rdb.name = update["name"]
+        if "description" in update:
+            rdb.description = update["description"]
+        if "content" in update:
+            rdb.content = update["content"]
+
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
+    async def delete_by_id(
+        self,
+        session: AsyncSession,
+        memory_id: str,
+    ) -> bool:
+        """Delete memory by ID.
+
+        :param session: Database session
+        :param memory_id: Memory ID
+        :return: Deletion flag (True=existed, False=absent)
+        """
+        result = await session.execute(
+            sa.delete(RDBAgentMemory).where(RDBAgentMemory.id == memory_id)
+        )
+        return result.rowcount > 0  # pyright: ignore[reportAttributeAccessIssue]  # SQLAlchemy CursorResult.rowcount returns int at runtime but is inferred as generic Result type
 
     async def list_summaries(
         self,

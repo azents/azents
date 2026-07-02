@@ -165,6 +165,11 @@ azentspublicclient/docs/LoginMethodsResponse.md
 azentspublicclient/docs/MCPOAuthConnectionStatus.md
 azentspublicclient/docs/MCPOAuthConnectionSummaryResponse.md
 azentspublicclient/docs/MeResponse.md
+azentspublicclient/docs/MemoryCreateRequest.md
+azentspublicclient/docs/MemoryListResponse.md
+azentspublicclient/docs/MemoryResponse.md
+azentspublicclient/docs/MemoryScope.md
+azentspublicclient/docs/MemoryUpdateRequest.md
 azentspublicclient/docs/ModelBuiltInToolCapabilities.md
 azentspublicclient/docs/ModelCapabilities.md
 azentspublicclient/docs/ModelCatalogEntryListResponse.md
@@ -406,6 +411,11 @@ azentspublicclient/models/login_methods_response.py
 azentspublicclient/models/mcpo_auth_connection_status.py
 azentspublicclient/models/mcpo_auth_connection_summary_response.py
 azentspublicclient/models/me_response.py
+azentspublicclient/models/memory_create_request.py
+azentspublicclient/models/memory_list_response.py
+azentspublicclient/models/memory_response.py
+azentspublicclient/models/memory_scope.py
+azentspublicclient/models/memory_update_request.py
 azentspublicclient/models/model_built_in_tool_capabilities.py
 azentspublicclient/models/model_capabilities.py
 azentspublicclient/models/model_catalog_entry_list_response.py
@@ -649,6 +659,11 @@ azentspublicclient/test/test_login_methods_response.py
 azentspublicclient/test/test_mcpo_auth_connection_status.py
 azentspublicclient/test/test_mcpo_auth_connection_summary_response.py
 azentspublicclient/test/test_me_response.py
+azentspublicclient/test/test_memory_create_request.py
+azentspublicclient/test/test_memory_list_response.py
+azentspublicclient/test/test_memory_response.py
+azentspublicclient/test/test_memory_scope.py
+azentspublicclient/test/test_memory_update_request.py
 azentspublicclient/test/test_model_built_in_tool_capabilities.py
 azentspublicclient/test/test_model_capabilities.py
 azentspublicclient/test/test_model_catalog_entry_list_response.py

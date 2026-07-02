@@ -660,6 +660,28 @@
         "hostedToolsBadge": "Outils hébergés",
         "toolCallingBadge": "Appel d’outils",
         "syncingWithoutSnapshot": "La synchronisation du catalogue est en cours. Les modèles apparaîtront après le premier snapshot réussi."
+      },
+      "memorySettings": {
+        "title": "Mémoire de l’agent",
+        "description": "Consultez et modifiez les mémoires persistantes que cet agent peut réutiliser entre les conversations.",
+        "enabledLabel": "Activer la mémoire",
+        "agentScope": "Mémoire de l’agent",
+        "userScope": "Ma mémoire",
+        "searchPlaceholder": "Rechercher des mémoires",
+        "create": "Ajouter une mémoire",
+        "createTitle": "Ajouter une mémoire",
+        "editTitle": "Modifier la mémoire",
+        "typeLabel": "Type",
+        "nameLabel": "Nom",
+        "descriptionLabel": "Description",
+        "contentLabel": "Contenu",
+        "cancel": "Annuler",
+        "save": "Enregistrer",
+        "edit": "Modifier",
+        "delete": "Supprimer",
+        "emptyTitle": "Aucune mémoire trouvée",
+        "emptyDescription": "Créez une mémoire ou ajustez le filtre de recherche.",
+        "deleteConfirm": "Supprimer la mémoire « {name} » ? Cette action est irréversible."
       }
     },
     "toolkits": {

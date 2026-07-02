@@ -13,6 +13,7 @@ from azents.core.agent import (
 )
 from azents.core.enums import AgentRole, AgentType
 from azents.repos.agent_subagent.data import SubagentToolkitInheritMode
+from azents.repos.memory.data import MemoryScope
 from azents.services.agent.data import (
     AgentAdminOutput,
     AgentOutput,
@@ -22,6 +23,7 @@ from azents.services.agent_subagent.data import (
     AgentSubagentOutput,
     AgentSubagentUpdateInput,
 )
+from azents.services.memory.data import MemoryOutput
 from azents.services.uploads.schema import UploadedImage
 
 
@@ -228,6 +230,64 @@ class AgentSubagentUpdateRequest(AgentSubagentUpdateInput):
     """AgentSubagent update request, for partial updates."""
 
     pass
+
+
+class MemoryResponse(BaseModel):
+    """Memory response."""
+
+    id: str
+    agent_id: str
+    user_id: str | None
+    scope: MemoryScope
+    type: str
+    name: str
+    description: str
+    content: str
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    @classmethod
+    def convert_from(cls, data: MemoryOutput) -> Self:
+        """Convert service model to a response object."""
+        return cls(
+            id=data.id,
+            agent_id=data.agent_id,
+            user_id=data.user_id,
+            scope=data.scope,
+            type=data.type,
+            name=data.name,
+            description=data.description,
+            content=data.content,
+            created_at=data.created_at,
+            updated_at=data.updated_at,
+        )
+
+
+class MemoryListResponse(BaseModel):
+    """Memory list response."""
+
+    items: list[MemoryResponse]
+
+
+class MemoryCreateRequest(BaseModel):
+    """Memory creation request."""
+
+    scope: MemoryScope = Field(description="Scope")
+    type: str = Field(min_length=1, max_length=50, description="Type")
+    name: str = Field(min_length=1, max_length=255, description="Memory identifier")
+    description: str = Field(min_length=1, description="One-line summary")
+    content: str = Field(min_length=1, description="Memory body")
+
+
+class MemoryUpdateRequest(TypedDict, total=False):
+    """Memory update request, for partial updates."""
+
+    type: Annotated[str, Field(min_length=1, max_length=50, description="Type")]
+    name: Annotated[
+        str, Field(min_length=1, max_length=255, description="Memory identifier")
+    ]
+    description: Annotated[str, Field(min_length=1, description="One-line summary")]
+    content: Annotated[str, Field(min_length=1, description="Memory body")]
 
 
 class AvatarUploadRequest(BaseModel):

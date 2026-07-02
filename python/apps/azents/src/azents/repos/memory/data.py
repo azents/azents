@@ -2,8 +2,10 @@
 
 import datetime
 import enum
+from typing import Annotated
 
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
 
 class MemoryScope(enum.StrEnum):
@@ -36,6 +38,15 @@ class MemoryCreate(BaseModel):
     name: str = Field(description="Memory identifier")
     description: str = Field(description="One-line summary")
     content: str = Field(description="Memory body")
+
+
+class MemoryUpdate(TypedDict, total=False):
+    """Memory update input."""
+
+    type: Annotated[str, Field(description="Type (free-form string)")]
+    name: Annotated[str, Field(description="Memory identifier")]
+    description: Annotated[str, Field(description="One-line summary")]
+    content: Annotated[str, Field(description="Memory body")]
 
 
 class MemorySummary(BaseModel):
