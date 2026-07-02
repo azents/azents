@@ -15,10 +15,10 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-06-18 | 35 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-02 | 36 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-02 | 77 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
-| [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-05-10 | 1 |
+| [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-02 | 2 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-01 | 43 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-29 | 5 |
