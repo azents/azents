@@ -1,4 +1,4 @@
-/* chat bubble inside markdown style */
+/* Chat bubble Markdown styles. */
 
 .markdown {
   max-width: 100%;
@@ -14,7 +14,7 @@
   min-width: 0;
 }
 
-/* remove margin from first/last elements */
+/* Remove margin from first and last elements. */
 .markdown > *:first-child {
   margin-top: 0;
 }
@@ -23,7 +23,7 @@
   margin-bottom: 0;
 }
 
-/* chat to to fit heading size reduce */
+/* Keep heading sizes compact for chat bubbles. */
 .markdown h1 {
   font-size: var(--mantine-font-size-md);
   font-weight: 700;
@@ -200,4 +200,47 @@
 /* checkbox (GFM task list) */
 .markdown input[type="checkbox"] {
   margin-right: 0.4em;
+}
+
+/* Mermaid diagram */
+.mermaidDiagram {
+  position: relative;
+  margin: 0.5em 0;
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-lg) var(--mantine-spacing-sm) var(--mantine-spacing-sm);
+  border-radius: var(--mantine-radius-sm);
+  background-color: var(--mantine-color-default);
+  overflow-x: auto;
+}
+
+.mermaidCopyButton {
+  position: absolute;
+  top: calc(var(--mantine-spacing-xs) / 2);
+  right: calc(var(--mantine-spacing-xs) / 2);
+  z-index: 1;
+}
+
+.mermaidSvg {
+  min-width: max-content;
+}
+
+.mermaidSvg svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaidFallback {
+  min-width: max-content;
+}
+
+.mermaidFallbackCode {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.mermaidFallbackCode code {
+  display: block;
+  white-space: pre;
 }

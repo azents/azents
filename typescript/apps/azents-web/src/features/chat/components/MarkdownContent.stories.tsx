@@ -2,6 +2,7 @@ import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   codeReadabilityMarkdownSample,
   markdownSample,
+  mermaidMarkdownSample,
 } from "../story-fixtures";
 import { MarkdownContent } from "./MarkdownContent";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -37,5 +38,11 @@ export const InlineText = {
 export const CodeReadability = {
   args: {
     children: codeReadabilityMarkdownSample,
+  },
+} satisfies Story;
+
+export const MermaidDiagram = {
+  args: {
+    children: mermaidMarkdownSample,
   },
 } satisfies Story;

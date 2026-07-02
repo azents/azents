@@ -989,6 +989,8 @@
     },
     "copy": "Copy",
     "copied": "Copied",
+    "mermaidRendering": "Rendering Mermaid diagram…",
+    "mermaidRenderError": "Unable to render Mermaid diagram.",
     "newChat": "New chat",
     "agentLoadError": "Failed to load agents",
     "selectAgentPlaceholder": "Select an agent",

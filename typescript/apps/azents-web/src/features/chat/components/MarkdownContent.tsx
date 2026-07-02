@@ -1,11 +1,6 @@
 "use client";
 
-/**
- * chat bubblefor markdown rendering component.
- *
- * heading size chat context to to fit reduce and,
- * GFM(GitHub Flavored Markdown) supports..
- */
+/** Render chat Markdown with compact typography, GFM, code highlighting, and Mermaid diagrams. */
 
 import { Box, useComputedColorScheme } from "@mantine/core";
 import { useTranslations } from "next-intl";
@@ -20,6 +15,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { ChatCopyButton } from "./ChatCopyButton";
 import classes from "./MarkdownContent.module.css";
+import { MermaidDiagram } from "./MermaidDiagram";
 import type { Components, ExtraProps } from "react-markdown";
 
 interface MarkdownContentProps {
@@ -156,6 +152,10 @@ function CodeBlock({
   const codeTheme = CODE_BLOCK_THEMES[codeColorScheme];
   const codeText = collectTextContent(children).replace(/\n$/, "");
   const language = getCodeLanguage(children);
+
+  if (language === "mermaid") {
+    return <MermaidDiagram source={codeText} />;
+  }
 
   return (
     <Box className={classes.codeBlock} component="pre" {...props}>
