@@ -1131,6 +1131,8 @@ async def _write_turn_action_via_rest(
                 raise HTTPException(
                     status_code=400, detail="Goal objective is required."
                 )
+        case SkillAction():
+            pass
         case _:
             raise HTTPException(status_code=400, detail="This action is not supported.")
     message = _create_chat_input_message(
@@ -1220,7 +1222,7 @@ async def _write_input_via_rest(
                 user_id=user_id,
                 payload_override=request.model_dump(mode="json"),
             )
-        case GoalAction():
+        case GoalAction() | SkillAction():
             return await _write_turn_action_via_rest(
                 chat_service,
                 agent_session_input_service,

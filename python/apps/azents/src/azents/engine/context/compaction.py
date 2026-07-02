@@ -126,6 +126,15 @@ Guidelines:
 - Include branches, PRs, issues, commands, test results, errors, file paths,
   symbols, and external IDs only when needed to continue.
 - Mark uncertain or stale information as Needs verification.
+- If the compacted transcript shows that a Skill is actively being followed for
+  unfinished work, include an "Active Skill" subsection in the checkpoint. A
+  Skill is active when its instructions, checklist, workflow stage, or
+  constraints are still needed to continue pending work. For each active Skill,
+  preserve the Skill name and exact SKILL.md path if known, why it is still
+  active, the current workflow/checklist stage, Skill-specific constraints or
+  output format, and concrete next actions required by that Skill. Do not list
+  every loaded Skill; omit Skills that were only inspected, used for completed
+  work, or no longer constrain pending work.
 - Do not answer the user or perform the next task.
 
 Here is the compacted transcript to checkpoint:

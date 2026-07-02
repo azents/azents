@@ -44,6 +44,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient as ControlRuntimeRunnerOperationClient,
 )
 from azents.runtime.deps import get_runtime_runner_operation_client
+from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operations
 from azents.services.artifact import ArtifactService
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.services.exchange_file import ExchangeFileService
@@ -54,7 +55,6 @@ from azents.utils.appctx import AppContext
 from .config import AgentWorkerConfig
 from .health import HealthServer
 from .input.background_result_injector import BackgroundTaskResultInjector
-from .runtime_io import adapt_runtime_runner_operations
 
 _DEFAULT_HEALTH_PORT = 8012
 

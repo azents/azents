@@ -14,6 +14,7 @@ from azents.engine.tools.skill import (
     render_skill_action_reminder,
     render_skill_prompt,
     resolve_active_skill,
+    skill_actions_from_snapshot,
 )
 
 
@@ -68,6 +69,15 @@ class TestSkillPrompt:
         assert f"Path: `{item.skill_path}`" in prompt
         assert "SECRET" not in prompt
 
+    def test_render_prompt_deduplicates_exact_skill_path(self) -> None:
+        """Prompt rendering keeps one entry for each exact SKILL.md path."""
+        item = _skill_item()
+        duplicate = item.model_copy(update={"id": "skill-duplicate"})
+
+        prompt = render_skill_prompt(SkillProjectionSnapshot(items=[item, duplicate]))
+
+        assert prompt.count(f"Path: `{item.skill_path}`") == 1
+
 
 class TestLoadSkill:
     """load_skill tool behavior."""
@@ -105,9 +115,42 @@ class TestLoadSkill:
         with pytest.raises(FunctionToolError, match="Skill not found"):
             await tool.handler(json.dumps({"skill_path": "/missing/SKILL.md"}))
 
+    @pytest.mark.asyncio
+    async def test_load_skill_tolerates_legacy_duplicate_exact_path(self) -> None:
+        """Tool still resolves exact path when old projection state has duplicates."""
+        item = _skill_item()
+        duplicate = item.model_copy(update={"id": "skill-duplicate"})
+        store = _SkillStore(
+            SkillProjectionState(
+                active=SkillProjectionSnapshot(items=[item, duplicate])
+            )
+        )
+        tool = make_load_skill_tool(
+            store=store,  # pyright: ignore[reportArgumentType]
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+
+        output = await tool.handler(json.dumps({"skill_path": item.skill_path}))
+
+        assert isinstance(output, str)
+        assert "Skill loaded from the active projection." in output
+        assert item.body in output
+
 
 class TestSkillAction:
     """Skill action helpers."""
+
+    def test_skill_actions_deduplicate_exact_skill_path(self) -> None:
+        """Action rendering keeps one action for each exact SKILL.md path."""
+        item = _skill_item()
+        duplicate = item.model_copy(update={"id": "skill-duplicate"})
+
+        actions = skill_actions_from_snapshot(
+            SkillProjectionSnapshot(items=[item, duplicate])
+        )
+
+        assert [action.skill_path for action in actions] == [item.skill_path]
 
     def test_resolve_active_skill_uses_exact_path(self) -> None:
         """Active projection lookup uses exact SKILL.md path."""

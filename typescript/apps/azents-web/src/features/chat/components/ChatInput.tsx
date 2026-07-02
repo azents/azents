@@ -678,7 +678,17 @@ export const ChatInput = memo(function ChatInput({
           </Paper>
         )}
         {visibleInputActions.length > 0 && (
-          <Paper withBorder radius="md" p="xs">
+          <Paper
+            withBorder
+            radius="md"
+            p="xs"
+            style={{
+              maxHeight: `min(40dvh, ${rem(320)})`,
+              overflowY: "auto",
+              overflowX: "hidden",
+              overscrollBehavior: "contain",
+            }}
+          >
             <Stack gap={rem(2)}>
               <Text size="xs" c="dimmed" px="xs">
                 {t("slashCommands.title")}
@@ -688,36 +698,48 @@ export const ChatInput = memo(function ChatInput({
                   key={ranked.action.id}
                   onClick={() => handleSelectInputAction(ranked.action)}
                   px="xs"
-                  py={rem(6)}
+                  py={rem(7)}
                   style={{ borderRadius: rem(8), width: "100%" }}
                 >
-                  <Stack gap={rem(2)}>
-                    <Group justify="space-between" gap="sm" wrap="nowrap">
-                      <Text size="sm" fw={500}>
+                  <Stack gap={rem(3)} style={{ minWidth: 0 }}>
+                    <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                      <Text
+                        size="sm"
+                        fw={500}
+                        style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}
+                      >
                         <HighlightedKeyword
                           keyword={ranked.action.keyword}
                           ranges={ranked.ranges}
                         />
                       </Text>
-                      <Stack gap={0} align="flex-end" style={{ minWidth: 0 }}>
-                        {(ranked.action.source_label ||
-                          ranked.action.relative_hint) && (
-                          <Text size="xs" c="dimmed" ta="right" truncate>
-                            {[
-                              ranked.action.source_label,
-                              ranked.action.relative_hint,
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </Text>
-                        )}
-                        <Text size="xs" c="dimmed" ta="right" truncate>
-                          {ranked.action.description}
+                      {(ranked.action.source_label ||
+                        ranked.action.relative_hint) && (
+                        <Text
+                          size="xs"
+                          c="dimmed"
+                          truncate
+                          style={{ flex: "1 1 auto", minWidth: 0 }}
+                        >
+                          {[
+                            ranked.action.source_label,
+                            ranked.action.relative_hint,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </Text>
-                      </Stack>
+                      )}
                     </Group>
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      lineClamp={2}
+                      style={{ overflowWrap: "anywhere" }}
+                    >
+                      {ranked.action.description}
+                    </Text>
                     {ranked.action.availability_hint?.message && (
-                      <Text size="xs" c="orange" ta="right">
+                      <Text size="xs" c="orange" lineClamp={2}>
                         {ranked.action.availability_hint.message}
                       </Text>
                     )}

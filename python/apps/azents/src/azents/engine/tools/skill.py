@@ -26,8 +26,6 @@ from azents.core.tools import (
     TurnContext,
 )
 from azents.engine.hooks.types import (
-    CompactionSummaryHookContext,
-    CompactionSummaryReplace,
     RunEndHookContext,
     RunStartHookContext,
     RuntimeHooks,
@@ -493,7 +491,6 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
             "on_run_start": self._on_run_start,
             "on_run_end": self._on_run_end,
             "on_turn_start": self._on_turn_start,
-            "on_compaction_summary": self._on_compaction_summary,
         }
 
     async def get_static_prompt(self, context: TurnContext) -> str:
@@ -561,26 +558,6 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         await self._store.adopt_latest(context.agent_id, context.session_id)
         return None
 
-    async def _on_compaction_summary(
-        self,
-        context: CompactionSummaryHookContext,
-    ) -> CompactionSummaryReplace | None:
-        """Append guidance for preserving unfinished active Skill workflows."""
-        state = await self._store.load(context.agent_id, context.session_id)
-        if not state.active.items:
-            return None
-        guidance = (
-            "## Skill Continuity Guidance\n\n"
-            "If the compacted transcript shows an unfinished workflow governed by a "
-            "loaded Skill, preserve the Skill name, exact SKILL.md path, current "
-            "workflow/checklist stage, Skill-specific constraints, and concrete next "
-            "actions. Do not list Skills that were only inspected or used for "
-            "completed work."
-        )
-        return CompactionSummaryReplace(
-            summary=f"{context.summary.rstrip()}\n\n{guidance}"
-        )
-
     async def _sync(
         self, agent_id: str, session_id: str, *, reason: SyncReason
     ) -> None:
@@ -629,10 +606,11 @@ class SkillToolkitProvider(ToolkitProvider[SkillToolkitConfig]):
 
 def render_skill_prompt(snapshot: SkillProjectionSnapshot) -> str:
     """Render stable model-visible Skill index."""
-    if not snapshot.items:
+    items = _dedupe_items_by_skill_path(snapshot.items)
+    if not items:
         return ""
     lines = [_SKILL_PROMPT_HEADER.rstrip(), ""]
-    for item in snapshot.items:
+    for item in items:
         lines.append(f"- **{item.name}**: {item.description}")
         lines.append(f"  Path: `{item.skill_path}`")
     return "\n".join(lines)
@@ -660,9 +638,15 @@ def make_load_skill_tool(
                 "path from the current Skills prompt."
             )
         if len(matches) > 1:
-            raise FunctionToolError(
-                "Skill path lookup is ambiguous in the active projection. Use the "
-                "exact SKILL.md path."
+            logger.warning(
+                "Duplicate Skill path entries found in active projection",
+                extra={
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "skill_path": args.skill_path,
+                    "match_count": len(matches),
+                    "projection_revision_id": state.active.revision_id,
+                },
             )
         item = matches[0]
         metadata = {
@@ -688,7 +672,7 @@ def skill_actions_from_snapshot(
     snapshot: SkillProjectionSnapshot,
 ) -> list[SkillProjectionItem]:
     """Return valid Skill items for action rendering."""
-    return list(snapshot.items)
+    return _dedupe_items_by_skill_path(snapshot.items)
 
 
 async def load_skill_projection_for_actions(
@@ -797,7 +781,21 @@ def _make_snapshot(
     *,
     reason: SyncReason,
 ) -> SkillProjectionSnapshot:
-    ordered = sorted(
+    ordered = _sort_skill_items(_dedupe_items_by_skill_path(items))
+    return SkillProjectionSnapshot(
+        revision_id=uuid7().hex,
+        projection_hash=_projection_hash(ordered),
+        synced_at=datetime.datetime.now(datetime.UTC).isoformat(),
+        sync_reason=reason,
+        items=list(ordered),
+    )
+
+
+def _sort_skill_items(
+    items: Sequence[SkillProjectionItem],
+) -> list[SkillProjectionItem]:
+    """Return Skill items in deterministic projection/rendering order."""
+    return sorted(
         items,
         key=lambda item: (
             _source_priority(item.source_kind),
@@ -806,13 +804,29 @@ def _make_snapshot(
             item.skill_path,
         ),
     )
-    return SkillProjectionSnapshot(
-        revision_id=uuid7().hex,
-        projection_hash=_projection_hash(ordered),
-        synced_at=datetime.datetime.now(datetime.UTC).isoformat(),
-        sync_reason=reason,
-        items=list(ordered),
-    )
+
+
+def _dedupe_items_by_skill_path(
+    items: Sequence[SkillProjectionItem],
+) -> list[SkillProjectionItem]:
+    """Keep one projection item per exact normalized SKILL.md path."""
+    deduped: dict[str, SkillProjectionItem] = {}
+    for item in _sort_skill_items(items):
+        normalized = _normalize_path(item.skill_path)
+        if normalized in deduped:
+            logger.warning(
+                "Duplicate Skill path entry ignored",
+                extra={
+                    "skill_path": item.skill_path,
+                    "kept_skill_path": deduped[normalized].skill_path,
+                    "source_kind": item.source_kind,
+                    "project_id": item.project_id,
+                    "project_path": item.project_path,
+                },
+            )
+            continue
+        deduped[normalized] = item
+    return list(deduped.values())
 
 
 def _projection_hash(items: Sequence[SkillProjectionItem]) -> str:
