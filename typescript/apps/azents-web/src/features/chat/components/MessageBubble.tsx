@@ -620,6 +620,16 @@ function GoalControlMessage({ label }: { label: string }): React.ReactElement {
   );
 }
 
+function stripMarkdownFrontmatter(content: string): string {
+  const frontmatter = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/u.exec(
+    content.replace(/^\uFEFF/u, ""),
+  );
+  if (frontmatter === null || frontmatter.index !== 0) {
+    return content;
+  }
+  return content.slice(frontmatter[0].length).trimStart();
+}
+
 function SkillLoadedControlMessage({
   message,
 }: {
@@ -628,7 +638,10 @@ function SkillLoadedControlMessage({
   const t = useTranslations("chat");
   const [opened, { toggle }] = useDisclosure(false);
   const name = message.metadata?.name || t("skillLoaded.unknownSkill");
-  const path = message.metadata?.skill_path || "";
+  const body = useMemo(
+    () => stripMarkdownFrontmatter(message.content ?? ""),
+    [message.content],
+  );
 
   return (
     <Box mb="md" w="100%" style={{ minWidth: 0 }}>
@@ -662,24 +675,24 @@ function SkillLoadedControlMessage({
           <Text size="xs" fw={600} lineClamp={1} style={{ minWidth: 0 }}>
             {t("skillLoaded.title", { name })}
           </Text>
-          {path && (
-            <Text size="xs" c="dimmed" lineClamp={1} style={{ minWidth: 0 }}>
-              {path}
-            </Text>
-          )}
         </Group>
         <Collapse expanded={opened}>
-          <Paper withBorder radius="md" p="sm" bg="var(--mantine-color-body)">
-            <Stack gap="xs">
-              {path && (
-                <Text size="xs" c="dimmed" style={{ overflowWrap: "anywhere" }}>
-                  {path}
-                </Text>
-              )}
-              <ScrollArea.Autosize mah={rem(360)}>
-                <MarkdownContent>{message.content ?? ""}</MarkdownContent>
-              </ScrollArea.Autosize>
-            </Stack>
+          <Paper
+            withBorder
+            radius="md"
+            p="sm"
+            bg="var(--mantine-color-body)"
+            style={{ minWidth: 0, overflow: "hidden" }}
+          >
+            <ScrollArea.Autosize
+              mah={rem(360)}
+              scrollbars="y"
+              style={{ maxWidth: "100%" }}
+            >
+              <Box className={classes.skillLoadedBody}>
+                <MarkdownContent>{body}</MarkdownContent>
+              </Box>
+            </ScrollArea.Autosize>
           </Paper>
         </Collapse>
       </Stack>
