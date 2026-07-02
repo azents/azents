@@ -1,46 +1,42 @@
 ---
 name: ship-pr
-description: "PR 출하 플로우를 실행한다. 사용 시점: (1) '/ship-pr', (2) 'PR 만들고 모니터링해' 를 거쳐 PR을 만들 때. PR 생성 자체는 /create-pr에 위임한다."
+description: "Run the PR shipping flow. Use for: (1) '/ship-pr', (2) requests such as 'create a PR and monitor it'. PR creation itself is delegated to /create-pr."
 ---
 
-# PR 출하 (/ship-pr)
+# Ship PR (/ship-pr)
 
-현재 브랜치를 review 가능한 상태로 점검한 뒤 `/create-pr`로 PR을 만든다. 이 스킬은
-품질·스펙 게이트를 담당하고, 실제 PR 생성 절차는 `/create-pr`에 위임한다.
+Check that the current branch is ready for review, then create the PR through `/create-pr`. This skill owns the quality and spec gates; the actual PR creation procedure is delegated to `/create-pr`.
 
-## 워크플로우
+## Workflow
 
-### 1. 코드 리뷰 (필수)
+### 1. Code review (required)
 
-PR 생성 전 반드시 `/code-review` 스킬로 셀프 리뷰를 수행한다. 생략하지 않는다.
+Before creating the PR, always run the `/code-review` skill for self-review. Do not skip it.
 
-코드 리뷰와 수정은 한 번만 수행한다. `/code-review` → 필요한 수정 반영 → 커밋까지
-진행한 뒤에는 같은 `/ship-pr` 실행 안에서 재리뷰 루프를 돌리지 않고 다음 단계로 간다.
+Run review and fixes only once. After `/code-review` → apply required fixes → commit, do not start another review loop within the same `/ship-pr` execution. Continue to the next step.
 
-- Critical/Warning 발견 시 → 수정 후 커밋하고 다음 단계 진행
-- Suggestion/Consistency만 있거나 발견 없으면 → 바로 다음 단계 진행
+- If Critical/Warning findings are found → fix them, commit, then continue.
+- If there are only Suggestion/Consistency findings, or no findings → continue immediately.
 
-### 2. 필요한 수정 반영
+### 2. Apply required fixes
 
-`/code-review`  결과로 필요한 코드/문서 수정이 있으면 같은 브랜치에 반영한다.
+If `/code-review` identifies required code or documentation fixes, apply them on the same branch.
 
-이 단계는 1회만 수행한다. 수정 후 새 Critical/Warning을 찾기 위해 `/code-review`를
-다시 호출하지 않는다. 추가 리뷰가 필요하면 PR 생성 후 일반 리뷰 과정에서 처리한다.
+This step runs only once. Do not call `/code-review` again to look for new Critical/Warning findings after the fix. If additional review is needed, handle it through the normal PR review process after PR creation.
 
-- Critical/Warning 발견 시 → 수정 후 진행
-- Suggestion/Consistency만 있거나 발견 없으면 → 바로 다음 단계 진행
+- If Critical/Warning findings are found → fix them, then continue.
+- If there are only Suggestion/Consistency findings, or no findings → continue immediately.
 
-### 3. `/create-pr` 호출
+### 3. Call `/create-pr`
 
-검증 결과를 바탕으로 `/create-pr`를 호출한다. `/create-pr`는 PR 생성만 담당하므로,
-아래 정보를 넘길 수 있게 대화 맥락에 남긴다.
+Call `/create-pr` with the validation context. Because `/create-pr` only creates the PR, leave the following information in the conversation context so it can be included in the PR body when appropriate:
 
-- 실행한 test/quality check와 결과
-- PR 본문에 `## Spec Impact`를 넣어야 하는지에 대한 판단
+- Tests and quality checks that were run, plus results
+- Whether the PR body should include `## Spec Impact`
 
-`/create-pr`의 규칙을 따른다.
+Follow the `/create-pr` rules.
 
-### 4. 결과 보고
+### 4. Report the result
 
-- 생성된 PR URL
-- `/code-review` 결과
+- Created PR URL
+- `/code-review` result
