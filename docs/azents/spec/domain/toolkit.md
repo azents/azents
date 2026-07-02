@@ -33,8 +33,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-01
-spec_version: 43
+last_verified_at: 2026-07-02
+spec_version: 44
 ---
 
 # Toolkit
@@ -266,6 +266,49 @@ Shell runtime treats AGENTS.md as a successful `read` tool result appendix, not 
 
 The shell runtime prompt contains only fixed guidance that read results may include `<system-reminder>` AGENTS.md appendix blocks and that the agent should follow them for the paths they apply to.
 
+### Claude Rules Instruction Loading
+
+The `claude_rules` auto-bound runtime Toolkit treats `.claude/rules/**/*.md` files as successful `read` tool result appendices. It exposes no model-visible tools and no Toolkit prompt fragments.
+
+Activation and context:
+
+- `ClaudeRulesToolkitProvider` is auto-bound whenever runtime tools are enabled.
+- The Toolkit shares the runtime instruction context prepared for file-instruction loaders: Runtime `FileStorage`, sorted registered Projects, and runtime-scoped agent/session identity.
+- Prompt builds and toolkit startup must not start or touch Runtime solely to discover Claude rules.
+- Subagent runtime-tool contexts use the parent runtime agent/session identity for file operations and dedupe state, matching inherited runtime workspace ownership.
+
+Candidate roots:
+
+- Workspace rules are discovered under `/workspace/agent/.claude/rules/**/*.md` for read targets under `/workspace/agent`.
+- If the read target is inside a registered Project, Project rules are also discovered under `<project.path>/.claude/rules/**/*.md`.
+- Workspace-root rules are evaluated before Project-root rules.
+- Nested `.claude/rules` roots below arbitrary subdirectories are not discovered.
+- Only Markdown files (`.md`) are candidates.
+- Missing rule roots and repo/config-level issues are skipped quietly.
+
+Matching and safety:
+
+- A rule without `paths` frontmatter is global for its source owner root.
+- `paths` frontmatter may be a string or a list of strings. Unsupported shapes or malformed frontmatter cause the rule to be skipped quietly.
+- Relative `paths` globs match paths relative to the source owner root (`/workspace/agent` for workspace rules, `<project.path>` for Project rules).
+- Absolute `paths` globs match normalized absolute runtime paths.
+- Glob matching is path-segment aware; `**` matches zero or more path segments.
+- Discovered rules are ordered deterministically by normalized runtime path within each root.
+- If multiple candidates resolve to the same real path, the first root-order occurrence is kept and later duplicates are skipped.
+- A candidate whose resolved real path is outside its source owner root is skipped.
+- Reading a rule file does not append that same file as its own appendix.
+
+Appendix and state:
+
+- Candidate content is read fresh from Runtime file storage only while handling a successful `read` result.
+- `write`, `edit`, `delete`, `grep`, `glob`, `import_file`, `present_file`, and `read_image` do not append Claude rules in this contract.
+- Rule content is rendered raw, including frontmatter, inside a `<system-reminder>` appendix after the original read output.
+- Claude rules use their own per-file content cap and truncation marker.
+- Toolkit State stores only a sorted dedupe path list under namespace `claude_rules`, state name `claude_rules_appendix_dedupe`; it does not store rule file content.
+- `on_session_compact` clears the dedupe path list so future reads may append current Claude rules again.
+- Runtime/FileStorage communication failures after a successful read are logged as errors and leave the read output unchanged.
+- Toolkit State failures and code bugs are not swallowed by `ClaudeRulesToolkit`; they flow to the runtime hook dispatcher fail-open path.
+
 ### Goal/Todo Prompt and Result Stability
 
 Goal and Todo auto-bound toolkits expose fixed tool definitions independent of current stored state. Their Toolkit prompts are fixed instruction text and do not include the current Goal objective/status or Todo list. The model can call `get_goal` when it needs exact Goal state; Todo UI/state snapshots remain the user-visible source of truth for Todo state.
@@ -277,6 +320,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | Toolkit | Activation condition | Credential source |
 |---|---|---|
 | `shell` (builtin) | always. Domain restriction by ShellEnvironment. | — |
+| `claude_rules` | auto-bound when runtime tools are enabled; exposes hooks only, no model-visible tools | — |
 | `mcp` | ToolkitConfig.enabled=True and `auth_type` satisfied (`none`/`header`/`bearer`/`oauth2`) | `encrypted_credentials` for static auth or `MCPOAuthConnection` for OAuth2 |
 | `github` | depends on `github_auth_type` — `pat`: workspace ToolkitConfig credentials, `github_app`: installation id, `github_app_platform`: platform App JWT | ToolkitConfig `encrypted_credentials` or platform App configuration |
 | `notion`, `sentry` | MCP + toolkit-level OAuth2 connection exists | `MCPOAuthConnection` |
