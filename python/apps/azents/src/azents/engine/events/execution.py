@@ -146,13 +146,13 @@ class AgentRunExecution:
     def __init__(
         self,
         *,
-        lowerer: AdapterLowerer,
         post_lower_filter: PostLowerFilter,
         model_adapter: ModelAdapter,
         output_normalizer: AdapterOutputNormalizer,
-        tool_executor: ClientToolExecutor,
-        pre_lower_filter: PreLowerFilter | None = None,
         model_call_preparer: ModelCallPreparer | None = None,
+        lowerer: AdapterLowerer | None = None,
+        tool_executor: ClientToolExecutor | None = None,
+        pre_lower_filter: PreLowerFilter | None = None,
         output_sink: OutputSink | None = None,
         phase_sink: PhaseSink | None = None,
         pre_model_lower_hook: PreModelLowerHook | None = None,
@@ -162,6 +162,11 @@ class AgentRunExecution:
         session_repo: SessionHeadRepository | None = None,
     ) -> None:
         """Inject loop dependencies."""
+        if model_call_preparer is None and (lowerer is None or tool_executor is None):
+            raise ValueError(
+                "AgentRunExecution requires either model_call_preparer or both "
+                "lowerer and tool_executor."
+            )
         self._lowerer = lowerer
         self._post_lower_filter = post_lower_filter
         self._model_adapter = model_adapter
@@ -419,14 +424,18 @@ class AgentRunExecution:
                 transcript=transcript,
                 model=model,
             )
+        lowerer = self._lowerer
+        tool_executor = self._tool_executor
+        if lowerer is None or tool_executor is None:
+            raise RuntimeError("Static model-call dependencies are not configured.")
         return PreparedModelCall(
-            native_request=self._lowerer.lower(
+            native_request=lowerer.lower(
                 transcript,
                 model=model,
                 system_prompt=system_prompt,
             ),
             system_prompt_analysis=system_prompt_analysis,
-            tool_executor=self._tool_executor,
+            tool_executor=tool_executor,
             on_turn_end=None,
         )
 

@@ -38,7 +38,6 @@ from azents.engine.events.filters import (
     EventPreLowerFilterPipeline,
     PostLowerFilterPipeline,
 )
-from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
 from azents.engine.events.protocols import (
     NormalizedAdapterOutput,
     OutputSink,
@@ -370,7 +369,6 @@ class _Execution:
 
     def __init__(self) -> None:
         self.request: AgentRunExecutionRequest | None = None
-        self.lowerer: LiteLLMResponsesLowerer | None = None
         self.model_call_preparer: ModelCallPreparer | None = None
         self.prepared_model_call: PreparedModelCall | None = None
 
@@ -576,8 +574,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
         run_repo=run_repo,
         agent_session_repo=_AgentSessionRepo(),
         execution_factory=lambda **kwargs: (
-            setattr(execution, "lowerer", kwargs["lowerer"])
-            or setattr(
+            setattr(
                 execution,
                 "model_call_preparer",
                 kwargs["model_call_preparer"],
@@ -834,11 +831,17 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
 
 async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
     """ChatGPT OAuth calls chatgpt backend-api/codex endpoint."""
-    captured: dict[str, object] = {}
+    execution = _Execution()
 
     def factory(**kwargs: object) -> _Execution:
-        captured.update(kwargs)
-        return _Execution()
+        return (
+            setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
+        )
 
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
@@ -874,9 +877,8 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
             ),
         )
     ]
-    lowerer = captured["lowerer"]
-    assert isinstance(lowerer, LiteLLMResponsesLowerer)
-    result = lowerer.lower([], model="gpt-5.1-codex").kwargs
+    assert execution.prepared_model_call is not None
+    result = execution.prepared_model_call.native_request.kwargs
 
     assert result["api_key"] == "access-token"
     assert result["custom_llm_provider"] == "openai"

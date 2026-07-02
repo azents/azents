@@ -526,6 +526,16 @@ def _event(
     )
 
 
+def test_requires_static_or_turn_local_model_call_dependencies() -> None:
+    """Reject execution construction without any model-call dependencies."""
+    with pytest.raises(ValueError, match="model_call_preparer"):
+        AgentRunExecution(
+            post_lower_filter=_PostFilter(),
+            model_adapter=_ModelAdapter(),
+            output_normalizer=_Normalizer([_assistant_event()]),
+        )
+
+
 async def test_text_run_completes() -> None:
     """End as completed when there are no tool calls."""
     run_repo = _RunRepo()
@@ -840,7 +850,6 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
         )
 
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -849,7 +858,6 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
                 [_assistant_event()],
             ]
         ),
-        tool_executor=_FailingToolExecutor(),
         model_call_preparer=prepare_model_call,
         run_repo=run_repo,
         transcript_repo=transcript_repo,
@@ -901,11 +909,9 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
         )
 
     execution = AgentRunExecution(
-        lowerer=_Lowerer(),
         post_lower_filter=_PostFilter(),
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
-        tool_executor=_ToolExecutor(),
         model_call_preparer=prepare_model_call,
         run_repo=_RunRepo(),
         transcript_repo=_TranscriptRepo(),

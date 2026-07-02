@@ -71,7 +71,6 @@ from azents.engine.events.protocols import (
 )
 from azents.engine.events.system_prompt import build_system_prompt
 from azents.engine.events.tools import (
-    ToolCatalog,
     ToolCatalogClientToolExecutor,
     build_tool_catalog,
 )
@@ -318,32 +317,6 @@ class AgentEngineAdapter:
         run_hook_providers = _runtime_hook_provider_refs(request.toolkits)
         emit_queue = _AsyncEventEmitQueue()
 
-        fallback_lowerer = LiteLLMResponsesLowerer(
-            provider=provider,
-            model=request.model,
-            tools=[],
-            provider_id=request.provider,
-            credential_kwargs=request.credential_kwargs,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            top_p=request.top_p,
-            stop=request.stop,
-            reasoning_effort=request.reasoning_effort,
-            hosted_tools=request.builtin_tools,
-            prompt_cache_scope=request.session_id,
-            model_developer=request.model_developer,
-            model_capabilities=request.model_capabilities,
-            model_file_resolver=model_file_resolver,
-        )
-        fallback_tool_executor = ToolCatalogClientToolExecutor(
-            ToolCatalog(
-                tools={},
-                static_prompt_fragment_inputs=[],
-                dynamic_prompt_fragment_inputs=[],
-                active_toolkit_bindings=[],
-            )
-        )
-
         async def prepare_model_call(
             *,
             transcript: Sequence[Event],
@@ -471,7 +444,6 @@ class AgentEngineAdapter:
             ]
         )
         execution = self.execution_factory(
-            lowerer=fallback_lowerer,
             post_lower_filter=PostLowerFilterPipeline(
                 [
                     NativeRequestSizeGuard(
@@ -484,7 +456,6 @@ class AgentEngineAdapter:
                 provider=provider,
                 model=request.model,
             ),
-            tool_executor=fallback_tool_executor,
             pre_lower_filter=pre_lower_filter,
             model_call_preparer=prepare_model_call,
             output_sink=emit_queue.extend_from_output,
