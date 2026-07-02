@@ -522,6 +522,11 @@ export interface SubscribedEvent {
   session_id: string;
 }
 
+export interface InputActionsUpdatedEvent {
+  type: "input_actions_updated";
+  session_id: string;
+}
+
 export interface SubscriptionHealthCheckAckEvent {
   type: "subscription_health_check_ack";
   session_id: string;
@@ -566,6 +571,7 @@ export type ChatEvent =
   | LiveEventUpsertedEvent
   | LiveEventRemovedEvent
   | SubscribedEvent
+  | InputActionsUpdatedEvent
   | SubscriptionHealthCheckAckEvent
   | ChatHistoryEvent;
 

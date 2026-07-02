@@ -112,6 +112,14 @@ def chat_live_event_removed_dump(session_id: str, event_id: str) -> dict[str, ob
     }
 
 
+def chat_input_actions_updated_dump(session_id: str) -> dict[str, object]:
+    """Convert composer action list update notification to chat WS wire dict."""
+    return {
+        "type": "input_actions_updated",
+        "session_id": session_id,
+    }
+
+
 def chat_subscription_ack_dump(session_id: str) -> dict[str, object]:
     """Convert Session subscription completion ack to chat WS wire dict."""
     return {

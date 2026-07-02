@@ -74,6 +74,22 @@ def get_runtime_tool_operation_client(
     return adapt_runtime_runner_operations(runner_operations)
 
 
+async def get_broadcast(
+    appctx: Annotated[AppContext[Config], Depends(get_appctx)],
+) -> WebSocketBroadcast:
+    """Worker-only WebSocketBroadcast dependency (cached by AppContext)."""
+
+    async def create() -> AsyncIterator[WebSocketBroadcast]:
+        redis = create_redis_client(appctx.config.redis.url)
+        broadcast = WebSocketBroadcast(redis)
+        try:
+            yield broadcast
+        finally:
+            await redis.aclose()
+
+    return await appctx.get_variable(f"{__name__}.get_broadcast", create)
+
+
 def get_skill_toolkit_provider(
     runner_operations: Annotated[
         EngineRuntimeRunnerOperationClient,
@@ -82,6 +98,7 @@ def get_skill_toolkit_provider(
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
+    broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)],
 ) -> SkillToolkitProvider:
     """SkillToolkitProvider dependency for Worker with runtime sync support."""
     store = SkillStateStore(session_manager=session_manager)
@@ -93,6 +110,7 @@ def get_skill_toolkit_provider(
             runner_operations=runner_operations,
             runtime_repository=AgentRuntimeRepository(),
             project_repository=SessionWorkspaceProjectRepository(),
+            broadcast=broadcast,
         ),
     )
 
@@ -162,22 +180,6 @@ async def get_worker_redis(
             await redis.aclose()
 
     return await appctx.get_variable(f"{__name__}.get_worker_redis", create_redis)
-
-
-async def get_broadcast(
-    appctx: Annotated[AppContext[Config], Depends(get_appctx)],
-) -> WebSocketBroadcast:
-    """Worker-only WebSocketBroadcast dependency (cached by AppContext)."""
-
-    async def create() -> AsyncIterator[WebSocketBroadcast]:
-        redis = create_redis_client(appctx.config.redis.url)
-        broadcast = WebSocketBroadcast(redis)
-        try:
-            yield broadcast
-        finally:
-            await redis.aclose()
-
-    return await appctx.get_variable(f"{__name__}.get_broadcast", create)
 
 
 def get_health_server(
