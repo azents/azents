@@ -57,6 +57,8 @@ logger = logging.getLogger(__name__)
 CheckStop = Callable[[], Awaitable[bool]]
 PhaseSink = Callable[[AgentRunPhase], Awaitable[None]]
 InputPoller = Callable[[AsyncSession, str], Awaitable[list[Event]]]
+TurnEndReason = Literal["completed", "error", "cancelled", "unknown"]
+TurnEndCallback = Callable[[TurnEndReason], Awaitable[None]]
 
 
 class PreModelLowerHook(Protocol):
@@ -68,6 +70,29 @@ class PreModelLowerHook(Protocol):
         transcript: Sequence[Event],
     ) -> object:
         """Prepare request-local state required by native lowerer."""
+        ...
+
+
+@dataclass(frozen=True)
+class PreparedModelCall:
+    """Turn-local model call dependencies."""
+
+    native_request: NativeModelRequest
+    system_prompt_analysis: SystemPromptAnalysisPayload | None
+    tool_executor: ClientToolExecutor
+    on_turn_end: TurnEndCallback | None
+
+
+class ModelCallPreparer(Protocol):
+    """Prepare turn-local model request and tool executor."""
+
+    async def __call__(
+        self,
+        *,
+        transcript: Sequence[Event],
+        model: str,
+    ) -> PreparedModelCall:
+        """Prepare one model-call turn."""
         ...
 
 
@@ -127,6 +152,7 @@ class AgentRunExecution:
         output_normalizer: AdapterOutputNormalizer,
         tool_executor: ClientToolExecutor,
         pre_lower_filter: PreLowerFilter | None = None,
+        model_call_preparer: ModelCallPreparer | None = None,
         output_sink: OutputSink | None = None,
         phase_sink: PhaseSink | None = None,
         pre_model_lower_hook: PreModelLowerHook | None = None,
@@ -142,6 +168,7 @@ class AgentRunExecution:
         self._output_normalizer = output_normalizer
         self._tool_executor = tool_executor
         self._pre_lower_filter = pre_lower_filter
+        self._model_call_preparer = model_call_preparer
         self._output_sink = output_sink
         self._phase_sink = phase_sink
         self._pre_model_lower_hook = pre_model_lower_hook
@@ -220,118 +247,151 @@ class AgentRunExecution:
                     await session.commit()
                 if self._pre_model_lower_hook is not None:
                     await self._pre_model_lower_hook(transcript=transcript)
-                native_request = self._lowerer.lower(
+                model_input_transcript = (
                     _without_existing_terminal_run_markers(transcript)
                     if compacted
-                    else transcript,
+                    else transcript
+                )
+                prepared = await self._prepare_model_call(
+                    transcript=model_input_transcript,
                     model=request.model,
                     system_prompt=request.system_prompt,
+                    system_prompt_analysis=request.system_prompt_analysis,
                 )
-                native_request = self._post_lower_filter.apply(native_request)
+                turn_end_callback = prepared.on_turn_end
+                turn_ended = False
 
-                await self._update_phase(
-                    session,
-                    request.run_id,
-                    AgentRunPhase.WAITING_FOR_MODEL,
-                )
-                await session.commit()
+                async def finish_turn(
+                    reason: TurnEndReason,
+                    callback: TurnEndCallback | None = turn_end_callback,
+                ) -> None:
+                    """Dispatch this turn's end hook at most once."""
+                    nonlocal turn_ended
+                    if turn_ended:
+                        return
+                    turn_ended = True
+                    await _finish_turn(callback, reason)
+
                 try:
-                    native_events = await self._stream_model(
-                        session,
-                        request.run_id,
-                        native_request,
-                    )
-                except _ModelStreamUserInterrupted as exc:
-                    return await self._complete_user_interrupted_model_stream(
-                        session,
-                        request,
-                        exc.native_events,
+                    native_request = self._post_lower_filter.apply(
+                        prepared.native_request
                     )
 
-                await self._update_phase(
-                    session,
-                    request.run_id,
-                    AgentRunPhase.NORMALIZING_OUTPUT,
-                )
-                normalized = self._output_normalizer.normalize(
-                    request.session_id,
-                    native_events,
-                )
-                _log_model_token_usage(
-                    request=request,
-                    usage=normalized.usage,
-                )
-
-                await self._update_phase(
-                    session,
-                    request.run_id,
-                    AgentRunPhase.APPENDING_EVENTS,
-                )
-                if not _has_durable_model_output(normalized.events):
-                    raise ModelCallError("Model completed without assistant output.")
-                appended = await self._append_events(session, normalized.events)
-                turn_marker = await self._append_turn_marker(
-                    session,
-                    request.session_id,
-                    request.run_id,
-                    normalized.usage,
-                    system_prompt=request.system_prompt_analysis,
-                )
-                turn_events = [turn_marker] if turn_marker is not None else []
-                client_tool_calls = [
-                    event.payload
-                    for event in appended
-                    if isinstance(event.payload, ClientToolCallPayload)
-                ]
-                if not client_tool_calls:
-                    run_marker = await self._append_run_marker(
-                        session,
-                        request.session_id,
-                        request.run_id,
-                        "completed",
-                    )
-                    await self._mark_terminal(
+                    await self._update_phase(
                         session,
                         request.run_id,
-                        AgentRunStatus.COMPLETED,
+                        AgentRunPhase.WAITING_FOR_MODEL,
                     )
                     await session.commit()
-                    if self._output_sink is not None:
-                        await self._output_sink(
-                            normalized,
-                            [*appended, *turn_events, run_marker],
+                    try:
+                        native_events = await self._stream_model(
+                            session,
+                            request.run_id,
+                            native_request,
                         )
-                    return AgentRunStatus.COMPLETED
+                    except _ModelStreamUserInterrupted as exc:
+                        await finish_turn("cancelled")
+                        return await self._complete_user_interrupted_model_stream(
+                            session,
+                            request,
+                            exc.native_events,
+                        )
 
-                await session.commit()
-                if self._output_sink is not None:
-                    await self._output_sink(normalized, [*appended, *turn_events])
-                try:
-                    await self._execute_tools(
+                    await self._update_phase(
                         session,
                         request.run_id,
+                        AgentRunPhase.NORMALIZING_OUTPUT,
+                    )
+                    normalized = self._output_normalizer.normalize(
                         request.session_id,
-                        client_tool_calls,
+                        native_events,
                     )
-                except _ToolExecutionUserInterrupted:
-                    run_marker = await self._append_run_marker(
+                    _log_model_token_usage(
+                        request=request,
+                        usage=normalized.usage,
+                    )
+
+                    await self._update_phase(
+                        session,
+                        request.run_id,
+                        AgentRunPhase.APPENDING_EVENTS,
+                    )
+                    if not _has_durable_model_output(normalized.events):
+                        raise ModelCallError(
+                            "Model completed without assistant output."
+                        )
+                    appended = await self._append_events(session, normalized.events)
+                    turn_marker = await self._append_turn_marker(
                         session,
                         request.session_id,
                         request.run_id,
-                        "interrupted",
+                        normalized.usage,
+                        system_prompt=prepared.system_prompt_analysis,
                     )
-                    await self._mark_terminal(
-                        session,
-                        request.run_id,
-                        AgentRunStatus.INTERRUPTED,
-                    )
+                    turn_events = [turn_marker] if turn_marker is not None else []
+                    client_tool_calls = [
+                        event.payload
+                        for event in appended
+                        if isinstance(event.payload, ClientToolCallPayload)
+                    ]
+                    if not client_tool_calls:
+                        run_marker = await self._append_run_marker(
+                            session,
+                            request.session_id,
+                            request.run_id,
+                            "completed",
+                        )
+                        await self._mark_terminal(
+                            session,
+                            request.run_id,
+                            AgentRunStatus.COMPLETED,
+                        )
+                        await session.commit()
+                        if self._output_sink is not None:
+                            await self._output_sink(
+                                normalized,
+                                [*appended, *turn_events, run_marker],
+                            )
+                        await finish_turn("completed")
+                        return AgentRunStatus.COMPLETED
+
                     await session.commit()
                     if self._output_sink is not None:
-                        await self._output_sink(
-                            NormalizedAdapterOutput(events=[]),
-                            [run_marker],
+                        await self._output_sink(normalized, [*appended, *turn_events])
+                    try:
+                        await self._execute_tools(
+                            session,
+                            request.run_id,
+                            request.session_id,
+                            client_tool_calls,
+                            tool_executor=prepared.tool_executor,
                         )
-                    return AgentRunStatus.INTERRUPTED
+                    except _ToolExecutionUserInterrupted:
+                        run_marker = await self._append_run_marker(
+                            session,
+                            request.session_id,
+                            request.run_id,
+                            "interrupted",
+                        )
+                        await self._mark_terminal(
+                            session,
+                            request.run_id,
+                            AgentRunStatus.INTERRUPTED,
+                        )
+                        await session.commit()
+                        if self._output_sink is not None:
+                            await self._output_sink(
+                                NormalizedAdapterOutput(events=[]),
+                                [run_marker],
+                            )
+                        await finish_turn("cancelled")
+                        return AgentRunStatus.INTERRUPTED
+                    await finish_turn("completed")
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    await finish_turn("error")
+                    raise
         except UserVisibleRuntimeError:
             raise
 
@@ -344,6 +404,31 @@ class AgentRunExecution:
         await self._mark_terminal(session, request.run_id, AgentRunStatus.INTERRUPTED)
         await session.commit()
         return AgentRunStatus.INTERRUPTED
+
+    async def _prepare_model_call(
+        self,
+        *,
+        transcript: Sequence[Event],
+        model: str,
+        system_prompt: str | None,
+        system_prompt_analysis: SystemPromptAnalysisPayload | None,
+    ) -> PreparedModelCall:
+        """Prepare model request with either static or turn-local dependencies."""
+        if self._model_call_preparer is not None:
+            return await self._model_call_preparer(
+                transcript=transcript,
+                model=model,
+            )
+        return PreparedModelCall(
+            native_request=self._lowerer.lower(
+                transcript,
+                model=model,
+                system_prompt=system_prompt,
+            ),
+            system_prompt_analysis=system_prompt_analysis,
+            tool_executor=self._tool_executor,
+            on_turn_end=None,
+        )
 
     async def _stream_model(
         self,
@@ -446,6 +531,8 @@ class AgentRunExecution:
         run_id: str,
         session_id: str,
         tool_calls: Sequence[ClientToolCallPayload],
+        *,
+        tool_executor: ClientToolExecutor,
     ) -> None:
         """Run foreground client tool calls in parallel and append results."""
         active_calls = [
@@ -460,13 +547,16 @@ class AgentRunExecution:
         await session.commit()
         try:
             results = await asyncio.gather(
-                *(self._execute_tool_safely(call) for call in tool_calls)
+                *(
+                    self._execute_tool_safely(call, tool_executor=tool_executor)
+                    for call in tool_calls
+                )
             )
         except asyncio.CancelledError as exc:
             if not _is_user_stop_cancellation(exc):
                 raise
             for call in tool_calls:
-                self._tool_executor.request_cancel(call)
+                tool_executor.request_cancel(call)
             await self._append_cancelled_tool_results(
                 session,
                 session_id,
@@ -589,10 +679,12 @@ class AgentRunExecution:
     async def _execute_tool_safely(
         self,
         call: ClientToolCallPayload,
+        *,
+        tool_executor: ClientToolExecutor,
     ) -> ClientToolResultPayload:
         """Repair tool exception as failed tool result."""
         try:
-            return await self._tool_executor.execute(call)
+            return await tool_executor.execute(call)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -702,6 +794,16 @@ class AgentRunExecution:
         )
         if self._phase_sink is not None:
             await self._phase_sink(phase)
+
+
+async def _finish_turn(
+    callback: TurnEndCallback | None,
+    reason: TurnEndReason,
+) -> None:
+    """Dispatch a prepared turn-end callback when present."""
+    if callback is None:
+        return
+    await callback(reason)
 
 
 def _log_model_token_usage(

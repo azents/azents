@@ -3,7 +3,6 @@
 import asyncio
 import contextlib
 import dataclasses
-import datetime
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from typing import Annotated, Protocol
@@ -40,6 +39,7 @@ from azents.engine.events.engine_events import (
 from azents.engine.events.execution import (
     AgentRunExecution,
     AgentRunExecutionRequest,
+    PreparedModelCall,
 )
 from azents.engine.events.file_parts import RequestLocalModelFileResolver
 from azents.engine.events.filters import (
@@ -71,6 +71,7 @@ from azents.engine.events.protocols import (
 )
 from azents.engine.events.system_prompt import build_system_prompt
 from azents.engine.events.tools import (
+    ToolCatalog,
     ToolCatalogClientToolExecutor,
     build_tool_catalog,
 )
@@ -305,30 +306,6 @@ class AgentEngineAdapter:
             await session.commit()
         for event in user_message_events:
             yield durable(event)
-        try:
-            catalog = await build_tool_catalog(
-                toolkit_bindings=request.toolkits,
-                context=TurnContext(
-                    user_id=context.user_id,
-                    workspace_id=request.workspace_id,
-                    model=request.model,
-                    run_id=context.run_id,
-                    session_id=request.session_id,
-                    run_index=run_state.run_index,
-                    publish_event=context.publish_event,
-                    check_stop=check_stop,
-                ),
-            )
-        except Exception:
-            async with self.session_manager() as session:
-                await self.run_repo.mark_terminal(
-                    session,
-                    context.run_id,
-                    AgentRunStatus.FAILED,
-                    ended_at=datetime.datetime.now(datetime.UTC),
-                )
-                await session.commit()
-            raise
         provider = _provider_name(request.provider)
         model_file_resolver = RequestLocalModelFileResolver()
         model_file_materializer = ModelFileMaterializer(
@@ -337,10 +314,14 @@ class AgentEngineAdapter:
             user_id=context.user_id,
             agent_id=request.agent_id,
         )
-        lowerer = LiteLLMResponsesLowerer(
+        hook_dispatcher = RuntimeHookDispatcher()
+        run_hook_providers = _runtime_hook_provider_refs(request.toolkits)
+        emit_queue = _AsyncEventEmitQueue()
+
+        fallback_lowerer = LiteLLMResponsesLowerer(
             provider=provider,
             model=request.model,
-            tools=catalog.native_tools,
+            tools=[],
             provider_id=request.provider,
             credential_kwargs=request.credential_kwargs,
             temperature=request.temperature,
@@ -354,40 +335,116 @@ class AgentEngineAdapter:
             model_capabilities=request.model_capabilities,
             model_file_resolver=model_file_resolver,
         )
-        hook_dispatcher = RuntimeHookDispatcher()
-        hook_providers = _runtime_hook_provider_refs(request.toolkits)
-        turn_start = await hook_dispatcher.dispatch_turn_start(
-            hook_providers,
-            TurnStartHookContext(
+        fallback_tool_executor = ToolCatalogClientToolExecutor(
+            ToolCatalog(
+                tools={},
+                static_prompt_fragment_inputs=[],
+                dynamic_prompt_fragment_inputs=[],
+                active_toolkit_bindings=[],
+            )
+        )
+
+        async def prepare_model_call(
+            *,
+            transcript: Sequence[Event],
+            model: str,
+        ) -> PreparedModelCall:
+            catalog = await build_tool_catalog(
+                toolkit_bindings=request.toolkits,
+                context=TurnContext(
+                    user_id=context.user_id,
+                    workspace_id=request.workspace_id,
+                    model=model,
+                    run_id=context.run_id,
+                    session_id=request.session_id,
+                    run_index=run_state.run_index,
+                    publish_event=context.publish_event,
+                    check_stop=check_stop,
+                ),
+            )
+            hook_providers = _runtime_hook_provider_refs(
+                catalog.active_toolkit_bindings
+            )
+            turn_start = await hook_dispatcher.dispatch_turn_start(
+                hook_providers,
+                TurnStartHookContext(
+                    workspace_id=request.workspace_id,
+                    agent_id=request.agent_id,
+                    session_id=request.session_id,
+                    run_id=context.run_id,
+                    turn_index=None,
+                ),
+            )
+            injected_prompts = [
+                injected for injected in turn_start.injected_prompts if injected.text
+            ]
+            system_prompt_result = build_system_prompt(
+                agent_prompt=request.agent_prompt,
+                static_toolkit_prompts=catalog.static_prompt_fragment_inputs,
+                dynamic_toolkit_prompts=catalog.dynamic_prompt_fragment_inputs,
+                injected_prompts=injected_prompts,
+            )
+            lowerer = LiteLLMResponsesLowerer(
+                provider=provider,
+                model=model,
+                tools=catalog.native_tools,
+                provider_id=request.provider,
+                credential_kwargs=request.credential_kwargs,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                top_p=request.top_p,
+                stop=request.stop,
+                reasoning_effort=request.reasoning_effort,
+                hosted_tools=request.builtin_tools,
+                prompt_cache_scope=request.session_id,
+                model_developer=request.model_developer,
+                model_capabilities=request.model_capabilities,
+                model_file_resolver=model_file_resolver,
+            )
+            tool_executor = ToolCatalogClientToolExecutor(catalog)
+            hooked_tool_executor = _HookedClientToolExecutor(
+                inner=tool_executor,
+                dispatcher=hook_dispatcher,
+                providers=hook_providers,
                 workspace_id=request.workspace_id,
                 agent_id=request.agent_id,
                 session_id=request.session_id,
                 run_id=context.run_id,
-                turn_index=None,
-            ),
-        )
-        injected_prompts = [
-            injected for injected in turn_start.injected_prompts if injected.text
-        ]
-        system_prompt_result = build_system_prompt(
-            agent_prompt=request.agent_prompt,
-            static_toolkit_prompts=catalog.static_prompt_fragment_inputs,
-            dynamic_toolkit_prompts=catalog.dynamic_prompt_fragment_inputs,
-            injected_prompts=injected_prompts,
-        )
-        system_prompt = system_prompt_result.prompt
-        system_prompt_analysis = system_prompt_result.analysis
-        emit_queue = _AsyncEventEmitQueue()
-        tool_executor = ToolCatalogClientToolExecutor(catalog)
-        hooked_tool_executor = _HookedClientToolExecutor(
-            inner=tool_executor,
-            dispatcher=hook_dispatcher,
-            providers=hook_providers,
-            workspace_id=request.workspace_id,
-            agent_id=request.agent_id,
-            session_id=request.session_id,
-            run_id=context.run_id,
-        )
+            )
+
+            async def on_turn_end(reason: TurnEndReason) -> None:
+                await hook_dispatcher.dispatch_observation(
+                    hook_providers,
+                    "on_turn_end",
+                    TurnEndHookContext(
+                        workspace_id=request.workspace_id,
+                        agent_id=request.agent_id,
+                        session_id=request.session_id,
+                        run_id=context.run_id,
+                        reason=reason,
+                        turn_index=None,
+                    ),
+                )
+
+            try:
+                native_request = lowerer.lower(
+                    transcript,
+                    model=model,
+                    system_prompt=system_prompt_result.prompt,
+                )
+            except asyncio.CancelledError:
+                await on_turn_end("cancelled")
+                raise
+            except Exception:
+                await on_turn_end("error")
+                raise
+            return PreparedModelCall(
+                native_request=native_request,
+                system_prompt_analysis=system_prompt_result.analysis,
+                tool_executor=hooked_tool_executor,
+                on_turn_end=on_turn_end,
+            )
+
         pre_lower_filter = EventPreLowerFilterPipeline(
             [
                 EventAttachmentAvailabilityFilter(),
@@ -407,14 +464,14 @@ class AgentEngineAdapter:
                     summary_enricher=_compaction_summary_enricher(
                         request,
                         dispatcher=hook_dispatcher,
-                        providers=hook_providers,
+                        providers=run_hook_providers,
                         run_id=context.run_id,
                     ),
                 ),
             ]
         )
         execution = self.execution_factory(
-            lowerer=lowerer,
+            lowerer=fallback_lowerer,
             post_lower_filter=PostLowerFilterPipeline(
                 [
                     NativeRequestSizeGuard(
@@ -427,8 +484,9 @@ class AgentEngineAdapter:
                 provider=provider,
                 model=request.model,
             ),
-            tool_executor=hooked_tool_executor,
+            tool_executor=fallback_tool_executor,
             pre_lower_filter=pre_lower_filter,
+            model_call_preparer=prepare_model_call,
             output_sink=emit_queue.extend_from_output,
             phase_sink=lambda phase: _emit_phase_change(
                 emit_queue,
@@ -452,8 +510,6 @@ class AgentEngineAdapter:
                         session_id=request.session_id,
                         run_index=run_state.run_index,
                         model=request.model,
-                        system_prompt=system_prompt,
-                        system_prompt_analysis=system_prompt_analysis,
                         max_turns=request.max_turns,
                     ),
                     check_stop=check_stop,
@@ -492,19 +548,6 @@ class AgentEngineAdapter:
                 _cancel_run_task(run_task, cancel_args)
                 with contextlib.suppress(asyncio.CancelledError):
                     await run_task
-
-        await hook_dispatcher.dispatch_observation(
-            hook_providers,
-            "on_turn_end",
-            TurnEndHookContext(
-                workspace_id=request.workspace_id,
-                agent_id=request.agent_id,
-                session_id=request.session_id,
-                run_id=context.run_id,
-                reason=_turn_end_reason(status),
-                turn_index=None,
-            ),
-        )
 
         if status in {AgentRunStatus.COMPLETED, AgentRunStatus.FAILED}:
             yield ephemeral(RunComplete())
@@ -665,15 +708,6 @@ def _tool_result_text(result: ClientToolResultPayload) -> str | None:
 def _provider_name(provider: LLMProvider) -> str:
     """Convert provider enum to string for native compat key."""
     return provider.value
-
-
-def _turn_end_reason(status: AgentRunStatus) -> TurnEndReason:
-    """Convert AgentRunStatus to hook reason string."""
-    if status == AgentRunStatus.COMPLETED:
-        return "completed"
-    if status == AgentRunStatus.FAILED:
-        return "error"
-    return "cancelled"
 
 
 def _make_input_poller(

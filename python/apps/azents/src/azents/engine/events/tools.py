@@ -42,6 +42,7 @@ class ToolCatalog:
     tools: dict[str, FunctionTool]
     static_prompt_fragment_inputs: list[ToolkitPromptInput]
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput]
+    active_toolkit_bindings: list[ToolkitBinding]
 
     @property
     def prompt_fragment_inputs(self) -> list[ToolkitPromptInput]:
@@ -75,6 +76,7 @@ async def build_tool_catalog(
     tools: dict[str, FunctionTool] = {}
     static_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput] = []
+    active_toolkit_bindings: list[ToolkitBinding] = []
     for index, binding in enumerate(toolkit_bindings):
         update_started_at = time.monotonic()
         try:
@@ -110,6 +112,7 @@ async def build_tool_catalog(
             )
         if state.status != ToolkitStatus.ENABLED:
             continue
+        active_toolkit_bindings.append(binding)
         label = _toolkit_prompt_label(binding)
         prompt = (await binding.toolkit.get_static_prompt(context)).strip()
         if prompt:
@@ -144,6 +147,7 @@ async def build_tool_catalog(
         tools=tools,
         static_prompt_fragment_inputs=static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=dynamic_prompt_fragment_inputs,
+        active_toolkit_bindings=active_toolkit_bindings,
     )
 
 

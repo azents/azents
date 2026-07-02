@@ -12,6 +12,8 @@ from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.execution import (
     AgentRunExecution,
     AgentRunExecutionRequest,
+    PreparedModelCall,
+    TurnEndReason,
 )
 from azents.engine.events.protocols import (
     NativeEvent,
@@ -810,6 +812,116 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     assert any(
         event.kind == EventKind.CLIENT_TOOL_RESULT for event in transcript_repo.events
     )
+
+
+async def test_model_call_preparer_runs_for_each_model_turn() -> None:
+    """Prepare model input and tools at each model-call turn boundary."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    prepared_transcripts: list[list[Event]] = []
+    turn_end_reasons: list[TurnEndReason] = []
+
+    async def prepare_model_call(
+        *,
+        transcript: Sequence[Event],
+        model: str,
+    ) -> PreparedModelCall:
+        """Record each turn-local preparation."""
+        prepared_transcripts.append(list(transcript))
+
+        async def on_turn_end(reason: TurnEndReason) -> None:
+            turn_end_reasons.append(reason)
+
+        return PreparedModelCall(
+            native_request=NativeModelRequest(model=model, input=[]),
+            system_prompt_analysis=None,
+            tool_executor=_ToolExecutor(),
+            on_turn_end=on_turn_end,
+        )
+
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        tool_executor=_FailingToolExecutor(),
+        model_call_preparer=prepare_model_call,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert len(prepared_transcripts) == 2
+    second_turn_payloads = [event.payload for event in prepared_transcripts[1]]
+    tool_result = next(
+        payload
+        for payload in second_turn_payloads
+        if isinstance(payload, ClientToolResultPayload)
+    )
+    assert tool_result.status == "completed"
+    assert tool_result.output == [OutputTextPart(text="tool output")]
+    assert turn_end_reasons == ["completed", "completed"]
+
+
+async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
+    """End the prepared turn with error when model execution fails."""
+    turn_end_reasons: list[TurnEndReason] = []
+
+    async def prepare_model_call(
+        *,
+        transcript: Sequence[Event],
+        model: str,
+    ) -> PreparedModelCall:
+        """Return a prepared failing model call."""
+        del transcript
+
+        async def on_turn_end(reason: TurnEndReason) -> None:
+            turn_end_reasons.append(reason)
+
+        return PreparedModelCall(
+            native_request=NativeModelRequest(model=model, input=[]),
+            system_prompt_analysis=None,
+            tool_executor=_ToolExecutor(),
+            on_turn_end=on_turn_end,
+        )
+
+    execution = AgentRunExecution(
+        lowerer=_Lowerer(),
+        post_lower_filter=_PostFilter(),
+        model_adapter=_FailingModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        tool_executor=_ToolExecutor(),
+        model_call_preparer=prepare_model_call,
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    with pytest.raises(ModelCallError, match="Missing scopes"):
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert turn_end_reasons == ["error"]
 
 
 async def test_provider_tool_call_completes_without_next_model_turn() -> None:

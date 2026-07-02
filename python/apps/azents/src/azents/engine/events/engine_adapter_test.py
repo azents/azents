@@ -29,7 +29,11 @@ from azents.engine.events.engine_adapter import (
     _HookedClientToolExecutor,  # pyright: ignore[reportPrivateUsage]  # Fix Hook wrapper cancellation contract.
 )
 from azents.engine.events.engine_events import RunComplete
-from azents.engine.events.execution import AgentRunExecutionRequest
+from azents.engine.events.execution import (
+    AgentRunExecutionRequest,
+    ModelCallPreparer,
+    PreparedModelCall,
+)
 from azents.engine.events.filters import (
     EventPreLowerFilterPipeline,
     PostLowerFilterPipeline,
@@ -367,6 +371,8 @@ class _Execution:
     def __init__(self) -> None:
         self.request: AgentRunExecutionRequest | None = None
         self.lowerer: LiteLLMResponsesLowerer | None = None
+        self.model_call_preparer: ModelCallPreparer | None = None
+        self.prepared_model_call: PreparedModelCall | None = None
 
     async def run(
         self,
@@ -376,9 +382,14 @@ class _Execution:
         check_stop: CheckStop | None = None,
         poll_input_events: object = None,
     ) -> AgentRunStatus:
-        """Record run request and return completed."""
+        """Record run request and prepare a model call when wired."""
         del session, check_stop, poll_input_events
         self.request = request
+        if self.model_call_preparer is not None:
+            self.prepared_model_call = await self.model_call_preparer(
+                transcript=[],
+                model=request.model,
+            )
         return AgentRunStatus.COMPLETED
 
 
@@ -565,7 +576,13 @@ async def test_event_engine_adapter_runs_execution() -> None:
         run_repo=run_repo,
         agent_session_repo=_AgentSessionRepo(),
         execution_factory=lambda **kwargs: (
-            setattr(execution, "lowerer", kwargs["lowerer"]) or execution
+            setattr(execution, "lowerer", kwargs["lowerer"])
+            or setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
         ),
     )
 
@@ -593,10 +610,10 @@ async def test_event_engine_adapter_runs_execution() -> None:
     assert run_repo.created is not None
     assert run_repo.created.id == "0" * 32
     assert execution.request is not None
-    assert execution.request.system_prompt == "## Agent prompt\n\nagent prompt"
-    assert execution.lowerer is not None
-    lowered = execution.lowerer.lower([], model="gpt-5.1")
-    assert isinstance(lowered.kwargs.get("prompt_cache_key"), str)
+    assert execution.prepared_model_call is not None
+    prepared_request = execution.prepared_model_call.native_request
+    assert prepared_request.kwargs["instructions"] == "## Agent prompt\n\nagent prompt"
+    assert isinstance(prepared_request.kwargs.get("prompt_cache_key"), str)
     assert isinstance(_events(emits)[0], RunComplete)
 
 
@@ -735,7 +752,14 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
         model_file_service=_ModelFileService(),
         run_repo=_RunRepo(),
         agent_session_repo=_AgentSessionRepo(),
-        execution_factory=lambda **kwargs: execution,
+        execution_factory=lambda **kwargs: (
+            setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
+        ),
     )
 
     _ = [
@@ -759,8 +783,8 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
         )
     ]
 
-    assert execution.request is not None
-    assert execution.request.system_prompt == (
+    assert execution.prepared_model_call is not None
+    assert execution.prepared_model_call.native_request.kwargs["instructions"] == (
         "## Agent prompt\n\nagent prompt\n\n"
         "## Static toolkit prompt: hooks\n\ntool prompt\n\n"
         "## Turn injected prompt from hooks\n\nvisible prompt\n\n"
