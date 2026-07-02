@@ -1140,6 +1140,8 @@
       "cancelGoalEdit": "Cancel",
       "editGoal": "Edit",
       "deleteGoal": "Delete",
+      "deleteGoalConfirmTitle": "Delete goal?",
+      "deleteGoalConfirmDescription": "This will remove the current goal. The conversation and todo list will remain.",
       "goalStatus": {
         "active": "Active",
         "paused": "Paused",
