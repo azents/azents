@@ -1,6 +1,7 @@
 ---
 title: "Claude Rules Loader Design"
 created: 2026-07-02
+implemented: 2026-07-02
 tags: [backend, engine, runtime, toolkit]
 ---
 # Claude Rules Loader Design
