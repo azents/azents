@@ -29,25 +29,23 @@ function actionLabel(action: ChatAction): string {
     case "command":
       return `/${action.name}`;
     case "goal":
-      return "Goal";
+      return "/goal";
     case "skill":
-      return "Skill";
+      return "/skill";
   }
 }
 
 function ActionPill({ action }: { action: ChatAction }): React.ReactElement {
   return (
     <Group
-      gap={rem(5)}
+      gap={rem(4)}
       wrap="nowrap"
-      px={rem(8)}
-      py={rem(3)}
+      px={rem(7)}
+      py={rem(2)}
       style={{
         alignSelf: "flex-start",
-        background: "rgba(255, 255, 255, 0.92)",
-        border: "1px solid rgba(255, 255, 255, 0.95)",
+        background: "var(--mantine-color-blue-light)",
         borderRadius: rem(999),
-        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.12)",
         maxWidth: "100%",
       }}
     >
