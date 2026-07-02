@@ -518,6 +518,48 @@
       "shellEnabledDescription": "Autoriser ce sous-agent à exécuter des commandes shell",
       "memoryEnabledLabel": "Activer la mémoire",
       "memoryEnabledDescription": "Permettre à cet agent de sauvegarder et rappeler des mémoires persistantes entre les conversations",
+      "settingsHub": {
+        "title": "Agent settings",
+        "description": "Choose a settings area to review or update this agent.",
+        "sections": {
+          "customization": "Agent customization",
+          "capabilities": "Capabilities",
+          "access": "Access",
+          "danger": "Danger zone"
+        },
+        "profile": {
+          "label": "Profile",
+          "description": "Name, instructions, visibility, avatar, and active state"
+        },
+        "model": {
+          "label": "Model",
+          "description": "Main model, lightweight model, reasoning, and turn limit"
+        },
+        "capabilities": {
+          "label": "Tools and subagents",
+          "description": "Shell access, built-in tools, toolkits, and subagent links"
+        },
+        "memory": {
+          "label": "Memory",
+          "description": "Persistent memories for this agent"
+        },
+        "admins": {
+          "label": "Admins",
+          "description": "Members who can manage this agent"
+        },
+        "danger": {
+          "label": "Runtime and deletion",
+          "description": "Reset runtime state or delete this agent"
+        },
+        "values": {
+          "active": "Active",
+          "inactive": "Inactive",
+          "enabled": "Enabled",
+          "disabled": "Disabled",
+          "shellEnabled": "Shell on",
+          "shellDisabled": "Shell off"
+        }
+      },
       "detail": {
         "tabs": {
           "chat": "Discussion",

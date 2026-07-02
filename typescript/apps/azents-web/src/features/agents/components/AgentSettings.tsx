@@ -21,9 +21,17 @@ import type { AgentFormValues } from "../schemas";
 import type { AdminListState, AgentFormState, MutationState } from "../types";
 import type { AgentAdminResponse, AgentResponse } from "@azents/public-client";
 
+type AgentSettingsSection =
+  | "all"
+  | "profile"
+  | "model"
+  | "capabilities"
+  | "admins";
+
 interface AgentSettingsProps {
   handle: string;
   agent: AgentResponse;
+  section: AgentSettingsSection | "danger";
   formState: AgentFormState;
   mutationState: MutationState;
   adminListState: AdminListState;
@@ -39,20 +47,39 @@ interface AgentSettingsProps {
 }
 
 export function AgentSettings(props: AgentSettingsProps): React.ReactElement {
-  const { handle, agent, ...formProps } = props;
+  const { handle, agent, section, ...formProps } = props;
+  const settingsHref = `/w/${handle}/agents/${agent.id}/settings`;
+
+  if (section === "danger") {
+    return (
+      <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
+        <Stack gap="xl" p="md" maw={rem(860)} mx="auto" w="100%">
+          <div style={{ padding: "0 var(--mantine-spacing-lg)" }}>
+            <AgentDangerSection handle={handle} agentId={agent.id} />
+          </div>
+        </Stack>
+      </div>
+    );
+  }
 
   return (
     <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
       <Stack gap="xl" p="md" maw={rem(960)} mx="auto" w="100%">
-        <div style={{ padding: "0 var(--mantine-spacing-lg)" }}>
-          <AgentAvatarSection handle={handle} agent={agent} />
-        </div>
-        <Divider />
-        <AgentForm handle={handle} mode="embedded" {...formProps} />
-        <Divider />
-        <div style={{ padding: "0 var(--mantine-spacing-lg)" }}>
-          <AgentDangerSection handle={handle} agentId={agent.id} />
-        </div>
+        {section === "profile" && (
+          <>
+            <div style={{ padding: "0 var(--mantine-spacing-lg)" }}>
+              <AgentAvatarSection handle={handle} agent={agent} />
+            </div>
+            <Divider />
+          </>
+        )}
+        <AgentForm
+          handle={handle}
+          mode="embedded"
+          section={section}
+          cancelHref={settingsHref}
+          {...formProps}
+        />
       </Stack>
     </div>
   );

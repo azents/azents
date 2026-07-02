@@ -52,6 +52,13 @@ import type { AgentFormValues } from "../schemas";
 import type { AdminListState, AgentFormState, MutationState } from "../types";
 import type { AgentAdminResponse } from "@azents/public-client";
 
+export type AgentFormSection =
+  | "all"
+  | "profile"
+  | "model"
+  | "capabilities"
+  | "admins";
+
 interface AgentFormProps {
   handle: string;
   formState: AgentFormState;
@@ -71,6 +78,8 @@ interface AgentFormProps {
    * "embedded": external (Settings tab) owns layout, so omit this wrapper.
    */
   mode?: "fullpage" | "embedded";
+  section?: AgentFormSection;
+  cancelHref?: string;
 }
 
 function formatBuiltinToolLabel(tool: string): string {
@@ -96,11 +105,13 @@ export function AgentForm({
   onAddAdmin,
   onRemoveAdmin,
   mode = "fullpage",
+  section = "all",
+  cancelHref,
 }: AgentFormProps): React.ReactElement {
   const t = useTranslations("workspace.agents");
 
   const isEdit = formState.type === "EDIT";
-  const backPath = `/w/${handle}/agents`;
+  const backPath = cancelHref ?? `/w/${handle}/agents`;
   const [mainPickerOpen, setMainPickerOpen] = useState(false);
   const [lightweightPickerOpen, setLightweightPickerOpen] = useState(false);
   const [mainModelPreview, setMainModelPreview] =
@@ -278,6 +289,11 @@ export function AgentForm({
   });
 
   const fullpageChrome = mode === "fullpage";
+  const showProfile = section === "all" || section === "profile";
+  const showModel = section === "all" || section === "model";
+  const showCapabilities = section === "all" || section === "capabilities";
+  const showAdmins = section === "all" || section === "admins";
+  const showFormActions = section !== "admins";
 
   const content = (
     <Stack gap="lg">
@@ -293,7 +309,7 @@ export function AgentForm({
         </>
       )}
 
-      {enabledProviderOptions.length === 0 && !modelsLoading && (
+      {showModel && enabledProviderOptions.length === 0 && !modelsLoading && (
         <Alert color="yellow" title={t("noIntegrationTitle")}>
           <Text size="sm">
             {t("noEnabledIntegrationDescription")}{" "}
@@ -304,62 +320,70 @@ export function AgentForm({
         </Alert>
       )}
 
-      <ModelCatalogPicker
-        opened={mainPickerOpen}
-        title={t("modelCatalogPicker.selectMainTitle")}
-        handle={handle}
-        integrations={enabledProviderOptions}
-        selectedIntegrationId={form.values.model_provider_integration_id}
-        selectedValue={form.values.model_selection_value}
-        onClose={() => setMainPickerOpen(false)}
-        onSelectIntegration={handleMainProviderChange}
-        onSelectModel={handleModelChange}
-        onSyncCatalog={onSyncCatalog}
-      />
-      <ModelCatalogPicker
-        opened={lightweightPickerOpen}
-        title={t("modelCatalogPicker.selectLightweightTitle")}
-        handle={handle}
-        integrations={enabledProviderOptions}
-        selectedIntegrationId={
-          form.values.lightweight_model_provider_integration_id
-        }
-        selectedValue={form.values.lightweight_model_selection_value}
-        onClose={() => setLightweightPickerOpen(false)}
-        onSelectIntegration={handleLightweightProviderChange}
-        onSelectModel={(model) => {
-          const integrationId =
-            form.values.lightweight_model_provider_integration_id;
-          if (integrationId == null) {
-            return;
+      {showModel && (
+        <ModelCatalogPicker
+          opened={mainPickerOpen}
+          title={t("modelCatalogPicker.selectMainTitle")}
+          handle={handle}
+          integrations={enabledProviderOptions}
+          selectedIntegrationId={form.values.model_provider_integration_id}
+          selectedValue={form.values.model_selection_value}
+          onClose={() => setMainPickerOpen(false)}
+          onSelectIntegration={handleMainProviderChange}
+          onSelectModel={handleModelChange}
+          onSyncCatalog={onSyncCatalog}
+        />
+      )}
+      {showModel && (
+        <ModelCatalogPicker
+          opened={lightweightPickerOpen}
+          title={t("modelCatalogPicker.selectLightweightTitle")}
+          handle={handle}
+          integrations={enabledProviderOptions}
+          selectedIntegrationId={
+            form.values.lightweight_model_provider_integration_id
           }
-          form.setFieldValue(
-            "lightweight_model_selection_value",
-            `${integrationId}:${model.model_identifier}`,
-          );
-          setLightweightModelPreview(model);
-        }}
-        onSyncCatalog={onSyncCatalog}
-      />
+          selectedValue={form.values.lightweight_model_selection_value}
+          onClose={() => setLightweightPickerOpen(false)}
+          onSelectIntegration={handleLightweightProviderChange}
+          onSelectModel={(model) => {
+            const integrationId =
+              form.values.lightweight_model_provider_integration_id;
+            if (integrationId == null) {
+              return;
+            }
+            form.setFieldValue(
+              "lightweight_model_selection_value",
+              `${integrationId}:${model.model_identifier}`,
+            );
+            setLightweightModelPreview(model);
+          }}
+          onSyncCatalog={onSyncCatalog}
+        />
+      )}
 
       <form onSubmit={handleSubmit}>
         <Stack gap="md">
-          <TextInput
-            label={t("nameLabel")}
-            placeholder={t("namePlaceholder")}
-            required
-            key={form.key("name")}
-            {...form.getInputProps("name")}
-          />
+          {showProfile && (
+            <TextInput
+              label={t("nameLabel")}
+              placeholder={t("namePlaceholder")}
+              required
+              key={form.key("name")}
+              {...form.getInputProps("name")}
+            />
+          )}
 
-          <Textarea
-            label={t("descriptionLabel")}
-            placeholder={t("descriptionPlaceholder")}
-            key={form.key("description")}
-            {...form.getInputProps("description")}
-          />
+          {showProfile && (
+            <Textarea
+              label={t("descriptionLabel")}
+              placeholder={t("descriptionPlaceholder")}
+              key={form.key("description")}
+              {...form.getInputProps("description")}
+            />
+          )}
 
-          {form.values.role === "subagent" && (
+          {showCapabilities && form.values.role === "subagent" && (
             <Checkbox
               label={t("useParentToolkitsLabel")}
               description={t("useParentToolkitsDescription")}
@@ -373,74 +397,81 @@ export function AgentForm({
             />
           )}
 
-          <Stack gap="xs">
-            <Text fw={500}>{t("mainModelLabel")}</Text>
-            <Text size="sm" c="dimmed">
-              {t("mainModelDescription")}
-            </Text>
-            <Card withBorder padding="sm">
-              <Group justify="space-between" align="center">
-                <Stack gap={2}>
-                  <Text fw={600}>
-                    {mainModelPreview?.model_display_name ??
-                      selectedModelSnapshot?.model_display_name ??
-                      t("noModelSelected")}
-                  </Text>
-                  <Text size="sm" c="dimmed">
-                    {mainModelPreview?.model_identifier ??
-                      selectedModelSnapshot?.model_identifier ??
-                      t("chooseModelDescription")}
-                  </Text>
-                </Stack>
-                <Button variant="light" onClick={() => setMainPickerOpen(true)}>
-                  {t("changeModel")}
-                </Button>
-              </Group>
-            </Card>
-            {form.values.model_selection_value != null &&
-              mainModelPreview == null &&
-              selectedModelSnapshot == null && (
-                <Alert color="yellow" title={t("selectedModelMissingTitle")}>
-                  {t("selectedModelMissingDescription")}
-                </Alert>
-              )}
-            {form.errors.model_selection_value && (
-              <Text size="sm" c="red">
-                {form.errors.model_selection_value}
+          {showModel && (
+            <Stack gap="xs">
+              <Text fw={500}>{t("mainModelLabel")}</Text>
+              <Text size="sm" c="dimmed">
+                {t("mainModelDescription")}
               </Text>
-            )}
-          </Stack>
+              <Card withBorder padding="sm">
+                <Group justify="space-between" align="center">
+                  <Stack gap={2}>
+                    <Text fw={600}>
+                      {mainModelPreview?.model_display_name ??
+                        selectedModelSnapshot?.model_display_name ??
+                        t("noModelSelected")}
+                    </Text>
+                    <Text size="sm" c="dimmed">
+                      {mainModelPreview?.model_identifier ??
+                        selectedModelSnapshot?.model_identifier ??
+                        t("chooseModelDescription")}
+                    </Text>
+                  </Stack>
+                  <Button
+                    variant="light"
+                    onClick={() => setMainPickerOpen(true)}
+                  >
+                    {t("changeModel")}
+                  </Button>
+                </Group>
+              </Card>
+              {form.values.model_selection_value != null &&
+                mainModelPreview == null &&
+                selectedModelSnapshot == null && (
+                  <Alert color="yellow" title={t("selectedModelMissingTitle")}>
+                    {t("selectedModelMissingDescription")}
+                  </Alert>
+                )}
+              {form.errors.model_selection_value && (
+                <Text size="sm" c="red">
+                  {form.errors.model_selection_value}
+                </Text>
+              )}
+            </Stack>
+          )}
 
-          <Stack gap="xs">
-            <Text fw={500}>{t("lightweightModelLabel")}</Text>
-            <Text size="sm" c="dimmed">
-              {t("lightweightModelDescription")}
-            </Text>
-            <Card withBorder padding="sm">
-              <Group justify="space-between" align="center">
-                <Stack gap={2}>
-                  <Text fw={600}>
-                    {lightweightModelPreview?.model_display_name ??
-                      selectedLightweightModelSnapshot?.model_display_name ??
-                      t("useMainOrWorkspaceDefault")}
-                  </Text>
-                  <Text size="sm" c="dimmed">
-                    {lightweightModelPreview?.model_identifier ??
-                      selectedLightweightModelSnapshot?.model_identifier ??
-                      t("optionalLightweightModel")}
-                  </Text>
-                </Stack>
-                <Button
-                  variant="light"
-                  onClick={() => setLightweightPickerOpen(true)}
-                >
-                  {t("changeModel")}
-                </Button>
-              </Group>
-            </Card>
-          </Stack>
+          {showModel && (
+            <Stack gap="xs">
+              <Text fw={500}>{t("lightweightModelLabel")}</Text>
+              <Text size="sm" c="dimmed">
+                {t("lightweightModelDescription")}
+              </Text>
+              <Card withBorder padding="sm">
+                <Group justify="space-between" align="center">
+                  <Stack gap={2}>
+                    <Text fw={600}>
+                      {lightweightModelPreview?.model_display_name ??
+                        selectedLightweightModelSnapshot?.model_display_name ??
+                        t("useMainOrWorkspaceDefault")}
+                    </Text>
+                    <Text size="sm" c="dimmed">
+                      {lightweightModelPreview?.model_identifier ??
+                        selectedLightweightModelSnapshot?.model_identifier ??
+                        t("optionalLightweightModel")}
+                    </Text>
+                  </Stack>
+                  <Button
+                    variant="light"
+                    onClick={() => setLightweightPickerOpen(true)}
+                  >
+                    {t("changeModel")}
+                  </Button>
+                </Group>
+              </Card>
+            </Stack>
+          )}
 
-          {selectedModelSupportsReasoning && (
+          {showModel && selectedModelSupportsReasoning && (
             <Select
               label={t("reasoningEffortLabel")}
               data={reasoningEffortOptions}
@@ -457,7 +488,7 @@ export function AgentForm({
             />
           )}
 
-          {selectedModelBuiltinTools.length > 0 && (
+          {showCapabilities && selectedModelBuiltinTools.length > 0 && (
             <>
               <Divider label={t("builtinToolsLabel")} labelPosition="left" />
               <Checkbox.Group
@@ -484,107 +515,123 @@ export function AgentForm({
             </>
           )}
 
-          <Textarea
-            label={t("systemPromptLabel")}
-            placeholder={t("systemPromptPlaceholder")}
-            minRows={5}
-            autosize
-            key={form.key("system_prompt")}
-            {...form.getInputProps("system_prompt")}
-          />
-
-          <NumberInput
-            label={t("maxTurnsLabel")}
-            description={t("maxTurnsDescription")}
-            placeholder={t("maxTurnsPlaceholder")}
-            min={1}
-            step={1}
-            allowDecimal={false}
-            allowNegative={false}
-            value={form.values.max_turns ?? ""}
-            onChange={(value) => {
-              form.setFieldValue(
-                "max_turns",
-                typeof value === "number" ? value : null,
-              );
-            }}
-            error={form.errors.max_turns}
-          />
-
-          <Radio.Group
-            label={t("typeLabel")}
-            key={form.key("type")}
-            {...form.getInputProps("type")}
-          >
-            <Stack gap="xs" mt="xs">
-              <Radio
-                value="public"
-                label={t("typePublic")}
-                description={t("typePublicDescription")}
-              />
-              <Radio
-                value="private"
-                label={t("typePrivate")}
-                description={t("typePrivateDescription")}
-              />
-            </Stack>
-          </Radio.Group>
-
-          <Radio.Group
-            label={t("roleLabel")}
-            key={form.key("role")}
-            {...form.getInputProps("role")}
-          >
-            <Stack gap="xs" mt="xs">
-              <Radio
-                value="agent"
-                label={t("roleAgent")}
-                description={t("roleAgentDescription")}
-              />
-              <Radio
-                value="subagent"
-                label={t("roleSubagent")}
-                description={t("roleSubagentDescription")}
-              />
-            </Stack>
-          </Radio.Group>
-
-          <Switch
-            label={t("shellEnabledLabel")}
-            description={t("shellEnabledDescription")}
-            checked={form.values.shell_enabled ?? false}
-            onChange={(e) =>
-              form.setFieldValue("shell_enabled", e.currentTarget.checked)
-            }
-          />
-
-          <Switch
-            label={t("memoryEnabledLabel")}
-            description={t("memoryEnabledDescription")}
-            checked={form.values.memory_enabled ?? true}
-            onChange={(e) =>
-              form.setFieldValue("memory_enabled", e.currentTarget.checked)
-            }
-          />
-
-          <Switch
-            label={t("enabledLabel")}
-            key={form.key("enabled")}
-            {...form.getInputProps("enabled", { type: "checkbox" })}
-          />
-
-          {formState.type === "EDIT" && form.values.role === "agent" && (
-            <AgentSubagentSection
-              handle={handle}
-              agentId={formState.agent.id}
+          {showProfile && (
+            <Textarea
+              label={t("systemPromptLabel")}
+              placeholder={t("systemPromptPlaceholder")}
+              minRows={5}
+              autosize
+              key={form.key("system_prompt")}
+              {...form.getInputProps("system_prompt")}
             />
           )}
 
-          {formState.type === "EDIT" && (
+          {showModel && (
+            <NumberInput
+              label={t("maxTurnsLabel")}
+              description={t("maxTurnsDescription")}
+              placeholder={t("maxTurnsPlaceholder")}
+              min={1}
+              step={1}
+              allowDecimal={false}
+              allowNegative={false}
+              value={form.values.max_turns ?? ""}
+              onChange={(value) => {
+                form.setFieldValue(
+                  "max_turns",
+                  typeof value === "number" ? value : null,
+                );
+              }}
+              error={form.errors.max_turns}
+            />
+          )}
+
+          {showProfile && (
+            <Radio.Group
+              label={t("typeLabel")}
+              key={form.key("type")}
+              {...form.getInputProps("type")}
+            >
+              <Stack gap="xs" mt="xs">
+                <Radio
+                  value="public"
+                  label={t("typePublic")}
+                  description={t("typePublicDescription")}
+                />
+                <Radio
+                  value="private"
+                  label={t("typePrivate")}
+                  description={t("typePrivateDescription")}
+                />
+              </Stack>
+            </Radio.Group>
+          )}
+
+          {showCapabilities && (
+            <Radio.Group
+              label={t("roleLabel")}
+              key={form.key("role")}
+              {...form.getInputProps("role")}
+            >
+              <Stack gap="xs" mt="xs">
+                <Radio
+                  value="agent"
+                  label={t("roleAgent")}
+                  description={t("roleAgentDescription")}
+                />
+                <Radio
+                  value="subagent"
+                  label={t("roleSubagent")}
+                  description={t("roleSubagentDescription")}
+                />
+              </Stack>
+            </Radio.Group>
+          )}
+
+          {showCapabilities && (
+            <Switch
+              label={t("shellEnabledLabel")}
+              description={t("shellEnabledDescription")}
+              checked={form.values.shell_enabled ?? false}
+              onChange={(e) =>
+                form.setFieldValue("shell_enabled", e.currentTarget.checked)
+              }
+            />
+          )}
+
+          {showCapabilities && (
+            <Switch
+              label={t("memoryEnabledLabel")}
+              description={t("memoryEnabledDescription")}
+              checked={form.values.memory_enabled ?? true}
+              onChange={(e) =>
+                form.setFieldValue("memory_enabled", e.currentTarget.checked)
+              }
+            />
+          )}
+
+          {showProfile && (
+            <Switch
+              label={t("enabledLabel")}
+              key={form.key("enabled")}
+              {...form.getInputProps("enabled", { type: "checkbox" })}
+            />
+          )}
+
+          {showCapabilities &&
+            formState.type === "EDIT" &&
+            form.values.role === "agent" && (
+              <AgentSubagentSection
+                handle={handle}
+                agentId={formState.agent.id}
+              />
+            )}
+
+          {showCapabilities && formState.type === "EDIT" && (
             <AgentToolkitSection handle={handle} agentId={formState.agent.id} />
           )}
 
-          {isEdit && (
+          {showAdmins && isEdit && (
             <AgentAdminSection
               adminListState={adminListState}
               members={members}
@@ -597,14 +644,19 @@ export function AgentForm({
             <Alert color="red">{mutationState.error}</Alert>
           )}
 
-          <Group justify="flex-end">
-            <Button component={Link} href={backPath} variant="default">
-              {t("cancel")}
-            </Button>
-            <Button type="submit" loading={mutationState.type === "SUBMITTING"}>
-              {isEdit ? t("save") : t("create")}
-            </Button>
-          </Group>
+          {showFormActions && (
+            <Group justify="flex-end">
+              <Button component={Link} href={backPath} variant="default">
+                {t("cancel")}
+              </Button>
+              <Button
+                type="submit"
+                loading={mutationState.type === "SUBMITTING"}
+              >
+                {isEdit ? t("save") : t("create")}
+              </Button>
+            </Group>
+          )}
         </Stack>
       </form>
     </Stack>

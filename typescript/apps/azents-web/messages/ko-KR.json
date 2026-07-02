@@ -518,6 +518,48 @@
       "shellEnabledDescription": "이 서브에이전트가 Shell 명령어를 실행할 수 있도록 허용",
       "memoryEnabledLabel": "메모리 활성화",
       "memoryEnabledDescription": "대화 간 영속적인 메모리를 저장하고 활용할 수 있도록 허용",
+      "settingsHub": {
+        "title": "에이전트 설정",
+        "description": "확인하거나 수정할 설정 영역을 선택하세요.",
+        "sections": {
+          "customization": "에이전트 맞춤 설정",
+          "capabilities": "기능",
+          "access": "접근 권한",
+          "danger": "위험한 작업"
+        },
+        "profile": {
+          "label": "프로필",
+          "description": "이름, 지침, 공개 범위, 아바타, 활성 상태"
+        },
+        "model": {
+          "label": "모델",
+          "description": "메인 모델, 경량 모델, 추론 설정, 최대 턴"
+        },
+        "capabilities": {
+          "label": "도구와 서브에이전트",
+          "description": "Shell 접근, 내장 도구, 툴킷, 서브에이전트 연결"
+        },
+        "memory": {
+          "label": "메모리",
+          "description": "이 에이전트의 영속 메모리"
+        },
+        "admins": {
+          "label": "관리자",
+          "description": "이 에이전트를 관리할 수 있는 멤버"
+        },
+        "danger": {
+          "label": "Runtime 및 삭제",
+          "description": "Runtime 상태를 초기화하거나 에이전트를 삭제"
+        },
+        "values": {
+          "active": "활성",
+          "inactive": "비활성",
+          "enabled": "사용 중",
+          "disabled": "사용 안 함",
+          "shellEnabled": "Shell 켜짐",
+          "shellDisabled": "Shell 꺼짐"
+        }
+      },
       "detail": {
         "tabs": {
           "chat": "채팅",
