@@ -175,7 +175,7 @@ class TestLiteLLMResponsesLowerer:
                 "role": "user",
                 "content": (
                     "Skill `review` has been loaded.\n"
-                    "Read and follow the following Skill body before answering.\n"
+                    "Read and follow the following Skill body.\n"
                     "The user's request is provided in the next user message.\n\n"
                     "Skill path: "
                     "`/workspace/agent/app/.claude/skills/review/SKILL.md`\n\n"

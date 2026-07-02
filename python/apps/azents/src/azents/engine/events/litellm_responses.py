@@ -107,7 +107,7 @@ def _format_skill_loaded_event(payload: SkillLoadedPayload) -> str:
     return "\n".join(
         [
             f"Skill `{payload.name}` has been loaded.",
-            "Read and follow the following Skill body before answering.",
+            "Read and follow the following Skill body.",
             user_message_note,
             "",
             f"Skill path: `{payload.skill_path}`",
