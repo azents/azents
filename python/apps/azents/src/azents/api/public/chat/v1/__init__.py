@@ -49,12 +49,19 @@ from azents.core.auth.jwt import (
 from azents.core.config import AuthConfig, Config
 from azents.core.deps import get_appctx, get_auth_config
 from azents.core.redis import create_redis_client
-from azents.engine.events.action_messages import CommandAction, GoalAction
+from azents.engine.events.action_messages import CommandAction, GoalAction, SkillAction
 from azents.engine.events.types import FileOutputPart
 from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
 from azents.engine.run.input import InputMessage
 from azents.engine.run.resolve import (
     materialize_user_input_exchange_file_attachments,
+)
+from azents.engine.tools.deps import get_skill_state_store
+from azents.engine.tools.skill import (
+    SkillStateStore,
+    load_skill_projection_for_actions,
+    skill_action_id,
+    skill_actions_from_snapshot,
 )
 from azents.repos.input_buffer.data import InputBuffer
 from azents.services.agent_session_input import (
@@ -1524,16 +1531,21 @@ async def list_input_actions(
     session_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
+    skill_store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
 ) -> InputActionListResponse:
     """Return composer actions available for a session."""
     _validate_session_id(session_id)
-    result = await chat_service.list_live_events(
+    session_result = await chat_service.get_session(
+        session_id,
+        user_id=current_user.user_id,
+    )
+    live_result = await chat_service.list_live_events(
         session_id,
         user_id=current_user.user_id,
         live_event_store=None,
     )
-    match result:
-        case Success(snapshot):
+    match (session_result, live_result):
+        case (Success(agent_session), Success(snapshot)):
             goal_hint = None
             if (
                 snapshot.goal is not None
@@ -1546,6 +1558,12 @@ async def list_input_actions(
                         "A goal is already in progress. Manage it from the goal card."
                     ),
                 )
+            skill_snapshot = await load_skill_projection_for_actions(
+                skill_store,
+                agent_id=agent_session.agent_id,
+                session_id=session_id,
+                run_state=snapshot.session_run_state,
+            )
             return InputActionListResponse(
                 items=[
                     *[
@@ -1584,16 +1602,37 @@ async def list_input_actions(
                         ),
                         availability_hint=goal_hint,
                     ),
+                    *[
+                        InputActionDefinitionResponse(
+                            id=skill_action_id(item.skill_path),
+                            keyword=item.slug,
+                            label=f"/{item.slug}",
+                            description=item.description,
+                            action=SkillAction(skill_path=item.skill_path),
+                            category="turn",
+                            message=InputActionMessagePolicyResponse(
+                                policy="optional",
+                                placeholder="Describe what to do with this skill.",
+                            ),
+                            attachments=InputActionAttachmentPolicyResponse(
+                                policy="unsupported"
+                            ),
+                            availability_hint=None,
+                            source_label=item.source_label,
+                            relative_hint=item.relative_hint,
+                        )
+                        for item in skill_actions_from_snapshot(skill_snapshot)
+                    ],
                 ]
             )
-        case Failure(error):
+        case (Failure(error), _) | (_, Failure(error)):
             match error:
                 case SessionNotFound() | SessionAccessDenied():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)
         case _:
-            assert_never(result)
+            assert_never((session_result, live_result))
 
 
 @router.get("/agents/{agent_id}/sessions/{session_id}/projects")

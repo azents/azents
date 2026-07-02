@@ -28,7 +28,7 @@ class SkillAction(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: Literal["skill"] = "skill"
-    skill_id: str = Field(min_length=1, description="Skill ID")
+    skill_path: str = Field(min_length=1, description="Exact SKILL.md path")
 
 
 ChatAction = Annotated[

@@ -40,6 +40,7 @@ from azents.engine.tools.builtin import (
     RuntimeToolkit,
 )
 from azents.engine.tools.goal import GoalToolkit, GoalToolkitProvider
+from azents.engine.tools.skill import SkillToolkit, SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkit, TodoToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -645,6 +646,7 @@ async def resolve_agent_tools(
     builtin_toolkit_provider: BuiltinToolkitProvider | None = None,
     todo_toolkit_provider: TodoToolkitProvider | None = None,
     goal_toolkit_provider: GoalToolkitProvider | None = None,
+    skill_toolkit_provider: SkillToolkitProvider | None = None,
     memory_enabled: bool = True,
     runtime_tools_enabled: bool = True,
 ) -> list[ToolkitBinding]:
@@ -666,6 +668,7 @@ async def resolve_agent_tools(
     :param builtin_toolkit_provider: Builtin toolkit provider (None disables builtin)
     :param todo_toolkit_provider: Todo toolkit provider (None disables todo)
     :param goal_toolkit_provider: Goal toolkit provider (None disables goal)
+    :param skill_toolkit_provider: Skill toolkit provider (None disables Skill)
     :param runtime_tools_enabled: Expose builtin shell/file tools only to
         Agents connected to Runtime settings.
         Memory tools can be exposed without runtime.
@@ -885,6 +888,49 @@ async def resolve_agent_tools(
                 goal_resolved,
                 goal_config,
                 "goal",
+                None,
+                False,
+                None,
+            )
+        )
+
+    # Auto-bound Toolkit: filesystem Skills
+    if skill_toolkit_provider is not None:
+        skill_config = SkillToolkitProvider.validate_config({})
+        skill_context = ResolveContext(
+            toolkit_id="",
+            toolkit_name="skill",
+            credentials_json=None,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            user_id=context.user_id,
+            session=session,
+            web_url=web_url,
+            oauth_secret_key=oauth_secret_key,
+            workspace_id=context.workspace_id,
+            workspace_handle=workspace_handle,
+        )
+        skill_resolved = await _resolve_toolkit_with_logging(
+            agent_id=agent_id,
+            context=context,
+            source="auto",
+            slug="skill",
+            provider=skill_toolkit_provider,
+            toolkit_name="skill",
+            resolve=skill_toolkit_provider.resolve(
+                skill_config,
+                skill_context,
+            ),
+        )
+        if isinstance(skill_resolved, SkillToolkit):
+            skill_resolved.set_agent_id(agent_id)
+            skill_resolved.set_session_id(context.session_id)
+        pending.append(
+            (
+                skill_toolkit_provider,
+                skill_resolved,
+                skill_config,
+                "skill",
                 None,
                 False,
                 None,

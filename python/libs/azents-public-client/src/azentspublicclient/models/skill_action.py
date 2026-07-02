@@ -28,9 +28,9 @@ class SkillAction(BaseModel):
     Skill invocation turn action.
     """ # noqa: E501
     type: Optional[StrictStr] = 'skill'
-    skill_id: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Skill ID")
+    skill_path: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Exact SKILL.md path")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["type", "skill_id"]
+    __properties: ClassVar[List[str]] = ["type", "skill_path"]
 
     @field_validator('type')
     def type_validate_enum(cls, value):
@@ -101,7 +101,7 @@ class SkillAction(BaseModel):
 
         _obj = cls.model_validate({
             "type": obj.get("type") if obj.get("type") is not None else 'skill',
-            "skill_id": obj.get("skill_id")
+            "skill_path": obj.get("skill_path")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

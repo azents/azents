@@ -37,12 +37,12 @@ class TestAction(unittest.TestCase):
             return Action(
                 type = 'command',
                 name = '0',
-                skill_id = '0'
+                skill_path = '0'
             )
         else:
             return Action(
                 name = '0',
-                skill_id = '0',
+                skill_path = '0',
         )
         """
 

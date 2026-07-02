@@ -19,6 +19,7 @@ from azents.engine.tools.kubernetes import KubernetesToolkitProvider
 from azents.engine.tools.mcp import McpToolkitProvider
 from azents.engine.tools.notion import NotionToolkitProvider
 from azents.engine.tools.sentry import SentryToolkitProvider
+from azents.engine.tools.skill import SkillStateStore, SkillToolkitProvider
 from azents.engine.tools.todo import TodoStateStore, TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -100,3 +101,19 @@ def get_goal_toolkit_provider(
 ) -> GoalToolkitProvider:
     """GoalToolkitProvider dependency."""
     return GoalToolkitProvider(store=GoalStateStore(session_manager=session_manager))
+
+
+def get_skill_state_store(
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+) -> SkillStateStore:
+    """SkillStateStore dependency."""
+    return SkillStateStore(session_manager=session_manager)
+
+
+def get_skill_toolkit_provider(
+    skill_store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
+) -> SkillToolkitProvider:
+    """SkillToolkitProvider dependency without runtime sync support."""
+    return SkillToolkitProvider(store=skill_store)

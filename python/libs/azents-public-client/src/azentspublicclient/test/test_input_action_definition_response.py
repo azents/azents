@@ -49,7 +49,9 @@ class TestInputActionDefinitionResponse(unittest.TestCase):
                     policy = 'unsupported', ),
                 availability_hint = azentspublicclient.models.input_action_availability_hint_response.InputActionAvailabilityHintResponse(
                     state = 'ready', 
-                    message = '', )
+                    message = '', ),
+                source_label = '',
+                relative_hint = ''
             )
         else:
             return InputActionDefinitionResponse(

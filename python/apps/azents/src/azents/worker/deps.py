@@ -25,6 +25,11 @@ from azents.engine.tools.builtin_agents import ToolkitAgentsAppendixDedupeStateS
 from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationClient as EngineRuntimeRunnerOperationClient,
 )
+from azents.engine.tools.skill import (
+    SkillProjectionService,
+    SkillStateStore,
+    SkillToolkitProvider,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -67,6 +72,29 @@ def get_runtime_tool_operation_client(
 ) -> EngineRuntimeRunnerOperationClient:
     """Convert Runtime control client to engine runtime I/O protocol."""
     return adapt_runtime_runner_operations(runner_operations)
+
+
+def get_skill_toolkit_provider(
+    runner_operations: Annotated[
+        EngineRuntimeRunnerOperationClient,
+        Depends(get_runtime_tool_operation_client),
+    ],
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+) -> SkillToolkitProvider:
+    """SkillToolkitProvider dependency for Worker with runtime sync support."""
+    store = SkillStateStore(session_manager=session_manager)
+    return SkillToolkitProvider(
+        store=store,
+        projection_service=SkillProjectionService(
+            store=store,
+            session_manager=session_manager,
+            runner_operations=runner_operations,
+            runtime_repository=AgentRuntimeRepository(),
+            project_repository=SessionWorkspaceProjectRepository(),
+        ),
+    )
 
 
 def get_builtin_toolkit_provider(

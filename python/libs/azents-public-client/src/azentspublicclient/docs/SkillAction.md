@@ -7,7 +7,7 @@ Skill invocation turn action.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'skill']
-**skill_id** | **str** | Skill ID | 
+**skill_path** | **str** | Exact SKILL.md path |
 
 ## Example
 

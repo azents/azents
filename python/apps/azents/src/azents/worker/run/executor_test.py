@@ -32,6 +32,7 @@ from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
+from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -396,6 +397,7 @@ def _executor(
         builtin_toolkit_provider=cast(BuiltinToolkitProvider, object()),
         todo_toolkit_provider=cast(TodoToolkitProvider, object()),
         goal_toolkit_provider=cast(GoalToolkitProvider, object()),
+        skill_toolkit_provider=cast(SkillToolkitProvider, object()),
         broadcast=cast(WebSocketBroadcast, object()),
     )
 

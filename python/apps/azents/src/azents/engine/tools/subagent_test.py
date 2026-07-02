@@ -174,6 +174,7 @@ def _make_ctx(
         builtin_toolkit_provider=None,
         todo_toolkit_provider=None,
         goal_toolkit_provider=None,
+        skill_toolkit_provider=None,
         web_url="https://example.test",
         oauth_secret_key="secret",
         mcp_proxy_url=None,

@@ -134,10 +134,10 @@ function normalizeAction(
   }
   if (
     type === "skill" &&
-    "skill_id" in action &&
-    typeof action.skill_id === "string"
+    "skill_path" in action &&
+    typeof action.skill_path === "string"
   ) {
-    return { type: "skill", skill_id: action.skill_id };
+    return { type: "skill", skill_path: action.skill_path };
   }
   return null;
 }
@@ -178,8 +178,8 @@ function normalizeStoredAction(value: unknown): ChatAction | null {
   if (action.type === "goal") {
     return { type: "goal" };
   }
-  if (action.type === "skill" && typeof action.skill_id === "string") {
-    return { type: "skill", skill_id: action.skill_id };
+  if (action.type === "skill" && typeof action.skill_path === "string") {
+    return { type: "skill", skill_path: action.skill_path };
   }
   return null;
 }
@@ -245,14 +245,14 @@ function fallbackActionDefinition(action: ChatAction): InputActionDefinition {
       };
     case "skill":
       return {
-        id: `skill:${action.skill_id}`,
+        id: `skill:${action.skill_path}`,
         keyword: "skill",
         label: "Skill",
         description: "",
         action,
         category: "turn",
         message: { policy: "optional", placeholder: null, max_length: null },
-        attachments: { policy: "optional" },
+        attachments: { policy: "unsupported" },
         availability_hint: null,
       };
   }
@@ -699,9 +699,22 @@ export const ChatInput = memo(function ChatInput({
                           ranges={ranked.ranges}
                         />
                       </Text>
-                      <Text size="xs" c="dimmed" ta="right">
-                        {ranked.action.description}
-                      </Text>
+                      <Stack gap={0} align="flex-end" style={{ minWidth: 0 }}>
+                        {(ranked.action.source_label ||
+                          ranked.action.relative_hint) && (
+                          <Text size="xs" c="dimmed" ta="right" truncate>
+                            {[
+                              ranked.action.source_label,
+                              ranked.action.relative_hint,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </Text>
+                        )}
+                        <Text size="xs" c="dimmed" ta="right" truncate>
+                          {ranked.action.description}
+                        </Text>
+                      </Stack>
                     </Group>
                     {ranked.action.availability_hint?.message && (
                       <Text size="xs" c="orange" ta="right">

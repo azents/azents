@@ -61,6 +61,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.input import InputMessage
 from azents.engine.tools.goal import GoalStateSnapshot
+from azents.engine.tools.skill import SkillProjectionState
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request.data import ChatWriteRequest
@@ -509,6 +510,15 @@ class _RestWriteIdempotencyService:
         return record
 
 
+class _EmptySkillStore:
+    """SkillStateStore double with empty projection."""
+
+    async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
+        """Return empty Skill projection state."""
+        del agent_id, session_id
+        return SkillProjectionState()
+
+
 class _DeleteInputBufferService:
     """ChatSessionService double for tests."""
 
@@ -545,6 +555,32 @@ class _EventService:
             native_format=None,
             schema_version="1",
             created_at=datetime.datetime(2026, 6, 4, tzinfo=datetime.UTC),
+        )
+
+    async def get_session(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+    ) -> Success[AgentSession]:
+        """Return session lookup result."""
+        del user_id
+        return Success(
+            AgentSession(
+                id=session_id,
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                status=AgentSessionStatus.ACTIVE,
+                start_reason=AgentSessionStartReason.INITIAL,
+                title=None,
+                title_source=None,
+                title_generated_at=None,
+                title_generation_event_id=None,
+                last_user_input_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                started_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+                updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
+            )
         )
 
     async def list_history_events(
@@ -970,6 +1006,7 @@ class TestListInputActions:
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
             _EventService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _EmptySkillStore(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
         )
 
         items = response.model_dump(mode="json")["items"]
@@ -987,6 +1024,8 @@ class TestListInputActions:
             },
             "attachments": {"policy": "unsupported"},
             "availability_hint": None,
+            "source_label": None,
+            "relative_hint": None,
         }
         assert items[1]["id"] == "goal"
         assert items[1]["action"] == {"type": "goal"}
