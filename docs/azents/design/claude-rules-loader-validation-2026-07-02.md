@@ -84,6 +84,31 @@ Fixes applied to PR #138:
 
 After the second fix, the local full backend suite and PR #138 CI passed.
 
+## Implementation vs. ADR-0088 Comparison
+
+| ADR-0088 decision | Implementation status | Evidence |
+| --- | --- | --- |
+| Adopt Claude rules loading as a separate auto-bound runtime Toolkit with slug `claude_rules` | Implemented | `ClaudeRulesToolkit`, `ClaudeRulesToolkitProvider`, and runtime auto-binding tests |
+| Resolve the Toolkit whenever runtime tools are enabled | Implemented | Runtime resolve, executor, and subagent plumbing tests |
+| Expose no model-visible tools and no Toolkit/system prompt content | Implemented | `update_context()` returns no tools; provider has empty prompt |
+| Register `on_after_tool_call` and `on_session_compact` hooks | Implemented | Toolkit hook tests for read append and compaction reset |
+| Use shared runtime file context instead of `RuntimeToolkit` internals | Implemented | `RuntimeInstructionContextStore` shared between runtime and Claude rules Toolkits |
+| Append only to successful `read` tool results and preserve original read failures | Implemented | Hook tests for successful reads, failed reads, and non-read tools |
+| Do not touch Runtime solely to discover rules during prompt construction | Implemented | Discovery occurs only from the after-read hook using existing runtime context |
+| Store only dedupe metadata in Toolkit State; runtime filesystem remains canonical | Implemented | `ClaudeRulesAppendixDedupeState` stores appended paths only; rule content is read from `FileStorage` |
+| Support workspace and registered Project `.claude/rules/**/*.md` roots only | Implemented | Root selection and discovery tests |
+| Keep nested `.claude/rules` roots and `.opencode/rules` out of scope | Implemented | Discovery is limited to workspace and Project rule roots |
+| Support global rules and `paths` globs with relative, absolute, and `**` semantics | Implemented | `rule_matches_target` unit tests |
+| Render raw rule content with a Claude-rules-specific cap | Implemented | Rendering and truncation tests |
+| Dedupe by normalized rule path and clear on compaction | Implemented | Hook dedupe and compaction tests |
+| Render workspace rules before Project rules and keep first realpath occurrence | Implemented | Hook ordering and realpath dedupe tests |
+| Skip repo/config-level issues quietly | Implemented | Discovery and matching tests for missing, malformed, unsupported, missing race, decode, and outside-root cases |
+| Log Runtime/FileStorage communication failures after a successful read and return unchanged output | Implemented | Failure-handling test; PR #138 CI passed after log assertion stabilization |
+| Let Toolkit State failures and code bugs raise to the hook dispatcher fail-open path | Implemented | Code path review and existing dispatcher exception tests |
+| Follow-up work: implement Toolkit, add helper/hook tests, update living spec after implementation | Completed in stack | PR #138 implements/tests, PR #140 promotes `docs/azents/spec/domain/toolkit.md` |
+
+No ADR-0088 decision drift was found.
+
 ## Implementation vs. Design Comparison
 
 | Design requirement | Implementation status | Evidence |
