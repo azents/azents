@@ -16,7 +16,7 @@ from azents.core.enums import (
     SessionWorkspaceProjectRegistrationRequestStatus,
 )
 from azents.engine.tools.deps import get_skill_state_store
-from azents.engine.tools.skill import SkillStateStore
+from azents.engine.tools.skill import SkillProjectionService, SkillStateStore
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
@@ -37,6 +37,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationUnavailable,
 )
 from azents.runtime.deps import get_runtime_runner_operation_client
+from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operations
 
 SESSION_WORKSPACE_ROOT = PurePosixPath("/workspace/agent")
 _RUNNER_PROJECT_VALIDATION_TIMEOUT_SECONDS = 120
@@ -204,8 +205,17 @@ class SessionWorkspaceProjectService:
                     path=normalized_path,
                 ),
             )
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
             await session.commit()
-            return Success(project)
+        if agent_session is not None:
+            await self._sync_skill_projection_for_project_change(
+                agent_id=agent_session.agent_id,
+                session_id=session_id,
+            )
+        return Success(project)
 
     async def register_existing_folder_for_session(
         self,
@@ -270,7 +280,11 @@ class SessionWorkspaceProjectService:
                 path=normalized_path,
             )
             await session.commit()
-            return Success(project)
+        await self._sync_skill_projection_for_project_change(
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+        )
+        return Success(project)
 
     async def list_registration_requests_for_session(
         self,
@@ -385,7 +399,11 @@ class SessionWorkspaceProjectService:
                 path=normalized_path,
             )
             await session.commit()
-            return Success(project)
+        await self._sync_skill_projection_for_project_change(
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+        )
+        return Success(project)
 
     async def reject_registration_request_for_session(
         self,
@@ -535,6 +553,28 @@ class SessionWorkspaceProjectService:
                 )
             await session.commit()
             return Success(None)
+
+    async def _sync_skill_projection_for_project_change(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        """Refresh latest Skill projection after a Project source-set addition."""
+        if self.skill_store is None or self.runner_operations is None:
+            return
+        projection_service = SkillProjectionService(
+            store=self.skill_store,
+            session_manager=self.session_manager,
+            runner_operations=adapt_runtime_runner_operations(self.runner_operations),
+            runtime_repository=self.agent_runtime_repository,
+            project_repository=self.repository,
+        )
+        await projection_service.sync_latest(
+            agent_id=agent_id,
+            session_id=session_id,
+            reason="project_change",
+        )
 
     async def _validate_project_path(
         self,

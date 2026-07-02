@@ -12,6 +12,7 @@ from azents.api.public.chat.v1 import (
     _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
     _write_command_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_edit_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
+    _write_input_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_new_session_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     archive_agent_session,
@@ -32,6 +33,7 @@ from azents.api.public.chat.v1.data import (
     AgentSessionTitleUpdateRequest,
     ChatCommandWriteRequest,
     ChatEditMessageWriteRequest,
+    ChatInputWriteRequest,
     ChatMessageWriteRequest,
     ChatSessionCreateMessageWriteRequest,
     GoalStatusUpdateRequest,
@@ -54,6 +56,7 @@ from azents.core.enums import (
     EventKind,
     InputBufferKind,
 )
+from azents.engine.events.action_messages import SkillAction
 from azents.engine.events.types import (
     ActiveToolCall,
     Event,
@@ -63,6 +66,7 @@ from azents.engine.run.input import InputMessage
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.skill import SkillProjectionState
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
+from azents.rdb.models.event import JSONValue
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request.data import ChatWriteRequest
 from azents.repos.input_buffer.data import InputBuffer
@@ -175,6 +179,40 @@ class _BufferedInputService:
         self.kwargs.append(kwargs)
         session_id = self.target_session_id or str(kwargs["agent_session_id"])
         input_buffer = self._input_buffer(kwargs, session_id=session_id)
+        return Success(
+            BufferedAgentSessionInputResult(
+                agent_runtime_id="1123456789abcdef0123456789abcdef",
+                agent_session_id=session_id,
+                input_buffer=input_buffer,
+            )
+        )
+
+    async def create_buffered_agent_action_input(
+        self,
+        **kwargs: object,
+    ) -> Success[BufferedAgentSessionInputResult]:
+        """Return action InputBuffer creation result."""
+        self.calls.append("create_buffered_agent_action_input")
+        self.kwargs.append(kwargs)
+        session_id = self.target_session_id or str(kwargs["agent_session_id"])
+        message = cast(InputMessage, kwargs["message"])
+        input_buffer = InputBuffer(
+            id="0123456789abcdef0123456789abcdef",
+            session_id=session_id,
+            kind=InputBufferKind.ACTION_MESSAGE,
+            actor_user_id=str(kwargs["user_id"]),
+            content=str(message.text),
+            idempotency_key=(
+                str(kwargs["client_request_id"])
+                if kwargs.get("client_request_id") is not None
+                else None
+            ),
+            metadata={"source": "chat"},
+            action=cast(dict[str, JSONValue], kwargs["action"]),
+            attachments=[],
+            file_parts=[],
+            created_at=datetime.datetime(2026, 5, 19, tzinfo=datetime.UTC),
+        )
         return Success(
             BufferedAgentSessionInputResult(
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
@@ -1224,6 +1262,46 @@ class TestRestMessageWriteContract:
             raise AssertionError("Expected RuntimeError")
 
         assert broker.messages == []
+
+    async def test_skill_action_write_commits_action_buffer_and_wakes_once(
+        self,
+    ) -> None:
+        """REST input write accepts SkillAction turn actions."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        chat_service = _RestWriteChatService()
+        input_service = _BufferedInputService()
+
+        response = await _write_input_via_rest(
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            AsyncMock(),  # ChatWriteService is not used for SkillAction.
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            ChatInputWriteRequest(
+                agent_id="agent-1",
+                client_request_id="skill-1",
+                message="Review this change",
+                action=SkillAction(
+                    skill_path="/workspace/agent/app/.claude/skills/review/SKILL.md"
+                ),
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert input_service.calls == ["create_buffered_agent_action_input"]
+        assert input_service.kwargs[0]["action"] == {
+            "type": "skill",
+            "skill_path": "/workspace/agent/app/.claude/skills/review/SKILL.md",
+        }
+        assert response.accepted.type == "input_buffer"
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
 
 
 class TestRestEditCommandWriteContract:
