@@ -69,6 +69,7 @@ from azents.engine.run.resolve import (
 )
 from azents.engine.run.types import CheckStop, PollMessages
 from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
+from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import (
     get_goal_toolkit_provider,
     get_todo_toolkit_provider,
@@ -112,6 +113,7 @@ from azents.worker.deps import (
     get_background_registry,
     get_broadcast,
     get_builtin_toolkit_provider,
+    get_claude_rules_toolkit_provider,
     get_command_registry,
     get_exchange_file_service,
     get_skill_toolkit_provider,
@@ -235,6 +237,9 @@ class RunExecutor:
     ]
     builtin_toolkit_provider: Annotated[
         BuiltinToolkitProvider, Depends(get_builtin_toolkit_provider)
+    ]
+    claude_rules_toolkit_provider: Annotated[
+        ClaudeRulesToolkitProvider, Depends(get_claude_rules_toolkit_provider)
     ]
     todo_toolkit_provider: Annotated[
         TodoToolkitProvider, Depends(get_todo_toolkit_provider)
@@ -442,6 +447,7 @@ class RunExecutor:
                 runtime_domain_config=runtime_domain_config,
                 workspace_handle=message.workspace_handle or "",
                 builtin_toolkit_provider=self.builtin_toolkit_provider,
+                claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
                 todo_toolkit_provider=self.todo_toolkit_provider,
                 goal_toolkit_provider=self.goal_toolkit_provider,
                 skill_toolkit_provider=self.skill_toolkit_provider,
@@ -514,6 +520,7 @@ class RunExecutor:
                 publish_event=publish_event,
                 broker=self.broker,
                 builtin_toolkit_provider=self.builtin_toolkit_provider,
+                claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
                 todo_toolkit_provider=self.todo_toolkit_provider,
                 goal_toolkit_provider=self.goal_toolkit_provider,
                 skill_toolkit_provider=self.skill_toolkit_provider,

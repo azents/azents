@@ -39,7 +39,14 @@ from azents.engine.tools.builtin import (
     BuiltinToolkitProvider,
     RuntimeToolkit,
 )
+from azents.engine.tools.claude_rules import (
+    ClaudeRulesToolkit,
+    ClaudeRulesToolkitProvider,
+)
 from azents.engine.tools.goal import GoalToolkit, GoalToolkitProvider
+from azents.engine.tools.runtime_instruction_context import (
+    RuntimeInstructionContextStore,
+)
 from azents.engine.tools.skill import SkillToolkit, SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkit, TodoToolkitProvider
 from azents.rdb.session import SessionManager
@@ -644,6 +651,7 @@ async def resolve_agent_tools(
     runtime_domain_config: RuntimeDomainConfig,
     workspace_handle: str = "",
     builtin_toolkit_provider: BuiltinToolkitProvider | None = None,
+    claude_rules_toolkit_provider: ClaudeRulesToolkitProvider | None = None,
     todo_toolkit_provider: TodoToolkitProvider | None = None,
     goal_toolkit_provider: GoalToolkitProvider | None = None,
     skill_toolkit_provider: SkillToolkitProvider | None = None,
@@ -666,6 +674,7 @@ async def resolve_agent_tools(
         constructor and keeps it immutable.
     :param workspace_handle: Workspace handle for settings page URL construction
     :param builtin_toolkit_provider: Builtin toolkit provider (None disables builtin)
+    :param claude_rules_toolkit_provider: Claude rules provider (None disables it)
     :param todo_toolkit_provider: Todo toolkit provider (None disables todo)
     :param goal_toolkit_provider: Goal toolkit provider (None disables goal)
     :param skill_toolkit_provider: Skill toolkit provider (None disables Skill)
@@ -803,6 +812,7 @@ async def resolve_agent_tools(
         )
 
         if runtime_tools_enabled:
+            instruction_context_store = RuntimeInstructionContextStore()
             runtime_context = ResolveContext(
                 toolkit_id="",
                 toolkit_name="shell",
@@ -832,6 +842,9 @@ async def resolve_agent_tools(
             if isinstance(runtime_resolved, RuntimeToolkit):
                 runtime_resolved.set_agent_id(agent_id)
                 runtime_resolved.set_session_id(context.session_id)
+                runtime_resolved.set_instruction_context_store(
+                    instruction_context_store
+                )
                 # Register peer toolkits to collect env when shell() runs.
                 # DB-registered toolkits are already in pending. In current structure,
                 # credential injection into runtime is limited to DB-registered toolkits
@@ -845,6 +858,51 @@ async def resolve_agent_tools(
                         runtime_resolved,
                         builtin_config,
                         "shell",
+                        None,
+                        False,
+                        None,
+                    )
+                )
+
+            if claude_rules_toolkit_provider is not None:
+                claude_rules_config = ClaudeRulesToolkitProvider.validate_config({})
+                claude_rules_context = ResolveContext(
+                    toolkit_id="",
+                    toolkit_name="claude_rules",
+                    credentials_json=None,
+                    agent_id=context.agent_id,
+                    session_id=context.session_id,
+                    user_id=context.user_id,
+                    session=session,
+                    web_url=web_url,
+                    oauth_secret_key=oauth_secret_key,
+                    workspace_id=context.workspace_id,
+                    workspace_handle=workspace_handle,
+                )
+                claude_rules_resolved = await _resolve_toolkit_with_logging(
+                    agent_id=agent_id,
+                    context=context,
+                    source="auto",
+                    slug="claude_rules",
+                    provider=claude_rules_toolkit_provider,
+                    toolkit_name="claude_rules",
+                    resolve=claude_rules_toolkit_provider.resolve(
+                        claude_rules_config,
+                        claude_rules_context,
+                    ),
+                )
+                if isinstance(claude_rules_resolved, ClaudeRulesToolkit):
+                    claude_rules_resolved.set_agent_id(agent_id)
+                    claude_rules_resolved.set_session_id(context.session_id)
+                    claude_rules_resolved.set_instruction_context_store(
+                        instruction_context_store
+                    )
+                pending.append(
+                    (
+                        claude_rules_toolkit_provider,
+                        claude_rules_resolved,
+                        claude_rules_config,
+                        "claude_rules",
                         None,
                         False,
                         None,

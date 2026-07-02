@@ -22,6 +22,10 @@ from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.commands import COMMAND_REGISTRY, CommandHandler
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.builtin_agents import ToolkitAgentsAppendixDedupeStateStore
+from azents.engine.tools.claude_rules import (
+    ClaudeRulesToolkitProvider,
+    ToolkitClaudeRulesAppendixDedupeStateStore,
+)
 from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationClient as EngineRuntimeRunnerOperationClient,
 )
@@ -112,6 +116,19 @@ def get_skill_toolkit_provider(
             project_repository=SessionWorkspaceProjectRepository(),
             broadcast=broadcast,
         ),
+    )
+
+
+def get_claude_rules_toolkit_provider(
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+) -> ClaudeRulesToolkitProvider:
+    """ClaudeRulesToolkitProvider dependency for Worker."""
+    return ClaudeRulesToolkitProvider(
+        store=ToolkitClaudeRulesAppendixDedupeStateStore(
+            session_manager=session_manager,
+        )
     )
 
 
