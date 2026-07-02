@@ -443,7 +443,7 @@ class TestClaudeRulesToolkit:
     ) -> None:
         """Runtime/FileStorage communication failure logs and returns unchanged."""
         toolkit = _make_toolkit(_FailingListStorage())
-        caplog.set_level(logging.ERROR)
+        caplog.set_level(logging.ERROR, logger="azents.engine.tools.claude_rules")
 
         result = await _run_after_tool_call_hook(
             toolkit,
