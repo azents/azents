@@ -189,3 +189,20 @@ export function getCompactionThreshold(maxInput: number): number {
 pnpm --filter @azents/web typecheck
 \`\`\`
 `;
+
+export const mermaidMarkdownSample = `Here is the current handoff flow:
+
+\`\`\`mermaid
+sequenceDiagram
+    participant User
+    participant Web as azents-web
+    participant API as Chat API
+    participant Worker
+
+    User->>Web: Send message
+    Web->>API: Commit chat write
+    API-->>Web: Return live snapshot
+    API->>Worker: Wake session
+    Worker-->>Web: Stream assistant response
+\`\`\`
+`;

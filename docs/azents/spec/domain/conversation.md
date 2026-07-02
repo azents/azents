@@ -77,7 +77,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-02
-spec_version: 78
+spec_version: 79
 ---
 
 # Conversation & Events
@@ -355,6 +355,15 @@ latest live projection, not every provider delta.
 Legacy chat UI deltas and input-buffer notifications such as `content_delta`,
 `reasoning_delta`, `function_call_delta`, `run_started`, `run_phase_changed`, `input_buffered`, and
 `input_buffer_deleted` are not frontend state contracts.
+
+### Frontend Markdown rendering
+
+azents-web renders user-visible chat Markdown with GitHub Flavored Markdown, soft line breaks, and
+compact chat typography. Fenced code blocks render through the chat code block renderer. A fenced code
+block with language `mermaid` renders as an inline Mermaid diagram instead of syntax-highlighted text.
+The Mermaid renderer is client-side, lazy-loads the Mermaid package, uses strict Mermaid security
+settings for untrusted chat content, and falls back to the original source block with a user-visible
+error message when diagram rendering fails.
 
 ## 6. Input Buffers And Session Inputs
 

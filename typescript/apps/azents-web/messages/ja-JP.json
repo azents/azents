@@ -989,6 +989,8 @@
     },
     "copy": "コピー",
     "copied": "コピー済み",
+    "mermaidRendering": "Mermaid 図をレンダリング中…",
+    "mermaidRenderError": "Mermaid 図をレンダリングできません。",
     "newChat": "新しいチャット",
     "agentLoadError": "エージェントの読み込みに失敗しました",
     "selectAgentPlaceholder": "エージェントを選択",
