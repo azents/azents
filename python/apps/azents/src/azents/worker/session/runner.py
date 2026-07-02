@@ -274,11 +274,26 @@ class SessionRunner:
             )
         return command is not None
 
+    async def _mark_idle_after_no_actionable_wake_up(
+        self,
+        session_id: str,
+    ) -> bool:
+        """Mark a wake-up idle when promotion produced no model work."""
+        logger.info(
+            "Session runner marking session idle after no-actionable wake-up",
+            extra={"session_id": session_id},
+        )
+        marked_idle = await self.session_lifecycle.mark_session_idle(session_id)
+        if not marked_idle:
+            return False
+        await self.session_lifecycle.clear_session_activity(session_id)
+        return True
+
     async def _mark_idle_after_boundary(
         self,
         boundary: _PendingIdleBoundary,
     ) -> bool:
-        """terminal boundary 를 idle transition 과 idle hook 으로 닫는다."""
+        """Close a terminal boundary through idle transition and idle hook."""
         logger.info(
             "Session runner marking session idle after terminal run",
             extra={
@@ -441,6 +456,12 @@ class SessionRunner:
                         marked_idle = await self._mark_idle_after_boundary(boundary)
                         if marked_idle:
                             self.pending_idle_boundary = None
+                    elif boundary is None and not await self._has_follow_up_work(
+                        message.session_id
+                    ):
+                        marked_idle = await self._mark_idle_after_no_actionable_wake_up(
+                            message.session_id
+                        )
                 elif (
                     isinstance(message, SessionWakeUp)
                     and self.pending_idle_boundary is not None

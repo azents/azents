@@ -53,3 +53,15 @@
   color: inherit;
   font-family: inherit;
 }
+
+.skillLoadedBody {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.skillLoadedBody :where(pre, code, span) {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}

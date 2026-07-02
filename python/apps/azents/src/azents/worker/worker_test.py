@@ -790,8 +790,31 @@ async def test_failed_terminal_run_marks_idle_without_goal_continuation() -> Non
 
 
 @pytest.mark.asyncio
+async def test_no_actionable_wake_up_marks_session_idle_without_continuation() -> None:
+    """No-actionable wake-ups clear RUNNING state without idle continuation."""
+    host = _Host()
+    host.no_actionable_message_numbers.add(1)
+    runner = _start_session_runner(host)
+    message = _wake_up()
+
+    try:
+        runner.enqueue(message)
+        await _wait_until(lambda: bool(host.idle_session_ids))
+    finally:
+        await runner.shutdown()
+
+    assert host.processed_messages == [message]
+    assert host.idle_session_ids == ["session-001"]
+    assert host.idle_continuation_calls == []
+    assert host.lifecycle_events == [
+        "mark_session_idle",
+        "clear_session_activity",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_noop_wake_up_after_terminal_run_finishes_delayed_idle() -> None:
-    """stale wake-up 이 빠진 뒤 지연된 idle continuation 을 실행한다."""
+    """Stale wake-ups finish delayed idle continuation after terminal runs."""
     host = _Host()
     host.no_actionable_message_numbers.add(2)
     runner = _start_session_runner(host)
