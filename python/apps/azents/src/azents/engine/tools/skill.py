@@ -15,6 +15,7 @@ from azcommon.uuid import uuid7
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.broker.broadcast import WebSocketBroadcast, WebSocketBroadcastPublishError
 from azents.core.enums import AgentSessionRunState, RuntimeRunnerState
 from azents.core.tools import (
     ResolveContext,
@@ -52,6 +53,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.transport.chat import chat_input_actions_updated_dump
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +269,7 @@ class SkillProjectionService:
         runner_operations: RuntimeRunnerOperationClient | None = None,
         runtime_repository: AgentRuntimeRepository | None = None,
         project_repository: SessionWorkspaceProjectRepository | None = None,
+        broadcast: WebSocketBroadcast | None = None,
     ) -> None:
         """Create Skill projection service."""
         self._store = store
@@ -276,6 +279,7 @@ class SkillProjectionService:
         self._project_repository = (
             project_repository or SessionWorkspaceProjectRepository()
         )
+        self._broadcast = broadcast
 
     async def sync_latest(
         self,
@@ -317,7 +321,24 @@ class SkillProjectionService:
         current = await self._store.load(agent_id, session_id)
         if current.latest.projection_hash == snapshot.projection_hash:
             return current
-        return await self._store.replace_latest(agent_id, session_id, snapshot)
+        updated = await self._store.replace_latest(agent_id, session_id, snapshot)
+        await self.publish_input_actions_updated(session_id)
+        return updated
+
+    async def publish_input_actions_updated(self, session_id: str) -> None:
+        """Notify chat clients that composer actions should be reloaded."""
+        if self._broadcast is None:
+            return
+        try:
+            await self._broadcast.publish(
+                session_id,
+                chat_input_actions_updated_dump(session_id),
+            )
+        except WebSocketBroadcastPublishError:
+            logger.exception(
+                "Input action update broadcast failed",
+                extra={"session_id": session_id},
+            )
 
     async def _scan_runtime(
         self,

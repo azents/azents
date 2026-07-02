@@ -8,6 +8,7 @@ import pytest
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.skill import (
     SkillProjectionItem,
+    SkillProjectionService,
     SkillProjectionSnapshot,
     SkillProjectionState,
     make_load_skill_tool,
@@ -52,6 +53,17 @@ class _SkillStore:
         """Return configured state."""
         del agent_id, session_id
         return self.state
+
+
+class _Broadcast:
+    """WebSocketBroadcast test double."""
+
+    def __init__(self) -> None:
+        self.published: list[tuple[str, dict[str, object]]] = []
+
+    async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
+        """Record published event payloads."""
+        self.published.append((session_id, event_json))
 
 
 class TestSkillPrompt:
@@ -136,6 +148,29 @@ class TestLoadSkill:
         assert isinstance(output, str)
         assert "Skill loaded from the active projection." in output
         assert item.body in output
+
+
+class TestSkillProjectionService:
+    """Skill projection service behavior."""
+
+    @pytest.mark.asyncio
+    async def test_publish_input_actions_updated_uses_session_channel(self) -> None:
+        """Skill projection changes notify clients to reload input actions."""
+        broadcast = _Broadcast()
+        service = SkillProjectionService(
+            store=object(),  # pyright: ignore[reportArgumentType]
+            session_manager=object(),  # pyright: ignore[reportArgumentType]
+            broadcast=broadcast,  # pyright: ignore[reportArgumentType]
+        )
+
+        await service.publish_input_actions_updated("session-1")
+
+        assert broadcast.published == [
+            (
+                "session-1",
+                {"type": "input_actions_updated", "session_id": "session-1"},
+            )
+        ]
 
 
 class TestSkillAction:

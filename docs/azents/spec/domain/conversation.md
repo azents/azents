@@ -48,7 +48,10 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - python/apps/azents/src/azents/engine/tools/todo.py
   - python/apps/azents/src/azents/engine/tools/goal.py
+  - python/apps/azents/src/azents/engine/tools/skill.py
   - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
+  - python/apps/azents/src/azents/transport/chat.py
+  - python/apps/azents/src/azents/worker/deps.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
 api_routes:
   - /chat/v1
@@ -73,8 +76,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-06-30
-spec_version: 76
+last_verified_at: 2026-07-02
+spec_version: 77
 ---
 
 # Conversation & Events
@@ -321,6 +324,7 @@ WebSocket chat clients receive subscription and event actions:
 - `history_event_appended` for newly persisted transcript events;
 - `live_event_upserted` for current live projections;
 - `live_event_removed` when a projection is no longer current;
+- `input_actions_updated` when composer action definitions change, including Skill projection list changes;
 - `todo_state_changed` when the session-scoped TodoToolkit State changes.
 
 Durable/live handoff follows these invariants:

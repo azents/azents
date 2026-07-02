@@ -1374,6 +1374,11 @@ export function useChatSessionContainer(
         return;
       }
 
+      if ("type" in event && event.type === "input_actions_updated") {
+        void utils.chat.listInputActions.invalidate({ sessionId });
+        return;
+      }
+
       if ("type" in event && event.type === "live_event_removed") {
         setManagedLiveState((prev) => ({
           ...prev,
@@ -1537,7 +1542,7 @@ export function useChatSessionContainer(
           break;
       }
     },
-    [connectionInfoQuery, sessionId],
+    [connectionInfoQuery, sessionId, utils.chat.listInputActions],
   );
 
   const {
