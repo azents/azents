@@ -14,6 +14,8 @@ Event transcript event kind.
 
 * `ACTION_MESSAGE` (value: `'action_message'`)
 
+* `SKILL_LOADED` (value: `'skill_loaded'`)
+
 * `GOAL_BRIEFING` (value: `'goal_briefing'`)
 
 * `ASSISTANT_MESSAGE` (value: `'assistant_message'`)

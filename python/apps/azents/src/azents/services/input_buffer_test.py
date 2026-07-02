@@ -9,12 +9,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionRunState,
+    EventKind,
     ExchangeFileOrigin,
     ExchangeFileStatus,
     InputBufferKind,
     LLMProvider,
 )
-from azents.engine.events.types import FileOutputPart, UserMessagePayload
+from azents.engine.events.action_messages import SkillAction
+from azents.engine.events.types import (
+    FileOutputPart,
+    SkillLoadedPayload,
+    UserMessagePayload,
+)
+from azents.engine.tools.skill import (
+    SkillProjectionItem,
+    SkillProjectionSnapshot,
+    SkillProjectionState,
+    SkillStateStore,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -140,6 +152,64 @@ async def _create_buffer(
             ),
         )
         return created.id
+
+
+async def _create_action_buffer(
+    rdb_session_manager: SessionManager[AsyncSession],
+    *,
+    session_id: str,
+    user_id: str,
+    content: str,
+    action: SkillAction,
+) -> str:
+    """Create action InputBuffer for tests."""
+    async with rdb_session_manager() as session:
+        created = await InputBufferRepository().create(
+            session,
+            InputBufferCreate(
+                session_id=session_id,
+                kind=InputBufferKind.ACTION_MESSAGE,
+                actor_user_id=user_id,
+                content=content,
+                idempotency_key=None,
+                metadata={"source": "chat"},
+                action=action.model_dump(mode="json"),
+                attachments=[],
+                file_parts=[],
+            ),
+        )
+        return created.id
+
+
+def _skill_item() -> SkillProjectionItem:
+    """Create projected Skill item for tests."""
+    return SkillProjectionItem(
+        id="skill-1",
+        source_kind="project_claude",
+        project_id="project-1",
+        project_path="/workspace/agent/app",
+        skill_dir_path="/workspace/agent/app/.claude/skills/review",
+        skill_path="/workspace/agent/app/.claude/skills/review/SKILL.md",
+        slug="review",
+        name="review",
+        description="Review code.",
+        frontmatter={"name": "review", "description": "Review code."},
+        body="# Review\nFollow this checklist.",
+        content_hash="hash-1",
+        source_label="app",
+        relative_hint=".claude/skills/review",
+    )
+
+
+async def _agent_id_for_session(
+    rdb_session_manager: SessionManager[AsyncSession],
+    session_id: str,
+) -> str:
+    """Return agent ID for a test session."""
+    async with rdb_session_manager() as session:
+        agent_session = await AgentSessionRepository().get_by_id(session, session_id)
+    assert agent_session is not None
+    return agent_session.agent_id
 
 
 def _exchange_file(
@@ -344,6 +414,58 @@ class TestInputBufferService:
                 .where(RDBInputBuffer.id == buffer_id)
             )
         assert remaining == 0
+
+    async def test_flush_skill_action_loads_skill_before_user_message(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Skill action promotes skill_loaded then the request as user_message."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-skill-action",
+        )
+        agent_id = await _agent_id_for_session(rdb_session_manager, session_id)
+        item = _skill_item()
+        await SkillStateStore(session_manager=rdb_session_manager).update(
+            agent_id,
+            session_id,
+            lambda _current: SkillProjectionState(
+                active=SkillProjectionSnapshot(items=[item])
+            ),
+        )
+        buffer_id = await _create_action_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="Review this PR",
+            action=SkillAction(skill_path=item.skill_path),
+        )
+        service = _input_buffer_service(rdb_session_manager)
+
+        result = await service.flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+        )
+
+        assert result.inserted_count == 3
+        assert [event.kind for event in result.events] == [
+            EventKind.ACTION_MESSAGE,
+            EventKind.SKILL_LOADED,
+            EventKind.USER_MESSAGE,
+        ]
+        skill_event = result.events[1]
+        assert skill_event.external_id == f"{buffer_id}:skill_loaded"
+        assert isinstance(skill_event.payload, SkillLoadedPayload)
+        assert skill_event.payload.skill_path == item.skill_path
+        assert skill_event.payload.body == item.body
+        assert skill_event.payload.user_message == "Review this PR"
+        user_event = result.events[2]
+        assert user_event.external_id == f"{buffer_id}:user_message"
+        assert isinstance(user_event.payload, UserMessagePayload)
+        assert user_event.payload.content == "Review this PR"
+        assert [message.external_id for message in result.user_messages] == [
+            f"{buffer_id}:user_message"
+        ]
 
     async def test_flush_preserves_exchange_attachment_payload(
         self,

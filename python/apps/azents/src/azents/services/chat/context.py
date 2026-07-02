@@ -18,6 +18,7 @@ from azents.engine.events.types import (
     ProviderToolCallPayload,
     ProviderToolResultPayload,
     ReasoningPayload,
+    SkillLoadedPayload,
     SystemPromptAnalysisPayload,
     SystemPromptFragmentPayload,
     TokenUsagePayload,
@@ -323,6 +324,8 @@ def _build_breakdown(
         payload = event.payload
         if isinstance(payload, UserMessagePayload):
             chars["user"] += _content_chars(payload.content)
+        elif isinstance(payload, SkillLoadedPayload):
+            chars["user"] += len(payload.body)
         elif isinstance(payload, AssistantMessagePayload):
             chars["assistant"] += _content_chars(payload.content)
         elif isinstance(payload, ReasoningPayload):

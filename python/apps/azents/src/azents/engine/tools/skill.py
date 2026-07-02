@@ -728,20 +728,6 @@ def resolve_active_skill(
     return None
 
 
-def render_skill_action_reminder(
-    item: SkillProjectionItem, *, user_message: str
-) -> str:
-    """Render durable model-visible reminder for selected Skill action."""
-    lines = [
-        f"The user selected the Skill `{item.name}`.",
-        "Load and follow this Skill before responding:",
-        f"`{item.skill_path}`",
-    ]
-    if user_message.strip():
-        lines.extend(["", "User request:", user_message.strip()])
-    return "\n".join(lines)
-
-
 def _skill_source_roots(
     projects: Sequence[SessionWorkspaceProject],
 ) -> list[SkillSourceRoot]:

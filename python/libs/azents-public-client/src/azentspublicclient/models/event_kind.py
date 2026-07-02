@@ -31,6 +31,7 @@ class EventKind(str, Enum):
     GOAL_CONTINUATION = 'goal_continuation'
     GOAL_UPDATED = 'goal_updated'
     ACTION_MESSAGE = 'action_message'
+    SKILL_LOADED = 'skill_loaded'
     GOAL_BRIEFING = 'goal_briefing'
     ASSISTANT_MESSAGE = 'assistant_message'
     REASONING = 'reasoning'

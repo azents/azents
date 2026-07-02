@@ -23,6 +23,7 @@ from azents.engine.events.types import (
     ProviderToolResultPayload,
     ReasoningPayload,
     RunMarkerPayload,
+    SkillLoadedPayload,
     SubagentEndPayload,
     SubagentStartPayload,
     SystemErrorPayload,
@@ -80,6 +81,8 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return ActionMessagePayload.model_validate(row.payload)
         case EventKind.GOAL_BRIEFING:
             return GoalBriefingPayload.model_validate(row.payload)
+        case EventKind.SKILL_LOADED:
+            return SkillLoadedPayload.model_validate(row.payload)
         case EventKind.SYSTEM_REMINDER:
             return SystemReminderPayload.model_validate(row.payload)
         case EventKind.SYSTEM_ERROR:
@@ -284,7 +287,7 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                 },
                 created_at=row.created_at,
             )
-        case GoalBriefingPayload():
+        case GoalBriefingPayload() | SkillLoadedPayload():
             return None
         case SubagentEndPayload():
             return ChatMessage(

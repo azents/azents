@@ -216,6 +216,16 @@ export interface GoalBriefingPayload {
   duration_seconds?: number | null;
 }
 
+export interface SkillLoadedPayload {
+  name: string;
+  skill_path: string;
+  body: string;
+  user_message: string;
+  content_hash: string;
+  source_label: string;
+  relative_hint: string;
+}
+
 export interface SystemReminderPayload {
   text: string;
 }
@@ -271,6 +281,7 @@ export type ChatEventPayload =
   | SubagentEndPayload
   | GoalBriefingPayload
   | ActionMessagePayload
+  | SkillLoadedPayload
   | SystemReminderPayload
   | SystemErrorPayload
   | UnknownAdapterOutputPayload;
@@ -307,6 +318,7 @@ export type ChatHistoryEvent =
   | EventBase<"goal_updated", UserMessagePayload>
   | EventBase<"goal_briefing", GoalBriefingPayload>
   | EventBase<"action_message", ActionMessagePayload>
+  | EventBase<"skill_loaded", SkillLoadedPayload>
   | EventBase<"system_reminder", SystemReminderPayload>
   | EventBase<"system_error", SystemErrorPayload>
   | EventBase<"unknown_adapter_output", UnknownAdapterOutputPayload>;
@@ -669,6 +681,7 @@ export interface ChatMessage {
     | "goal_continuation"
     | "goal_updated"
     | "goal_briefing"
+    | "skill_loaded"
     | "subagent_start"
     | "subagent_end";
   content: string | null;

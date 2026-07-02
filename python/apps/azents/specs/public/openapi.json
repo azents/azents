@@ -11132,6 +11132,7 @@
           "goal_continuation",
           "goal_updated",
           "action_message",
+          "skill_loaded",
           "goal_briefing",
           "assistant_message",
           "reasoning",

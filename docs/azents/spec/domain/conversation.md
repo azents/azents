@@ -77,7 +77,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-02
-spec_version: 77
+spec_version: 78
 ---
 
 # Conversation & Events
@@ -261,9 +261,18 @@ Event kinds:
 - `system_reminder`
 - `goal_continuation`
 - `goal_updated`
+- `action_message`
+- `skill_loaded`
 - `goal_briefing`
 - `system_error`
 - `unknown_adapter_output`
+
+`skill_loaded` records a Skill turn action side effect. Its payload stores the Skill display name,
+exact `skill_path`, full Skill body, original user action message, content hash, source label, and
+relative hint. Model lowering injects `skill_loaded` as a required user-role instruction to read and
+follow the embedded Skill body; the original user action message is promoted as the following normal
+`user_message` event when non-empty. The UI renders `skill_loaded` as an expandable control event and
+hides the durable Skill `action_message` so the user's request appears once as a normal message.
 
 `system_error` payloads may include optional user-safe failed-run metadata under `failure`. The
 metadata identifies terminal failed-run output, finalization reason, retry counts, last error type,

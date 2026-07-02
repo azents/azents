@@ -513,13 +513,17 @@ function mapEvents(
         ];
       }
       case "action_message": {
+        const action = chatActionFromValue(payload.action);
+        if (action?.type === "skill") {
+          return messages;
+        }
         return [
           ...messages,
           {
             id: event.id,
             role: "user",
             content: stringField(payload, "message") ?? "",
-            action: chatActionFromValue(payload.action),
+            action,
             createdAt: event.created_at,
             status: "complete",
             metadata: eventMetadata(event),
@@ -804,6 +808,27 @@ function mapEvents(
                 typeof payload.duration_seconds === "number"
                   ? String(payload.duration_seconds)
                   : "",
+            },
+          },
+        ];
+      }
+      case "skill_loaded": {
+        return [
+          ...messages,
+          {
+            id: event.id,
+            role: "skill_loaded",
+            content: stringField(payload, "body"),
+            createdAt: event.created_at,
+            status: "complete",
+            metadata: {
+              ...eventMetadata(event),
+              name: stringField(payload, "name") ?? "",
+              skill_path: stringField(payload, "skill_path") ?? "",
+              user_message: stringField(payload, "user_message") ?? "",
+              content_hash: stringField(payload, "content_hash") ?? "",
+              source_label: stringField(payload, "source_label") ?? "",
+              relative_hint: stringField(payload, "relative_hint") ?? "",
             },
           },
         ];
