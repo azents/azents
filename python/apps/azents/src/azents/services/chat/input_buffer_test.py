@@ -177,6 +177,11 @@ async def _create_session_with_buffer(
     agent_session = await AgentSessionRepository().ensure_team_primary_for_agent(
         session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
     )
+    await SessionInitializationRepository().create_ready_noop_if_absent(
+        session,
+        session_id=agent_session.id,
+        completed_at=datetime.datetime.now(datetime.UTC),
+    )
     input_buffer = await InputBufferRepository().create(
         session,
         InputBufferCreate(
