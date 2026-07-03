@@ -9,6 +9,7 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentProjectCatalogStatus,
     LLMProvider,
     RuntimeRunnerState,
     WorkspaceUserRole,
@@ -335,6 +336,8 @@ class TestSessionWorkspaceProjectService:
         )
         assert [preset.path for preset in presets] == ["/workspace/agent/app"]
         assert [entry.path for entry in catalog_entries] == ["/workspace/agent/app"]
+        assert catalog_entries[0].status == AgentProjectCatalogStatus.AVAILABLE
+        assert catalog_entries[0].checked_at is not None
         assert runner_operations.paths == ["/workspace/agent/app"]
 
     async def test_list_projects_for_session_requires_matching_agent(

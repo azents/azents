@@ -210,6 +210,14 @@ __all__ = [
     "PreviewPasswordResetTokenResponse",
     "PreviewSignupTokenRequest",
     "PreviewSignupTokenResponse",
+    "ProjectBrowserEmptyStateResponse",
+    "ProjectBrowserEntryCapabilitiesResponse",
+    "ProjectBrowserEntryResponse",
+    "ProjectBrowserEntrySourceResponse",
+    "ProjectBrowserEntryStatusResponse",
+    "ProjectBrowserManifestPreviewRequest",
+    "ProjectBrowserManifestResponse",
+    "ProjectBrowserModeResponse",
     "ReceivedInvitationListResponse",
     "ReceivedInvitationResponse",
     "RedeemPasswordResetTokenRequest",
@@ -479,6 +487,14 @@ from azentspublicclient.models.preview_password_reset_token_request import Previ
 from azentspublicclient.models.preview_password_reset_token_response import PreviewPasswordResetTokenResponse as PreviewPasswordResetTokenResponse
 from azentspublicclient.models.preview_signup_token_request import PreviewSignupTokenRequest as PreviewSignupTokenRequest
 from azentspublicclient.models.preview_signup_token_response import PreviewSignupTokenResponse as PreviewSignupTokenResponse
+from azentspublicclient.models.project_browser_empty_state_response import ProjectBrowserEmptyStateResponse as ProjectBrowserEmptyStateResponse
+from azentspublicclient.models.project_browser_entry_capabilities_response import ProjectBrowserEntryCapabilitiesResponse as ProjectBrowserEntryCapabilitiesResponse
+from azentspublicclient.models.project_browser_entry_response import ProjectBrowserEntryResponse as ProjectBrowserEntryResponse
+from azentspublicclient.models.project_browser_entry_source_response import ProjectBrowserEntrySourceResponse as ProjectBrowserEntrySourceResponse
+from azentspublicclient.models.project_browser_entry_status_response import ProjectBrowserEntryStatusResponse as ProjectBrowserEntryStatusResponse
+from azentspublicclient.models.project_browser_manifest_preview_request import ProjectBrowserManifestPreviewRequest as ProjectBrowserManifestPreviewRequest
+from azentspublicclient.models.project_browser_manifest_response import ProjectBrowserManifestResponse as ProjectBrowserManifestResponse
+from azentspublicclient.models.project_browser_mode_response import ProjectBrowserModeResponse as ProjectBrowserModeResponse
 from azentspublicclient.models.received_invitation_list_response import ReceivedInvitationListResponse as ReceivedInvitationListResponse
 from azentspublicclient.models.received_invitation_response import ReceivedInvitationResponse as ReceivedInvitationResponse
 from azentspublicclient.models.redeem_password_reset_token_request import RedeemPasswordResetTokenRequest as RedeemPasswordResetTokenRequest

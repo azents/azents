@@ -62,6 +62,15 @@ from azents.services.chat.workspace import (
     AgentWorkspaceRuntime,
     AgentWorkspaceState,
 )
+from azents.services.project_browser_manifest import (
+    ProjectBrowserEmptyState,
+    ProjectBrowserEntry,
+    ProjectBrowserEntryCapabilities,
+    ProjectBrowserEntrySource,
+    ProjectBrowserEntryStatus,
+    ProjectBrowserManifest,
+    ProjectBrowserMode,
+)
 
 
 class UploadResponse(BaseModel):
@@ -497,6 +506,194 @@ class SessionWorkspaceProjectRegistrationRequestListResponse(BaseModel):
     items: list[SessionWorkspaceProjectRegistrationRequestResponse] = Field(
         description="Project registration request list"
     )
+
+
+class ProjectBrowserManifestPreviewRequest(BaseModel):
+    """Pre-session Project browser manifest preview request."""
+
+    project_paths: list[str] = Field(
+        description="Exact Project paths to preview before session creation",
+    )
+
+
+class ProjectBrowserModeResponse(BaseModel):
+    """Workspace browser mode descriptor response."""
+
+    id: Literal["projects", "all_files"] = Field(description="Browser mode ID")
+    label: str = Field(description="User-facing mode label")
+    default: bool = Field(description="Whether this is the default browser mode")
+    root_path: str | None = Field(
+        default=None,
+        description="Agent Workspace root path for this mode, when applicable",
+    )
+
+    @classmethod
+    def from_domain(cls, mode: ProjectBrowserMode) -> Self:
+        """Convert from service model."""
+        return cls(
+            id=mode.id,
+            label=mode.label,
+            default=mode.default,
+            root_path=mode.root_path,
+        )
+
+
+class ProjectBrowserEntrySourceResponse(BaseModel):
+    """Project browser entry source metadata response."""
+
+    type: Literal["session_project", "preview_project"] = Field(
+        description="Entry source type",
+    )
+    project_id: str | None = Field(
+        default=None,
+        description="Session Project ID when entry comes from a registered Project",
+    )
+
+    @classmethod
+    def from_domain(cls, source: ProjectBrowserEntrySource) -> Self:
+        """Convert from service model."""
+        return cls(type=source.type, project_id=source.project_id)
+
+
+class ProjectBrowserEntryStatusResponse(BaseModel):
+    """Project browser filesystem status projection response."""
+
+    value: Literal["unchecked", "available", "missing", "unavailable", "error"] = Field(
+        description="Stored filesystem status projection"
+    )
+    detail: str | None = Field(
+        default=None,
+        description="Optional status detail or error text",
+    )
+    checked_at: datetime.datetime | None = Field(
+        default=None,
+        description="Last filesystem status check time",
+    )
+    stale: bool = Field(description="Whether a background refresh is recommended")
+
+    @classmethod
+    def from_domain(cls, status: ProjectBrowserEntryStatus) -> Self:
+        """Convert from service model."""
+        return cls(
+            value=status.value.value,
+            detail=status.detail,
+            checked_at=status.checked_at,
+            stale=status.stale,
+        )
+
+
+class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
+    """Backend-provided Project root action policy response."""
+
+    open: bool = Field(description="Whether the entry can be opened in the browser")
+    remove_project: bool = Field(
+        description="Whether the registry Project row can be removed",
+    )
+    filesystem_delete: bool = Field(
+        description="Whether filesystem delete is allowed for this entry",
+    )
+    filesystem_move: bool = Field(
+        description="Whether filesystem move is allowed for this entry",
+    )
+    filesystem_rename: bool = Field(
+        description="Whether filesystem rename is allowed for this entry",
+    )
+
+    @classmethod
+    def from_domain(cls, capabilities: ProjectBrowserEntryCapabilities) -> Self:
+        """Convert from service model."""
+        return cls(
+            open=capabilities.open,
+            remove_project=capabilities.remove_project,
+            filesystem_delete=capabilities.filesystem_delete,
+            filesystem_move=capabilities.filesystem_move,
+            filesystem_rename=capabilities.filesystem_rename,
+        )
+
+
+class ProjectBrowserEntryResponse(BaseModel):
+    """Project root entry response."""
+
+    name: str = Field(description="Project root display name")
+    path: str = Field(description="Agent Workspace absolute path")
+    kind: Literal["directory"] = Field(description="Entry kind")
+    source: ProjectBrowserEntrySourceResponse = Field(description="Entry source")
+    status: ProjectBrowserEntryStatusResponse = Field(
+        description="Filesystem status projection",
+    )
+    capabilities: ProjectBrowserEntryCapabilitiesResponse = Field(
+        description="Backend-provided entry action policy",
+    )
+
+    @classmethod
+    def from_domain(cls, entry: ProjectBrowserEntry) -> Self:
+        """Convert from service model."""
+        return cls(
+            name=entry.name,
+            path=entry.path,
+            kind=entry.kind,
+            source=ProjectBrowserEntrySourceResponse.from_domain(entry.source),
+            status=ProjectBrowserEntryStatusResponse.from_domain(entry.status),
+            capabilities=ProjectBrowserEntryCapabilitiesResponse.from_domain(
+                entry.capabilities
+            ),
+        )
+
+
+class ProjectBrowserEmptyStateResponse(BaseModel):
+    """Project mode empty-state response."""
+
+    title: str = Field(description="Empty-state title")
+    description: str = Field(description="Empty-state explanatory text")
+
+    @classmethod
+    def from_domain(cls, empty_state: ProjectBrowserEmptyState) -> Self:
+        """Convert from service model."""
+        return cls(title=empty_state.title, description=empty_state.description)
+
+
+class ProjectBrowserManifestResponse(BaseModel):
+    """Backend-owned Project browser manifest response."""
+
+    agent_id: str = Field(description="Agent ID")
+    session_id: str | None = Field(
+        default=None,
+        description="AgentSession ID for existing-session manifests",
+    )
+    root: str = Field(description="Agent Workspace root path")
+    active_mode: Literal["projects", "all_files"] = Field(
+        description="Active browser mode",
+    )
+    modes: list[ProjectBrowserModeResponse] = Field(
+        description="Available browser modes",
+    )
+    entries: list[ProjectBrowserEntryResponse] = Field(
+        description="Project mode root entries",
+    )
+    empty_state: ProjectBrowserEmptyStateResponse | None = Field(
+        default=None,
+        description="Projects-mode empty state when no Projects are registered",
+    )
+
+    @classmethod
+    def from_domain(cls, manifest: ProjectBrowserManifest) -> Self:
+        """Convert from service model."""
+        return cls(
+            agent_id=manifest.agent_id,
+            session_id=manifest.session_id,
+            root=manifest.root,
+            active_mode=manifest.active_mode,
+            modes=[ProjectBrowserModeResponse.from_domain(m) for m in manifest.modes],
+            entries=[
+                ProjectBrowserEntryResponse.from_domain(entry)
+                for entry in manifest.entries
+            ],
+            empty_state=(
+                ProjectBrowserEmptyStateResponse.from_domain(manifest.empty_state)
+                if manifest.empty_state is not None
+                else None
+            ),
+        )
 
 
 class AgentWorkspaceActionResponse(BaseModel):
