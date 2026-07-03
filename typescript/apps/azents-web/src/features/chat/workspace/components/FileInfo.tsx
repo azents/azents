@@ -64,6 +64,18 @@ function formatDate(value: string | null): string {
   return date.toLocaleString();
 }
 
+function canRename(entry: WorkspaceEntry): boolean {
+  return entry.capabilities?.filesystemRename ?? true;
+}
+
+function canMove(entry: WorkspaceEntry): boolean {
+  return entry.capabilities?.filesystemMove ?? true;
+}
+
+function canDelete(entry: WorkspaceEntry): boolean {
+  return entry.capabilities?.filesystemDelete ?? true;
+}
+
 function MetadataRow({
   label,
   value,
@@ -158,26 +170,32 @@ export function FileInfo({
                   {t("download")}
                 </Menu.Item>
               )}
-              <Menu.Item
-                leftSection={<IconEdit size="0.875rem" />}
-                onClick={() => onRename(entry)}
-              >
-                {t("rename")}
-              </Menu.Item>
-              <Menu.Item
-                leftSection={<IconArrowRight size="0.875rem" />}
-                onClick={() => onMove(entry)}
-              >
-                {t("move")}
-              </Menu.Item>
-              <Menu.Divider />
-              <Menu.Item
-                color="red"
-                leftSection={<IconTrash size="0.875rem" />}
-                onClick={() => onDelete(entry)}
-              >
-                {t("delete")}
-              </Menu.Item>
+              {canRename(entry) ? (
+                <Menu.Item
+                  leftSection={<IconEdit size="0.875rem" />}
+                  onClick={() => onRename(entry)}
+                >
+                  {t("rename")}
+                </Menu.Item>
+              ) : null}
+              {canMove(entry) ? (
+                <Menu.Item
+                  leftSection={<IconArrowRight size="0.875rem" />}
+                  onClick={() => onMove(entry)}
+                >
+                  {t("move")}
+                </Menu.Item>
+              ) : null}
+              {canDelete(entry) ? <Menu.Divider /> : null}
+              {canDelete(entry) ? (
+                <Menu.Item
+                  color="red"
+                  leftSection={<IconTrash size="0.875rem" />}
+                  onClick={() => onDelete(entry)}
+                >
+                  {t("delete")}
+                </Menu.Item>
+              ) : null}
             </Menu.Dropdown>
           </Menu>
         </Group>

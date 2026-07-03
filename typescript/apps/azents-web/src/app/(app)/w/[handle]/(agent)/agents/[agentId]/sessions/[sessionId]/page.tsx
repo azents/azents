@@ -1,18 +1,14 @@
 import { TRPCError } from "@trpc/server";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AgentChatTabPage } from "@/features/agents/AgentChatTabPage";
 import { AgentContextPage } from "@/features/agents/AgentContextPage";
-import { AgentProjectsPage } from "@/features/agents/AgentProjectsPage";
 import { trpc } from "@/trpc/server";
 import type { AgentContextPageView } from "@/features/agents/AgentContextPage";
 
-type SessionPageView = "chat" | "projects" | AgentContextPageView;
+type SessionPageView = "chat" | AgentContextPageView;
 
 function parsePageView(value?: string | string[]): SessionPageView {
   const rawValue = Array.isArray(value) ? value[0] : value;
-  if (rawValue === "projects") {
-    return "projects";
-  }
   if (
     rawValue === "context" ||
     rawValue === "system-prompt" ||
@@ -34,21 +30,16 @@ export default async function Page({
     params,
     searchParams,
   ]);
+  const pageValue = Array.isArray(query.page) ? query.page[0] : query.page;
+  if (pageValue === "projects") {
+    redirect(`/w/${handle}/agents/${agentId}/sessions/${sessionId}`);
+  }
   try {
     const [agent] = await Promise.all([
       trpc.agent.get({ handle, agentId }),
       trpc.chat.getAgentSession({ agentId, sessionId }),
     ]);
     const view = parsePageView(query.page);
-    if (view === "projects") {
-      return (
-        <AgentProjectsPage
-          handle={handle}
-          agent={agent}
-          sessionId={sessionId}
-        />
-      );
-    }
     if (view !== "chat") {
       return (
         <AgentContextPage

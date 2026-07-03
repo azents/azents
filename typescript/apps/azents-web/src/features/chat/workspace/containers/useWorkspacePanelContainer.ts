@@ -4,9 +4,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import {
+  mapProjectBrowserManifest,
   mapWorkspaceManifest,
   mapWorkspacePathResult,
   mapWorkspacePathStat,
+  type WorkspaceBrowserMode,
   type WorkspaceEntry,
   type WorkspacePanelState,
   type WorkspaceProjectPanelState,
@@ -53,6 +55,8 @@ export interface WorkspacePanelContainerOutput {
   onApproveRegistrationRequest: (requestId: string) => void;
   onRejectRegistrationRequest: (requestId: string) => void;
   onDeleteProject: (projectId: string) => void;
+  onRemoveProjectEntry: (entry: WorkspaceEntry) => void;
+  onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -94,6 +98,8 @@ export function useWorkspacePanelContainer({
   const [currentDirectoryPath, setCurrentDirectoryPath] = useState<
     string | null
   >(null);
+  const [browserMode, setBrowserMode] =
+    useState<WorkspaceBrowserMode>("projects");
   const [workspaceView, setWorkspaceView] = useState<
     "browser" | "preview" | "info"
   >("browser");
@@ -123,6 +129,7 @@ export function useWorkspacePanelContainer({
     setSelectedFilePath(null);
     setSelectedPaths([]);
     setWorkspaceView("browser");
+    setBrowserMode("projects");
     setDirectoryEntriesByPath({});
     setProjectPickerOpen(false);
   }, [agentId, sessionId]);
@@ -146,6 +153,11 @@ export function useWorkspacePanelContainer({
     agentId,
     sessionId,
   });
+  const projectBrowserManifestQuery =
+    trpc.chat.getSessionProjectBrowserManifest.useQuery({
+      agentId,
+      sessionId,
+    });
   const registrationRequestsQuery =
     trpc.chat.listAgentProjectRegistrationRequests.useQuery({
       agentId,
@@ -159,7 +171,18 @@ export function useWorkspacePanelContainer({
     return mapWorkspaceManifest(workspaceQuery.data.workspace.manifest);
   }, [workspaceQuery.data]);
 
-  const activeDirectoryPath = currentDirectoryPath ?? manifest?.cwd ?? "";
+  const projectBrowserManifest = useMemo(() => {
+    if (!projectBrowserManifestQuery.data) {
+      return null;
+    }
+    return mapProjectBrowserManifest(projectBrowserManifestQuery.data);
+  }, [projectBrowserManifestQuery.data]);
+
+  const projectBrowserRoot =
+    projectBrowserManifest?.root ?? manifest?.root ?? "";
+  const activeDirectoryPath =
+    currentDirectoryPath ??
+    (browserMode === "projects" ? projectBrowserRoot : (manifest?.cwd ?? ""));
 
   useEffect(() => {
     if (!manifest) {
@@ -171,12 +194,26 @@ export function useWorkspacePanelContainer({
     }));
   }, [manifest]);
 
+  useEffect(() => {
+    if (!projectBrowserManifest) {
+      return;
+    }
+    setDirectoryEntriesByPath((previous) => ({
+      ...previous,
+      [projectBrowserManifest.root]: projectBrowserManifest.entries,
+    }));
+  }, [projectBrowserManifest]);
+
   const directoryQuery = trpc.chat.readAgentWorkspacePath.useQuery(
     { agentId, sessionId, path: activeDirectoryPath },
     {
       enabled:
         workspaceQuery.data?.workspace.type === "READY" &&
-        activeDirectoryPath !== "",
+        activeDirectoryPath !== "" &&
+        !(
+          browserMode === "projects" &&
+          activeDirectoryPath === projectBrowserRoot
+        ),
     },
   );
 
@@ -373,7 +410,13 @@ export function useWorkspacePanelContainer({
   const registerProjectMutation = trpc.chat.registerAgentProject.useMutation({
     onSuccess: async () => {
       setRegisterProjectError(null);
-      await utils.chat.listAgentProjects.invalidate({ agentId, sessionId });
+      await Promise.all([
+        utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
+        utils.chat.getSessionProjectBrowserManifest.invalidate({
+          agentId,
+          sessionId,
+        }),
+      ]);
     },
     onError: (error) => setRegisterProjectError(error.message),
   });
@@ -384,6 +427,10 @@ export function useWorkspacePanelContainer({
         setPendingApproveRequestId(null);
         await Promise.all([
           utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
+          utils.chat.getSessionProjectBrowserManifest.invalidate({
+            agentId,
+            sessionId,
+          }),
           utils.chat.listAgentProjectRegistrationRequests.invalidate({
             agentId,
             sessionId,
@@ -408,7 +455,13 @@ export function useWorkspacePanelContainer({
   const deleteProjectMutation = trpc.chat.deleteAgentProject.useMutation({
     onSuccess: async () => {
       setPendingDeleteProjectId(null);
-      await utils.chat.listAgentProjects.invalidate({ agentId, sessionId });
+      await Promise.all([
+        utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
+        utils.chat.getSessionProjectBrowserManifest.invalidate({
+          agentId,
+          sessionId,
+        }),
+      ]);
     },
     onError: () => setPendingDeleteProjectId(null),
   });
@@ -526,6 +579,10 @@ export function useWorkspacePanelContainer({
       utils.chat.getAgentWorkspace.invalidate({ agentId }),
       utils.chat.readAgentWorkspacePath.invalidate({ agentId }),
       utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
+      utils.chat.getSessionProjectBrowserManifest.invalidate({
+        agentId,
+        sessionId,
+      }),
       utils.chat.listAgentProjectRegistrationRequests.invalidate({
         agentId,
         sessionId,
@@ -535,6 +592,7 @@ export function useWorkspacePanelContainer({
     agentId,
     sessionId,
     utils.chat.getAgentWorkspace,
+    utils.chat.getSessionProjectBrowserManifest,
     utils.chat.listAgentProjectRegistrationRequests,
     utils.chat.listAgentProjects,
     utils.chat.readAgentWorkspacePath,
@@ -590,6 +648,28 @@ export function useWorkspacePanelContainer({
     [agentId, deleteProjectMutation, sessionId],
   );
 
+  const onRemoveProjectEntry = useCallback(
+    (entry: WorkspaceEntry) => {
+      const projectId =
+        entry.source?.type === "session_project"
+          ? entry.source.projectId
+          : null;
+      if (!projectId || entry.capabilities?.removeProject !== true) {
+        return;
+      }
+      onDeleteProject(projectId);
+    },
+    [onDeleteProject],
+  );
+
+  const onSetBrowserMode = useCallback((mode: WorkspaceBrowserMode) => {
+    setBrowserMode(mode);
+    setCurrentDirectoryPath(null);
+    setSelectedFilePath(null);
+    setSelectedPaths([]);
+    setWorkspaceView("browser");
+  }, []);
+
   useEffect(() => {
     if (!directoryQuery.data) {
       return;
@@ -608,7 +688,7 @@ export function useWorkspacePanelContainer({
     if (!projectPickerOpen) {
       return { type: "CLOSED" };
     }
-    if (workspaceQuery.isLoading) {
+    if (workspaceQuery.isLoading || projectBrowserManifestQuery.isLoading) {
       return { type: "LOADING" };
     }
     if (workspaceQuery.isError) {
@@ -635,6 +715,7 @@ export function useWorkspacePanelContainer({
     directoryQuery.data,
     directoryQuery.isFetching,
     manifest?.entries,
+    projectBrowserManifestQuery.isLoading,
     projectPickerOpen,
     startRuntimeMutation.isPending,
     workspaceQuery.data,
@@ -645,25 +726,40 @@ export function useWorkspacePanelContainer({
   ]);
 
   const state = useMemo<WorkspacePanelState>(() => {
-    if (workspaceQuery.isLoading) {
+    if (workspaceQuery.isLoading || projectBrowserManifestQuery.isLoading) {
       return { type: "LOADING" };
     }
     if (workspaceQuery.isError) {
       return { type: "ERROR", message: getErrorMessage(workspaceQuery.error) };
     }
+    if (projectBrowserManifestQuery.isError) {
+      return {
+        type: "ERROR",
+        message: getErrorMessage(projectBrowserManifestQuery.error),
+      };
+    }
     if (!workspaceQuery.data) {
       return { type: "LOADING" };
     }
+
+    const browserManifest =
+      browserMode === "projects" && projectBrowserManifest
+        ? {
+            root: projectBrowserManifest.root,
+            cwd: projectBrowserManifest.root,
+            entries: projectBrowserManifest.entries,
+          }
+        : manifest;
 
     const mappedDirectory = directoryQuery.data
       ? mapWorkspacePathResult(directoryQuery.data)
       : null;
     const directory =
-      manifest && mappedDirectory?.type === "DIRECTORY"
+      browserManifest && mappedDirectory?.type === "DIRECTORY"
         ? { path: mappedDirectory.path, entries: mappedDirectory.entries }
         : {
-            path: activeDirectoryPath || manifest?.cwd || "",
-            entries: manifest?.entries ?? [],
+            path: activeDirectoryPath || browserManifest?.cwd || "",
+            entries: browserManifest?.entries ?? [],
           };
 
     const fileState = (() => {
@@ -695,7 +791,9 @@ export function useWorkspacePanelContainer({
     return {
       type: "SERVER",
       server: workspaceQuery.data,
-      manifest,
+      manifest: browserManifest,
+      projectBrowserManifest,
+      browserMode,
       directory,
       directoryEntriesByPath,
       fileState,
@@ -738,9 +836,14 @@ export function useWorkspacePanelContainer({
         resetRuntimeMutation.isPending,
       isStopping: stopRuntimeMutation.isPending,
       isResetting: resetRuntimeMutation.isPending,
+      projectEmptyState:
+        browserMode === "projects"
+          ? (projectBrowserManifest?.emptyState ?? null)
+          : null,
     };
   }, [
     activeDirectoryPath,
+    browserMode,
     bulkDeletePathsMutation.isPending,
     bulkMovePathsMutation.isPending,
     createDirectoryMutation.isPending,
@@ -754,6 +857,10 @@ export function useWorkspacePanelContainer({
     fileQuery.isLoading,
     isManualRefreshing,
     manifest,
+    projectBrowserManifest,
+    projectBrowserManifestQuery.error,
+    projectBrowserManifestQuery.isError,
+    projectBrowserManifestQuery.isLoading,
     movePathMutation.isPending,
     resetRuntimeMutation.isPending,
     restartRuntimeMutation.isPending,
@@ -847,5 +954,7 @@ export function useWorkspacePanelContainer({
     onApproveRegistrationRequest,
     onRejectRegistrationRequest,
     onDeleteProject,
+    onRemoveProjectEntry,
+    onSetBrowserMode,
   };
 }

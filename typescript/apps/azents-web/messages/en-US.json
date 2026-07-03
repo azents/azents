@@ -1116,7 +1116,18 @@
       "movePrompt": "Destination path",
       "deleteConfirmTitle": "Delete file or folder",
       "deleteConfirm": "Delete {path}? This cannot be undone.",
-      "registerProjectBrowse": "Browse folders"
+      "registerProjectBrowse": "Browse folders",
+      "projectsMode": "Projects",
+      "allFilesMode": "All files",
+      "addProject": "Add Project",
+      "removeProject": "Remove Project",
+      "projectStatus": {
+        "unchecked": "Unchecked",
+        "available": "Available",
+        "missing": "Missing",
+        "unavailable": "Unavailable",
+        "error": "Error"
+      }
     },
     "toolCall": {
       "preparing": "Writing command...",

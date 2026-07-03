@@ -24,6 +24,7 @@ import {
   chatV1GetAgentSessionContext,
   chatV1GetAgentSessionProjectDefaults,
   chatV1GetAgentWorkspace,
+  chatV1GetSessionProjectBrowserManifest,
   chatV1IssueWsTicket,
   chatV1ListAgentProjectPresets,
   chatV1ListAgentProjectRegistrationRequests,
@@ -33,6 +34,7 @@ import {
   chatV1ListInputActions,
   chatV1ListLiveEvents,
   chatV1MoveAgentWorkspacePath,
+  chatV1PreviewProjectBrowserManifest,
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
   chatV1RejectAgentProjectRegistrationRequest,
@@ -256,6 +258,53 @@ export const chatRouter = router({
       } catch (e) {
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  getSessionProjectBrowserManifest: publicProcedure
+    .input(
+      z.object({ agentId: z.string().min(1), sessionId: z.string().min(1) }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1GetSessionProjectBrowserManifest({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  previewProjectBrowserManifest: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        projectPaths: z.array(z.string().min(1)),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1PreviewProjectBrowserManifest({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          body: { project_paths: input.projectPaths },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
           404: "NOT_FOUND",
         });
       }
