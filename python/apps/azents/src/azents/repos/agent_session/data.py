@@ -20,6 +20,7 @@ class AgentSession(BaseModel):
     id: str = Field(description="AgentSession ID")
     workspace_id: str = Field(description="Workspace ID")
     agent_id: str = Field(description="Agent ID")
+    handle: str = Field(description="Human-readable session handle")
     status: AgentSessionStatus = Field(description="AgentSession status")
     primary_kind: AgentSessionPrimaryKind | None = Field(
         default=None,

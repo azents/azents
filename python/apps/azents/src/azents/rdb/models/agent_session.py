@@ -104,6 +104,7 @@ class RDBAgentSession(RDBModel):
 
     __tablename__ = "agent_sessions"
 
+    UQ_HANDLE = sa.UniqueConstraint("handle", name="uq_agent_sessions_handle")
     IX_WORKSPACE_ID = sa.Index("ix_agent_sessions_workspace_id", "workspace_id")
     IX_AGENT_ID = sa.Index("ix_agent_sessions_agent_id", "agent_id")
     IX_AGENT_ACTIVE_LAST_USER_INPUT = sa.Index(
@@ -160,6 +161,7 @@ class RDBAgentSession(RDBModel):
         sa.ForeignKey("agents.id", ondelete="CASCADE"),
         nullable=False,
     )
+    handle: Mapped[str] = mapped_column(sa.String(120), nullable=False)
     status: Mapped[AgentSessionStatus] = mapped_column(
         agent_session_status_enum,
         nullable=False,
@@ -327,6 +329,7 @@ class RDBAgentSession(RDBModel):
     )
 
     __table_args__ = (
+        UQ_HANDLE,
         IX_WORKSPACE_ID,
         IX_AGENT_ID,
         IX_AGENT_ACTIVE_LAST_USER_INPUT,
