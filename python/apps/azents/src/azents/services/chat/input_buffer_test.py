@@ -21,6 +21,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate
+from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -129,6 +130,7 @@ def _service(
         message_repository=MessageRepository(),
         agent_repository=AgentRepository(),
         agent_project_preset_repository=AgentProjectPresetRepository(),
+        agent_project_catalog_repository=AgentProjectCatalogRepository(),
         agent_project_default_repository=AgentProjectDefaultRepository(),
         agent_run_repository=AgentRunRepository(),
         event_transcript_repository=EventTranscriptRepository(),

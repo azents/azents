@@ -13,6 +13,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -78,6 +79,10 @@ class AgentSessionInputService:
     agent_project_preset_repository: Annotated[
         AgentProjectPresetRepository,
         Depends(AgentProjectPresetRepository),
+    ]
+    agent_project_catalog_repository: Annotated[
+        AgentProjectCatalogRepository,
+        Depends(AgentProjectCatalogRepository),
     ]
     agent_project_default_repository: Annotated[
         AgentProjectDefaultRepository,
@@ -298,6 +303,11 @@ class AgentSessionInputService:
                 ),
             )
             await self.agent_project_preset_repository.upsert_preset(
+                session,
+                agent_id=agent_id,
+                path=path,
+            )
+            await self.agent_project_catalog_repository.upsert_entry(
                 session,
                 agent_id=agent_id,
                 path=path,

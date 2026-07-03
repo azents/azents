@@ -99,6 +99,16 @@ class LLMCatalogEntryVisibility(enum.StrEnum):
     HIDDEN = "hidden"
 
 
+class AgentProjectCatalogStatus(enum.StrEnum):
+    """Agent Project catalog filesystem status projection."""
+
+    UNCHECKED = "unchecked"
+    AVAILABLE = "available"
+    MISSING = "missing"
+    UNAVAILABLE = "unavailable"
+    ERROR = "error"
+
+
 class AgentSessionRunState(enum.StrEnum):
     """Engine execution status of AgentSession."""
 
