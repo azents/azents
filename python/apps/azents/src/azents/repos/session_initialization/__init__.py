@@ -1,8 +1,17 @@
 """Session initialization repository."""
 
+import datetime
+
 import sqlalchemy as sa
+from azcommon.uuid import uuid7
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import (
+    SessionInitializationStatus,
+    SessionInitializationStepStatus,
+    SessionInitializationStepType,
+)
 from azents.rdb.models.session_initialization import (
     RDBSessionInitialization,
     RDBSessionInitializationEvent,
@@ -57,6 +66,63 @@ class SessionInitializationRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
+        return self._build_initialization(rdb)
+
+    async def create_ready_noop_if_absent(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        completed_at: datetime.datetime,
+    ) -> SessionInitialization:
+        """Create a ready no-op initialization lifecycle if absent."""
+        initialization_id = uuid7().hex
+        result = await session.execute(
+            pg_insert(RDBSessionInitialization)
+            .values(
+                id=initialization_id,
+                session_id=session_id,
+                status=SessionInitializationStatus.READY,
+                retry_count=0,
+                completed_at=completed_at,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[RDBSessionInitialization.session_id]
+            )
+            .returning(RDBSessionInitialization)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            existing = await self.get_by_session_id(session, session_id=session_id)
+            if existing is None:
+                raise RuntimeError("SessionInitialization conflict target not found")
+            return existing
+
+        await session.execute(
+            pg_insert(RDBSessionInitializationStep)
+            .values(
+                id=uuid7().hex,
+                initialization_id=initialization_id,
+                session_id=session_id,
+                sequence=1,
+                step_key=SessionInitializationStepType.NOOP_READY.value,
+                step_type=SessionInitializationStepType.NOOP_READY,
+                status=SessionInitializationStepStatus.COMPLETED,
+                blocking=False,
+                retryable=False,
+                attempt=1,
+                depends_on_step_keys=[],
+                resource_descriptors=[],
+                completed_at=completed_at,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    RDBSessionInitializationStep.initialization_id,
+                    RDBSessionInitializationStep.step_key,
+                ]
+            )
+        )
+        await session.flush()
         return self._build_initialization(rdb)
 
     async def create_step(

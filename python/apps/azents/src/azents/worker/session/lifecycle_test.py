@@ -14,6 +14,7 @@ from azents.engine.events.types import ActiveToolCall, AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.services.session_initialization import SessionInitializationService
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -134,6 +135,7 @@ def _service(
             agent_session_repository,
         ),
         agent_run_repository=cast(AgentRunRepository, agent_run_repository),
+        session_initialization_service=cast(SessionInitializationService, object()),
     )
 
 

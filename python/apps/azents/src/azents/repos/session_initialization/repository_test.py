@@ -1,5 +1,7 @@
 """SessionInitializationRepository tests."""
 
+import datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -101,6 +103,32 @@ class TestSessionInitializationRepository:
         assert loaded.id == created.id
         assert loaded.status == SessionInitializationStatus.READY
         assert loaded.retry_count == 0
+
+    async def test_create_ready_noop_if_absent_is_idempotent(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Ready no-op initialization creation is idempotent."""
+        workspace_id = await _create_workspace(rdb_session, "init-ready-ws")
+        session_id = await _create_session(rdb_session, workspace_id, "init-ready")
+        repo = SessionInitializationRepository()
+
+        first = await repo.create_ready_noop_if_absent(
+            rdb_session,
+            session_id=session_id,
+            completed_at=datetime.datetime(2026, 7, 3, tzinfo=datetime.UTC),
+        )
+        second = await repo.create_ready_noop_if_absent(
+            rdb_session,
+            session_id=session_id,
+            completed_at=datetime.datetime(2026, 7, 4, tzinfo=datetime.UTC),
+        )
+        steps = await repo.list_steps(rdb_session, initialization_id=first.id)
+
+        assert second.id == first.id
+        assert first.status == SessionInitializationStatus.READY
+        assert [step.step_key for step in steps] == ["noop_ready"]
+        assert steps[0].blocking is False
+        assert steps[0].retryable is False
 
     async def test_steps_are_listed_by_sequence(
         self, rdb_session: AsyncSession

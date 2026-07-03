@@ -29,6 +29,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBufferCreate
 from azents.repos.message import MessageRepository
+from azents.repos.session_initialization import SessionInitializationRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -39,6 +40,7 @@ from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
+from azents.services.session_initialization import SessionInitializationService
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import ChatSessionService
@@ -138,6 +140,10 @@ def _service(
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         input_buffer_service=input_buffer_service,
+        session_initialization_service=SessionInitializationService(
+            session_initialization_repository=SessionInitializationRepository(),
+            session_manager=rdb_session_manager,
+        ),
         session_manager=rdb_session_manager,
     )
 

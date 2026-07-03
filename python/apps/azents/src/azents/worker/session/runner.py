@@ -22,6 +22,7 @@ from azents.engine.run.types import CheckStop, PollMessages
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session.data import PendingSessionCommand
 from azents.services.input_buffer import InputBufferService
+from azents.services.session_initialization import SessionInitializationRunGate
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
@@ -532,6 +533,14 @@ class SessionRunner:
     async def _process_wake_up(self, message: SessionWakeUp) -> RunExecutionResult:
         """Handle command/run/continuation lifecycle for one SessionWakeUp."""
         command = await self._get_pending_command(message.session_id)
+        if command is None and not await self._initialization_allows_run_dispatch(
+            message.session_id
+        ):
+            return RunExecutionResult(
+                toolkits=[],
+                terminal_event_observed=False,
+                no_actionable_work=True,
+            )
         self.run_active = True
         try:
             result = await self._run_with_timeout(message, command=command)
@@ -546,6 +555,19 @@ class SessionRunner:
         if self.shutdown_event.is_set():
             self._drain_stop_signals()
         return result
+
+    async def _initialization_allows_run_dispatch(self, session_id: str) -> bool:
+        """Return whether session initialization allows normal run dispatch."""
+        gate_result = await self.session_lifecycle.get_initialization_run_gate(
+            session_id
+        )
+        if gate_result.gate == SessionInitializationRunGate.READY:
+            return True
+        await self.session_lifecycle.block_run_dispatch_for_initialization(
+            session_id,
+            gate=gate_result.gate,
+        )
+        return False
 
     async def _get_pending_command(
         self,
