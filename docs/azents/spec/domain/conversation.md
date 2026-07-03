@@ -69,6 +69,8 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest
+  - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/sessions/{session_id}/exchange-files
@@ -76,8 +78,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-02
-spec_version: 79
+last_verified_at: 2026-07-03
+spec_version: 80
 ---
 
 # Conversation & Events
@@ -142,11 +144,12 @@ first and the remaining sessions ordered by persisted `last_user_input_at`, the 
 most recent non-reverted `user_message` event or the session creation time when no user input exists.
 This lets newly created sessions appear naturally in the active list before their first message. Each
 session item includes `run_state` so azents-web can mark running sessions in the Agent rail session
-list. `POST /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session and
-snapshot-copies registered projects from the team primary session. Pending project registration
-requests are not copied. `POST /chat/v1/agents/{agent_id}/sessions/messages` creates the same kind of
-non-primary team session and enqueues the first user message in one write boundary. The first-message
-create response is `ChatWriteResponse`, including the created `session_id` and live snapshot. azents-web
+list. `POST /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session with the
+explicit `project_paths` supplied by the client. It does not copy Projects from the team primary
+session. `POST /chat/v1/agents/{agent_id}/sessions/messages` creates the same kind of non-primary team
+session with explicit `project_paths` and enqueues the first user message in one write boundary. The
+first-message create response is `ChatWriteResponse`, including the created `session_id` and live
+snapshot. azents-web
 Agent detail routes surface the active session list in the Agent rail and navigate selected sessions
 through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action
 navigates to `/w/{handle}/agents/{agent_id}/sessions/new`, which is a draft route and must not create
@@ -207,7 +210,8 @@ belongs to the requested agent and that the requester is a workspace member befo
 that session's rows. Runtime lookup is allowed only after that session context is selected, and only
 for physical workspace validation or runner filesystem operations. Runtime current project, selected
 project, active project, team-primary fallback, and runtime-owned project catalog state are not part of
-the conversation contract.
+the conversation prompt contract. The Agent Project catalog is only a reusable path/status projection
+for browser and new-session preview UI; session Project rows remain the prompt-eligibility source.
 
 RuntimeToolkit loads registered project prompt content from the current logical `AgentSession` ID.
 Runtime context sharing affects shell/file operations; it must not make project registry ownership or
@@ -499,4 +503,5 @@ Current verification:
 - **2026-06-20** — v59. Documented session-bound input buffers, removed runtime-bound buffer
   ownership from the spec, and defined the `InputBufferService` transaction boundary for running-state
   transitions and goal continuation promotion.
+- **2026-07-03** — v80. Reflected explicit Project path session creation and separated Agent Project catalog UI projection from session Project prompt ownership.
 - **2026-06-13** — v54. Added session todo snapshot and `todo_state_changed` WebSocket event to Chat live state. Todo is side state stored in `toolkit_states`, not durable transcript/compaction state.
