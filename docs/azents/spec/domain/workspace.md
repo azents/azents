@@ -17,9 +17,12 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_workspace_project/**
   - python/apps/azents/src/azents/repos/agent_project_preset/**
   - python/apps/azents/src/azents/repos/agent_project_default/**
+  - python/apps/azents/src/azents/repos/agent_project_catalog/**
   - python/apps/azents/src/azents/rdb/models/session_workspace_project.py
   - python/apps/azents/src/azents/rdb/models/agent_project_preset.py
   - python/apps/azents/src/azents/rdb/models/agent_project_default.py
+  - python/apps/azents/src/azents/rdb/models/agent_project_catalog.py
+  - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/api/internal/agent_home/v1/projects.py
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/features/workspace/**
@@ -41,9 +44,11 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests
   - /chat/v1/agents/{agent_id}/project-presets
   - /chat/v1/agents/{agent_id}/session-project-defaults
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest
+  - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-06-29
-spec_version: 23
+last_verified_at: 2026-07-03
+spec_version: 24
 ---
 
 # Workspace & Membership
@@ -103,6 +108,7 @@ erDiagram
     }
     AGENT_RUNTIME ||--o{ SESSION_WORKSPACE_PROJECT : "validates paths"
     AGENT ||--o{ AGENT_PROJECT_PRESET : "remembers"
+    AGENT ||--o{ AGENT_PROJECT_CATALOG : "projects status"
     AGENT_SESSION ||--o{ SESSION_WORKSPACE_PROJECT : "owns"
     SESSION_WORKSPACE_PROJECT_REGISTRATION_REQUEST }o--|| AGENT_SESSION : "requests"
 
@@ -110,6 +116,13 @@ erDiagram
         string id PK
         string agent_id FK
         string path
+    }
+    AGENT_PROJECT_CATALOG {
+        string id PK
+        string agent_id FK
+        string path
+        string status
+        datetime last_checked_at
     }
     SESSION_WORKSPACE_PROJECT {
         string id PK
@@ -130,6 +143,7 @@ erDiagram
 - **WorkspaceJoinRequest** — user → Workspace join request. `(workspace_id, user_id)` is unique.
 - **SessionWorkspaceProject** — session-owned row registering an already-existing directory inside AgentRuntime's Agent Workspace as Project boundary.
 - **SessionWorkspaceProjectRegistrationRequest** — session-owned approval row where Agent requests user to register a folder it created as Project.
+- **AgentProjectCatalog** — Agent-scoped reusable Project path candidate and filesystem status projection. It is a read model for browser/selection UI, not the prompt-eligibility source of truth.
 
 ## Behavior
 
@@ -163,13 +177,17 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - `agent_project_defaults` stores the last non-empty Project path selection used when creating a non-primary session for the Agent. New-session defaults come from this table, not from the current live Project rows of the most recent session. Creating a new session with non-empty `project_paths` replaces the stored defaults in selection order; creating a session with empty `project_paths` leaves the stored defaults unchanged.
 - `GET /chat/v1/agents/{agent_id}/session-project-defaults` returns the stored last-created-session Project paths for the new-session UI's default chip selection, including source metadata (`empty` or `last_created_session`).
 - `agent_project_presets` stores agent-scoped recent Project path presets. Creating a new session with selected Projects, registering an existing Project, or approving a registration request refreshes matching presets. `GET /chat/v1/agents/{agent_id}/project-presets` returns these presets ordered by recent use.
+- `agent_project_catalog` stores Agent-scoped reusable Project path candidates and filesystem status projection (`unchecked`, `available`, `missing`, `unavailable`, or `error`) with optional detail and `last_checked_at`. Catalog status is a UI projection; it does not decide prompt Project eligibility.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` registers an existing directory as Project for the selected AgentSession. Server validates user access, agent/session match, active Runtime directory existence, and Project path policy, then creates the session-owned registry row. This API does not modify filesystem.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/projects` returns registered Project list for the selected AgentSession. Public response exposes only `id`, `path`, `created_at`, `updated_at`.
+- `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest` returns a backend-owned Project browser manifest for the selected session. It derives Project root entries from `session_workspace_projects`, joins catalog status projection by Agent/path, and returns backend-provided capabilities. Project root entries allow registry removal when tied to a session Project and disallow filesystem delete, move, and rename.
+- `POST /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview` accepts explicit `project_paths` before a session exists and returns the same Project browser entry model. Preview entries do not expose session registry removal because no session Project row exists yet.
+- Project browser manifest reads do not call runtime runner file stat/list operations before responding. Missing or unchecked catalog projection is represented as stored/unchecked status and may be refreshed by separate boundary-triggered sync work.
 - `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected session's registry row. Filesystem folder deletion is destructive and not included.
 - Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, exact duplicate Project path per session forbidden. Nested Project paths are allowed.
 - Registration request is flow where Agent asks user approval to include a folder it created into the current session's Projects. Approve validates active Runtime path and creates registered Project in the selected AgentSession; reject does not create Project.
 
-New-session azents-web UI shows selected Project chips above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, and provides a Runtime-gated folder picker with Runtime start control. Projects tab in azents-web concrete session header exposes the selected session's registered Project list, a Runtime-gated folder picker for registering an existing directory, and registration request approve/reject. Project lists display the folder basename as primary text with the full path as secondary text. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
+New-session azents-web UI shows selected Project chips above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, and can preview explicit Project paths through the backend Project browser manifest preview. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project lists display the folder basename as primary text with the full path as secondary text. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
 
 ### Workspace Home / Membership UI
 
@@ -261,6 +279,8 @@ At least 7 rules — all actually verified in code:
 - `[project-root-denied]` — Agent Workspace root itself cannot be registered as a Project.
 - `[project-exact-duplicate-denied]` — same session cannot register the exact same Project path twice. Nested Project paths are allowed.
 - `[project-registry-only-delete]` — Project delete API removes only registry row, not filesystem folder.
+- `[project-browser-manifest-non-blocking]` — Project browser manifest reads return stored catalog projection and do not block on runner filesystem stat/list operations.
+- `[project-root-action-policy]` — Project browser root entries expose backend capabilities; filesystem delete, move, and rename are disabled for Project roots, while registry removal is available only for existing session Project rows.
 
 ## State Transitions
 
@@ -346,6 +366,8 @@ stateDiagram-v2
 | `chat_v1_create_team_agent_session_message` | POST `/chat/v1/agents/{agent_id}/sessions/messages` | explicit `project_paths` |
 | `chat_v1_list_agent_project_presets` | GET `/chat/v1/agents/{agent_id}/project-presets` | workspace membership |
 | `chat_v1_get_agent_session_project_defaults` | GET `/chat/v1/agents/{agent_id}/session-project-defaults` | workspace membership |
+| `chat_v1_get_session_project_browser_manifest` | GET `/chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest` | `[project-browser-manifest-non-blocking]`, `[project-root-action-policy]` |
+| `chat_v1_preview_project_browser_manifest` | POST `/chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview` | `[project-browser-manifest-non-blocking]`, `[project-root-action-policy]` |
 | `chat_v1_list_agent_projects` | GET `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects` | agent/session workspace membership |
 | `chat_v1_register_agent_project` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` | `[project-existing-directory]` |
 | `chat_v1_delete_agent_project` | DELETE `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` | `[project-registry-only-delete]` |
@@ -380,6 +402,8 @@ stateDiagram-v2
 - **Ownership Transfer** — 2-step operation transitioning OWNER → MANAGER / new OWNER → OWNER in single transaction.
 - **Mute** — state that stops JoinRequest notification. Returns to PENDING automatically on re-request.
 - **Agent Workspace Project** — Project boundary explicitly registered for an existing directory under AgentRuntime's Provider-reported Agent Workspace.
+- **Project browser manifest** — backend-owned read model for Project-first browser entries, status projection, and action capabilities.
+- **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
 
@@ -403,3 +427,4 @@ stateDiagram-v2
 
 - **2026-06-22 (spec_version=15)** — Removed Workspace Team and TeamMember as current domain concepts. WorkspaceUser is the only current membership model.
 - **2026-06-26 (spec_version=18)** — Project and registration request public APIs became AgentSession-scoped. Removed team-primary compatibility lookup from project list/register/delete/approval routes.
+- **2026-07-03 (spec_version=24)** — Promoted Workspace Project Browser behavior: backend Project browser manifests, Agent Project catalog status projection, Project-first Workspace UI, explicit All files mode, and backend Project root capabilities.

@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-06-27
-spec_version: 9
+last_verified_at: 2026-07-03
+spec_version: 10
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -26,7 +26,7 @@ code_paths:
 
 ## Current Behavior
 
-Concrete Agent session screens provide `Chat`, `Projects`, and `Context` header tabs. `Context` is selected by the session URL query `?page=context`; it shows model context usage and event source based on the URL-selected AgentSession. `?page=system-prompt` and `?page=raw-events` expose detail views for the same selected session. These tabs are session-scoped and are not rendered on the independent Agent settings page. These query-param routes preserve the same page layout as the former dedicated Context pages: session header, tab navigation, and a scrollable inspector content area.
+Concrete Agent session screens provide `Chat` and `Context` header tabs. Project management is part of the Workspace surface, not a separate session header tab. `Context` is selected by the session URL query `?page=context`; it shows model context usage and event source based on the URL-selected AgentSession. `?page=system-prompt` and `?page=raw-events` expose detail views for the same selected session. These tabs are session-scoped and are not rendered on the independent Agent settings page. These query-param routes preserve the same page layout as the former dedicated Context pages: session header, tab navigation, and a scrollable inspector content area. Unknown or legacy page values, including `?page=projects`, render the normal chat/session surface.
 
 ## Backend API
 
@@ -101,11 +101,11 @@ Ready state includes this UI:
 - event stats cards
 - links to `?page=system-prompt` and `?page=raw-events` detail views
 
-`?page=system-prompt` renders system prompt fragments. `?page=raw-events` renders raw event JSON accordion. Unknown or absent `page` values render the normal chat view.
+`?page=system-prompt` renders system prompt fragments. `?page=raw-events` renders raw event JSON accordion. Unknown, legacy, or absent `page` values render the normal chat view.
 
 ## Verification
 
-As of 2026-05-30, verified with these checks.
+As of 2026-07-03, verified through the Workspace Project Browser stack and existing context inspector checks.
 
 ```bash
 cd python/apps/azents && uv run ruff check src/azents/services/chat/context.py

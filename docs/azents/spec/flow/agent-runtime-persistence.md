@@ -17,8 +17,8 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
-last_verified_at: 2026-06-27
-spec_version: 2
+last_verified_at: 2026-07-03
+spec_version: 3
 ---
 
 # Agent Runtime Persistence
@@ -100,9 +100,11 @@ filesystem snapshots. Runtime persistence preserves the bytes; the session regis
 child paths are registered or awaiting registration approval for the selected conversation.
 
 Project paths are normalized as children of the provider-reported Agent Workspace root. The root
-itself is not a Project. Runtime persistence does not own Project membership; azents-web exposes
-Project management from concrete session tabs, while the Runtime/Workspace panel remains a file and
-runtime-control surface.
+itself is not a Project. Runtime persistence does not own Project membership. azents-web exposes
+Project management inside the concrete session Workspace surface. The Workspace browser opens in
+Project mode by default, keeps `All files` as an explicit Agent Workspace root inspection mode, and
+uses backend Project browser manifest capabilities so Project root removal is registry-scoped rather
+than filesystem-destructive.
 
 ## Validation
 
@@ -113,3 +115,7 @@ Required checks:
 - Workspace service tests reject missing provider workspace paths with explicit errors.
 - Runner state sink tests preserve provider path authority and reject missing/mismatched paths.
 - Deterministic azents E2E covers Agent Workspace bootstrap and reset action availability.
+
+## Changelog
+
+- **2026-07-03 (spec_version=3)** — Reflected Project-first Workspace browser ownership and registry-scoped Project root action boundary.

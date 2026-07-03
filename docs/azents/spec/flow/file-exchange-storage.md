@@ -27,8 +27,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/hooks/useFileUpload.ts
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
-last_verified_at: 2026-06-27
-spec_version: 8
+last_verified_at: 2026-07-03
+spec_version: 9
 ---
 
 # File Exchange Storage
@@ -88,7 +88,7 @@ Active transcript FilePart referencing deleted or missing ModelFile is rewritten
 - `AttachmentPreviewBar` provides pre-send file list and removal behavior.
 - `FileAttachmentList` renders attachments of user/assistant messages.
 - Expired/unavailable attachment keeps metadata card but disables original download/preview action. If only preview asset is unavailable, fallback separately from original attachment download availability.
-- Project tab in concrete Agent session navigation provides only existing Agent Workspace folder registration. Project Source upload/delete/load implementation does not currently exist.
+- Project management in the concrete Agent session Workspace surface provides existing Agent Workspace folder registration. Project Source upload/delete/load implementation does not currently exist.
 
 ## Related Specs
 
