@@ -135,6 +135,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 *ChatV1Api* | [**chat_v1_get_agent_session_project_defaults**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
+*ChatV1Api* | [**chat_v1_get_session_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_session_project_browser_manifest) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest | Get Session Project Browser Manifest
 *ChatV1Api* | [**chat_v1_get_team_primary_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_team_primary_agent_session) | **GET** /chat/v1/agents/{agent_id}/team-primary-session | Get Team Primary Agent Session
 *ChatV1Api* | [**chat_v1_issue_ws_ticket**](azentspublicclient/docs/ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
 *ChatV1Api* | [**chat_v1_list_agent_project_presets**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_project_presets) | **GET** /chat/v1/agents/{agent_id}/project-presets | List Agent Project Presets
@@ -146,6 +147,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_list_live_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
 *ChatV1Api* | [**chat_v1_list_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_sessions) | **GET** /chat/v1/workspaces/{handle}/sessions | List Sessions
 *ChatV1Api* | [**chat_v1_move_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_move_agent_workspace_path) | **POST** /chat/v1/agents/{agent_id}/workspace/move | Move Agent Workspace Path
+*ChatV1Api* | [**chat_v1_preview_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_project_browser_manifest) | **POST** /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview | Preview Project Browser Manifest
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
 *ChatV1Api* | [**chat_v1_reject_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reject_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject | Reject Agent Project Registration Request
@@ -389,6 +391,14 @@ Class | Method | HTTP request | Description
  - [PreviewPasswordResetTokenResponse](azentspublicclient/docs/PreviewPasswordResetTokenResponse.md)
  - [PreviewSignupTokenRequest](azentspublicclient/docs/PreviewSignupTokenRequest.md)
  - [PreviewSignupTokenResponse](azentspublicclient/docs/PreviewSignupTokenResponse.md)
+ - [ProjectBrowserEmptyStateResponse](azentspublicclient/docs/ProjectBrowserEmptyStateResponse.md)
+ - [ProjectBrowserEntryCapabilitiesResponse](azentspublicclient/docs/ProjectBrowserEntryCapabilitiesResponse.md)
+ - [ProjectBrowserEntryResponse](azentspublicclient/docs/ProjectBrowserEntryResponse.md)
+ - [ProjectBrowserEntrySourceResponse](azentspublicclient/docs/ProjectBrowserEntrySourceResponse.md)
+ - [ProjectBrowserEntryStatusResponse](azentspublicclient/docs/ProjectBrowserEntryStatusResponse.md)
+ - [ProjectBrowserManifestPreviewRequest](azentspublicclient/docs/ProjectBrowserManifestPreviewRequest.md)
+ - [ProjectBrowserManifestResponse](azentspublicclient/docs/ProjectBrowserManifestResponse.md)
+ - [ProjectBrowserModeResponse](azentspublicclient/docs/ProjectBrowserModeResponse.md)
  - [ReceivedInvitationListResponse](azentspublicclient/docs/ReceivedInvitationListResponse.md)
  - [ReceivedInvitationResponse](azentspublicclient/docs/ReceivedInvitationResponse.md)
  - [RedeemPasswordResetTokenRequest](azentspublicclient/docs/RedeemPasswordResetTokenRequest.md)

@@ -11,6 +11,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentProjectCatalogStatus,
     AgentSessionStatus,
     RuntimeRunnerState,
     SessionWorkspaceProjectRegistrationRequestStatus,
@@ -20,6 +21,7 @@ from azents.engine.tools.skill import SkillProjectionService, SkillStateStore
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
+from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
@@ -144,6 +146,15 @@ def _runner_project_validation_deadline() -> datetime:
     """Return Runtime operation deadline for Project path validation."""
     return datetime.now(UTC) + timedelta(
         seconds=_RUNNER_PROJECT_VALIDATION_TIMEOUT_SECONDS
+    )
+
+
+def _available_project_status_patch() -> AgentProjectCatalogStatusPatch:
+    """Return status patch for a Project directory validated through Runner."""
+    return AgentProjectCatalogStatusPatch(
+        status=AgentProjectCatalogStatus.AVAILABLE,
+        status_detail=None,
+        checked_at=datetime.now(UTC),
     )
 
 
@@ -284,10 +295,11 @@ class SessionWorkspaceProjectService:
                 agent_id=context.agent_id,
                 path=normalized_path,
             )
-            await self.agent_project_catalog_repository.upsert_entry(
+            await self.agent_project_catalog_repository.update_status(
                 session,
                 agent_id=context.agent_id,
                 path=normalized_path,
+                patch=_available_project_status_patch(),
             )
             await session.commit()
         await self._sync_skill_projection_for_project_change(
@@ -408,10 +420,11 @@ class SessionWorkspaceProjectService:
                 agent_id=context.agent_id,
                 path=normalized_path,
             )
-            await self.agent_project_catalog_repository.upsert_entry(
+            await self.agent_project_catalog_repository.update_status(
                 session,
                 agent_id=context.agent_id,
                 path=normalized_path,
+                patch=_available_project_status_patch(),
             )
             await session.commit()
         await self._sync_skill_projection_for_project_change(

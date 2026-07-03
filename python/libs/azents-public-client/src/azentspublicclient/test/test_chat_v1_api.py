@@ -166,6 +166,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_get_session_project_browser_manifest(self) -> None:
+        """Test case for chat_v1_get_session_project_browser_manifest
+
+        Get Session Project Browser Manifest
+        """
+        pass
+
     def test_chat_v1_get_team_primary_agent_session(self) -> None:
         """Test case for chat_v1_get_team_primary_agent_session
 
@@ -240,6 +247,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_move_agent_workspace_path
 
         Move Agent Workspace Path
+        """
+        pass
+
+    def test_chat_v1_preview_project_browser_manifest(self) -> None:
+        """Test case for chat_v1_preview_project_browser_manifest
+
+        Preview Project Browser Manifest
         """
         pass
 

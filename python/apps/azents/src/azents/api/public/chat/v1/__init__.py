@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from azcommon.result import Failure, Result, Success
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     HTTPException,
     Query,
@@ -121,6 +122,12 @@ from azents.services.exchange_file import (
     SessionNotFound as ExchangeSessionNotFound,
 )
 from azents.services.model_file import ModelFileService
+from azents.services.project_browser_manifest import (
+    ProjectBrowserAccessDenied,
+    ProjectBrowserAgentNotFound,
+    ProjectBrowserManifestService,
+    ProjectBrowserSessionNotFound,
+)
 from azents.services.session_storage import guess_media_type
 from azents.services.session_workspace_project import (
     AgentNotFound as ProjectAgentNotFound,
@@ -190,6 +197,8 @@ from .data import (
     InputActionMessagePolicyResponse,
     LiveEventListResponse,
     PartialHistoryResponse,
+    ProjectBrowserManifestPreviewRequest,
+    ProjectBrowserManifestResponse,
     SessionContextResponse,
     SessionWorkspaceProjectListResponse,
     SessionWorkspaceProjectRegisterRequest,
@@ -1637,6 +1646,71 @@ async def list_input_actions(
             assert_never((session_result, live_result))
 
 
+@router.get(
+    "/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest"
+)
+async def get_session_project_browser_manifest(
+    agent_id: str,
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    manifest_service: Annotated[ProjectBrowserManifestService, Depends()],
+) -> ProjectBrowserManifestResponse:
+    """Get the backend-owned Project browser manifest for an AgentSession."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_session_id(session_id)
+    result = await manifest_service.get_session_manifest(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(value):
+            _queue_project_status_refresh(
+                background_tasks,
+                manifest_service=manifest_service,
+                agent_id=agent_id,
+                paths=value.refresh_paths,
+            )
+            return ProjectBrowserManifestResponse.from_domain(value.manifest)
+        case Failure(error):
+            _raise_project_browser_error(error)
+            raise AssertionError("unreachable")
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/workspace/project-browser-manifest/preview")
+async def preview_project_browser_manifest(
+    agent_id: str,
+    request: ProjectBrowserManifestPreviewRequest,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    manifest_service: Annotated[ProjectBrowserManifestService, Depends()],
+) -> ProjectBrowserManifestResponse:
+    """Preview a Project browser manifest before AgentSession creation."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await manifest_service.preview_manifest(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        project_paths=request.project_paths,
+    )
+    match result:
+        case Success(value):
+            _queue_project_status_refresh(
+                background_tasks,
+                manifest_service=manifest_service,
+                agent_id=agent_id,
+                paths=value.refresh_paths,
+            )
+            return ProjectBrowserManifestResponse.from_domain(value.manifest)
+        case Failure(error):
+            _raise_project_browser_error(error)
+            raise AssertionError("unreachable")
+        case _:
+            assert_never(result)
+
+
 @router.get("/agents/{agent_id}/sessions/{session_id}/projects")
 async def list_agent_projects(
     agent_id: str,
@@ -2516,6 +2590,43 @@ def _raise_project_access_error(
             )
         case _:
             assert_never(error)
+
+
+def _raise_project_browser_error(
+    error: (
+        ProjectBrowserAgentNotFound
+        | ProjectBrowserAccessDenied
+        | ProjectBrowserSessionNotFound
+        | InvalidProjectPath
+    ),
+) -> NoReturn:
+    """Convert Project browser manifest errors to HTTPException."""
+    match error:
+        case ProjectBrowserAgentNotFound():
+            raise HTTPException(status_code=404, detail="Agent not found.")
+        case ProjectBrowserAccessDenied() | ProjectBrowserSessionNotFound():
+            raise HTTPException(status_code=404, detail="Session not found.")
+        case InvalidProjectPath():
+            raise HTTPException(status_code=400, detail=error.reason)
+        case _:
+            assert_never(error)
+
+
+def _queue_project_status_refresh(
+    background_tasks: BackgroundTasks,
+    *,
+    manifest_service: ProjectBrowserManifestService,
+    agent_id: str,
+    paths: list[str],
+) -> None:
+    """Queue Project status refresh after returning the manifest response."""
+    if not paths:
+        return
+    background_tasks.add_task(
+        manifest_service.refresh_project_statuses,
+        agent_id=agent_id,
+        paths=paths,
+    )
 
 
 def mount(mounter: RouteMounter) -> None:

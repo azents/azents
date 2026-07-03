@@ -3238,6 +3238,121 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Get Session Project Browser Manifest",
+        "description": "Get the backend-owned Project browser manifest for an AgentSession.",
+        "operationId": "chat_v1_get_session_project_browser_manifest",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectBrowserManifestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Preview Project Browser Manifest",
+        "description": "Preview a Project browser manifest before AgentSession creation.",
+        "operationId": "chat_v1_preview_project_browser_manifest",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectBrowserManifestPreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectBrowserManifestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}/projects": {
       "get": {
         "tags": [
@@ -13505,6 +13620,326 @@
         ],
         "title": "PreviewSignupTokenResponse",
         "description": "Signup token preview response."
+      },
+      "ProjectBrowserEmptyStateResponse": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Empty-state title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Empty-state explanatory text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "description"
+        ],
+        "title": "ProjectBrowserEmptyStateResponse",
+        "description": "Project mode empty-state response."
+      },
+      "ProjectBrowserEntryCapabilitiesResponse": {
+        "properties": {
+          "open": {
+            "type": "boolean",
+            "title": "Open",
+            "description": "Whether the entry can be opened in the browser"
+          },
+          "remove_project": {
+            "type": "boolean",
+            "title": "Remove Project",
+            "description": "Whether the registry Project row can be removed"
+          },
+          "filesystem_delete": {
+            "type": "boolean",
+            "title": "Filesystem Delete",
+            "description": "Whether filesystem delete is allowed for this entry"
+          },
+          "filesystem_move": {
+            "type": "boolean",
+            "title": "Filesystem Move",
+            "description": "Whether filesystem move is allowed for this entry"
+          },
+          "filesystem_rename": {
+            "type": "boolean",
+            "title": "Filesystem Rename",
+            "description": "Whether filesystem rename is allowed for this entry"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open",
+          "remove_project",
+          "filesystem_delete",
+          "filesystem_move",
+          "filesystem_rename"
+        ],
+        "title": "ProjectBrowserEntryCapabilitiesResponse",
+        "description": "Backend-provided Project root action policy response."
+      },
+      "ProjectBrowserEntryResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Project root display name"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Agent Workspace absolute path"
+          },
+          "kind": {
+            "type": "string",
+            "const": "directory",
+            "title": "Kind",
+            "description": "Entry kind"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProjectBrowserEntrySourceResponse",
+            "description": "Entry source"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProjectBrowserEntryStatusResponse",
+            "description": "Filesystem status projection"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/ProjectBrowserEntryCapabilitiesResponse",
+            "description": "Backend-provided entry action policy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "kind",
+          "source",
+          "status",
+          "capabilities"
+        ],
+        "title": "ProjectBrowserEntryResponse",
+        "description": "Project root entry response."
+      },
+      "ProjectBrowserEntrySourceResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "session_project",
+              "preview_project"
+            ],
+            "title": "Type",
+            "description": "Entry source type"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id",
+            "description": "Session Project ID when entry comes from a registered Project"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "ProjectBrowserEntrySourceResponse",
+        "description": "Project browser entry source metadata response."
+      },
+      "ProjectBrowserEntryStatusResponse": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": [
+              "unchecked",
+              "available",
+              "missing",
+              "unavailable",
+              "error"
+            ],
+            "title": "Value",
+            "description": "Stored filesystem status projection"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail",
+            "description": "Optional status detail or error text"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At",
+            "description": "Last filesystem status check time"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "description": "Whether a background refresh is recommended"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "stale"
+        ],
+        "title": "ProjectBrowserEntryStatusResponse",
+        "description": "Project browser filesystem status projection response."
+      },
+      "ProjectBrowserManifestPreviewRequest": {
+        "properties": {
+          "project_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Project Paths",
+            "description": "Exact Project paths to preview before session creation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_paths"
+        ],
+        "title": "ProjectBrowserManifestPreviewRequest",
+        "description": "Pre-session Project browser manifest preview request."
+      },
+      "ProjectBrowserManifestResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "description": "Agent ID"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "AgentSession ID for existing-session manifests"
+          },
+          "root": {
+            "type": "string",
+            "title": "Root",
+            "description": "Agent Workspace root path"
+          },
+          "active_mode": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "all_files"
+            ],
+            "title": "Active Mode",
+            "description": "Active browser mode"
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectBrowserModeResponse"
+            },
+            "type": "array",
+            "title": "Modes",
+            "description": "Available browser modes"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectBrowserEntryResponse"
+            },
+            "type": "array",
+            "title": "Entries",
+            "description": "Project mode root entries"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectBrowserEmptyStateResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Projects-mode empty state when no Projects are registered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "root",
+          "active_mode",
+          "modes",
+          "entries"
+        ],
+        "title": "ProjectBrowserManifestResponse",
+        "description": "Backend-owned Project browser manifest response."
+      },
+      "ProjectBrowserModeResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "projects",
+              "all_files"
+            ],
+            "title": "Id",
+            "description": "Browser mode ID"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "User-facing mode label"
+          },
+          "default": {
+            "type": "boolean",
+            "title": "Default",
+            "description": "Whether this is the default browser mode"
+          },
+          "root_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Path",
+            "description": "Agent Workspace root path for this mode, when applicable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "default"
+        ],
+        "title": "ProjectBrowserModeResponse",
+        "description": "Workspace browser mode descriptor response."
       },
       "ReceivedInvitationListResponse": {
         "properties": {
