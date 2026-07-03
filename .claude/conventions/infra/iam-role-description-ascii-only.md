@@ -14,7 +14,7 @@ The AWS IAM API rejects characters outside Latin-1 with a confusing 400 error th
 
 ```yaml
 spec:
-  description: "azents-prd 워크로드용 — Bedrock 호출 권한"
+  description: "azents-prd workload role — Bedrock invocation permissions"
 ```
 
 ## Good

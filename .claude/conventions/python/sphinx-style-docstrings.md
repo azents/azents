@@ -13,10 +13,10 @@ Pyright already enforces type hints. Repeating them in the docstring duplicates 
 
 ```python
 def get_place(place_id: str) -> Place | None:
-    """Place 를 조회한다.
+    """Fetch a Place.
 
-    :param str place_id: place 의 ID
-    :returns Place | None: 조회된 place
+    :param str place_id: ID of the place
+    :returns Place | None: fetched place
     """
 ```
 
@@ -24,9 +24,9 @@ def get_place(place_id: str) -> Place | None:
 
 ```python
 def get_place(place_id: str) -> Place | None:
-    """Place 를 조회한다.
+    """Fetch a Place.
 
-    :param place_id: place 의 ID
-    :returns: 조회된 place. 존재하지 않으면 None
+    :param place_id: ID of the place
+    :returns: fetched place, or None when it does not exist
     """
 ```

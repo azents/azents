@@ -12,8 +12,8 @@ English is required for source code and for anything that crosses the runtime bo
 ## Bad
 
 ```python
-logger.info("워크플로우 시작", extra={"workflow_id": wf_id})
-raise HTTPException(status_code=400, detail="요청이 잘못되었습니다")
+logger.info("<non-English workflow start message>", extra={"workflow_id": wf_id})
+raise HTTPException(status_code=400, detail="<non-English invalid request message>")
 ```
 
 ## Good

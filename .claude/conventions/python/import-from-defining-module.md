@@ -24,7 +24,7 @@ from foo import X
 
 ```python
 # foo/__init__.py
-"""foo 패키지."""
+"""Foo package."""
 
 # caller
 from foo.bar.baz import X
