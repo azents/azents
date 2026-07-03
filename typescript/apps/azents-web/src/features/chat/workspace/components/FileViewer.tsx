@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- workspace image is dynamically served through authenticated proxy URL, so not target for next/image optimization */
 /** Workspace file preview component. */
 import {
+  ActionIcon,
   Box,
   Button,
   Code,
@@ -356,27 +357,27 @@ export function FileViewer({
     case "LOADED": {
       const file = state.file;
       return (
-        <Stack gap="sm" h="100%">
-          <Group justify="space-between" gap="xs" wrap="nowrap">
-            <Group gap="xs" wrap="nowrap" miw={0}>
+        <Stack gap="sm" h="100%" miw={0}>
+          <Group justify="space-between" gap="xs" wrap="nowrap" miw={0}>
+            <Group gap="xs" wrap="nowrap" miw={0} flex={1}>
               {onBack && (
-                <Button
-                  size="xs"
+                <ActionIcon
                   variant="subtle"
-                  leftSection={<IconArrowLeft size="1rem" />}
+                  aria-label={t("backToBrowser")}
                   onClick={onBack}
+                  style={{ flexShrink: 0 }}
                 >
-                  {t("backToBrowser")}
-                </Button>
+                  <IconArrowLeft size="1rem" />
+                </ActionIcon>
               )}
-              <Stack gap={0} miw={0}>
+              <Stack gap={0} miw={0} flex={1}>
                 <Text size="sm" fw={600} truncate>
                   {getFileName(file.path)}
                 </Text>
                 <Text size="xs" c="dimmed" truncate>
                   {file.path}
                 </Text>
-                <Text size="xs" c="dimmed">
+                <Text size="xs" c="dimmed" truncate>
                   {file.mediaType} · {formatFileSize(file.size)}
                 </Text>
               </Stack>
@@ -387,11 +388,25 @@ export function FileViewer({
               size="xs"
               variant="light"
               leftSection={<IconDownload size="1rem" />}
+              visibleFrom="sm"
             >
               {t("download")}
             </Button>
+            <ActionIcon
+              component="a"
+              href={getDownloadHref(file.path)}
+              variant="light"
+              aria-label={t("download")}
+              hiddenFrom="sm"
+              style={{ flexShrink: 0 }}
+            >
+              <IconDownload size="1rem" />
+            </ActionIcon>
           </Group>
-          <ScrollArea flex={1}>
+          <ScrollArea
+            flex={1}
+            styles={{ root: { minWidth: 0 }, viewport: { minWidth: 0 } }}
+          >
             {renderLoadedContent(file)}
             {file.truncated && (
               <Text size="xs" c="dimmed" mt="xs">
