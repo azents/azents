@@ -1,7 +1,7 @@
 "use client";
 
 /** Workspace panel container hook. */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import {
   mapProjectBrowserManifest,
@@ -21,6 +21,7 @@ interface UseWorkspacePanelContainerInput {
   handle: string;
   agentId: string;
   sessionId: string;
+  autoRefreshVisible: boolean;
 }
 
 export interface WorkspacePanelContainerOutput {
@@ -94,6 +95,7 @@ export function useWorkspacePanelContainer({
   handle,
   agentId,
   sessionId,
+  autoRefreshVisible,
 }: UseWorkspacePanelContainerInput): WorkspacePanelContainerOutput {
   const [currentDirectoryPath, setCurrentDirectoryPath] = useState<
     string | null
@@ -123,6 +125,7 @@ export function useWorkspacePanelContainer({
     string | null
   >(null);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const autoRefreshKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     setCurrentDirectoryPath(null);
@@ -596,6 +599,28 @@ export function useWorkspacePanelContainer({
     utils.chat.listAgentProjectRegistrationRequests,
     utils.chat.listAgentProjects,
     utils.chat.readAgentWorkspacePath,
+  ]);
+
+  useEffect(() => {
+    if (!autoRefreshVisible) {
+      autoRefreshKeyRef.current = null;
+      return;
+    }
+    if (workspaceQuery.data?.workspace.type !== "READY") {
+      return;
+    }
+    const autoRefreshKey = `${agentId}:${sessionId}`;
+    if (autoRefreshKeyRef.current === autoRefreshKey) {
+      return;
+    }
+    autoRefreshKeyRef.current = autoRefreshKey;
+    onRefresh();
+  }, [
+    agentId,
+    autoRefreshVisible,
+    onRefresh,
+    sessionId,
+    workspaceQuery.data?.workspace.type,
   ]);
 
   const getDownloadHref = useCallback(

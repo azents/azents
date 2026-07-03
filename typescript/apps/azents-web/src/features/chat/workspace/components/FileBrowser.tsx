@@ -339,8 +339,9 @@ function TreeNode({
             : "var(--mantine-color-text)",
           cursor: "pointer",
           ...rowStyle,
-          minWidth: "100%",
-          width: "max-content",
+          boxSizing: "border-box",
+          minWidth: 0,
+          width: "100%",
         }}
       >
         <Checkbox
@@ -384,7 +385,8 @@ function TreeNode({
           size={compact ? "xs" : "sm"}
           fw={isDirectory ? 500 : 400}
           title={getRelativePath(node.path, root)}
-          style={{ flexShrink: 0, whiteSpace: "nowrap" }}
+          truncate
+          style={{ flex: "1 1 auto", minWidth: 0 }}
         >
           {node.name}
         </Text>
@@ -404,6 +406,7 @@ function TreeNode({
               size="sm"
               variant="subtle"
               ml="auto"
+              style={{ flexShrink: 0 }}
               onClick={(event) => event.stopPropagation()}
             >
               <IconDotsVertical size="0.875rem" />
@@ -712,8 +715,14 @@ export function FileBrowser({
         </Group>
       ) : null}
 
-      <ScrollArea flex={1} mih={0} type="auto" offsetScrollbars>
-        <Box py={rem(4)}>
+      <ScrollArea
+        flex={1}
+        mih={0}
+        type="auto"
+        offsetScrollbars
+        styles={{ root: { minWidth: 0 }, viewport: { minWidth: 0 } }}
+      >
+        <Box py={rem(4)} miw={0}>
           {displayTree.length === 0 ? (
             <Stack align="center" gap="xs" py="xl" px="md">
               <Text size="sm" fw={600} ta="center">
