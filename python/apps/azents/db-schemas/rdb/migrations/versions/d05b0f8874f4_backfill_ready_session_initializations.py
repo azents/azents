@@ -31,7 +31,7 @@ def upgrade() -> None:
             updated_at
         )
         SELECT
-            md5(agent_sessions.id || ':initialization'),
+            md5(agent_sessions.id || '-initialization'),
             agent_sessions.id,
             'ready'::session_initialization_status,
             0,
@@ -66,7 +66,7 @@ def upgrade() -> None:
             updated_at
         )
         SELECT
-            md5(session_initializations.session_id || ':noop_ready'),
+            md5(session_initializations.session_id || '-noop-ready'),
             session_initializations.id,
             session_initializations.session_id,
             1,
@@ -103,7 +103,7 @@ def downgrade() -> None:
         WHERE session_initialization_steps.initialization_id =
             session_initializations.id
           AND session_initialization_steps.id =
-            md5(session_initializations.session_id || ':noop_ready')
+            md5(session_initializations.session_id || '-noop-ready')
           AND session_initialization_steps.step_key = 'noop_ready'
         """
     )
@@ -112,6 +112,6 @@ def downgrade() -> None:
         DELETE FROM session_initializations
         USING agent_sessions
         WHERE session_initializations.session_id = agent_sessions.id
-          AND session_initializations.id = md5(agent_sessions.id || ':initialization')
+          AND session_initializations.id = md5(agent_sessions.id || '-initialization')
         """
     )
