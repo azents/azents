@@ -4,6 +4,8 @@ import type {
   AgentResponse,
   ChatEventResponse,
   InputActionDefinitionResponse,
+  SessionInitializationEventResponse,
+  SessionInitializationResponse,
 } from "@azents/public-client";
 
 // --- WebSocket event type ---
@@ -539,6 +541,27 @@ export interface InputActionsUpdatedEvent {
   session_id: string;
 }
 
+export interface SessionInitializationUpdatedEvent {
+  type: "session_initialization_updated";
+  session_id: string;
+  initialization: SessionInitializationResponse;
+}
+
+export interface SessionInitializationEventAppendedEvent {
+  type: "session_initialization_event_appended";
+  session_id: string;
+  event: SessionInitializationEventResponse;
+}
+
+export type SessionInitializationDetailState =
+  | { type: "IDLE" }
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | {
+      type: "READY";
+      events: SessionInitializationEventResponse[];
+    };
+
 export interface SubscriptionHealthCheckAckEvent {
   type: "subscription_health_check_ack";
   session_id: string;
@@ -584,6 +607,8 @@ export type ChatEvent =
   | LiveEventRemovedEvent
   | SubscribedEvent
   | InputActionsUpdatedEvent
+  | SessionInitializationUpdatedEvent
+  | SessionInitializationEventAppendedEvent
   | SubscriptionHealthCheckAckEvent
   | ChatHistoryEvent;
 

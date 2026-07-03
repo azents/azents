@@ -33,6 +33,7 @@ import type {
   GoalStateSnapshot,
   InputActionDefinition,
   PendingInputBuffer,
+  SessionInitializationDetailState,
   TodoStateSnapshot,
   TokenUsageSummary,
   ToolResultStatus,
@@ -42,6 +43,7 @@ import type {
   ChatEventResponse,
   ChatWriteResponse,
   LiveEventListResponse,
+  SessionInitializationResponse,
 } from "@azents/public-client";
 
 export type SessionRunState = "idle" | "running";
@@ -124,6 +126,14 @@ export interface ChatSessionContainerOutput {
   authorizationRequests: AuthorizationRequest[];
   /** auth complete when remove corresponding request */
   onAuthorizationComplete: (toolkitId: string) => void;
+  /** current session initialization projection */
+  initialization: SessionInitializationResponse | null;
+  /** durable initialization event detail state */
+  initializationDetailState: SessionInitializationDetailState;
+  /** load durable initialization details */
+  onLoadInitializationDetails: () => void;
+  /** delete all pending inputs blocked behind initialization */
+  onDeletePendingInitializationInputs: () => void;
   /** latest turn usage */
   tokenUsage: TokenUsageSummary | null;
   /** current session goal snapshot */
@@ -951,6 +961,7 @@ interface ManagedLiveState {
   isStopPending: boolean;
   todo: TodoStateSnapshot;
   goal: GoalStateSnapshot;
+  initialization: SessionInitializationResponse | null;
 }
 
 interface LiveTaxonomySnapshot {
@@ -960,6 +971,7 @@ interface LiveTaxonomySnapshot {
   session_run_state: LiveEventListResponse["session_run_state"];
   todo?: TodoStateSnapshot | null;
   goal?: Partial<GoalStateSnapshot> | null;
+  initialization?: SessionInitializationResponse | null;
 }
 
 function emptyPartialHistoryState(): PartialHistoryState {
@@ -997,6 +1009,7 @@ function emptyManagedLiveState(): ManagedLiveState {
     isStopPending: false,
     todo: emptyTodoState(),
     goal: emptyGoalState(),
+    initialization: null,
   };
 }
 
@@ -1109,6 +1122,7 @@ function replaceLiveStateFromSnapshot(
     isCompacting: liveRunPhase === "compacting",
     todo: live.todo ?? emptyTodoState(),
     goal: normalizeGoalState(live.goal),
+    initialization: live.initialization ?? null,
   };
 }
 
@@ -1206,6 +1220,7 @@ function mapChatWriteSnapshot(response: ChatWriteResponse): ManagedLiveState {
     session_run_state: response.snapshot.session_run_state,
     todo: response.snapshot.todo,
     goal: normalizeGoalState(response.snapshot.goal),
+    initialization: response.snapshot.initialization,
   });
 }
 
@@ -1297,6 +1312,8 @@ export function useChatSessionContainer(
   const [managedLiveState, setManagedLiveState] = useState<ManagedLiveState>(
     () => emptyManagedLiveState(),
   );
+  const [initializationDetailState, setInitializationDetailState] =
+    useState<SessionInitializationDetailState>({ type: "IDLE" });
   const [isSubscribeReady, setIsSubscribeReady] = useState(false);
   const historyNewestCursorRef = useRef<string | null>(null);
   const writeInFlightRef = useRef(false);
@@ -1322,9 +1339,20 @@ export function useChatSessionContainer(
     [historyMessages, partialHistoryMessages],
   );
   const pendingInputBuffers = managedLiveState.pendingInputBuffers;
+  const initialization = managedLiveState.initialization;
   const isResponsePending = managedLiveState.isResponsePending;
   const isModelResponsePending = managedLiveState.isModelResponsePending;
   const sessionRunState = managedLiveState.sessionRunState;
+  const previousInitializationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const initializationId = initialization?.id ?? null;
+    if (previousInitializationIdRef.current === initializationId) {
+      return;
+    }
+    previousInitializationIdRef.current = initializationId;
+    setInitializationDetailState({ type: "IDLE" });
+  }, [initialization?.id]);
 
   // WebSocket connection text (ticket + wsUrl)
   const connectionInfoQuery = trpc.chat.getConnectionInfo.useQuery();
@@ -1401,6 +1429,26 @@ export function useChatSessionContainer(
 
       if ("type" in event && event.type === "input_actions_updated") {
         void utils.chat.listInputActions.invalidate({ sessionId });
+        return;
+      }
+
+      if ("type" in event && event.type === "session_initialization_updated") {
+        setManagedLiveState((prev) => ({
+          ...prev,
+          initialization: event.initialization,
+        }));
+        return;
+      }
+
+      if (
+        "type" in event &&
+        event.type === "session_initialization_event_appended"
+      ) {
+        setInitializationDetailState((prev) =>
+          prev.type === "READY"
+            ? { type: "READY", events: [...prev.events, event.event] }
+            : prev,
+        );
         return;
       }
 
@@ -1799,6 +1847,25 @@ export function useChatSessionContainer(
     void applyLatestSnapshot(sessionId);
   }, [applyLatestSnapshot, sessionId]);
 
+  const onLoadInitializationDetails = useCallback((): void => {
+    setInitializationDetailState({ type: "LOADING" });
+    void utils.chat.getSessionInitialization
+      .fetch({ sessionId })
+      .then((detail) => {
+        setManagedLiveState((prev) => ({
+          ...prev,
+          initialization: detail.initialization,
+        }));
+        setInitializationDetailState({ type: "READY", events: detail.events });
+      })
+      .catch(() => {
+        setInitializationDetailState({
+          type: "ERROR",
+          message: "load_failed",
+        });
+      });
+  }, [sessionId, utils.chat.getSessionInitialization]);
+
   const onAuthorizationComplete = useCallback((toolkitId: string) => {
     setAuthorizationRequests((prev) =>
       prev.filter((r) => r.toolkitId !== toolkitId),
@@ -2011,6 +2078,12 @@ export function useChatSessionContainer(
     [deleteInputBufferMutation, sessionId, utils.chat.listSessionEvents],
   );
 
+  const onDeletePendingInitializationInputs = useCallback((): void => {
+    for (const buffer of pendingInputBuffers) {
+      onDeletePendingInputBuffer(buffer.id);
+    }
+  }, [onDeletePendingInputBuffer, pendingInputBuffers]);
+
   const onUpdateGoal = useCallback(
     async (objective: string): Promise<boolean> => {
       try {
@@ -2124,6 +2197,10 @@ export function useChatSessionContainer(
     }),
     authorizationRequests,
     onAuthorizationComplete,
+    initialization,
+    initializationDetailState,
+    onLoadInitializationDetails,
+    onDeletePendingInitializationInputs,
     tokenUsage,
     goal: managedLiveState.goal,
     todo: managedLiveState.todo,

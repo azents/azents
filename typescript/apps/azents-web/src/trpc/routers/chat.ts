@@ -24,6 +24,7 @@ import {
   chatV1GetAgentSessionContext,
   chatV1GetAgentSessionProjectDefaults,
   chatV1GetAgentWorkspace,
+  chatV1GetSessionInitialization,
   chatV1GetSessionProjectBrowserManifest,
   chatV1IssueWsTicket,
   chatV1ListAgentProjectPresets,
@@ -516,6 +517,25 @@ export const chatRouter = router({
           history: history.data,
           live: live.data,
         };
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  getSessionInitialization: publicProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1GetSessionInitialization({
+          client: ctx.apiClient,
+          path: { session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
       } catch (e) {
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
