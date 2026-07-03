@@ -2,6 +2,7 @@
 title: "Workspace Project Browser"
 created: 2026-07-03
 updated: 2026-07-03
+implemented: 2026-07-03
 tags: [workspace, project, frontend, backend, runtime]
 ---
 
