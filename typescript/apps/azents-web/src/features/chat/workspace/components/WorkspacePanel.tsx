@@ -28,7 +28,13 @@ import { FileBrowser } from "./FileBrowser";
 import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
 import { RuntimeActivationView } from "./RuntimeActivationView";
-import type { WorkspacePanelState } from "../types";
+import { WorkspaceDirectoryPickerModal } from "./WorkspaceDirectoryPickerModal";
+import type {
+  WorkspaceBrowserMode,
+  WorkspaceEntry,
+  WorkspacePanelState,
+} from "../types";
+import type { ProjectDirectoryPickerState } from "./WorkspaceDirectoryPickerModal";
 
 type WorkspacePanelTab = "workspace" | "settings";
 
@@ -53,6 +59,16 @@ interface WorkspacePanelProps {
   onBulkMovePaths: (destinationDirectory: string) => void;
   onBulkDeletePaths: (recursive: boolean) => void;
   getDownloadHref: (path: string) => string;
+  projectPickerState: ProjectDirectoryPickerState;
+  isProjectPickerOpen: boolean;
+  onOpenProjectPicker: () => void;
+  onCloseProjectPicker: () => void;
+  onOpenProjectPickerDirectory: (path: string) => void;
+  onSelectProjectPickerDirectory: (path: string) => void;
+  onRefreshProjectPicker: () => void;
+  onStartRuntimeForProjectPicker: () => void;
+  onRemoveProjectEntry: (entry: WorkspaceEntry) => void;
+  onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
 }
 
 export function WorkspacePanel({
@@ -76,6 +92,16 @@ export function WorkspacePanel({
   onBulkMovePaths,
   onBulkDeletePaths,
   getDownloadHref,
+  projectPickerState,
+  isProjectPickerOpen,
+  onOpenProjectPicker,
+  onCloseProjectPicker,
+  onOpenProjectPickerDirectory,
+  onSelectProjectPickerDirectory,
+  onRefreshProjectPicker,
+  onStartRuntimeForProjectPicker,
+  onRemoveProjectEntry,
+  onSetBrowserMode,
 }: WorkspacePanelProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
   const modals = useModals();
@@ -93,6 +119,21 @@ export function WorkspacePanel({
       confirmProps: { color: "red" },
       centered: true,
       onConfirm,
+    });
+  };
+
+  const openRemoveProjectConfirm = (entry: WorkspaceEntry): void => {
+    modals.openConfirmModal({
+      title: t("deleteProjectConfirmTitle"),
+      children: (
+        <Text size="sm">
+          {t("deleteProjectConfirmDescription", { path: entry.path })}
+        </Text>
+      ),
+      labels: { confirm: t("deleteProject"), cancel: t("cancel") },
+      confirmProps: { color: "red" },
+      centered: true,
+      onConfirm: () => onRemoveProjectEntry(entry),
     });
   };
 
@@ -512,6 +553,14 @@ export function WorkspacePanel({
                     selectedFilePath={state.selectedFilePath}
                     selectedPaths={state.selectedPaths}
                     isRefreshing={state.isRefreshing}
+                    browserMode={state.browserMode ?? "projects"}
+                    modes={
+                      state.projectBrowserManifest?.modes ?? [
+                        { id: "projects", label: t("projectsMode") },
+                        { id: "all_files", label: t("allFilesMode") },
+                      ]
+                    }
+                    projectEmptyState={state.projectEmptyState ?? null}
                     getDownloadHref={getDownloadHref}
                     onOpenDirectory={onOpenDirectory}
                     onOpenFile={onOpenFile}
@@ -561,7 +610,10 @@ export function WorkspacePanel({
                         onDeletePath(entry.path, entry.kind === "directory"),
                       )
                     }
+                    onRemoveProject={openRemoveProjectConfirm}
                     onRefresh={onRefresh}
+                    onSetBrowserMode={onSetBrowserMode}
+                    onAddProject={onOpenProjectPicker}
                   />
                 )}
               </Box>
@@ -572,42 +624,53 @@ export function WorkspacePanel({
   };
 
   return (
-    <Tabs
-      defaultValue={defaultTab}
-      keepMounted={false}
-      h="100%"
-      style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}
-    >
-      <Tabs.List grow style={{ flexShrink: 0 }}>
-        <Tabs.Tab
-          value="workspace"
-          leftSection={<IconFolderOpen size="1rem" />}
-        >
-          {t("workspaceTab")}
-        </Tabs.Tab>
-        <Tabs.Tab value="settings" leftSection={<IconSettings size="1rem" />}>
-          {t("settingsTab")}
-        </Tabs.Tab>
-      </Tabs.List>
+    <>
+      <Tabs
+        defaultValue={defaultTab}
+        keepMounted={false}
+        h="100%"
+        style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}
+      >
+        <Tabs.List grow style={{ flexShrink: 0 }}>
+          <Tabs.Tab
+            value="workspace"
+            leftSection={<IconFolderOpen size="1rem" />}
+          >
+            {t("workspaceTab")}
+          </Tabs.Tab>
+          <Tabs.Tab value="settings" leftSection={<IconSettings size="1rem" />}>
+            {t("settingsTab")}
+          </Tabs.Tab>
+        </Tabs.List>
 
-      <Tabs.Panel
-        value="workspace"
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {renderWorkspacePanel()}
-      </Tabs.Panel>
-      <Tabs.Panel
-        value="settings"
-        p="md"
-        style={{ flex: 1, minHeight: 0, overflow: "auto" }}
-      >
-        {renderSettingsPanel()}
-      </Tabs.Panel>
-    </Tabs>
+        <Tabs.Panel
+          value="workspace"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {renderWorkspacePanel()}
+        </Tabs.Panel>
+        <Tabs.Panel
+          value="settings"
+          p="md"
+          style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+        >
+          {renderSettingsPanel()}
+        </Tabs.Panel>
+      </Tabs>
+      <WorkspaceDirectoryPickerModal
+        opened={isProjectPickerOpen}
+        state={projectPickerState}
+        onClose={onCloseProjectPicker}
+        onOpenDirectory={onOpenProjectPickerDirectory}
+        onSelectDirectory={onSelectProjectPickerDirectory}
+        onRefresh={onRefreshProjectPicker}
+        onStartRuntime={onStartRuntimeForProjectPicker}
+      />
+    </>
   );
 }

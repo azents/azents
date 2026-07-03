@@ -1116,7 +1116,18 @@
       "movePrompt": "이동할 경로",
       "deleteConfirmTitle": "파일 또는 폴더 삭제",
       "deleteConfirm": "{path}을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
-      "registerProjectBrowse": "폴더 찾아보기"
+      "registerProjectBrowse": "폴더 찾아보기",
+      "projectsMode": "프로젝트",
+      "allFilesMode": "모든 파일",
+      "addProject": "프로젝트 추가",
+      "removeProject": "프로젝트 제거",
+      "projectStatus": {
+        "unchecked": "미확인",
+        "available": "사용 가능",
+        "missing": "없음",
+        "unavailable": "사용 불가",
+        "error": "오류"
+      }
     },
     "toolCall": {
       "preparing": "명령어 작성 중...",

@@ -5,11 +5,32 @@ import type {
   AgentWorkspaceManifestResponse,
   AgentWorkspaceResponse,
   AgentWorkspaceStatResponse,
+  ProjectBrowserEntryResponse,
+  ProjectBrowserManifestResponse,
   SessionWorkspaceProjectRegistrationRequestResponse,
   SessionWorkspaceProjectResponse,
 } from "@azents/public-client";
 
 export type AgentWorkspaceServerState = AgentWorkspaceResponse;
+
+export type WorkspaceEntryCapabilities = {
+  open: boolean;
+  removeProject: boolean;
+  filesystemDelete: boolean;
+  filesystemMove: boolean;
+  filesystemRename: boolean;
+};
+
+export type WorkspaceEntryStatus = {
+  value: "unchecked" | "available" | "missing" | "unavailable" | "error";
+  detail: string | null;
+  checkedAt: string | null;
+  stale: boolean;
+};
+
+export type WorkspaceEntrySource =
+  | { type: "workspace" }
+  | { type: "session_project" | "preview_project"; projectId: string | null };
 
 export type WorkspaceEntry = {
   name: string;
@@ -18,12 +39,30 @@ export type WorkspaceEntry = {
   size: number | null;
   mediaType: string | null;
   modifiedAt: string | null;
+  capabilities?: WorkspaceEntryCapabilities | null;
+  status?: WorkspaceEntryStatus | null;
+  source?: WorkspaceEntrySource;
 };
 
 export type WorkspaceManifest = {
   root: string;
   cwd: string;
   entries: WorkspaceEntry[];
+};
+
+export type WorkspaceBrowserMode = "projects" | "all_files";
+
+export type WorkspaceProjectBrowserManifest = {
+  root: string;
+  activeMode: WorkspaceBrowserMode;
+  modes: {
+    id: WorkspaceBrowserMode;
+    label: string;
+    default: boolean;
+    rootPath: string | null;
+  }[];
+  entries: WorkspaceEntry[];
+  emptyState: { title: string; description: string } | null;
 };
 
 export type WorkspaceFile = {
@@ -77,6 +116,8 @@ export type WorkspacePanelState =
       type: "SERVER";
       server: AgentWorkspaceServerState;
       manifest: WorkspaceManifest | null;
+      projectBrowserManifest?: WorkspaceProjectBrowserManifest | null;
+      browserMode?: WorkspaceBrowserMode;
       directory: { path: string; entries: WorkspaceEntry[] };
       directoryEntriesByPath: Record<string, WorkspaceEntry[]>;
       fileState: WorkspaceFileState;
@@ -94,6 +135,7 @@ export type WorkspacePanelState =
       isStarting: boolean;
       isStopping: boolean;
       isResetting: boolean;
+      projectEmptyState?: { title: string; description: string } | null;
     };
 
 export function mapWorkspaceEntry(
@@ -106,6 +148,9 @@ export function mapWorkspaceEntry(
     size: entry.size ?? null,
     mediaType: entry.media_type ?? null,
     modifiedAt: entry.modified_at ?? null,
+    capabilities: null,
+    status: null,
+    source: { type: "workspace" },
   };
 }
 
@@ -116,6 +161,58 @@ export function mapWorkspaceManifest(
     root: manifest.root,
     cwd: manifest.cwd,
     entries: manifest.entries.map(mapWorkspaceEntry),
+  };
+}
+
+export function mapProjectBrowserEntry(
+  entry: ProjectBrowserEntryResponse,
+): WorkspaceEntry {
+  return {
+    name: entry.name,
+    path: entry.path,
+    kind: entry.kind,
+    size: null,
+    mediaType: null,
+    modifiedAt: null,
+    capabilities: {
+      open: entry.capabilities.open,
+      removeProject: entry.capabilities.remove_project,
+      filesystemDelete: entry.capabilities.filesystem_delete,
+      filesystemMove: entry.capabilities.filesystem_move,
+      filesystemRename: entry.capabilities.filesystem_rename,
+    },
+    status: {
+      value: entry.status.value,
+      detail: entry.status.detail ?? null,
+      checkedAt: entry.status.checked_at ?? null,
+      stale: entry.status.stale,
+    },
+    source: {
+      type: entry.source.type,
+      projectId: entry.source.project_id ?? null,
+    },
+  };
+}
+
+export function mapProjectBrowserManifest(
+  manifest: ProjectBrowserManifestResponse,
+): WorkspaceProjectBrowserManifest {
+  return {
+    root: manifest.root,
+    activeMode: manifest.active_mode,
+    modes: manifest.modes.map((mode) => ({
+      id: mode.id,
+      label: mode.label,
+      default: mode.default,
+      rootPath: mode.root_path ?? null,
+    })),
+    entries: manifest.entries.map(mapProjectBrowserEntry),
+    emptyState: manifest.empty_state
+      ? {
+          title: manifest.empty_state.title,
+          description: manifest.empty_state.description,
+        }
+      : null,
   };
 }
 

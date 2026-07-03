@@ -1116,7 +1116,18 @@
       "movePrompt": "Chemin de destination",
       "deleteConfirmTitle": "Supprimer le fichier ou le dossier",
       "deleteConfirm": "Supprimer {path} ? Cette action est irréversible.",
-      "registerProjectBrowse": "Parcourir les dossiers"
+      "registerProjectBrowse": "Parcourir les dossiers",
+      "projectsMode": "Projets",
+      "allFilesMode": "Tous les fichiers",
+      "addProject": "Ajouter un projet",
+      "removeProject": "Retirer le projet",
+      "projectStatus": {
+        "unchecked": "Non vérifié",
+        "available": "Disponible",
+        "missing": "Manquant",
+        "unavailable": "Indisponible",
+        "error": "Erreur"
+      }
     },
     "toolCall": {
       "preparing": "Rédaction de la commande...",

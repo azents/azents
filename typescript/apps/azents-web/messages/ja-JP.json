@@ -1116,7 +1116,18 @@
       "movePrompt": "移動先パス",
       "deleteConfirmTitle": "ファイルまたはフォルダーを削除",
       "deleteConfirm": "{path} を削除しますか？この操作は元に戻せません。",
-      "registerProjectBrowse": "フォルダーを参照"
+      "registerProjectBrowse": "フォルダーを参照",
+      "projectsMode": "プロジェクト",
+      "allFilesMode": "すべてのファイル",
+      "addProject": "プロジェクトを追加",
+      "removeProject": "プロジェクトを削除",
+      "projectStatus": {
+        "unchecked": "未確認",
+        "available": "利用可能",
+        "missing": "見つかりません",
+        "unavailable": "利用不可",
+        "error": "エラー"
+      }
     },
     "toolCall": {
       "preparing": "コマンドを作成中…",

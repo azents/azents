@@ -215,6 +215,16 @@ const meta = {
     onBulkMovePaths: noop,
     onBulkDeletePaths: noop,
     getDownloadHref: (path: string): string => `/download?path=${path}`,
+    projectPickerState: { type: "CLOSED" },
+    isProjectPickerOpen: false,
+    onOpenProjectPicker: noop,
+    onCloseProjectPicker: noop,
+    onOpenProjectPickerDirectory: noop,
+    onSelectProjectPickerDirectory: noop,
+    onRefreshProjectPicker: noop,
+    onStartRuntimeForProjectPicker: noop,
+    onRemoveProjectEntry: noop,
+    onSetBrowserMode: noop,
   },
 } satisfies Meta<typeof WorkspacePanel>;
 

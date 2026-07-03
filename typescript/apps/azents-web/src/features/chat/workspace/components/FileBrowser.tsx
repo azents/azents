@@ -3,12 +3,15 @@
 /** Workspace file browser component. */
 import {
   ActionIcon,
+  Badge,
   Box,
+  Button,
   Checkbox,
   Group,
   Menu,
   rem,
   ScrollArea,
+  SegmentedControl,
   Stack,
   Text,
   TextInput,
@@ -39,12 +42,15 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { WorkspaceEntry } from "../types";
+import type { WorkspaceBrowserMode, WorkspaceEntry } from "../types";
 
 interface FileBrowserProps {
   root: string;
   cwd: string;
   path: string;
+  browserMode: WorkspaceBrowserMode;
+  modes: { id: WorkspaceBrowserMode; label: string }[];
+  projectEmptyState: { title: string; description: string } | null;
   manifestEntries: WorkspaceEntry[];
   entries: WorkspaceEntry[];
   directoryEntriesByPath: Record<string, WorkspaceEntry[]>;
@@ -63,7 +69,10 @@ interface FileBrowserProps {
   onRenamePath: (entry: WorkspaceEntry) => void;
   onMovePath: (entry: WorkspaceEntry) => void;
   onDeletePath: (entry: WorkspaceEntry) => void;
+  onRemoveProject: (entry: WorkspaceEntry) => void;
   onRefresh: () => void;
+  onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
+  onAddProject: () => void;
 }
 
 type FileTreeNode = WorkspaceEntry & {
@@ -200,6 +209,37 @@ function collectDirectoryPaths(
   return output;
 }
 
+function canRename(entry: WorkspaceEntry): boolean {
+  return entry.capabilities?.filesystemRename ?? true;
+}
+
+function canMove(entry: WorkspaceEntry): boolean {
+  return entry.capabilities?.filesystemMove ?? true;
+}
+
+function canDelete(entry: WorkspaceEntry): boolean {
+  return entry.capabilities?.filesystemDelete ?? true;
+}
+
+function canSelect(entry: WorkspaceEntry): boolean {
+  return canMove(entry) || canDelete(entry);
+}
+
+function getStatusColor(status: WorkspaceEntry["status"]): string {
+  switch (status?.value) {
+    case "available":
+      return "green";
+    case "missing":
+    case "error":
+      return "red";
+    case "unavailable":
+      return "yellow";
+    case "unchecked":
+    default:
+      return "gray";
+  }
+}
+
 interface TreeNodeProps {
   node: FileTreeNode;
   depth: number;
@@ -217,6 +257,7 @@ interface TreeNodeProps {
   onRenamePath: (entry: WorkspaceEntry) => void;
   onMovePath: (entry: WorkspaceEntry) => void;
   onDeletePath: (entry: WorkspaceEntry) => void;
+  onRemoveProject: (entry: WorkspaceEntry) => void;
 }
 
 function TreeNode({
@@ -236,6 +277,7 @@ function TreeNode({
   onRenamePath,
   onMovePath,
   onDeletePath,
+  onRemoveProject,
 }: TreeNodeProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
   const theme = useMantineTheme();
@@ -244,6 +286,8 @@ function TreeNode({
   const active = activePath === node.path;
   const checked = selectedPaths.has(node.path);
   const isDirectory = node.kind === "directory";
+  const selectable = canSelect(node);
+  const canRemoveProject = node.capabilities?.removeProject === true;
   const rowStyle = compact
     ? {
         minHeight: rem(28),
@@ -303,6 +347,7 @@ function TreeNode({
         <Checkbox
           size="xs"
           checked={checked}
+          disabled={!selectable}
           aria-label={t("selectPath")}
           onClick={(event) => event.stopPropagation()}
           onChange={() => onToggleSelectedPath(node.path)}
@@ -344,6 +389,16 @@ function TreeNode({
         >
           {node.name}
         </Text>
+        {node.status ? (
+          <Badge
+            size="xs"
+            variant={node.status.stale ? "outline" : "light"}
+            color={getStatusColor(node.status)}
+            title={node.status.detail ?? ""}
+          >
+            {t(`projectStatus.${node.status.value}`)}
+          </Badge>
+        ) : null}
         <Menu withinPortal position="bottom-end">
           <Menu.Target>
             <ActionIcon
@@ -379,26 +434,41 @@ function TreeNode({
                 {t("newFolder")}
               </Menu.Item>
             )}
-            <Menu.Item
-              leftSection={<IconEdit size="0.875rem" />}
-              onClick={() => onRenamePath(node)}
-            >
-              {t("rename")}
-            </Menu.Item>
-            <Menu.Item
-              leftSection={<IconArrowRight size="0.875rem" />}
-              onClick={() => onMovePath(node)}
-            >
-              {t("move")}
-            </Menu.Item>
-            <Menu.Divider />
-            <Menu.Item
-              color="red"
-              leftSection={<IconTrash size="0.875rem" />}
-              onClick={() => onDeletePath(node)}
-            >
-              {t("delete")}
-            </Menu.Item>
+            {canRename(node) ? (
+              <Menu.Item
+                leftSection={<IconEdit size="0.875rem" />}
+                onClick={() => onRenamePath(node)}
+              >
+                {t("rename")}
+              </Menu.Item>
+            ) : null}
+            {canMove(node) ? (
+              <Menu.Item
+                leftSection={<IconArrowRight size="0.875rem" />}
+                onClick={() => onMovePath(node)}
+              >
+                {t("move")}
+              </Menu.Item>
+            ) : null}
+            {canDelete(node) || canRemoveProject ? <Menu.Divider /> : null}
+            {canRemoveProject ? (
+              <Menu.Item
+                color="red"
+                leftSection={<IconTrash size="0.875rem" />}
+                onClick={() => onRemoveProject(node)}
+              >
+                {t("removeProject")}
+              </Menu.Item>
+            ) : null}
+            {canDelete(node) ? (
+              <Menu.Item
+                color="red"
+                leftSection={<IconTrash size="0.875rem" />}
+                onClick={() => onDeletePath(node)}
+              >
+                {t("delete")}
+              </Menu.Item>
+            ) : null}
           </Menu.Dropdown>
         </Menu>
       </Group>
@@ -422,6 +492,7 @@ function TreeNode({
               onRenamePath={onRenamePath}
               onMovePath={onMovePath}
               onDeletePath={onDeletePath}
+              onRemoveProject={onRemoveProject}
             />
           ))
         : null}
@@ -433,6 +504,9 @@ export function FileBrowser({
   root,
   cwd,
   path,
+  browserMode,
+  modes,
+  projectEmptyState,
   manifestEntries,
   entries,
   directoryEntriesByPath,
@@ -451,7 +525,10 @@ export function FileBrowser({
   onRenamePath,
   onMovePath,
   onDeletePath,
+  onRemoveProject,
   onRefresh,
+  onSetBrowserMode,
+  onAddProject,
 }: FileBrowserProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
   const [query, setQuery] = useState("");
@@ -506,6 +583,15 @@ export function FileBrowser({
   }, [cwd]);
 
   const activePath = selectedFilePath ?? path;
+  const handleModeChange = useCallback(
+    (value: string): void => {
+      const nextMode = modes.find((mode) => mode.id === value);
+      if (nextMode) {
+        onSetBrowserMode(nextMode.id);
+      }
+    },
+    [modes, onSetBrowserMode],
+  );
 
   return (
     <Stack gap={0} h="100%" mih={0}>
@@ -519,6 +605,22 @@ export function FileBrowser({
           borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
         }}
       >
+        <SegmentedControl
+          size="xs"
+          value={browserMode}
+          data={modes.map((mode) => ({ label: mode.label, value: mode.id }))}
+          onChange={handleModeChange}
+        />
+        {browserMode === "projects" ? (
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconFolderPlus size="0.8125rem" />}
+            onClick={onAddProject}
+          >
+            {t("addProject")}
+          </Button>
+        ) : null}
         <TextInput
           flex={1}
           size="xs"
@@ -622,9 +724,28 @@ export function FileBrowser({
       <ScrollArea flex={1} mih={0} type="auto" offsetScrollbars>
         <Box py={rem(4)}>
           {displayTree.length === 0 ? (
-            <Text size="xs" c="dimmed" ta="center" py="xl">
-              {query ? t("noSearchResults") : t("emptyDirectory")}
-            </Text>
+            <Stack align="center" gap="xs" py="xl" px="md">
+              <Text size="sm" fw={600} ta="center">
+                {query
+                  ? t("noSearchResults")
+                  : (projectEmptyState?.title ?? t("emptyDirectory"))}
+              </Text>
+              {!query && projectEmptyState ? (
+                <Text size="xs" c="dimmed" ta="center">
+                  {projectEmptyState.description}
+                </Text>
+              ) : null}
+              {!query && browserMode === "projects" ? (
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconFolderPlus size="0.875rem" />}
+                  onClick={onAddProject}
+                >
+                  {t("addProject")}
+                </Button>
+              ) : null}
+            </Stack>
           ) : (
             displayTree.map((node) => (
               <TreeNode
@@ -645,6 +766,7 @@ export function FileBrowser({
                 onRenamePath={onRenamePath}
                 onMovePath={onMovePath}
                 onDeletePath={onDeletePath}
+                onRemoveProject={onRemoveProject}
               />
             ))
           )}
