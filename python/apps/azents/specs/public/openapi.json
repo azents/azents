@@ -3025,6 +3025,63 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/git-refs": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Preview Agent Git Refs",
+        "description": "Preview Git refs for a source Project path.",
+        "operationId": "chat_v1_preview_agent_git_refs",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "source_project_path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Project Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitRefPreviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}/archive": {
       "post": {
         "tags": [
@@ -8712,19 +8769,38 @@
       },
       "AgentSessionCreateRequest": {
         "properties": {
+          "workspace_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExistingProjectsWorkspaceModeRequest"
+              },
+              {
+                "$ref": "#/components/schemas/GitWorktreeWorkspaceModeRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Mode",
+            "description": "Workspace mode for the created session"
+          },
           "project_paths": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Project Paths",
             "description": "Exact Project paths to register on the created session"
           }
         },
         "type": "object",
-        "required": [
-          "project_paths"
-        ],
         "title": "AgentSessionCreateRequest",
         "description": "REST non-primary AgentSession create request."
       },
@@ -10925,11 +11001,33 @@
             "title": "Message",
             "description": "Message content"
           },
+          "workspace_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExistingProjectsWorkspaceModeRequest"
+              },
+              {
+                "$ref": "#/components/schemas/GitWorktreeWorkspaceModeRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Mode",
+            "description": "Workspace mode for the created session"
+          },
           "project_paths": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Project Paths",
             "description": "Exact Project paths to register on the created session"
           },
@@ -10952,8 +11050,7 @@
         "type": "object",
         "required": [
           "client_request_id",
-          "message",
-          "project_paths"
+          "message"
         ],
         "title": "ChatSessionCreateMessageWriteRequest",
         "description": "REST first message write request for a draft AgentSession."
@@ -11328,6 +11425,31 @@
         "title": "EventKind",
         "description": "Event transcript event kind."
       },
+      "ExistingProjectsWorkspaceModeRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "existing_projects",
+            "title": "Type",
+            "description": "Workspace mode type"
+          },
+          "project_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Project Paths",
+            "description": "Exact Project paths to register on the created session"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "project_paths"
+        ],
+        "title": "ExistingProjectsWorkspaceModeRequest",
+        "description": "Existing Project path mode for a new AgentSession."
+      },
       "GcpConfig": {
         "properties": {
           "type": {
@@ -11495,6 +11617,123 @@
         ],
         "title": "GitHubPlatformOAuthUrlResponse",
         "description": "GitHub Platform App OAuth URL response."
+      },
+      "GitRefEntryResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display ref name"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref",
+            "description": "Full Git ref"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "branch",
+              "remote_branch",
+              "tag",
+              "other"
+            ],
+            "title": "Type",
+            "description": "Git ref type"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "Target commit"
+          },
+          "default": {
+            "type": "boolean",
+            "title": "Default",
+            "description": "Whether this is the default ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "ref",
+          "type",
+          "target",
+          "default"
+        ],
+        "title": "GitRefEntryResponse",
+        "description": "Git ref entry response."
+      },
+      "GitRefPreviewResponse": {
+        "properties": {
+          "refs": {
+            "items": {
+              "$ref": "#/components/schemas/GitRefEntryResponse"
+            },
+            "type": "array",
+            "title": "Refs",
+            "description": "Available Git refs"
+          },
+          "default_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Branch",
+            "description": "Default branch name"
+          },
+          "head_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Commit",
+            "description": "Current HEAD commit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refs",
+          "default_branch",
+          "head_commit"
+        ],
+        "title": "GitRefPreviewResponse",
+        "description": "Git ref preview response for a source Project."
+      },
+      "GitWorktreeWorkspaceModeRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "git_worktree",
+            "title": "Type",
+            "description": "Workspace mode type"
+          },
+          "source_project_path": {
+            "type": "string",
+            "title": "Source Project Path",
+            "description": "Source Project path"
+          },
+          "starting_ref": {
+            "type": "string",
+            "title": "Starting Ref",
+            "description": "Starting Git ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "source_project_path",
+          "starting_ref"
+        ],
+        "title": "GitWorktreeWorkspaceModeRequest",
+        "description": "Git worktree mode for a new AgentSession."
       },
       "GoalAction": {
         "properties": {

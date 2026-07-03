@@ -128,6 +128,14 @@ from azents.services.project_browser_manifest import (
     ProjectBrowserManifestService,
     ProjectBrowserSessionNotFound,
 )
+from azents.services.session_git_worktree import (
+    ExplicitProjectsWorkspaceMode,
+    GitRefPreviewAccessDenied,
+    GitRefPreviewAgentNotFound,
+    GitRefPreviewRuntimeUnavailable,
+    GitWorktreeWorkspaceMode,
+    SessionGitWorktreeService,
+)
 from azents.services.session_storage import guess_media_type
 from azents.services.session_workspace_project import (
     AgentNotFound as ProjectAgentNotFound,
@@ -187,6 +195,9 @@ from .data import (
     ChatWriteAcceptedResponse,
     ChatWriteResponse,
     ChatWriteSnapshotResponse,
+    ExistingProjectsWorkspaceModeRequest,
+    GitRefPreviewResponse,
+    GitWorktreeWorkspaceModeRequest,
     GoalStateResponse,
     GoalStatusUpdateRequest,
     GoalUpdateRequest,
@@ -937,6 +948,33 @@ async def create_team_agent_session_message(
     )
 
 
+def _workspace_mode_from_request(
+    request: ExistingProjectsWorkspaceModeRequest
+    | GitWorktreeWorkspaceModeRequest
+    | None,
+    *,
+    project_paths: list[str] | None,
+) -> ExplicitProjectsWorkspaceMode | GitWorktreeWorkspaceMode:
+    """Convert REST workspace mode request to service input."""
+    if request is None:
+        if project_paths is None:
+            raise HTTPException(status_code=400, detail="workspace_mode is required.")
+        return ExplicitProjectsWorkspaceMode(project_paths=project_paths)
+    match request:
+        case ExistingProjectsWorkspaceModeRequest(project_paths=project_paths):
+            return ExplicitProjectsWorkspaceMode(project_paths=project_paths)
+        case GitWorktreeWorkspaceModeRequest(
+            source_project_path=source_project_path,
+            starting_ref=starting_ref,
+        ):
+            return GitWorktreeWorkspaceMode(
+                source_project_path=source_project_path,
+                starting_ref=starting_ref,
+            )
+        case _:
+            assert_never(request)
+
+
 async def _write_new_session_message_via_rest(
     chat_service: ChatSessionService,
     agent_session_input_service: AgentSessionInputService,
@@ -957,15 +995,32 @@ async def _write_new_session_message_via_rest(
         attachments=request.attachments or [],
         file_parts=[],
     )
-    input_result = (
-        await agent_session_input_service.create_team_session_with_buffered_input(
-            agent_id=agent_id,
-            message=message,
-            user_id=user_id,
-            project_paths=request.project_paths,
-            client_request_id=request.client_request_id,
-        )
+    workspace_mode = _workspace_mode_from_request(
+        request.workspace_mode,
+        project_paths=request.project_paths,
     )
+    create_session_input = (
+        agent_session_input_service.create_team_session_with_buffered_input
+    )
+    match workspace_mode:
+        case ExplicitProjectsWorkspaceMode(project_paths=project_paths):
+            input_result = await create_session_input(
+                agent_id=agent_id,
+                message=message,
+                user_id=user_id,
+                project_paths=project_paths,
+                client_request_id=request.client_request_id,
+            )
+        case GitWorktreeWorkspaceMode():
+            input_result = await create_session_input(
+                agent_id=agent_id,
+                message=message,
+                user_id=user_id,
+                workspace_mode=workspace_mode,
+                client_request_id=request.client_request_id,
+            )
+        case _:
+            assert_never(workspace_mode)
     result = _handle_created_agent_session_input_result(input_result)
     return await _finalize_message_write_response(
         chat_service,
@@ -1418,6 +1473,42 @@ async def get_agent_session_project_defaults(
             assert_never(result)
 
 
+@router.get("/agents/{agent_id}/git-refs")
+async def preview_agent_git_refs(
+    agent_id: str,
+    source_project_path: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
+) -> GitRefPreviewResponse:
+    """Preview Git refs for a source Project path."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await session_git_worktree_service.preview_git_refs(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        source_project_path=source_project_path,
+    )
+    match result:
+        case Success(preview):
+            return GitRefPreviewResponse.from_domain(preview)
+        case Failure(error):
+            match error:
+                case InvalidProjectPath():
+                    raise HTTPException(status_code=400, detail=error.reason)
+                case GitRefPreviewAgentNotFound():
+                    raise HTTPException(status_code=404, detail="Agent not found.")
+                case GitRefPreviewAccessDenied():
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Workspace membership required.",
+                    )
+                case GitRefPreviewRuntimeUnavailable():
+                    raise HTTPException(status_code=409, detail=error.reason)
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
 @router.post("/agents/{agent_id}/sessions")
 async def create_team_agent_session(
     agent_id: str,
@@ -1426,11 +1517,25 @@ async def create_team_agent_session(
     chat_service: Annotated[ChatSessionService, Depends()],
 ) -> AgentSessionResponse:
     """Create a non-primary team AgentSession for an Agent."""
-    result = await chat_service.create_team_session(
-        agent_id=agent_id,
-        user_id=current_user.user_id,
+    workspace_mode = _workspace_mode_from_request(
+        request.workspace_mode,
         project_paths=request.project_paths,
     )
+    match workspace_mode:
+        case ExplicitProjectsWorkspaceMode(project_paths=project_paths):
+            result = await chat_service.create_team_session(
+                agent_id=agent_id,
+                user_id=current_user.user_id,
+                project_paths=project_paths,
+            )
+        case GitWorktreeWorkspaceMode():
+            result = await chat_service.create_team_session(
+                agent_id=agent_id,
+                user_id=current_user.user_id,
+                workspace_mode=workspace_mode,
+            )
+        case _:
+            assert_never(workspace_mode)
     match result:
         case Success(session):
             return AgentSessionResponse.from_domain(session)

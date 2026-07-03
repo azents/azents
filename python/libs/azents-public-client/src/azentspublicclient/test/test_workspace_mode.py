@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.agent_session_create_request import AgentSessionCreateRequest
+from azentspublicclient.models.workspace_mode import WorkspaceMode
 
-class TestAgentSessionCreateRequest(unittest.TestCase):
-    """AgentSessionCreateRequest unit test stubs"""
+class TestWorkspaceMode(unittest.TestCase):
+    """WorkspaceMode unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,28 +25,36 @@ class TestAgentSessionCreateRequest(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> AgentSessionCreateRequest:
-        """Test AgentSessionCreateRequest
+    def make_instance(self, include_optional) -> WorkspaceMode:
+        """Test WorkspaceMode
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `AgentSessionCreateRequest`
+        # uncomment below to create an instance of `WorkspaceMode`
         """
-        model = AgentSessionCreateRequest()
+        model = WorkspaceMode()
         if include_optional:
-            return AgentSessionCreateRequest(
-                workspace_mode = None,
+            return WorkspaceMode(
+                type = 'existing_projects',
                 project_paths = [
                     ''
-                    ]
+                    ],
+                source_project_path = '',
+                starting_ref = ''
             )
         else:
-            return AgentSessionCreateRequest(
+            return WorkspaceMode(
+                type = 'existing_projects',
+                project_paths = [
+                    ''
+                    ],
+                source_project_path = '',
+                starting_ref = '',
         )
         """
 
-    def testAgentSessionCreateRequest(self):
-        """Test AgentSessionCreateRequest"""
+    def testWorkspaceMode(self):
+        """Test WorkspaceMode"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

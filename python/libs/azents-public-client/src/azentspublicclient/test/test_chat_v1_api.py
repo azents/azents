@@ -257,6 +257,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_preview_agent_git_refs(self) -> None:
+        """Test case for chat_v1_preview_agent_git_refs
+
+        Preview Agent Git Refs
+        """
+        pass
+
     def test_chat_v1_preview_project_browser_manifest(self) -> None:
         """Test case for chat_v1_preview_project_browser_manifest
 

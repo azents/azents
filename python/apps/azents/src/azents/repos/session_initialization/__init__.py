@@ -208,6 +208,61 @@ class SessionInitializationRepository:
         )
         return [self._build_event(rdb) for rdb in result.scalars()]
 
+    async def update_initialization_status(
+        self,
+        session: AsyncSession,
+        *,
+        initialization_id: str,
+        status: SessionInitializationStatus,
+        failure_summary: str | None,
+        started_at: datetime.datetime | None,
+        completed_at: datetime.datetime | None,
+        failed_at: datetime.datetime | None,
+    ) -> SessionInitialization:
+        """Update lifecycle status and milestone timestamps."""
+        rdb = await session.get(RDBSessionInitialization, initialization_id)
+        if rdb is None:
+            raise RuntimeError("SessionInitialization row is missing")
+        rdb.status = status
+        rdb.failure_summary = failure_summary
+        if started_at is not None:
+            rdb.started_at = started_at
+        if completed_at is not None:
+            rdb.completed_at = completed_at
+        if failed_at is not None:
+            rdb.failed_at = failed_at
+        await session.flush()
+        return self._build_initialization(rdb)
+
+    async def update_step_status(
+        self,
+        session: AsyncSession,
+        *,
+        step_id: str,
+        status: SessionInitializationStepStatus,
+        failure_reason: str | None,
+        resource_descriptors: list[object] | None,
+        started_at: datetime.datetime | None,
+        completed_at: datetime.datetime | None,
+        failed_at: datetime.datetime | None,
+    ) -> SessionInitializationStep:
+        """Update a step status and optional execution metadata."""
+        rdb = await session.get(RDBSessionInitializationStep, step_id)
+        if rdb is None:
+            raise RuntimeError("SessionInitializationStep row is missing")
+        rdb.status = status
+        rdb.failure_reason = failure_reason
+        if resource_descriptors is not None:
+            rdb.resource_descriptors = resource_descriptors
+        if started_at is not None:
+            rdb.started_at = started_at
+        if completed_at is not None:
+            rdb.completed_at = completed_at
+        if failed_at is not None:
+            rdb.failed_at = failed_at
+        await session.flush()
+        return self._build_step(rdb)
+
     def _build_initialization(
         self,
         rdb: RDBSessionInitialization,

@@ -8,7 +8,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **client_request_id** | **str** | Client-generated idempotency key | 
 **message** | **str** | Message content | 
-**project_paths** | **List[str]** | Exact Project paths to register on the created session | 
+**workspace_mode** | [**WorkspaceMode**](WorkspaceMode.md) |  | [optional]
+**project_paths** | **List[str]** |  | [optional]
 **attachments** | **List[str]** |  | [optional] 
 
 ## Example

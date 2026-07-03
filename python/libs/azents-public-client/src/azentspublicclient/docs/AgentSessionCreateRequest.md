@@ -6,7 +6,8 @@ REST non-primary AgentSession create request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**project_paths** | **List[str]** | Exact Project paths to register on the created session | 
+**workspace_mode** | [**WorkspaceMode**](WorkspaceMode.md) |  | [optional]
+**project_paths** | **List[str]** |  | [optional]
 
 ## Example
 
