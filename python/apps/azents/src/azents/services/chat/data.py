@@ -7,6 +7,7 @@ from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunStat
 from azents.engine.events.types import Event
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
 from azents.engine.tools.todo import TodoStateSnapshot
+from azents.services.session_initialization import SessionInitializationProjection
 
 # ---------------------------------------------------------------------------
 # Output
@@ -54,6 +55,7 @@ class ChatLiveStateSnapshot:
     session_run_state: AgentSessionRunState = AgentSessionRunState.IDLE
     todo: TodoStateSnapshot | None = None
     goal: GoalStateSnapshot | None = None
+    initialization: SessionInitializationProjection | None = None
 
 
 @dataclasses.dataclass(frozen=True)

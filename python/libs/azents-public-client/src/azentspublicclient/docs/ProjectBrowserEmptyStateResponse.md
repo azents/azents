@@ -6,8 +6,8 @@ Project mode empty-state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**title** | **str** | Empty-state title |
-**description** | **str** | Empty-state explanatory text |
+**title** | **str** | Empty-state title | 
+**description** | **str** | Empty-state explanatory text | 
 
 ## Example
 
@@ -27,3 +27,5 @@ project_browser_empty_state_response_dict = project_browser_empty_state_response
 project_browser_empty_state_response_from_dict = ProjectBrowserEmptyStateResponse.from_dict(project_browser_empty_state_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

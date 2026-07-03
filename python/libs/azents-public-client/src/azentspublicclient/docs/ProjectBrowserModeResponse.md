@@ -6,10 +6,10 @@ Workspace browser mode descriptor response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Browser mode ID |
-**label** | **str** | User-facing mode label |
-**default** | **bool** | Whether this is the default browser mode |
-**root_path** | **str** |  | [optional]
+**id** | **str** | Browser mode ID | 
+**label** | **str** | User-facing mode label | 
+**default** | **bool** | Whether this is the default browser mode | 
+**root_path** | **str** |  | [optional] 
 
 ## Example
 
@@ -29,3 +29,5 @@ project_browser_mode_response_dict = project_browser_mode_response_instance.to_d
 project_browser_mode_response_from_dict = ProjectBrowserModeResponse.from_dict(project_browser_mode_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

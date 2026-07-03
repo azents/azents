@@ -6,12 +6,12 @@ Project root entry response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Project root display name |
-**path** | **str** | Agent Workspace absolute path |
-**kind** | **str** | Entry kind |
-**source** | [**ProjectBrowserEntrySourceResponse**](ProjectBrowserEntrySourceResponse.md) | Entry source |
-**status** | [**ProjectBrowserEntryStatusResponse**](ProjectBrowserEntryStatusResponse.md) | Filesystem status projection |
-**capabilities** | [**ProjectBrowserEntryCapabilitiesResponse**](ProjectBrowserEntryCapabilitiesResponse.md) | Backend-provided entry action policy |
+**name** | **str** | Project root display name | 
+**path** | **str** | Agent Workspace absolute path | 
+**kind** | **str** | Entry kind | 
+**source** | [**ProjectBrowserEntrySourceResponse**](ProjectBrowserEntrySourceResponse.md) | Entry source | 
+**status** | [**ProjectBrowserEntryStatusResponse**](ProjectBrowserEntryStatusResponse.md) | Filesystem status projection | 
+**capabilities** | [**ProjectBrowserEntryCapabilitiesResponse**](ProjectBrowserEntryCapabilitiesResponse.md) | Backend-provided entry action policy | 
 
 ## Example
 
@@ -31,3 +31,5 @@ project_browser_entry_response_dict = project_browser_entry_response_instance.to
 project_browser_entry_response_from_dict = ProjectBrowserEntryResponse.from_dict(project_browser_entry_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

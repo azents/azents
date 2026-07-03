@@ -22,6 +22,10 @@ from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
 from azents.repos.agent_project_preset.data import AgentProjectPreset
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.session_initialization.data import (
+    SessionInitializationEvent,
+    SessionInitializationStep,
+)
 from azents.repos.session_workspace_project.data import (
     SessionWorkspaceProject,
     SessionWorkspaceProjectRegistrationRequest,
@@ -70,6 +74,10 @@ from azents.services.project_browser_manifest import (
     ProjectBrowserEntryStatus,
     ProjectBrowserManifest,
     ProjectBrowserMode,
+)
+from azents.services.session_initialization import (
+    SessionInitializationDetail,
+    SessionInitializationProjection,
 )
 
 
@@ -325,6 +333,162 @@ class GoalStatusUpdateRequest(BaseModel):
     )
 
 
+class SessionInitializationStepResponse(BaseModel):
+    """Session initialization step response."""
+
+    id: str = Field(description="Session initialization step ID")
+    sequence: int = Field(description="Stable step order")
+    step_key: str = Field(description="Stable step key")
+    step_type: str = Field(description="Typed step kind")
+    status: str = Field(description="Step status")
+    blocking: bool = Field(description="Whether failure blocks run dispatch")
+    retryable: bool = Field(description="Whether retry is allowed")
+    attempt: int = Field(description="Current attempt number")
+    depends_on_step_keys: list[str] = Field(description="Dependency step keys")
+    resource_descriptors: list[object] = Field(description="Created resources")
+    failure_reason: str | None = Field(default=None, description="Failure reason")
+    started_at: datetime.datetime | None = Field(default=None, description="Start time")
+    completed_at: datetime.datetime | None = Field(
+        default=None,
+        description="Completion time",
+    )
+    failed_at: datetime.datetime | None = Field(
+        default=None,
+        description="Failure time",
+    )
+    created_at: datetime.datetime = Field(description="Created time")
+    updated_at: datetime.datetime = Field(description="Updated time")
+
+    @classmethod
+    def from_domain(cls, step: SessionInitializationStep) -> Self:
+        """Convert from domain model."""
+        return cls(
+            id=step.id,
+            sequence=step.sequence,
+            step_key=step.step_key,
+            step_type=step.step_type.value,
+            status=step.status.value,
+            blocking=step.blocking,
+            retryable=step.retryable,
+            attempt=step.attempt,
+            depends_on_step_keys=list(step.depends_on_step_keys),
+            resource_descriptors=list(step.resource_descriptors),
+            failure_reason=step.failure_reason,
+            started_at=step.started_at,
+            completed_at=step.completed_at,
+            failed_at=step.failed_at,
+            created_at=step.created_at,
+            updated_at=step.updated_at,
+        )
+
+
+class SessionInitializationEventResponse(BaseModel):
+    """Session initialization event response."""
+
+    id: str = Field(description="Session initialization event ID")
+    step_id: str | None = Field(default=None, description="Step ID")
+    sequence: int = Field(description="Monotonic event sequence")
+    kind: str = Field(description="Event kind")
+    command_argv: list[str] | None = Field(default=None, description="Command argv")
+    content: str | None = Field(default=None, description="Event content")
+    exit_code: int | None = Field(default=None, description="Command exit code")
+    created_at: datetime.datetime = Field(description="Created time")
+
+    @classmethod
+    def from_domain(cls, event: SessionInitializationEvent) -> Self:
+        """Convert from domain model."""
+        return cls(
+            id=event.id,
+            step_id=event.step_id,
+            sequence=event.sequence,
+            kind=event.kind.value,
+            command_argv=None
+            if event.command_argv is None
+            else list(event.command_argv),
+            content=event.content,
+            exit_code=event.exit_code,
+            created_at=event.created_at,
+        )
+
+
+class SessionInitializationResponse(BaseModel):
+    """Session initialization live projection response."""
+
+    id: str = Field(description="Session initialization ID")
+    status: str = Field(description="Initialization status")
+    failure_summary: str | None = Field(default=None, description="Failure summary")
+    retry_count: int = Field(description="Retry count")
+    started_at: datetime.datetime | None = Field(default=None, description="Start time")
+    completed_at: datetime.datetime | None = Field(
+        default=None,
+        description="Completion time",
+    )
+    failed_at: datetime.datetime | None = Field(
+        default=None,
+        description="Failure time",
+    )
+    canceled_at: datetime.datetime | None = Field(
+        default=None,
+        description="Cancellation time",
+    )
+    cleaned_at: datetime.datetime | None = Field(
+        default=None,
+        description="Cleanup time",
+    )
+    updated_at: datetime.datetime = Field(description="Updated time")
+    steps: list[SessionInitializationStepResponse] = Field(
+        description="Current initialization steps",
+    )
+
+    @classmethod
+    def from_domain(cls, projection: SessionInitializationProjection) -> Self:
+        """Convert from live projection domain model."""
+        initialization = projection.initialization
+        return cls(
+            id=initialization.id,
+            status=initialization.status.value,
+            failure_summary=initialization.failure_summary,
+            retry_count=initialization.retry_count,
+            started_at=initialization.started_at,
+            completed_at=initialization.completed_at,
+            failed_at=initialization.failed_at,
+            canceled_at=initialization.canceled_at,
+            cleaned_at=initialization.cleaned_at,
+            updated_at=initialization.updated_at,
+            steps=[
+                SessionInitializationStepResponse.from_domain(step)
+                for step in projection.steps
+            ],
+        )
+
+
+class SessionInitializationDetailResponse(BaseModel):
+    """Durable session initialization detail response."""
+
+    initialization: SessionInitializationResponse = Field(
+        description="Initialization projection",
+    )
+    events: list[SessionInitializationEventResponse] = Field(
+        description="Initialization event list",
+    )
+
+    @classmethod
+    def from_domain(cls, detail: SessionInitializationDetail) -> Self:
+        """Convert from initialization detail domain model."""
+        return cls(
+            initialization=SessionInitializationResponse.from_domain(
+                SessionInitializationProjection(
+                    initialization=detail.initialization,
+                    steps=detail.steps,
+                )
+            ),
+            events=[
+                SessionInitializationEventResponse.from_domain(event)
+                for event in detail.events
+            ],
+        )
+
+
 class ChatWriteSnapshotResponse(BaseModel):
     """Authoritative live snapshot after REST write."""
 
@@ -348,6 +512,10 @@ class ChatWriteSnapshotResponse(BaseModel):
     goal: GoalStateResponse | None = Field(
         default=None,
         description="Current session goal snapshot",
+    )
+    initialization: SessionInitializationResponse | None = Field(
+        default=None,
+        description="Current session initialization projection",
     )
 
 
@@ -1476,6 +1644,10 @@ class LiveEventListResponse(BaseModel):
     goal: GoalStateResponse | None = Field(
         default=None,
         description="Current session goal snapshot",
+    )
+    initialization: SessionInitializationResponse | None = Field(
+        default=None,
+        description="Current session initialization projection",
     )
 
 

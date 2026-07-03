@@ -17,28 +17,26 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ProjectBrowserModeResponse(BaseModel):
+class SessionInitializationEventResponse(BaseModel):
     """
-    Workspace browser mode descriptor response.
+    Session initialization event response.
     """ # noqa: E501
-    id: StrictStr = Field(description="Browser mode ID")
-    label: StrictStr = Field(description="User-facing mode label")
-    default: StrictBool = Field(description="Whether this is the default browser mode")
-    root_path: Optional[StrictStr] = None
+    id: StrictStr = Field(description="Session initialization event ID")
+    step_id: Optional[StrictStr] = None
+    sequence: StrictInt = Field(description="Monotonic event sequence")
+    kind: StrictStr = Field(description="Event kind")
+    command_argv: Optional[List[StrictStr]] = None
+    content: Optional[StrictStr] = None
+    exit_code: Optional[StrictInt] = None
+    created_at: datetime = Field(description="Created time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "label", "default", "root_path"]
-
-    @field_validator('id')
-    def id_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['projects', 'all_files']):
-            raise ValueError("must be one of enum values ('projects', 'all_files')")
-        return value
+    __properties: ClassVar[List[str]] = ["id", "step_id", "sequence", "kind", "command_argv", "content", "exit_code", "created_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -58,7 +56,7 @@ class ProjectBrowserModeResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ProjectBrowserModeResponse from a JSON string"""
+        """Create an instance of SessionInitializationEventResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -86,16 +84,31 @@ class ProjectBrowserModeResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if root_path (nullable) is None
+        # set to None if step_id (nullable) is None
         # and model_fields_set contains the field
-        if self.root_path is None and "root_path" in self.model_fields_set:
-            _dict['root_path'] = None
+        if self.step_id is None and "step_id" in self.model_fields_set:
+            _dict['step_id'] = None
+
+        # set to None if command_argv (nullable) is None
+        # and model_fields_set contains the field
+        if self.command_argv is None and "command_argv" in self.model_fields_set:
+            _dict['command_argv'] = None
+
+        # set to None if content (nullable) is None
+        # and model_fields_set contains the field
+        if self.content is None and "content" in self.model_fields_set:
+            _dict['content'] = None
+
+        # set to None if exit_code (nullable) is None
+        # and model_fields_set contains the field
+        if self.exit_code is None and "exit_code" in self.model_fields_set:
+            _dict['exit_code'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ProjectBrowserModeResponse from a dict"""
+        """Create an instance of SessionInitializationEventResponse from a dict"""
         if obj is None:
             return None
 
@@ -104,9 +117,13 @@ class ProjectBrowserModeResponse(BaseModel):
 
         _obj = cls.model_validate({
             "id": obj.get("id"),
-            "label": obj.get("label"),
-            "default": obj.get("default"),
-            "root_path": obj.get("root_path")
+            "step_id": obj.get("step_id"),
+            "sequence": obj.get("sequence"),
+            "kind": obj.get("kind"),
+            "command_argv": obj.get("command_argv"),
+            "content": obj.get("content"),
+            "exit_code": obj.get("exit_code"),
+            "created_at": obj.get("created_at")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

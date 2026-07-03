@@ -39,18 +39,18 @@ class TestProjectBrowserEntryResponse(unittest.TestCase):
                 path = '',
                 kind = 'directory',
                 source = azentspublicclient.models.project_browser_entry_source_response.ProjectBrowserEntrySourceResponse(
-                    type = 'session_project',
+                    type = 'session_project', 
                     project_id = '', ),
                 status = azentspublicclient.models.project_browser_entry_status_response.ProjectBrowserEntryStatusResponse(
-                    value = 'unchecked',
-                    detail = '',
-                    checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                    value = 'unchecked', 
+                    detail = '', 
+                    checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     stale = True, ),
                 capabilities = azentspublicclient.models.project_browser_entry_capabilities_response.ProjectBrowserEntryCapabilitiesResponse(
-                    open = True,
-                    remove_project = True,
-                    filesystem_delete = True,
-                    filesystem_move = True,
+                    open = True, 
+                    remove_project = True, 
+                    filesystem_delete = True, 
+                    filesystem_move = True, 
                     filesystem_rename = True, )
             )
         else:
@@ -59,18 +59,18 @@ class TestProjectBrowserEntryResponse(unittest.TestCase):
                 path = '',
                 kind = 'directory',
                 source = azentspublicclient.models.project_browser_entry_source_response.ProjectBrowserEntrySourceResponse(
-                    type = 'session_project',
+                    type = 'session_project', 
                     project_id = '', ),
                 status = azentspublicclient.models.project_browser_entry_status_response.ProjectBrowserEntryStatusResponse(
-                    value = 'unchecked',
-                    detail = '',
-                    checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                    value = 'unchecked', 
+                    detail = '', 
+                    checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     stale = True, ),
                 capabilities = azentspublicclient.models.project_browser_entry_capabilities_response.ProjectBrowserEntryCapabilitiesResponse(
-                    open = True,
-                    remove_project = True,
-                    filesystem_delete = True,
-                    filesystem_move = True,
+                    open = True, 
+                    remove_project = True, 
+                    filesystem_delete = True, 
+                    filesystem_move = True, 
                     filesystem_rename = True, ),
         )
         """

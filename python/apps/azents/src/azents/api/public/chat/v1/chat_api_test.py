@@ -19,6 +19,7 @@ from azents.api.public.chat.v1 import (
     create_team_agent_session,
     delete_input_buffer,
     get_agent_session,
+    get_session_initialization,
     get_team_primary_agent_session,
     list_agent_sessions,
     list_history_events,
@@ -55,6 +56,10 @@ from azents.core.enums import (
     AgentSessionStatus,
     EventKind,
     InputBufferKind,
+    SessionInitializationEventKind,
+    SessionInitializationStatus,
+    SessionInitializationStepStatus,
+    SessionInitializationStepType,
 )
 from azents.engine.events.action_messages import SkillAction
 from azents.engine.events.types import (
@@ -70,6 +75,11 @@ from azents.rdb.models.event import JSONValue
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request.data import ChatWriteRequest
 from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.session_initialization.data import (
+    SessionInitialization,
+    SessionInitializationEvent,
+    SessionInitializationStep,
+)
 from azents.services.agent_session_input import (
     BufferedAgentSessionInputResult,
     CreatedAgentSessionInputResult,
@@ -94,6 +104,72 @@ from azents.services.chat_write import (
     AcceptedPendingCommand,
     AcceptedStopRequest,
 )
+from azents.services.session_initialization import (
+    SessionInitializationDetail,
+    SessionInitializationProjection,
+)
+
+
+def _initialization_projection() -> SessionInitializationProjection:
+    """Create initialization projection for route tests."""
+    now = datetime.datetime(2026, 7, 3, tzinfo=datetime.UTC)
+    initialization = SessionInitialization(
+        id="init-1",
+        session_id="1123456789abcdef0123456789abcdef",
+        status=SessionInitializationStatus.READY,
+        failure_summary=None,
+        retry_count=0,
+        started_at=None,
+        completed_at=now,
+        failed_at=None,
+        canceled_at=None,
+        cleaned_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+    step = SessionInitializationStep(
+        id="step-1",
+        initialization_id=initialization.id,
+        session_id=initialization.session_id,
+        sequence=1,
+        step_key="noop_ready",
+        step_type=SessionInitializationStepType.NOOP_READY,
+        status=SessionInitializationStepStatus.COMPLETED,
+        blocking=False,
+        retryable=False,
+        attempt=1,
+        depends_on_step_keys=[],
+        resource_descriptors=[],
+        failure_reason=None,
+        started_at=None,
+        completed_at=now,
+        failed_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+    return SessionInitializationProjection(initialization=initialization, steps=[step])
+
+
+def _initialization_detail() -> SessionInitializationDetail:
+    """Create initialization detail for route tests."""
+    projection = _initialization_projection()
+    event = SessionInitializationEvent(
+        id="event-1",
+        initialization_id=projection.initialization.id,
+        step_id=projection.steps[0].id,
+        session_id=projection.initialization.session_id,
+        sequence=1,
+        kind=SessionInitializationEventKind.STDOUT,
+        command_argv=None,
+        content="Initialization completed.",
+        exit_code=None,
+        created_at=datetime.datetime(2026, 7, 3, tzinfo=datetime.UTC),
+    )
+    return SessionInitializationDetail(
+        initialization=projection.initialization,
+        steps=projection.steps,
+        events=[event],
+    )
 
 
 class _MemoryBroker:
@@ -354,6 +430,7 @@ class _RestWriteChatService:
                 partial_history_events=[],
                 input_buffer_events=[self.event],
                 run=None,
+                initialization=_initialization_projection(),
             )
         )
 
@@ -663,6 +740,7 @@ class _EventService:
                     status=AgentRunStatus.RUNNING,
                 ),
                 session_run_state=AgentSessionRunState.RUNNING,
+                initialization=_initialization_projection(),
             )
         )
 
@@ -1076,6 +1154,27 @@ class TestListInputActions:
         assert items[1]["message"]["policy"] == "required"
 
 
+class _InitializationDetailChatService:
+    """ChatSessionService double for initialization detail tests."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.result: Result[
+            SessionInitializationDetail,
+            SessionAccessDenied | SessionNotFound,
+        ] = Success(_initialization_detail())
+
+    async def get_session_initialization_detail(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+    ) -> Result[SessionInitializationDetail, SessionAccessDenied | SessionNotFound]:
+        """Return initialization detail result."""
+        self.calls.append((session_id, user_id))
+        return self.result
+
+
 class TestEventRoutes:
     """Event history/live route contract tests."""
 
@@ -1133,6 +1232,51 @@ class TestEventRoutes:
             "status": "running",
         }
         assert dump["session_run_state"] == "running"
+        assert dump["initialization"]["status"] == "ready"
+        assert dump["initialization"]["steps"][0]["step_key"] == "noop_ready"
+
+    async def test_get_session_initialization_returns_detail(self) -> None:
+        """Initialization route returns durable detail."""
+        service = _InitializationDetailChatService()
+
+        response = await get_session_initialization(
+            "1123456789abcdef0123456789abcdef",
+            CurrentUser(user_id="user-1", session_id="auth-session"),
+            service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+        )
+
+        dump = response.model_dump(mode="json")
+        assert service.calls == [("1123456789abcdef0123456789abcdef", "user-1")]
+        assert dump["initialization"]["status"] == "ready"
+        assert dump["initialization"]["steps"][0]["step_key"] == "noop_ready"
+        assert dump["events"] == [
+            {
+                "id": "event-1",
+                "step_id": "step-1",
+                "sequence": 1,
+                "kind": "stdout",
+                "command_argv": None,
+                "content": "Initialization completed.",
+                "exit_code": None,
+                "created_at": "2026-07-03T00:00:00Z",
+            }
+        ]
+
+    async def test_get_session_initialization_hides_denied_session(self) -> None:
+        """Initialization route hides denied sessions."""
+        service = _InitializationDetailChatService()
+        service.result = Failure(SessionAccessDenied())
+
+        try:
+            await get_session_initialization(
+                "1123456789abcdef0123456789abcdef",
+                CurrentUser(user_id="user-1", session_id="auth-session"),
+                service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            )
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 404
+        else:
+            raise AssertionError("Expected HTTPException")
 
 
 class TestRestMessageWriteContract:

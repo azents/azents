@@ -3578,17 +3578,17 @@ class AgentV1Api:
             _path_params['handle'] = handle
         # process the query parameters
         if scope is not None:
-
+            
             _query_params.append(('scope', scope.value))
-
+            
         if type is not None:
-
+            
             _query_params.append(('type', type))
-
+            
         if query is not None:
-
+            
             _query_params.append(('query', query))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter

@@ -135,6 +135,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 *ChatV1Api* | [**chat_v1_get_agent_session_project_defaults**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
+*ChatV1Api* | [**chat_v1_get_session_initialization**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_session_initialization) | **GET** /chat/v1/sessions/{session_id}/initialization | Get Session Initialization
 *ChatV1Api* | [**chat_v1_get_session_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_session_project_browser_manifest) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest | Get Session Project Browser Manifest
 *ChatV1Api* | [**chat_v1_get_team_primary_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_team_primary_agent_session) | **GET** /chat/v1/agents/{agent_id}/team-primary-session | Get Team Primary Agent Session
 *ChatV1Api* | [**chat_v1_issue_ws_ticket**](azentspublicclient/docs/ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
@@ -429,6 +430,10 @@ Class | Method | HTTP request | Description
  - [SessionContextStatsResponse](azentspublicclient/docs/SessionContextStatsResponse.md)
  - [SessionContextSystemPromptFragmentResponse](azentspublicclient/docs/SessionContextSystemPromptFragmentResponse.md)
  - [SessionContextSystemPromptResponse](azentspublicclient/docs/SessionContextSystemPromptResponse.md)
+ - [SessionInitializationDetailResponse](azentspublicclient/docs/SessionInitializationDetailResponse.md)
+ - [SessionInitializationEventResponse](azentspublicclient/docs/SessionInitializationEventResponse.md)
+ - [SessionInitializationResponse](azentspublicclient/docs/SessionInitializationResponse.md)
+ - [SessionInitializationStepResponse](azentspublicclient/docs/SessionInitializationStepResponse.md)
  - [SessionWorkspaceProjectListResponse](azentspublicclient/docs/SessionWorkspaceProjectListResponse.md)
  - [SessionWorkspaceProjectRegisterRequest](azentspublicclient/docs/SessionWorkspaceProjectRegisterRequest.md)
  - [SessionWorkspaceProjectRegistrationRequestListResponse](azentspublicclient/docs/SessionWorkspaceProjectRegistrationRequestListResponse.md)
