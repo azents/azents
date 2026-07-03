@@ -15,7 +15,6 @@ import {
   Stack,
   Text,
   TextInput,
-  Tooltip,
   useMantineTheme,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
@@ -136,7 +135,7 @@ function buildTree(
 ): FileTreeNode[] {
   const knownEntriesByPath: Record<string, WorkspaceEntry[]> = {
     ...directoryEntriesByPath,
-    [cwd]: directoryEntriesByPath[cwd] ?? manifestEntries,
+    [cwd]: manifestEntries,
   };
 
   for (const entry of entries) {
@@ -611,18 +610,9 @@ export function FileBrowser({
           data={modes.map((mode) => ({ label: mode.label, value: mode.id }))}
           onChange={handleModeChange}
         />
-        {browserMode === "projects" ? (
-          <Button
-            size="xs"
-            variant="light"
-            leftSection={<IconFolderPlus size="0.8125rem" />}
-            onClick={onAddProject}
-          >
-            {t("addProject")}
-          </Button>
-        ) : null}
         <TextInput
-          flex={1}
+          flex={`1 1 ${rem(120)}`}
+          miw={0}
           size="xs"
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
@@ -643,11 +633,7 @@ export function FileBrowser({
         />
         <Menu withinPortal position="bottom-end">
           <Menu.Target>
-            <ActionIcon
-              size="sm"
-              variant="subtle"
-              disabled={selectedPaths.length === 0}
-            >
+            <ActionIcon size="sm" variant="subtle">
               <IconDotsVertical size="0.75rem" />
             </ActionIcon>
           </Menu.Target>
@@ -657,6 +643,7 @@ export function FileBrowser({
             </Menu.Label>
             <Menu.Item
               leftSection={<IconArrowRight size="0.875rem" />}
+              disabled={selectedPaths.length === 0}
               onClick={onBulkMove}
             >
               {t("move")}
@@ -664,39 +651,41 @@ export function FileBrowser({
             <Menu.Item
               color="red"
               leftSection={<IconTrash size="0.875rem" />}
+              disabled={selectedPaths.length === 0}
               onClick={onBulkDelete}
             >
               {t("delete")}
             </Menu.Item>
-            <Menu.Divider />
             <Menu.Item
               leftSection={<IconX size="0.875rem" />}
+              disabled={selectedPaths.length === 0}
               onClick={onClearSelection}
             >
               {t("clearSelection")}
             </Menu.Item>
+            <Menu.Divider />
+            <Menu.Item
+              leftSection={<IconChevronDown size="0.875rem" />}
+              onClick={handleExpandAll}
+            >
+              {t("expandAll")}
+            </Menu.Item>
+            <Menu.Item
+              leftSection={<IconChevronUp size="0.875rem" />}
+              onClick={handleCollapseAll}
+            >
+              {t("collapseAll")}
+            </Menu.Item>
           </Menu.Dropdown>
         </Menu>
-        <Tooltip label={t("expandAll")}>
-          <ActionIcon size="sm" variant="subtle" onClick={handleExpandAll}>
-            <IconChevronDown size="0.75rem" />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label={t("collapseAll")}>
-          <ActionIcon size="sm" variant="subtle" onClick={handleCollapseAll}>
-            <IconChevronUp size="0.75rem" />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label={t("refresh")}>
-          <ActionIcon
-            size="sm"
-            variant="subtle"
-            loading={isRefreshing}
-            onClick={onRefresh}
-          >
-            <IconRefresh size="0.75rem" />
-          </ActionIcon>
-        </Tooltip>
+        <ActionIcon
+          size="sm"
+          variant="subtle"
+          loading={isRefreshing}
+          onClick={onRefresh}
+        >
+          <IconRefresh size="0.75rem" />
+        </ActionIcon>
       </Group>
 
       <Group
@@ -747,28 +736,44 @@ export function FileBrowser({
               ) : null}
             </Stack>
           ) : (
-            displayTree.map((node) => (
-              <TreeNode
-                key={node.path}
-                node={node}
-                depth={0}
-                root={root}
-                expanded={effectiveExpanded}
-                activePath={activePath}
-                selectedPaths={selectedPathSet}
-                getDownloadHref={getDownloadHref}
-                onToggle={handleToggle}
-                onOpenDirectory={onOpenDirectory}
-                onOpenFile={onOpenFile}
-                onShowInfo={onShowInfo}
-                onToggleSelectedPath={onToggleSelectedPath}
-                onCreateDirectory={onCreateDirectory}
-                onRenamePath={onRenamePath}
-                onMovePath={onMovePath}
-                onDeletePath={onDeletePath}
-                onRemoveProject={onRemoveProject}
-              />
-            ))
+            <>
+              {!query && browserMode === "projects" ? (
+                <Box px="xs" py={rem(4)}>
+                  <Button
+                    fullWidth
+                    justify="flex-start"
+                    size="xs"
+                    variant="subtle"
+                    leftSection={<IconFolderPlus size="0.875rem" />}
+                    onClick={onAddProject}
+                  >
+                    {t("addProject")}
+                  </Button>
+                </Box>
+              ) : null}
+              {displayTree.map((node) => (
+                <TreeNode
+                  key={node.path}
+                  node={node}
+                  depth={0}
+                  root={root}
+                  expanded={effectiveExpanded}
+                  activePath={activePath}
+                  selectedPaths={selectedPathSet}
+                  getDownloadHref={getDownloadHref}
+                  onToggle={handleToggle}
+                  onOpenDirectory={onOpenDirectory}
+                  onOpenFile={onOpenFile}
+                  onShowInfo={onShowInfo}
+                  onToggleSelectedPath={onToggleSelectedPath}
+                  onCreateDirectory={onCreateDirectory}
+                  onRenamePath={onRenamePath}
+                  onMovePath={onMovePath}
+                  onDeletePath={onDeletePath}
+                  onRemoveProject={onRemoveProject}
+                />
+              ))}
+            </>
           )}
         </Box>
       </ScrollArea>
