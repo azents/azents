@@ -9,7 +9,8 @@
  * status text session with leakdoes not..
  */
 
-import { Box, Drawer } from "@mantine/core";
+import { Box, Drawer, useMantineTheme } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
@@ -45,6 +46,10 @@ export function ChatSessionView({
   onConnectionStatusChange,
 }: ChatSessionViewProps): React.ReactElement {
   const t = useTranslations("chat");
+  const theme = useMantineTheme();
+  const isWorkspacePanelDocked = useMediaQuery(
+    `(min-width: ${theme.breakpoints.lg})`,
+  );
   const [runtimeDrawerOpened, setRuntimeDrawerOpened] = useState(false);
   const [headerSession, setHeaderSession] =
     useState<AgentSessionResponse>(session);
@@ -60,6 +65,7 @@ export function ChatSessionView({
     handle,
     agentId: agent.id,
     sessionId,
+    autoRefreshVisible: isWorkspacePanelDocked || runtimeDrawerOpened,
   });
   const effectiveContextWindowTokens =
     agent.effective_context_window_tokens ?? null;

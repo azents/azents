@@ -4,6 +4,7 @@
 import {
   ActionIcon,
   Alert,
+  Box,
   Button,
   Divider,
   Group,
@@ -84,14 +85,30 @@ function MetadataRow({
   value: string;
 }): React.ReactElement {
   return (
-    <Group justify="space-between" gap="sm" wrap="nowrap">
-      <Text size="sm" c="dimmed">
+    <Box
+      style={{
+        alignItems: "start",
+        display: "grid",
+        gap: rem(8),
+        gridTemplateColumns: `${rem(88)} minmax(0, 1fr)`,
+        minWidth: 0,
+      }}
+    >
+      <Text size="sm" c="dimmed" style={{ whiteSpace: "nowrap" }}>
         {label}
       </Text>
-      <Text size="sm" ff="monospace" ta="right" truncate>
+      <Text
+        size="sm"
+        ff="monospace"
+        style={{
+          minWidth: 0,
+          overflowWrap: "anywhere",
+          whiteSpace: "normal",
+        }}
+      >
         {value}
       </Text>
-    </Group>
+    </Box>
   );
 }
 
