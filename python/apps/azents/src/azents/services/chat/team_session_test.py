@@ -22,6 +22,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -121,6 +122,7 @@ def _service(
         message_repository=MessageRepository(),
         agent_repository=AgentRepository(),
         agent_project_preset_repository=AgentProjectPresetRepository(),
+        agent_project_catalog_repository=AgentProjectCatalogRepository(),
         agent_project_default_repository=AgentProjectDefaultRepository(),
         agent_run_repository=AgentRunRepository(),
         event_transcript_repository=EventTranscriptRepository(),
@@ -205,12 +207,20 @@ class TestChatSessionTeamSessions:
                 verify_session,
                 agent_id=agent_id,
             )
+            catalog_entries = await AgentProjectCatalogRepository().list_entries(
+                verify_session,
+                agent_id=agent_id,
+            )
 
         assert [project.path for project in projects] == [
             "/workspace/agent/project-a",
             "/workspace/agent/project-a/nested",
         ]
         assert {preset.path for preset in presets} == {
+            "/workspace/agent/project-a",
+            "/workspace/agent/project-a/nested",
+        }
+        assert {entry.path for entry in catalog_entries} == {
             "/workspace/agent/project-a",
             "/workspace/agent/project-a/nested",
         }

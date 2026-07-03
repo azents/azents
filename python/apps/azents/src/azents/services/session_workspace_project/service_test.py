@@ -16,6 +16,7 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -174,6 +175,7 @@ def _service(
     return SessionWorkspaceProjectService(
         repository=SessionWorkspaceProjectRepository(),
         agent_project_preset_repository=AgentProjectPresetRepository(),
+        agent_project_catalog_repository=AgentProjectCatalogRepository(),
         agent_runtime_repository=AgentRuntimeRepository(),
         agent_session_repository=AgentSessionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
@@ -327,7 +329,12 @@ class TestSessionWorkspaceProjectService:
             rdb_session,
             agent_id=fixture.agent_id,
         )
+        catalog_entries = await AgentProjectCatalogRepository().list_entries(
+            rdb_session,
+            agent_id=fixture.agent_id,
+        )
         assert [preset.path for preset in presets] == ["/workspace/agent/app"]
+        assert [entry.path for entry in catalog_entries] == ["/workspace/agent/app"]
         assert runner_operations.paths == ["/workspace/agent/app"]
 
     async def test_list_projects_for_session_requires_matching_agent(

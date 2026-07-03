@@ -24,6 +24,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_project_preset.data import AgentProjectPreset
@@ -84,6 +85,10 @@ class ChatSessionService:
     agent_project_preset_repository: Annotated[
         AgentProjectPresetRepository,
         Depends(AgentProjectPresetRepository),
+    ]
+    agent_project_catalog_repository: Annotated[
+        AgentProjectCatalogRepository,
+        Depends(AgentProjectCatalogRepository),
     ]
     agent_project_default_repository: Annotated[
         AgentProjectDefaultRepository,
@@ -364,6 +369,11 @@ class ChatSessionService:
                 SessionWorkspaceProjectCreate(session_id=session_id, path=path),
             )
             await self.agent_project_preset_repository.upsert_preset(
+                session,
+                agent_id=agent_id,
+                path=path,
+            )
+            await self.agent_project_catalog_repository.upsert_entry(
                 session,
                 agent_id=agent_id,
                 path=path,

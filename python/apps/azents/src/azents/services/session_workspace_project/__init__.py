@@ -19,6 +19,7 @@ from azents.engine.tools.deps import get_skill_state_store
 from azents.engine.tools.skill import SkillProjectionService, SkillStateStore
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
@@ -158,6 +159,10 @@ class SessionWorkspaceProjectService:
         AgentProjectPresetRepository,
         Depends(AgentProjectPresetRepository),
     ]
+    agent_project_catalog_repository: Annotated[
+        AgentProjectCatalogRepository,
+        Depends(AgentProjectCatalogRepository),
+    ]
     agent_runtime_repository: Annotated[
         AgentRuntimeRepository,
         Depends(AgentRuntimeRepository),
@@ -279,6 +284,11 @@ class SessionWorkspaceProjectService:
                 agent_id=context.agent_id,
                 path=normalized_path,
             )
+            await self.agent_project_catalog_repository.upsert_entry(
+                session,
+                agent_id=context.agent_id,
+                path=normalized_path,
+            )
             await session.commit()
         await self._sync_skill_projection_for_project_change(
             agent_id=context.agent_id,
@@ -394,6 +404,11 @@ class SessionWorkspaceProjectService:
                 )
                 return Failure(RegistrationRequestAlreadyResolved())
             await self.agent_project_preset_repository.upsert_preset(
+                session,
+                agent_id=context.agent_id,
+                path=normalized_path,
+            )
+            await self.agent_project_catalog_repository.upsert_entry(
                 session,
                 agent_id=context.agent_id,
                 path=normalized_path,
