@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# gh CLI 래퍼 — config.yaml이 있으면 GitHub App 토큰을 자동 주입하고,
-# 없으면 일반 gh처럼 동작한다.
+# gh CLI wrapper. When config.yaml exists, inject a GitHub App token automatically;
+# otherwise behave like the normal gh CLI.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 
-# 래퍼 자신을 제외한 실제 gh 경로 찾기
-# codingbot/bin 디렉토리는 worktree마다 별도 경로를 가지므로
-# 패턴 매칭으로 모든 래퍼 디렉토리를 건너뛴다
+# Find the real gh path, excluding this wrapper.
+# codingbot/bin has a separate path for each worktree, so skip every wrapper
+# directory by pattern matching.
 REAL_GH=""
 IFS=: read -ra PATH_DIRS <<< "$PATH"
 for dir in "${PATH_DIRS[@]}"; do
@@ -25,7 +25,7 @@ if [[ -z "$REAL_GH" ]]; then
     exit 1
 fi
 
-# config.yaml 경로 찾기 (git worktree list로 main worktree 찾기)
+# Locate config.yaml. Use git worktree list to find the main worktree.
 if [[ -z "${CODINGBOT_CONFIG:-}" ]]; then
     CODINGBOT_CONFIG="$(git config --get codingbot.config 2>/dev/null || true)"
 fi
@@ -36,7 +36,7 @@ if [[ -z "${CODINGBOT_CONFIG:-}" ]]; then
     fi
 fi
 
-# config.yaml이 없으면 일반 gh로 passthrough
+# If config.yaml is unavailable, pass through to normal gh.
 if [[ -z "${CODINGBOT_CONFIG:-}" || ! -f "${CODINGBOT_CONFIG}" ]]; then
     exec "$REAL_GH" "$@"
 fi
@@ -67,7 +67,7 @@ infer_repo_from_url() {
     fi
 }
 
-# REPO 미지정 시 worktree 에 저장된 session repo 를 기본값으로 사용한다.
+# If REPO is not set, default to the session repo stored in the worktree.
 if [[ -z "${REPO:-}" ]]; then
     REPO="$(git config --get codingbot.repo 2>/dev/null || true)"
 fi

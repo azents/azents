@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# GitHub App Installation Token 또는 JWT를 반환한다.
-# config.yaml에서 App credentials를 읽고, JWT로 Installation Token을 교환한다.
-# 캐시 파일에 토큰을 저장하여 매 호출마다 재발급하지 않는다.
+# Return a GitHub App installation token or JWT.
+# Read app credentials from config.yaml and exchange a JWT for an installation token.
+# Cache the token so every invocation does not request a new token.
 #
-# 사용법:
-#   gh-app-token          # Installation Token 반환 (기본)
-#   gh-app-token --jwt    # JWT 반환 (App-level API 호출용)
+# Usage:
+#   gh-app-token          # Return an installation token (default)
+#   gh-app-token --jwt    # Return a JWT for app-level API calls
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# --jwt 플래그 확인
+# Check the --jwt flag.
 if [[ "${1:-}" == "--jwt" ]]; then
     JWT_ONLY=true
 else
     JWT_ONLY=false
 fi
 
-# config.yaml 경로 찾기
-# 1) CODINGBOT_CONFIG 환경변수
-# 2) git worktree list의 main worktree (worktree에서도 본 repo root를 찾음)
-# 3) 스크립트 위치 기준 fallback
+# Locate config.yaml.
+# 1) CODINGBOT_CONFIG environment variable
+# 2) Main worktree from git worktree list, which also works from worktrees
+# 3) Fallback relative to the script location
 if [[ -z "${CODINGBOT_CONFIG:-}" ]]; then
     CODINGBOT_CONFIG="$(git config --get codingbot.config 2>/dev/null || true)"
 fi
@@ -60,7 +60,7 @@ infer_repo_from_url() {
     fi
 }
 
-# REPO 미지정 시 session 설정 또는 현재 origin remote 에서 repo slug 를 추론한다.
+# If REPO is not set, infer the repo slug from session settings or current origin.
 if [[ -z "${REPO:-}" ]]; then
     REPO="$(git config --get codingbot.repo 2>/dev/null || true)"
 fi
@@ -72,10 +72,10 @@ if [[ -z "${REPO:-}" ]]; then
 fi
 export REPO
 
-# config.yaml 파싱 (python 사용)
-# 새 스키마: github_app.installation_ids = {slug: id} (dict)
-# 구 스키마: github_app.installation_id = id (int) 도 호환
-# REPO 환경변수, session 설정, origin remote 순으로 installation 선택
+# Parse config.yaml with Python.
+# New schema: github_app.installation_ids = {slug: id} (dict)
+# Legacy schema: github_app.installation_id = id (int) is also supported.
+# Select the installation from REPO environment variable, session settings, then origin remote.
 read -r APP_ID PRIVATE_KEY_PATH INSTALLATION_ID <<< "$(python3 -c "
 import os
 import yaml
@@ -103,7 +103,7 @@ if inst_id is None:
 print(ga['app_id'], ga['private_key_path'], inst_id)
 ")"
 
-# JWT 생성 함수
+# Generate a JWT.
 generate_jwt() {
     python3 -c "
 import time, jwt
@@ -117,18 +117,18 @@ print(jwt.encode(payload, private_key, algorithm='RS256'))
 "
 }
 
-# --jwt 모드: JWT만 반환하고 종료
+# In --jwt mode, return only the JWT and exit.
 if [[ "$JWT_ONLY" == "true" ]]; then
     generate_jwt
     exit 0
 fi
 
-# 캐시 파일
+# Cache file.
 CACHE_DIR="${HOME}/.cache"
 mkdir -p "$CACHE_DIR"
 CACHE_FILE="$CACHE_DIR/gh-app-installation-token-${INSTALLATION_ID}.json"
 
-# 캐시 확인
+# Check the cache.
 if [[ -f "$CACHE_FILE" ]]; then
     EXPIRES_AT=$(python3 -c "
 import json, sys
@@ -147,7 +147,7 @@ with open('$CACHE_FILE') as f:
     fi
 fi
 
-# JWT 생성 + Installation Token 교환
+# Generate a JWT and exchange it for an installation token.
 python3 -c "
 import json, time, jwt, httpx, sys
 
