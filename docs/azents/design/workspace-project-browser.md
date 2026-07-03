@@ -410,14 +410,23 @@ None that block implementation. The durable job mechanism for status sync can st
 
 ## QA Checklist
 
+Evidence recorded on 2026-07-03:
+
+- PR #151 adds API-level E2E coverage in `testenv/azents/e2e/src/tests/azents/public/test_project_browser_manifest.py`.
+- GitHub Actions for PR #151 passed `ci-pre-commit`, `ci-typescript`, `ci-python`, `ci-docker-build`, `ci-helm`, `ci-python-e2e-run`, and `ci-python-e2e`.
+- Local checks passed for the new E2E file: `ruff format`, `ruff check`, `pyright`, and `pytest --collect-only`.
+- Local full E2E execution was attempted, but this agent runtime has no Docker socket; test setup failed before product code execution while creating the testcontainers Docker network.
+- Browser-level automation is not currently available in this repository path: no Playwright/Selenium test configuration was found, and `@azents/web` has no test script or browser test dependency.
+
 ### QA-1 — Project mode is the default for existing sessions
 
 - What to check: Opening a concrete session with registered Projects shows Project mode and Project roots first.
 - Why it matters: This validates the primary product change from root-first browsing to Project-first browsing.
 - How to check: Run E2E against a session with at least two registered Project paths.
 - Expected result: The Workspace browser opens in Project mode and displays exactly the registered Project roots.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: Partially verified by PR #151 API E2E. `test_session_project_manifest_uses_registry_capabilities_and_removal` creates a session with two registered Project paths, fetches the backend Project browser manifest, verifies `active_mode == "projects"`, and verifies the manifest entry paths exactly match the registered order.
+- Remaining gap: Browser-open default rendering was not exercised because the repository does not currently provide browser automation for `@azents/web`.
+- Fixes applied: Added deterministic public API E2E coverage for populated session manifests.
 
 ### QA-2 — Empty Projects does not fall back to Agent Workspace root
 
@@ -425,8 +434,9 @@ None that block implementation. The durable job mechanism for status sync can st
 - Why it matters: Empty Project context must not imply full workspace context.
 - How to check: Run E2E against a session created with `project_paths: []`.
 - Expected result: Project mode shows empty state and registration affordances; root entries appear only after switching to `All files`.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: Verified by PR #151 API E2E. `test_empty_project_manifest_has_explicit_empty_state` fetches a no-Project session manifest, verifies `active_mode == "projects"`, verifies `entries == []`, verifies an empty state is present, and verifies `Projects` is the default mode while `All files` is only an available secondary mode.
+- Remaining gap: Browser empty-state copy and registration affordance rendering were not exercised without browser automation.
+- Fixes applied: Added deterministic public API E2E coverage for empty Project manifests without root fallback.
 
 ### QA-3 — All files remains available as explicit secondary mode
 
@@ -434,8 +444,9 @@ None that block implementation. The durable job mechanism for status sync can st
 - Why it matters: Debug/inspection workflows still require root-level access.
 - How to check: Run E2E with runtime-ready workspace contents outside registered Project roots.
 - Expected result: `All files` mode shows Agent Workspace root contents without changing Project bindings.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: Partially verified by PR #151 API E2E. The empty manifest test verifies that `All files` is advertised as a secondary mode and is not the default fallback for empty Projects.
+- Remaining gap: Switching the browser UI to `All files` and inspecting runtime workspace root contents still needs browser or equivalent product-flow automation.
+- Fixes applied: Added API E2E assertion for explicit `All files` mode availability.
 
 ### QA-4 — Project root actions are registry-scoped
 
@@ -443,8 +454,9 @@ None that block implementation. The durable job mechanism for status sync can st
 - Why it matters: Project root action safety is a backend product contract.
 - How to check: Run E2E opening Project root action menus and inspect available actions.
 - Expected result: Registry removal is available; filesystem destructive actions are hidden/disabled for Project roots.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: Partially verified by PR #151 API E2E. Session Project manifest entries expose `remove_project: true` and `filesystem_delete`, `filesystem_move`, and `filesystem_rename` as `false`; pre-session preview entries expose `remove_project: false` with the same destructive filesystem capabilities disabled.
+- Remaining gap: Frontend action-menu visibility was not browser-tested.
+- Fixes applied: Added deterministic backend capability-policy assertions to the public API E2E suite.
 
 ### QA-5 — Removing a Project does not delete files
 
@@ -452,8 +464,9 @@ None that block implementation. The durable job mechanism for status sync can st
 - Why it matters: Project removal must remain registry-only.
 - How to check: Run E2E removing a Project, then switch to `All files` and inspect the path.
 - Expected result: Project disappears from Project mode, and the directory still exists in `All files`.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: Partially verified by PR #151 API E2E. `test_session_project_manifest_uses_registry_capabilities_and_removal` removes a Project through the public registry delete endpoint and verifies the Project no longer appears in the Project manifest while the remaining Project stays present.
+- Remaining gap: Underlying directory preservation in `All files` was not verified because the API E2E does not create runtime filesystem contents or exercise the browser `All files` flow.
+- Fixes applied: Added public API E2E coverage for registry-row removal semantics.
 
 ### QA-6 — Backend manifest supports pre-session preview
 
@@ -461,8 +474,9 @@ None that block implementation. The durable job mechanism for status sync can st
 - Why it matters: Session bootstrap and future worktree flow need Project semantics before a session exists.
 - How to check: Run API/E2E flow for draft session Project chips and picker selection before first message send.
 - Expected result: Preview entries use the same entry/capability/status model as existing-session Project roots.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: Verified by PR #151 API E2E. `test_pre_session_preview_uses_project_manifest_entry_model` calls the preview endpoint before a session exists, verifies path normalization/deduplication, verifies `source.type == "preview_project"`, verifies no session Project id is attached, verifies the same capability shape, and verifies unchecked stale status projection.
+- Remaining gap: Draft composer chip rendering was not browser-tested.
+- Fixes applied: Added deterministic public API E2E coverage for pre-session preview manifests.
 
 ### QA-7 — Manifest reads are non-blocking under stale or unavailable status
 
@@ -470,8 +484,9 @@ None that block implementation. The durable job mechanism for status sync can st
 - Why it matters: Browser reads must not depend on runner responsiveness.
 - How to check: Run backend test and E2E/API scenario with unchecked projection and inactive runtime.
 - Expected result: Manifest returns stored/unchecked status immediately and does not fail due to missing runner access.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: Partially verified by PR #151 API E2E. The pre-session preview test verifies an unchecked stale status projection is returned successfully for an unchecked path. CI E2E completed successfully without needing live filesystem status checks in the manifest response path.
+- Remaining gap: A dedicated inactive-runtime scenario and explicit no-runner-call assertion remain candidates for the spec-promotion or follow-up verification phase.
+- Fixes applied: Added unchecked/stale status projection assertion to public API E2E coverage.
 
 ### QA-8 — Legacy Projects route is normalized away
 
@@ -479,8 +494,9 @@ None that block implementation. The durable job mechanism for status sync can st
 - Why it matters: There must be one canonical Workspace surface.
 - How to check: Run E2E navigating directly to a legacy Projects URL.
 - Expected result: The route normalizes to the canonical session surface with Workspace Project management available inside it.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: Not executed in PR #151. This is a browser/navigation behavior and the repository does not currently provide browser automation for `@azents/web`.
+- Remaining gap: Browser route-normalization E2E is still required for full product QA evidence.
+- Fixes applied: None in PR #151.
 
 ### QA-9 — Specs match implemented behavior
 
@@ -488,5 +504,6 @@ None that block implementation. The durable job mechanism for status sync can st
 - Why it matters: Specs are the source of truth after implementation.
 - How to check: Run spec review against the cumulative implementation diff during spec-promotion phase.
 - Expected result: Relevant specs are added/updated/removed and `last_verified_at` is current.
-- Execution result: TBD
-- Fixes applied: TBD
+- Execution result: Not executed in PR #151. Spec promotion remains the next planned stacked phase after verification evidence is finalized.
+- Remaining gap: Run spec review and update current specs in the spec-promotion PR.
+- Fixes applied: None in PR #151.
