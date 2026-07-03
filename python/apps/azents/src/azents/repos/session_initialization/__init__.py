@@ -232,6 +232,7 @@ class SessionInitializationRepository:
         if failed_at is not None:
             rdb.failed_at = failed_at
         await session.flush()
+        await session.refresh(rdb)
         return self._build_initialization(rdb)
 
     async def update_step_status(
@@ -261,6 +262,7 @@ class SessionInitializationRepository:
         if failed_at is not None:
             rdb.failed_at = failed_at
         await session.flush()
+        await session.refresh(rdb)
         return self._build_step(rdb)
 
     def _build_initialization(

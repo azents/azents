@@ -33,6 +33,7 @@ class SessionGitWorktreeRepository:
         )
         session.add(rdb)
         await session.flush()
+        await session.refresh(rdb)
         return self._build(rdb)
 
     async def get_by_session_id(
@@ -87,6 +88,7 @@ class SessionGitWorktreeRepository:
         rdb.worktree_path = worktree_path
         rdb.branch_name = branch_name
         await session.flush()
+        await session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_creating(
@@ -103,6 +105,7 @@ class SessionGitWorktreeRepository:
         rdb.failure_summary = None
         rdb.failed_at = None
         await session.flush()
+        await session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_ready(
@@ -126,6 +129,7 @@ class SessionGitWorktreeRepository:
         rdb.failure_summary = None
         rdb.ready_at = ready_at
         await session.flush()
+        await session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_failed(
@@ -144,6 +148,7 @@ class SessionGitWorktreeRepository:
         rdb.failure_summary = failure_summary
         rdb.failed_at = failed_at
         await session.flush()
+        await session.refresh(rdb)
         return self._build(rdb)
 
     def _build(self, rdb: RDBSessionGitWorktree) -> SessionGitWorktree:
