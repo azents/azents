@@ -388,7 +388,7 @@ function TreeNode({
         >
           {node.name}
         </Text>
-        {node.status ? (
+        {node.status && node.status.value !== "available" ? (
           <Badge
             size="xs"
             variant={node.status.stale ? "outline" : "light"}
@@ -688,27 +688,29 @@ export function FileBrowser({
         </ActionIcon>
       </Group>
 
-      <Group
-        gap="xs"
-        wrap="nowrap"
-        px="sm"
-        py="xs"
-        style={{
-          background: "var(--mantine-color-default-hover)",
-          borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
-        }}
-      >
-        <IconFolderOpen size="0.75rem" color="var(--mantine-color-blue-6)" />
-        <Text size="xs" ff="monospace" fw={600} truncate>
-          {getRelativePath(cwd, root)}
-        </Text>
-        <Text size="xs" c="dimmed">
-          ·
-        </Text>
-        <Text size="xs" c="dimmed" ff="monospace" truncate>
-          {getRelativePath(path, root)}
-        </Text>
-      </Group>
+      {browserMode === "all_files" ? (
+        <Group
+          gap="xs"
+          wrap="nowrap"
+          px="sm"
+          py="xs"
+          style={{
+            background: "var(--mantine-color-default-hover)",
+            borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
+          }}
+        >
+          <IconFolderOpen size="0.75rem" color="var(--mantine-color-blue-6)" />
+          <Text size="xs" ff="monospace" fw={600} truncate>
+            {getRelativePath(cwd, root)}
+          </Text>
+          <Text size="xs" c="dimmed">
+            ·
+          </Text>
+          <Text size="xs" c="dimmed" ff="monospace" truncate>
+            {getRelativePath(path, root)}
+          </Text>
+        </Group>
+      ) : null}
 
       <ScrollArea flex={1} mih={0} type="auto" offsetScrollbars>
         <Box py={rem(4)}>
