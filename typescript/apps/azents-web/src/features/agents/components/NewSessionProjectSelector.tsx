@@ -10,6 +10,8 @@ import {
   Menu,
   Paper,
   Popover,
+  rem,
+  ScrollArea,
   Stack,
   Text,
 } from "@mantine/core";
@@ -72,42 +74,44 @@ export function NewSessionProjectSelector({
             </Menu.Target>
             <Menu.Dropdown>
               <Menu.Label>{t("projectSelectionPresets")}</Menu.Label>
-              {projectPresetState.type === "LOADING" ? (
-                <Menu.Item disabled leftSection={<Loader size="xs" />}>
-                  {t("projectSelectionLoading")}
-                </Menu.Item>
-              ) : null}
-              {projectPresetState.type === "ERROR" ? (
-                <Menu.Item color="red" disabled>
-                  {t("projectSelectionError")}
-                </Menu.Item>
-              ) : null}
-              {projectPresetState.type === "READY" &&
-              presetPaths.length === 0 ? (
-                <Menu.Item disabled>
-                  {t("projectSelectionEmptyPresets")}
-                </Menu.Item>
-              ) : null}
-              {presetPaths.map((path) => {
-                const selected = selectedProjectPaths.includes(path);
-                return (
-                  <Menu.Item
-                    key={path}
-                    disabled={selected}
-                    leftSection={selected ? <IconCheck size={16} /> : null}
-                    onClick={() => onAddPresetProject(path)}
-                  >
-                    <Stack gap={2}>
-                      <Text fw={500} size="sm">
-                        {basename(path)}
-                      </Text>
-                      <Text c="dimmed" size="xs" truncate>
-                        {path}
-                      </Text>
-                    </Stack>
+              <ScrollArea.Autosize mah={rem(360)} type="auto" offsetScrollbars>
+                {projectPresetState.type === "LOADING" ? (
+                  <Menu.Item disabled leftSection={<Loader size="xs" />}>
+                    {t("projectSelectionLoading")}
                   </Menu.Item>
-                );
-              })}
+                ) : null}
+                {projectPresetState.type === "ERROR" ? (
+                  <Menu.Item color="red" disabled>
+                    {t("projectSelectionError")}
+                  </Menu.Item>
+                ) : null}
+                {projectPresetState.type === "READY" &&
+                presetPaths.length === 0 ? (
+                  <Menu.Item disabled>
+                    {t("projectSelectionEmptyPresets")}
+                  </Menu.Item>
+                ) : null}
+                {presetPaths.map((path) => {
+                  const selected = selectedProjectPaths.includes(path);
+                  return (
+                    <Menu.Item
+                      key={path}
+                      disabled={selected}
+                      leftSection={selected ? <IconCheck size={16} /> : null}
+                      onClick={() => onAddPresetProject(path)}
+                    >
+                      <Stack gap={2} miw={0}>
+                        <Text fw={500} size="sm" truncate>
+                          {basename(path)}
+                        </Text>
+                        <Text c="dimmed" size="xs" truncate>
+                          {path}
+                        </Text>
+                      </Stack>
+                    </Menu.Item>
+                  );
+                })}
+              </ScrollArea.Autosize>
               <Menu.Divider />
               <Menu.Item
                 leftSection={<IconFolderPlus size={16} />}
