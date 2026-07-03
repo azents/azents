@@ -140,8 +140,10 @@ _14 documents_
 - [ADR-0087: Filesystem Skill Projection Revisions](adr/0087-filesystem-skill-projection-revisions.md)
 - [ADR-0088: Agent Settings Pages and Memory UI](adr/0088-agent-settings-pages-and-memory-ui.md)
 - [ADR-0088: Adopt Claude Rules Loader as a Separate Runtime Toolkit](adr/0088-claude-rules-loader.md)
+- [ADR-0089: Workspace Project Browser Surface](adr/0089-workspace-project-browser-surface.md)
+- [ADR-0090: Backend Project Browser Manifest](adr/0090-backend-project-browser-manifest.md)
 
-_91 documents_
+_93 documents_
 
 ## Issues (Bug Tracking)
 
@@ -172,4 +174,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 331
+- Total documents: 334
