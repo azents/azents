@@ -21,6 +21,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileReadResult,
     RuntimeFileStatResult,
     RuntimeGrepResult,
+    RuntimeOperationTextDelta,
     RuntimeProcessOutputDelta,
     RuntimeProcessResult,
     RuntimeRunnerOperationCanceledError,
@@ -863,6 +864,116 @@ async def test_resume_process_uses_output_deltas_when_final_snapshot_is_empty() 
 
 
 @pytest.mark.asyncio
+async def test_create_git_worktree_dispatches_and_folds_text_output() -> None:
+    """Git worktree creation dispatches typed payload and streams text deltas."""
+    harness = await _make_harness()
+    deltas: list[RuntimeOperationTextDelta] = []
+    task = asyncio.create_task(
+        harness.client.create_git_worktree(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            source_project_path="/workspace/agent/repo",
+            worktree_path="/workspace/agent/.azents/worktrees/session/repo",
+            branch_name="azents/session",
+            starting_ref="main",
+            deadline_at=_now() + timedelta(seconds=30),
+            text_output_callback=lambda delta: _append_text_delta(deltas, delta),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "create_git_worktree"
+    assert request.payload["payload"] == {
+        "source_project_path": "/workspace/agent/repo",
+        "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+        "branch_name": "azents/session",
+        "starting_ref": "main",
+    }
+
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.STDERR,
+        {"text": "Preparing worktree\n"},
+    )
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "base_commit": "abc123",
+            "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+            "branch_name": "azents/session",
+        },
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result.base_commit == "abc123"
+    assert result.worktree_path == "/workspace/agent/.azents/worktrees/session/repo"
+    assert result.branch_name == "azents/session"
+    assert [(delta.stream, delta.text) for delta in deltas] == [
+        ("stderr", "Preparing worktree\n")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_git_refs_returns_final_refs() -> None:
+    """Git ref discovery final payload is decoded into ref entries."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.list_git_refs(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            source_project_path="/workspace/agent/repo",
+            deadline_at=_now() + timedelta(seconds=30),
+            text_output_callback=None,
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "list_git_refs"
+    assert request.payload["payload"] == {
+        "source_project_path": "/workspace/agent/repo"
+    }
+
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "git_refs": [
+                {
+                    "name": "main",
+                    "ref": "refs/heads/main",
+                    "type": "branch",
+                    "target": "abc123",
+                    "default": True,
+                }
+            ],
+            "default_branch": "main",
+            "head_commit": "abc123",
+        },
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result.default_branch == "main"
+    assert result.head_commit == "abc123"
+    assert result.refs[0].name == "main"
+    assert result.refs[0].default is True
+
+
+@pytest.mark.asyncio
 async def test_stale_runner_generation_raises_before_dispatch() -> None:
     """Stale Runner generation is surfaced before request stream append."""
     harness = await _make_harness()
@@ -984,6 +1095,13 @@ def _now() -> datetime:
 async def _append_delta(
     deltas: list[RuntimeProcessOutputDelta],
     delta: RuntimeProcessOutputDelta,
+) -> None:
+    deltas.append(delta)
+
+
+async def _append_text_delta(
+    deltas: list[RuntimeOperationTextDelta],
+    delta: RuntimeOperationTextDelta,
 ) -> None:
     deltas.append(delta)
 

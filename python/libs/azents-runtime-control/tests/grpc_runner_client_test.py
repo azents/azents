@@ -187,3 +187,94 @@ def _registration() -> RunnerRegistration:
 
 def _now() -> datetime:
     return datetime(2026, 5, 25, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_grpc_client_maps_git_operation_payloads_and_results() -> None:
+    """Git operation payloads and final results round-trip through protobuf."""
+    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id="req-git",
+            operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
+                runtime_id="runtime-1",
+                runner_generation=7,
+                operation_type="create_git_worktree",
+                git_create_worktree=(
+                    runtime_runner_control_pb2.GitCreateWorktreeOperationPayload(
+                        source_project_path="/workspace/agent/repo",
+                        worktree_path="/workspace/agent/.azents/worktrees/session/repo",
+                        branch_name="azents/session",
+                        starting_ref="main",
+                    )
+                ),
+                reply_stream_id="reply:req-git",
+            ),
+        )
+        event = await anext(requests)
+        sent.append(event)
+
+    client = GrpcRunnerControlClient(stream)
+    accepted = await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    operation = await client.claim_next_runner_operation(
+        runtime_id="runtime-1",
+        generation=accepted.generation,
+        consumer_id="consumer-1",
+        block_ms=100,
+    )
+
+    assert operation is not None
+    assert operation.operation_type == "create_git_worktree"
+    assert operation.payload == {
+        "source_project_path": "/workspace/agent/repo",
+        "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+        "branch_name": "azents/session",
+        "starting_ref": "main",
+    }
+
+    await client.append_runner_event(
+        RunnerOperationEvent(
+            request_id="req-git",
+            runtime_id="runtime-1",
+            generation=accepted.generation,
+            event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+            payload={
+                "base_commit": "abc123",
+                "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+                "branch_name": "azents/session",
+            },
+            created_at=_now(),
+            final=True,
+        )
+    )
+    for _ in range(10):
+        if sent:
+            break
+        await asyncio.sleep(0)
+
+    event = sent[0].operation_event
+    assert event.final_success.WhichOneof("result") == "git_create_worktree"
+    assert event.final_success.git_create_worktree.base_commit == "abc123"
+    assert (
+        event.final_success.git_create_worktree.worktree_path
+        == "/workspace/agent/.azents/worktrees/session/repo"
+    )
+    await client.close()

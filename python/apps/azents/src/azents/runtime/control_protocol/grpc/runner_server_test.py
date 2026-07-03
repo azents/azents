@@ -191,6 +191,46 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
     await stream.aclose()
 
 
+@pytest.mark.asyncio
+async def test_runner_grpc_relays_git_operation_payload() -> None:
+    """The gRPC bridge maps Git operation payloads to protobuf oneofs."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-git")
+    sink = FakeStateSink()
+    servicer = _servicer(service, store, sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="create_git_worktree",
+            payload={
+                "source_project_path": "/workspace/agent/repo",
+                "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+                "branch_name": "azents/session",
+                "starting_ref": "main",
+            },
+            deadline_at=_now() + timedelta(seconds=30),
+            body_stream_id=None,
+            background=False,
+        ),
+        created_at=_now(),
+    )
+
+    command = await anext(stream)
+    assert command.operation_request.operation_type == "create_git_worktree"
+    assert command.operation_request.WhichOneof("payload") == "git_create_worktree"
+    assert command.operation_request.git_create_worktree.source_project_path == (
+        "/workspace/agent/repo"
+    )
+    assert command.operation_request.git_create_worktree.branch_name == "azents/session"
+    await stream.aclose()
+
+
 def _servicer(
     service: RuntimeControlProtocolService,
     store: InMemoryRuntimeCoordinationStore,

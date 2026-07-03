@@ -61,6 +61,15 @@ class _StreamSnapshot:
     omitted_bytes: int
 
 
+@dataclass(frozen=True)
+class _GitCommandResult:
+    """Completed Git command output."""
+
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
 class _ProcessOutputBuffer:
     """Bounded unread byte buffer for one process stream."""
 
@@ -218,11 +227,25 @@ class RunnerOperations:
             if operation.operation_type == "file.bulk_move":
                 await self._file_bulk_move(operation)
                 return
+            if operation.operation_type == "list_git_refs":
+                await self._git_list_refs(operation)
+                return
+            if operation.operation_type == "create_git_worktree":
+                await self._git_create_worktree(operation)
+                return
+            if operation.operation_type == "remove_git_worktree":
+                await self._git_remove_worktree(operation)
+                return
+            if operation.operation_type == "delete_git_branch":
+                await self._git_delete_branch(operation)
+                return
             await self._final_error(
                 operation,
                 "UNSUPPORTED_OPERATION",
                 f"Unsupported Runner operation: {operation.operation_type}",
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             await self._final_error(operation, "RUNNER_OPERATION_ERROR", str(exc))
 
@@ -702,6 +725,196 @@ class RunnerOperations:
             },
         )
 
+    async def _git_list_refs(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        refs_result = await self._run_git_capture(
+            operation,
+            ("for-each-ref", "--format=%(refname)%09%(objectname)%09%(refname:short)"),
+            cwd=source_path,
+        )
+        if refs_result is None:
+            return
+        if refs_result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(refs_result),
+            )
+            return
+        default_branch = await self._default_branch(operation, source_path)
+        head_commit = await self._head_commit(operation, source_path)
+        refs: list[JsonValue] = []
+        for line in refs_result.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) != 3:
+                continue
+            ref, target, short_name = parts
+            refs.append(
+                {
+                    "name": _git_ref_display_name(ref, short_name),
+                    "ref": ref,
+                    "type": _git_ref_type(ref),
+                    "target": target,
+                    "default": _git_ref_is_default(ref, short_name, default_branch),
+                }
+            )
+        await self._final_success(
+            operation,
+            {
+                "git_refs": refs,
+                "default_branch": default_branch,
+                "head_commit": head_commit,
+            },
+        )
+
+    async def _git_create_worktree(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        starting_ref = _str_payload(operation.payload, "starting_ref")
+        if not starting_ref:
+            await self._final_error(
+                operation,
+                "invalid_ref",
+                "starting_ref is required",
+            )
+            return
+        branch_name = _str_payload(operation.payload, "branch_name")
+        if not branch_name:
+            await self._final_error(
+                operation,
+                "invalid_branch",
+                "branch_name is required",
+            )
+            return
+        try:
+            worktree_path = _resolve_lexical_path(
+                operation.payload.get("worktree_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_worktree_path", str(exc))
+            return
+        if worktree_path.exists() or worktree_path.is_symlink():
+            await self._final_error(
+                operation,
+                "worktree_path_exists",
+                f"Worktree path already exists: {worktree_path}",
+            )
+            return
+        base_commit = await self._resolve_git_commit(
+            operation,
+            source_path,
+            starting_ref,
+        )
+        if base_commit is None:
+            return
+        branch_exists = await self._git_branch_exists(
+            operation, source_path, branch_name
+        )
+        if branch_exists is None:
+            return
+        if branch_exists:
+            await self._final_error(
+                operation,
+                "branch_exists",
+                f"Git branch already exists: {branch_name}",
+            )
+            return
+        result = await self._run_git_streaming(
+            operation,
+            (
+                "worktree",
+                "add",
+                "-b",
+                branch_name,
+                str(worktree_path),
+                starting_ref,
+            ),
+            cwd=source_path,
+        )
+        if result is None:
+            return
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return
+        await self._final_success(
+            operation,
+            {
+                "base_commit": base_commit,
+                "worktree_path": str(worktree_path),
+                "branch_name": branch_name,
+            },
+        )
+
+    async def _git_remove_worktree(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        try:
+            worktree_path = _resolve_lexical_path(
+                operation.payload.get("worktree_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_worktree_path", str(exc))
+            return
+        argv = ["worktree", "remove"]
+        if _bool_payload(operation.payload, "force", default=False):
+            argv.append("--force")
+        argv.append(str(worktree_path))
+        result = await self._run_git_streaming(operation, tuple(argv), cwd=source_path)
+        if result is None:
+            return
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return
+        await self._final_success(
+            operation,
+            {"removed_worktree_path": str(worktree_path)},
+        )
+
+    async def _git_delete_branch(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        branch_name = _str_payload(operation.payload, "branch_name")
+        if not branch_name:
+            await self._final_error(
+                operation,
+                "invalid_branch",
+                "branch_name is required",
+            )
+            return
+        result = await self._run_git_streaming(
+            operation,
+            ("branch", "-D", branch_name),
+            cwd=source_path,
+        )
+        if result is None:
+            return
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return
+        await self._final_success(
+            operation,
+            {"deleted_branch_name": branch_name},
+        )
+
     async def _process_start(self, operation: RunnerOperationEnvelope) -> None:
         command = _str_payload(operation.payload, "command")
         if not command:
@@ -1145,6 +1358,223 @@ class RunnerOperations:
             missing_reason=missing.reason,
         )
 
+    async def _git_source_path(self, operation: RunnerOperationEnvelope) -> Path | None:
+        try:
+            source_path = _resolve_lexical_path(
+                operation.payload.get("source_project_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_source_path", str(exc))
+            return None
+        if not source_path.exists():
+            await self._final_error(
+                operation,
+                "not_git_repo",
+                f"Source project path does not exist: {source_path}",
+            )
+            return None
+        if not source_path.is_dir():
+            await self._final_error(
+                operation,
+                "not_git_repo",
+                f"Source project path is not a directory: {source_path}",
+            )
+            return None
+        result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "--is-inside-work-tree"),
+            cwd=source_path,
+        )
+        if result is None:
+            return None
+        if result.exit_code != 0 or result.stdout.strip() != "true":
+            await self._final_error(
+                operation,
+                "not_git_repo",
+                f"Source project path is not a Git repository: {source_path}",
+            )
+            return None
+        return source_path
+
+    async def _resolve_git_commit(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+        ref: str,
+    ) -> str | None:
+        result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "--verify", f"{ref}^{{commit}}"),
+            cwd=source_path,
+        )
+        if result is None:
+            return None
+        if result.exit_code != 0:
+            await self._final_error(
+                operation, "invalid_ref", _git_command_error_message(result)
+            )
+            return None
+        return result.stdout.strip()
+
+    async def _git_branch_exists(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+        branch_name: str,
+    ) -> bool | None:
+        result = await self._run_git_capture(
+            operation,
+            ("show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"),
+            cwd=source_path,
+        )
+        if result is None:
+            return None
+        if result.exit_code == 0:
+            return True
+        if result.exit_code == 1:
+            return False
+        await self._final_error(
+            operation, "git_command_failed", _git_command_error_message(result)
+        )
+        return None
+
+    async def _default_branch(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+    ) -> str | None:
+        result = await self._run_git_capture(
+            operation,
+            ("symbolic-ref", "--quiet", "--short", "HEAD"),
+            cwd=source_path,
+        )
+        if result is None or result.exit_code != 0:
+            return None
+        value = result.stdout.strip()
+        return value or None
+
+    async def _head_commit(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+    ) -> str | None:
+        result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "HEAD"),
+            cwd=source_path,
+        )
+        if result is None or result.exit_code != 0:
+            return None
+        value = result.stdout.strip()
+        return value or None
+
+    async def _run_git_capture(
+        self,
+        operation: RunnerOperationEnvelope,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+    ) -> _GitCommandResult | None:
+        return await self._run_git_command(
+            operation,
+            argv,
+            cwd=cwd,
+            stream_output=False,
+        )
+
+    async def _run_git_streaming(
+        self,
+        operation: RunnerOperationEnvelope,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+    ) -> _GitCommandResult | None:
+        return await self._run_git_command(
+            operation,
+            argv,
+            cwd=cwd,
+            stream_output=True,
+        )
+
+    async def _run_git_command(
+        self,
+        operation: RunnerOperationEnvelope,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        stream_output: bool,
+    ) -> _GitCommandResult | None:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "git",
+                *argv,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as exc:
+            await self._final_error(operation, "git_command_failed", str(exc))
+            return None
+        if process.stdout is None or process.stderr is None:
+            raise RuntimeError("git stdout/stderr pipes are required")
+        stdout_task = asyncio.create_task(
+            self._drain_git_stream(
+                operation,
+                RuntimeRunnerEventType.STDOUT,
+                process.stdout,
+                stream_output=stream_output,
+            )
+        )
+        stderr_task = asyncio.create_task(
+            self._drain_git_stream(
+                operation,
+                RuntimeRunnerEventType.STDERR,
+                process.stderr,
+                stream_output=stream_output,
+            )
+        )
+        timeout = _remaining_timeout_seconds(operation.deadline_at)
+        try:
+            if timeout is None:
+                exit_code = await process.wait()
+            else:
+                exit_code = await asyncio.wait_for(process.wait(), timeout=timeout)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            await self._final_error(
+                operation,
+                "operation_timeout",
+                "Git operation timed out",
+            )
+            return None
+        stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
+        return _GitCommandResult(
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+    async def _drain_git_stream(
+        self,
+        operation: RunnerOperationEnvelope,
+        event_type: RuntimeRunnerEventType,
+        reader: asyncio.StreamReader,
+        *,
+        stream_output: bool,
+    ) -> str:
+        chunks: list[str] = []
+        while True:
+            data = await reader.read(_PROCESS_READ_CHUNK_BYTES)
+            if not data:
+                return "".join(chunks)
+            text = data.decode(errors="replace")
+            chunks.append(text)
+            if stream_output:
+                await self._event(operation, event_type, {"text": text})
+
     async def _final_success(
         self,
         operation: RunnerOperationEnvelope,
@@ -1193,6 +1623,45 @@ class RunnerOperations:
 
 def _process_exited(record: _ManagedProcess) -> bool:
     return record.process.returncode is not None
+
+
+def _remaining_timeout_seconds(deadline_at: datetime | None) -> float | None:
+    if deadline_at is None:
+        return None
+    return max((deadline_at - datetime.now(UTC)).total_seconds(), 0.001)
+
+
+def _git_command_error_message(result: _GitCommandResult) -> str:
+    text = result.stderr.strip() or result.stdout.strip()
+    if text:
+        return text
+    return f"Git command failed with exit code {result.exit_code}"
+
+
+def _git_ref_display_name(ref: str, short_name: str) -> str:
+    if ref.startswith("refs/heads/"):
+        return ref.removeprefix("refs/heads/")
+    if ref.startswith("refs/remotes/"):
+        return ref.removeprefix("refs/remotes/")
+    if ref.startswith("refs/tags/"):
+        return ref.removeprefix("refs/tags/")
+    return short_name
+
+
+def _git_ref_type(ref: str) -> str:
+    if ref.startswith("refs/heads/"):
+        return "branch"
+    if ref.startswith("refs/remotes/"):
+        return "remote_branch"
+    if ref.startswith("refs/tags/"):
+        return "tag"
+    return "other"
+
+
+def _git_ref_is_default(ref: str, short_name: str, default_branch: str | None) -> bool:
+    if default_branch is None:
+        return False
+    return short_name == default_branch or ref == f"refs/heads/{default_branch}"
 
 
 def _yield_time_ms(payload: Mapping[str, JsonValue]) -> int:

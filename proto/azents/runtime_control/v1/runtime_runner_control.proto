@@ -99,6 +99,10 @@ message RunnerOperationRequest {
     ProcessTerminateSessionOperationPayload process_terminate_session = 31;
     FileBulkDeleteOperationPayload file_bulk_delete = 32;
     FileBulkMoveOperationPayload file_bulk_move = 33;
+    GitListRefsOperationPayload git_list_refs = 34;
+    GitCreateWorktreeOperationPayload git_create_worktree = 35;
+    GitRemoveWorktreeOperationPayload git_remove_worktree = 36;
+    GitDeleteBranchOperationPayload git_delete_branch = 37;
   }
 }
 
@@ -186,6 +190,28 @@ message FileBulkMoveOperationPayload {
   bool overwrite = 3;
 }
 
+message GitListRefsOperationPayload {
+  string source_project_path = 1;
+}
+
+message GitCreateWorktreeOperationPayload {
+  string source_project_path = 1;
+  string worktree_path = 2;
+  string branch_name = 3;
+  string starting_ref = 4;
+}
+
+message GitRemoveWorktreeOperationPayload {
+  string source_project_path = 1;
+  string worktree_path = 2;
+  bool force = 3;
+}
+
+message GitDeleteBranchOperationPayload {
+  string source_project_path = 1;
+  string branch_name = 2;
+}
+
 message RunnerBodyChunk {
   uint64 chunk_id = 1;
   bytes data = 2;
@@ -246,6 +272,10 @@ message RunnerOperationFinalSuccessPayload {
     FileMoveFinalSuccess file_move = 10;
     FileBulkDeleteFinalSuccess file_bulk_delete = 11;
     FileBulkMoveFinalSuccess file_bulk_move = 12;
+    GitListRefsFinalSuccess git_list_refs = 13;
+    GitCreateWorktreeFinalSuccess git_create_worktree = 14;
+    GitRemoveWorktreeFinalSuccess git_remove_worktree = 15;
+    GitDeleteBranchFinalSuccess git_delete_branch = 16;
   }
 }
 
@@ -311,6 +341,34 @@ message RuntimeFileMoveEntry {
 
 message FileBulkMoveFinalSuccess {
   repeated RuntimeFileMoveEntry entries = 1;
+}
+
+message RuntimeGitRefEntry {
+  string name = 1;
+  string ref = 2;
+  string type = 3;
+  string target = 4;
+  bool default = 5;
+}
+
+message GitListRefsFinalSuccess {
+  repeated RuntimeGitRefEntry refs = 1;
+  string default_branch = 2;
+  string head_commit = 3;
+}
+
+message GitCreateWorktreeFinalSuccess {
+  string base_commit = 1;
+  string worktree_path = 2;
+  string branch_name = 3;
+}
+
+message GitRemoveWorktreeFinalSuccess {
+  string worktree_path = 1;
+}
+
+message GitDeleteBranchFinalSuccess {
+  string branch_name = 1;
 }
 
 message FileGrepFinalSuccess {
