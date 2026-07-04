@@ -18,6 +18,8 @@ code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/services/agent_session_input.py
+  - python/apps/azents/src/azents/services/session_initialization.py
+  - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/services/model_file.py
@@ -32,8 +34,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-02
-spec_version: 51
+last_verified_at: 2026-07-04
+spec_version: 52
 ---
 
 # Agent Execution Loop
@@ -50,17 +52,18 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker promotes input buffers to event `RunUserMessage` input.
-2. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
-3. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
-4. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
-5. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
+1. Worker checks session initialization. Blocking initialization must be `ready` before a run can start.
+2. Worker promotes input buffers to event `RunUserMessage` input.
+3. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
+4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
+5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
+6. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
    into a LiteLLM Responses native request.
-6. `PostLowerFilterPipeline` applies adapter-native request size guard.
-7. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
-8. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
-9. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
-10. When no foreground client tool call or pending follow-up remains, the runner observes the
+7. `PostLowerFilterPipeline` applies adapter-native request size guard.
+8. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
+9. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
+10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
+11. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
 Streaming deltas are UI projection only. Durable events are appended based on completed output items
@@ -339,7 +342,9 @@ entrypoints depend on `AgentEngineProtocol`, not SDK concrete adapters.
 
 Web chat user writes enter through REST commit endpoints. Message writes create or reuse an
 `AgentSession`, materialize user input attachments, record the accepted write under
-`client_request_id`, commit an input buffer, then send a broker wake-up signal. Edit writes are
+`client_request_id`, commit an input buffer, then send a broker wake-up signal. New-session writes may
+also create blocking initialization rows, such as Git worktree setup, before the first run is allowed
+to start. Edit writes are
 idle-only: the REST transaction rewrites durable history state, clears pending input buffers,
 creates an `edited_user_message` input buffer, marks the session running, and sends a wake-up.
 Command writes are idle-only control actions: the REST transaction stores one pending command on
@@ -347,6 +352,14 @@ Command writes are idle-only control actions: the REST transaction stores one pe
 command from the session and passes it into `RunExecutor`, which prepares the same `RunRequest` and
 `RunContext` used by normal runs before invoking the registered command handler. Running sessions,
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
+Before any pending input buffer becomes durable model input, the session runner observes the
+session initialization projection. `ready` initialization allows run creation.
+`pending` or `running` initialization leaves input buffers pending and relies on later wake-up/retry to
+resume. `failed`, `canceled`, or cleanup-required states do not create an `agent_runs` row; users must
+retry setup, delete pending input, or create a different session. This gate belongs to the session
+runner boundary, not the model execution core, so failed setup is not represented as failed-run retry
+state or durable transcript `system_error`.
+
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
 message/edit/command/stop
@@ -391,6 +404,7 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/execution_test.py src/azents/engine/events/filters_test.py src/azents/engine/events/engine_adapter_test.py`
 - `cd python/apps/azents && uv run pyright`
 - deterministic azents E2E CI for text/tool/UI projection behavior
+- deterministic session initialization and Git worktree lifecycle E2E coverage
 - `cd testenv/azents/e2e && uv run pyright src/tests/azents/public/test_chat_input_buffer.py`
 - REST chat write targeted verification: `cd python/apps/azents && uv run pytest -q src/azents/api/public/chat/v1/chat_api_test.py src/azents/repos/chat_write_request/repository_test.py src/azents/services/chat/input_buffer_test.py`
 - REST chat write and preemptive stop E2E/browser blocker tracking: GitHub issues #4468 and #4469
@@ -452,6 +466,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-04** (spec_version 52) — Added the session initialization gate before run creation.
 - **2026-07-01** (spec_version 50) — Unified pending runtime commands into the `RunExecutor` run boundary.
 - **2026-06-28** (spec_version 47) — Added failed-run retry state foundation, live retry projection contract, and Goal continuation gating by successful terminal run status.
 - **2026-06-28** (spec_version 46) — Promoted generic client tool result metadata and runtime process tool execution (`exec_command`/`write_stdin`) into the execution loop spec.

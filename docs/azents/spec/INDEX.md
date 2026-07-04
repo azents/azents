@@ -13,29 +13,29 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-02 | 36 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-03 | 80 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-04 | 81 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-01 | 8 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-02 | 2 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-02 | 44 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-06-29 | 5 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-03 | 24 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-04 | 25 |
 
 ## Flow Specs
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-02 | 51 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-06-28 | 5 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-04 | 52 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-04 | 6 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
-| [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-02 | 7 |
+| [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-04 | 8 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-01 | 17 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-03 | 9 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |
-| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-06-28 | 8 |
+| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-04 | 9 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-03 | 10 |
 | [Subagent Delegation Flow](flow/subagent-delegation.md) | @Hardtack | 2026-07-01 | 13 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |

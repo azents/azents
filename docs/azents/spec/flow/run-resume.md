@@ -10,14 +10,15 @@ code_paths:
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/services/agent_session_input.py
+  - python/apps/azents/src/azents/services/session_initialization.py
   - python/apps/azents/src/azents/repos/agent_run/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-06-28
-spec_version: 8
+last_verified_at: 2026-07-04
+spec_version: 9
 ---
 
 # Run Resume
@@ -35,6 +36,7 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Stale session activity | Worker recovery scan of `agent_sessions.run_state` | Worker enqueues a wake-up signal for the affected session |
 | Active event run | `agent_runs.phase`, `active_tool_calls`, and `retry_state` | Runtime reconciles phase/tool/retry state and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime executes or interrupts the missing result path without duplicating completed results |
+| Blocked initialization | Session has pending input but initialization is not ready | Worker preserves pending buffers and does not create an `agent_runs` row until initialization is ready |
 
 ## Ownership Lease
 
@@ -160,8 +162,12 @@ The takeover path must preserve single-session execution:
 - A live owner heartbeat prevents non-owner processing.
 - A stale heartbeat permits lease stealing even if the 30-minute sticky key remains.
 - Wake-up signals remain in the per-session Redis list until a worker with valid ownership drains
-  them. Model input payloads and control state remain durable in Postgres.
+  them. Model input payloads and control state remain durable in Postgres. For newly created sessions with blocking initialization, pending input buffers are also durable while setup is pending or failed; takeover must resume from the initialization state before run creation.
 - Durable transcript and `agent_runs` remain the execution source of truth after takeover.
+
+## Initialization Recovery
+
+Session initialization is a pre-run gate. If a worker receives a wake-up for a session whose initialization is `pending` or `running`, it must leave pending buffers in place and avoid creating an `agent_runs` row. If initialization is `failed`, `canceled`, or otherwise blocks dispatch, recovery remains a session setup concern rather than failed-run retry state. Once initialization becomes `ready`, the next wake-up can process the already-persisted pending input normally.
 
 ## Failed-run Retry Recovery
 
@@ -210,4 +216,10 @@ that next run to observe `check_stop()` as true.
   hooks.
 - Completed tool results are not duplicated.
 - User stop intent is consumed by stop finalization and must not interrupt the next wake-up.
+- Blocking session initialization must be ready before recovery creates or resumes a run for pending input.
 - SDK `RunState` compatibility is not preserved.
+
+
+## Changelog
+
+- **2026-07-04** (spec_version 9) — Added initialization-gated wake-up and recovery semantics.
