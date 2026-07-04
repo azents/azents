@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 from azcommon.result import Failure, Result, Success
+from fastapi import BackgroundTasks
 
 from azents.api.public.chat.v1 import (
     _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
@@ -800,7 +801,10 @@ class _AgentSessionRouteChatService:
             | PrimarySessionArchiveBlocked
             | RunningSessionArchiveBlocked,
         ] = Success(
-            ArchiveSessionResult(archived_session_id="2123456789abcdef0123456789abcdef")
+            ArchiveSessionResult(
+                archived_session_id="2123456789abcdef0123456789abcdef",
+                cleanup_requested=False,
+            )
         )
 
     async def get_team_primary_session(
@@ -883,6 +887,17 @@ class _AgentSessionRouteChatService:
         if title == "invalid":
             return Failure(InvalidSessionTitle(reason="Invalid title."))
         return Success(self.primary_session.model_copy(update={"title": title}))
+
+
+class _RouteWorktreeCleanupService:
+    """Session worktree cleanup service double for route tests."""
+
+    def __init__(self) -> None:
+        self.cleanup_calls: list[tuple[str, str]] = []
+
+    async def run_cleanup_for_session(self, *, agent_id: str, session_id: str) -> None:
+        """Record cleanup execution."""
+        self.cleanup_calls.append((agent_id, session_id))
 
 
 class TestAgentSessionRoutes:
@@ -1000,8 +1015,10 @@ class TestAgentSessionRoutes:
         response = await archive_agent_session(
             agent_id="agent-1",
             session_id="2123456789abcdef0123456789abcdef",
+            background_tasks=BackgroundTasks(),
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
             chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            session_git_worktree_service=_RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
         )
 
         assert response is None
@@ -1017,8 +1034,10 @@ class TestAgentSessionRoutes:
             await archive_agent_session(
                 agent_id="agent-1",
                 session_id="1123456789abcdef0123456789abcdef",
+                background_tasks=BackgroundTasks(),
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+                session_git_worktree_service=_RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 409
@@ -1037,8 +1056,10 @@ class TestAgentSessionRoutes:
             await archive_agent_session(
                 agent_id="agent-1",
                 session_id="2123456789abcdef0123456789abcdef",
+                background_tasks=BackgroundTasks(),
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+                session_git_worktree_service=_RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 409

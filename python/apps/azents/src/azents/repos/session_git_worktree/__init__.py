@@ -151,6 +151,62 @@ class SessionGitWorktreeRepository:
         await session.refresh(rdb)
         return self._build(rdb)
 
+    async def mark_cleanup_pending(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_id: str,
+    ) -> SessionGitWorktree:
+        """Mark allocation cleanup requested."""
+        rdb = await session.get(RDBSessionGitWorktree, worktree_id)
+        if rdb is None:
+            raise RuntimeError("SessionGitWorktree row is missing")
+        if rdb.status is not SessionGitWorktreeStatus.CLEANED:
+            rdb.status = SessionGitWorktreeStatus.CLEANUP_PENDING
+            rdb.cleanup_summary = None
+            rdb.cleaned_at = None
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
+    async def mark_cleaned(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_id: str,
+        cleanup_summary: str,
+        cleaned_at: datetime.datetime,
+    ) -> SessionGitWorktree:
+        """Mark allocation cleanup completed."""
+        rdb = await session.get(RDBSessionGitWorktree, worktree_id)
+        if rdb is None:
+            raise RuntimeError("SessionGitWorktree row is missing")
+        rdb.status = SessionGitWorktreeStatus.CLEANED
+        rdb.cleanup_summary = cleanup_summary
+        rdb.cleaned_at = cleaned_at
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
+    async def mark_cleanup_failed(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_id: str,
+        cleanup_summary: str,
+        failed_at: datetime.datetime,
+    ) -> SessionGitWorktree:
+        """Mark allocation cleanup failed."""
+        rdb = await session.get(RDBSessionGitWorktree, worktree_id)
+        if rdb is None:
+            raise RuntimeError("SessionGitWorktree row is missing")
+        rdb.status = SessionGitWorktreeStatus.CLEANUP_FAILED
+        rdb.cleanup_summary = cleanup_summary
+        rdb.failed_at = failed_at
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
     def _build(self, rdb: RDBSessionGitWorktree) -> SessionGitWorktree:
         """Convert RDB row to domain model."""
         return SessionGitWorktree(

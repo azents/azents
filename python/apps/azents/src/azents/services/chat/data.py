@@ -74,6 +74,7 @@ class ArchiveSessionResult:
     """AgentSession archive result."""
 
     archived_session_id: str
+    cleanup_requested: bool
 
 
 @dataclasses.dataclass(frozen=True)
