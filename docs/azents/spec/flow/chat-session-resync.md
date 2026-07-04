@@ -14,8 +14,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/deps.py
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-02
-spec_version: 7
+last_verified_at: 2026-07-04
+spec_version: 8
 ---
 
 # Chat Session Resync
@@ -70,6 +70,8 @@ sequenceDiagram
 | `live_event_removed` | server → client | `session_id`, `event_id` | non-durable live projection removal. |
 | `input_actions_updated` | server → client | `session_id` | composer action definitions changed; client reloads `/actions`. |
 | `todo_state_changed` | server → client | `todo` | session todo Toolkit State snapshot changed. |
+| `session_initialization_updated` | server → client | `session_id`, `initialization` | Session initialization status or step projection changed. |
+| `session_initialization_event_appended` | server → client | `session_id`, `event` | Durable initialization log event was appended. |
 
 Client does not query history/live REST baseline before `subscribed` ack. If health check ack timeout or socket close occurs, switch to ticket refresh/reconnect path.
 
@@ -110,8 +112,11 @@ Response fields:
 | `run` | currently running run projection. `null` if absent. |
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |
+| `initialization` | session initialization projection with status, timestamps, and steps. `null` only when no initialization row exists. |
 
-`snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, and `snapshot.todo` is same session todo snapshot.
+`snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.initialization` is the current setup projection.
+
+`GET /chat/v1/sessions/{session_id}/initialization` returns the durable initialization projection plus ordered setup events. Clients use it to recover the full setup log after reconnect or when the live card requests details. The endpoint is separate from durable chat history because initialization events are setup telemetry, not transcript events.
 
 ## 6. Timeline State Rules
 
@@ -119,6 +124,7 @@ Response fields:
 
 - Renders REST history tail and REST live state together.
 - WS events are replayed on baseline, then applied in realtime.
+- Initialization updates are reconciled by the same baseline/replay ordering: `/live.initialization` provides the latest projection, and initialization event detail can be reloaded from the detail endpoint.
 - Can display pending input buffer, model response pending indicator, compaction indicator, todo preview.
 - Follow is active only when scroll viewport is at bottom or in iOS bottom bounce area.
 - When Follow is active, new timeline item and streaming update automatically scroll to bottom.
@@ -264,9 +270,11 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 - Browser idle return candidate signals are handled by WebSocket health check and REST baseline convergence.
 - History pagination always returns page renderable oldest to newest.
 - Legacy aggregate `/messages` fallback is not used.
+- Initialization setup events are not chat history events; clients reconcile them through `/live`, initialization WebSocket actions, and `/sessions/{session_id}/initialization`.
 
 ## 11. Changelog
 
+- **2026-07-04** — v8. Added initialization live/detail recovery and WebSocket setup projection actions.
 - **2026-06-13** — v5. Added session todo state to REST live/write snapshot and WebSocket contract, and reflected UI rule that treats todo preview as live state.
 - **2026-06-10** — v4. Removed aggregate live event list from `/live` and REST write snapshot, and reflected live state taxonomy contract separating partial history and input buffer.
 - **2026-06-10** — v3. Limited follow to bottom/bottom bounce area and separated follow stop from detached/buffering. Narrowed resume resync buffering timing to immediately before REST baseline reload and made failure path replay buffered events.

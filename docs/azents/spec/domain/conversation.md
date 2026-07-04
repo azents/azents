@@ -22,6 +22,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/event.py
   - python/apps/azents/src/azents/rdb/models/input_buffer.py
+  - python/apps/azents/src/azents/rdb/models/session_initialization.py
+  - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/chat_write_request.py
   - python/apps/azents/src/azents/rdb/models/scheduled_task.py
   - python/apps/azents/src/azents/rdb/models/exchange_file.py
@@ -29,6 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_run/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/repos/input_buffer/**
+  - python/apps/azents/src/azents/repos/session_initialization/**
+  - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/chat_write_request/**
   - python/apps/azents/src/azents/repos/scheduled_task/**
   - python/apps/azents/src/azents/repos/exchange_file/**
@@ -38,6 +42,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat_write.py
   - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
+  - python/apps/azents/src/azents/services/session_initialization.py
+  - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/api/public/chat/**
   - python/apps/azents/src/azents/api/internal/agent_home/v1/projects.py
@@ -63,6 +69,9 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/messages
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/archive
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup
+  - /chat/v1/agents/{agent_id}/git-refs
+  - /chat/v1/sessions/{session_id}/initialization
   - /chat/v1/sessions/{session_id}/title
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/context
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects
@@ -78,8 +87,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-03
-spec_version: 80
+last_verified_at: 2026-07-04
+spec_version: 81
 ---
 
 # Conversation & Events
@@ -101,6 +110,8 @@ erDiagram
     AgentSession ||--o{ AgentRun : "durable execution runs"
     AgentSession ||--o{ ExchangeFile : "shows uploads and artifacts"
     AgentSession ||--o{ SessionWorkspaceProject : "working projects"
+    AgentSession ||--o| SessionInitialization : "initialization lifecycle"
+    AgentSession ||--o| SessionGitWorktree : "owned worktree"
     AgentRuntime ||--o{ ExchangeFile : "owns sandbox artifacts"
     ScheduledTask }o--|| Agent : "targets"
 ```
@@ -122,6 +133,7 @@ command, stop intent, or run heartbeat.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `str(32)` | UUID7 hex |
+| `handle` | string | Human-readable, BIP-39-derived session handle used for user-facing allocation names such as owned Git worktree paths. |
 | `workspace_id` / `agent_id` | FK | Workspace and agent boundary |
 | `status` | enum | `active` or `archived` |
 | `primary_kind` | enum \| null | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind. |
@@ -144,14 +156,18 @@ first and the remaining sessions ordered by persisted `last_user_input_at`, the 
 most recent non-reverted `user_message` event or the session creation time when no user input exists.
 This lets newly created sessions appear naturally in the active list before their first message. Each
 session item includes `run_state` so azents-web can mark running sessions in the Agent rail session
-list. `POST /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session with the
-explicit `project_paths` supplied by the client. It does not copy Projects from the team primary
-session. `POST /chat/v1/agents/{agent_id}/sessions/messages` creates the same kind of non-primary team
-session with explicit `project_paths` and enqueues the first user message in one write boundary. The
+list. `POST /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session. The
+request selects a workspace mode. `existing_projects` registers the explicit `project_paths` supplied
+by the client and does not copy Projects from the team primary session. `git_worktree` records a
+durable session initialization that creates an Azents-owned Git worktree from a source Project path and
+starting ref before registering the created worktree as the session Project. For legacy clients,
+`project_paths` is still accepted as the existing-Projects mode. `POST /chat/v1/agents/{agent_id}/sessions/messages`
+creates the same kind of non-primary team session and enqueues the first user message in one write
+boundary. When the selected workspace mode needs blocking initialization, the input buffer remains
+pending until initialization becomes ready and the first run is gated behind that state. The
 first-message create response is `ChatWriteResponse`, including the created `session_id` and live
-snapshot. azents-web
-Agent detail routes surface the active session list in the Agent rail and navigate selected sessions
-through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action
+snapshot. azents-web Agent detail routes surface the active session list in the Agent rail and navigate
+selected sessions through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action
 navigates to `/w/{handle}/agents/{agent_id}/sessions/new`, which is a draft route and must not create
 an `AgentSession` row. The draft route renders the Agent top bar plus the chat input surface, but it
 does not render session-scoped Projects or Context tabs. On first-message success, azents-web replaces
@@ -189,6 +205,14 @@ are not running and opens a confirmation dialog before calling the archive API. 
 session is currently selected, the UI returns to the independent Agent settings page at
 `/w/{handle}/agents/{agent_id}/settings` instead of resolving a replacement session implicitly.
 
+For sessions with an Azents-owned Git worktree allocation, archive requests mark cleanup pending and
+schedule best-effort cleanup after the archive response. Cleanup removes only the explicitly owned
+worktree path and Azents-created branch after validating the `session_git_worktrees` ownership row.
+Cleanup failure does not roll back archive; it records a user-safe cleanup summary and leaves manual
+retry available through `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup`.
+Hard delete of a session must not erase the ownership metadata before cleanup reaches `cleaned` or
+`cleanup_failed`.
+
 Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
 projections, broker wake-up, and the REST response use that same session id. Runtime current/active
 session lookup is invalid for that direct write path and for default team session selection. If any
@@ -216,6 +240,25 @@ for browser and new-session preview UI; session Project rows remain the prompt-e
 RuntimeToolkit loads registered project prompt content from the current logical `AgentSession` ID.
 Runtime context sharing affects shell/file operations; it must not make project registry ownership or
 project prompt selection fall back to a parent, team-primary, or runtime session.
+
+### SessionInitialization and SessionGitWorktree
+
+`session_initializations` stores durable setup state for an `AgentSession`. Every session has an
+initialization projection. Ordinary sessions receive a ready no-op initialization. Worktree sessions
+start as `pending` / `running`, complete as `ready`, or become `failed` when a blocking setup step
+fails. Initialization steps have stable `step_key`, typed `step_type`, status, dependency metadata,
+resource descriptors, and optional failure reasons. Initialization events store ordered setup output,
+including command start/completion, stdout/stderr text, warnings, and failures. `GET
+/chat/v1/sessions/{session_id}/initialization` returns the durable projection plus event log, while
+`GET /chat/v1/sessions/{session_id}/live` returns the current projection for live rendering.
+
+`session_git_worktrees` is the cleanup authority for Azents-owned worktrees. It stores the source
+Project path, starting ref, generated worktree path, generated branch name, base commit, status,
+failure summary, and cleanup summary. Worktree creation uses typed Runner Git operations, records the
+created worktree descriptor on the create step, registers exactly the created path in
+`session_workspace_projects`, and upserts the Agent Project catalog entry without updating presets or
+new-session defaults. The ownership row, not reserved-root membership or `session_workspace_projects`,
+is required before destructive cleanup can remove a path or branch.
 
 ## 3. AgentRun
 
@@ -311,7 +354,7 @@ event-list APIs:
   pages.
 - `GET /chat/v1/sessions/{session_id}/live` returns current non-durable live state such as
   streaming assistant text, streaming reasoning, active tool calls, pending input buffers, run state,
-  and session todo snapshot.
+  session todo snapshot, and session initialization projection.
 
 Both responses use the same event transport shape as the durable transcript. The removed
 `/chat/v1/sessions/{session_id}/messages` aggregate endpoint is not part of the public contract:
@@ -328,7 +371,7 @@ source. Goal continuation starts as a pending `goal_continuation` input buffer a
 bubbles or delete controls; it may render non-interactive timeline indicators such as goal controls or
 an interrupted divider.
 
-Session todo is persisted in `toolkit_states`, not in the transcript. `/live` and REST write snapshots expose it as `todo: { items }`; each item has `content` and status `pending`, `in_progress`, or `completed`. The worker also broadcasts `todo_state_changed` after `update_todo` so the chat UI can update without a separate todo read API.
+Session todo is persisted in `toolkit_states`, not in the transcript. `/live` and REST write snapshots expose it as `todo: { items }`; each item has `content` and status `pending`, `in_progress`, or `completed`. The same live and write snapshots expose `initialization` as the current setup projection when present. The worker also broadcasts `todo_state_changed` after `update_todo` so the chat UI can update without a separate todo read API.
 
 WebSocket chat clients receive subscription and event actions:
 
@@ -338,7 +381,9 @@ WebSocket chat clients receive subscription and event actions:
 - `live_event_upserted` for current live projections;
 - `live_event_removed` when a projection is no longer current;
 - `input_actions_updated` when composer action definitions change, including Skill projection list changes;
-- `todo_state_changed` when the session-scoped TodoToolkit State changes.
+- `todo_state_changed` when the session-scoped TodoToolkit State changes;
+- `session_initialization_updated` when an initialization projection changes;
+- `session_initialization_event_appended` when a durable initialization event is appended.
 
 Durable/live handoff follows these invariants:
 
@@ -402,7 +447,10 @@ The durable event kind is determined by buffer kind at flush time:
 | `goal_continuation` | `goal_continuation` |
 
 Wake-up delivery is a signal only. The persisted buffer plus the `running` state transition is the
-recovery source of truth if the signal is lost.
+recovery source of truth if the signal is lost. If the selected session has blocking initialization
+that is not ready, the worker must not promote input buffers into an `agent_runs` row. Failed
+initialization keeps the buffer pending until the user retries, deletes the pending input, or chooses
+another recovery action.
 
 Web chat message/edit/command writes use REST commit endpoints instead of WebSocket write payloads.
 `GET /chat/v1/agents/{agent_id}/team-primary-session` resolves or creates the agent's team
@@ -493,10 +541,12 @@ Current verification:
 - `cd testenv/azents && uv run pytest testenv/tests -q`
 - deterministic azents E2E CI for public chat/tool behavior
 - `cd testenv/azents/e2e && uv run pyright src/tests/azents/public/test_chat_input_buffer.py`
+- `cd testenv/azents/e2e && uv run pytest -vv src/tests/azents/public/test_session_git_worktree_lifecycle.py` in deterministic E2E CI
 - REST chat write verification evidence is recorded in `docs/azents/design/rest-chat-write-boundary.md`; preemptive stop audit and E2E coverage evidence is recorded in `docs/azents/design/preemptive-user-stop-phase6-audit.md` and `docs/azents/design/preemptive-user-stop-phase7-verification.md`. Docker/testcontainers blocker #4468 and browser-runner blocker #4469 track scenarios that could not run in the current agent runtime.
 
 ## 11. Changelog
 
+- **2026-07-04** — v81. Added session initialization, worktree-mode session creation, run gating, live initialization projections, and Azents-owned Git worktree cleanup semantics.
 - **2026-06-25** — v60. Moved coarse run state, run heartbeat, pending command, and stop intent
   ownership from `AgentRuntime` to `AgentSession`; `AgentRuntime` remains shared sandbox lifecycle
   state.

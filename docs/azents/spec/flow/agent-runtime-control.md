@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/runtime/**
+  - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/runtime/control_server.py
   - python/apps/azents/src/cli/runtime_control_server.py
@@ -21,8 +22,8 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-06-28
-spec_version: 5
+last_verified_at: 2026-07-04
+spec_version: 6
 ---
 
 # Agent Runtime Control
@@ -115,6 +116,7 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 - process start/write operations used by model-visible `exec_command` and `write_stdin`
 - file stat/list/read/write/grep
 - file upload/download body streams
+- Git repository/worktree operations used by session initialization and cleanup
 - operation heartbeat/progress/final events
 
 `file.stat` is the authoritative operation for classifying a workspace path as file, directory, symlink, other, or missing before a caller chooses a file or directory operation.
@@ -122,6 +124,8 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 `file.list` accepts either a workspace file path or directory path. File paths return that single file entry. Directory paths are direct-child listings by default, and callers can opt into recursive listing with exclude patterns so high-level file tools can skip heavy trees such as `.git` or `node_modules`.
 
 `file.grep` accepts a workspace file path or directory path plus a regex pattern. The Runner performs file discovery, text decoding, regex matching, line limiting, file limiting, exclude filtering, searched-file limiting, and scanned-byte limiting inside the Runtime workspace, then returns a structured final payload of matched files, line matches, truncation status, and truncation reason. Callers should not implement grep by issuing `file.list` plus one `file.read` operation per file.
+
+Git operations are typed Runner operations, not arbitrary shell strings. `list_git_refs` previews local branches, remote branches, tags, default branch, and HEAD commit for a source Project path. `create_git_worktree` creates a branch-backed worktree from a source Project and starting ref and returns the final worktree path, branch name, and base commit. `remove_git_worktree` removes an owned worktree path with explicit force policy. `delete_git_branch` deletes only the requested branch in the source repository. These operations return semantic failures for non-Git paths, invalid refs, collisions, and Git command failures so product services can show user-safe setup or cleanup summaries.
 
 Runner registration and state reports include a mounted workspace path. Control compares it with the provider-reported path and records an explicit failure if they differ. Operation routing uses runner generation fencing so stale runner streams cannot complete newer operations.
 
@@ -169,7 +173,7 @@ Required deterministic coverage:
 - repository/service tests for desired/observed/runner state summary/actions
 - Coordination Store contract tests for in-memory and Redis implementations
 - provider/runner gRPC registration, generation fencing, request/reply/body stream tests
-- Runner operation tests for process and file operations
+- Runner operation tests for process, file, and Git operations
 - Provider tests for Docker host bind mount persistence and Kubernetes PVC persistence
 - azents deterministic E2E for Agent Workspace bootstrap and lifecycle actions
 
@@ -177,4 +181,5 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-04** (spec_version 6) — Added typed Runner Git operations for ref preview, worktree creation, worktree removal, and branch deletion.
 - **2026-06-28** (spec_version 5) — Promoted Runtime Runner process operations and runner-owned process lifecycle/buffer semantics for `exec_command` and `write_stdin`.
