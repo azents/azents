@@ -42,8 +42,11 @@ from azents.services.chat.context import (
 from azents.services.chat.data import (
     ChatLiveRunRetryState,
     ChatLiveRunState,
+    NewSessionDefaultExistingProjectWorkspaceItem,
+    NewSessionDefaultGitWorktreeWorkspaceItem,
     NewSessionProjectDefaults,
     NewSessionProjectDefaultsSource,
+    NewSessionProjectDefaultWorkspaceItem,
 )
 from azents.services.chat.workspace import (
     AgentWorkspaceAccessConnecting,
@@ -75,7 +78,9 @@ from azents.services.project_browser_manifest import (
     ProjectBrowserManifest,
     ProjectBrowserMode,
 )
-from azents.services.session_git_worktree import GitRefPreview
+from azents.services.session_git_worktree import (
+    GitRefPreview,
+)
 from azents.services.session_initialization import (
     SessionInitializationDetail,
     SessionInitializationProjection,
@@ -210,6 +215,26 @@ AgentSessionWorkspaceModeRequest = (
 )
 
 
+class ExistingProjectWorkspaceItemRequest(BaseModel):
+    """Existing Project workspace item for a new AgentSession."""
+
+    type: Literal["existing_project"] = Field(description="Workspace item type")
+    path: str = Field(description="Existing Project path")
+
+
+class GitWorktreeWorkspaceItemRequest(BaseModel):
+    """Git worktree workspace item for a new AgentSession."""
+
+    type: Literal["git_worktree"] = Field(description="Workspace item type")
+    source_project_path: str = Field(description="Source Project path")
+    starting_ref: str = Field(description="Starting local Git branch ref")
+
+
+AgentSessionWorkspaceItemRequest = (
+    ExistingProjectWorkspaceItemRequest | GitWorktreeWorkspaceItemRequest
+)
+
+
 class ChatSessionCreateMessageWriteRequest(BaseModel):
     """REST first message write request for a draft AgentSession."""
 
@@ -219,9 +244,13 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         description="Client-generated idempotency key",
     )
     message: str = Field(description="Message content")
+    workspace_items: list[AgentSessionWorkspaceItemRequest] | None = Field(
+        default=None,
+        description="Ordered workspace items for the created session",
+    )
     workspace_mode: AgentSessionWorkspaceModeRequest | None = Field(
         default=None,
-        description="Workspace mode for the created session",
+        description="Legacy workspace mode for the created session",
     )
     project_paths: list[str] | None = Field(
         default=None,
@@ -236,9 +265,13 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
 class AgentSessionCreateRequest(BaseModel):
     """REST non-primary AgentSession create request."""
 
+    workspace_items: list[AgentSessionWorkspaceItemRequest] | None = Field(
+        default=None,
+        description="Ordered workspace items for the created session",
+    )
     workspace_mode: AgentSessionWorkspaceModeRequest | None = Field(
         default=None,
-        description="Workspace mode for the created session",
+        description="Legacy workspace mode for the created session",
     )
     project_paths: list[str] | None = Field(
         default=None,
@@ -689,10 +722,61 @@ class AgentSessionProjectDefaultsSourceResponse(BaseModel):
         return cls(type=source.type, session_id=source.session_id)
 
 
+class ExistingProjectWorkspaceItemResponse(BaseModel):
+    """Existing Project default workspace item response."""
+
+    type: Literal["existing_project"] = Field(
+        default="existing_project",
+        description="Workspace item type",
+    )
+    path: str = Field(description="Existing Project path")
+
+
+class GitWorktreeWorkspaceItemResponse(BaseModel):
+    """Git worktree default workspace item response."""
+
+    type: Literal["git_worktree"] = Field(
+        default="git_worktree",
+        description="Workspace item type",
+    )
+    source_project_path: str = Field(description="Source Project path")
+    starting_ref: str | None = Field(
+        default=None,
+        description="Starting local Git branch ref",
+    )
+
+
+AgentSessionWorkspaceItemResponse = (
+    ExistingProjectWorkspaceItemResponse | GitWorktreeWorkspaceItemResponse
+)
+
+
+def _workspace_item_response_from_domain(
+    item: NewSessionProjectDefaultWorkspaceItem,
+) -> AgentSessionWorkspaceItemResponse:
+    """Convert workspace item domain model to API response."""
+    match item:
+        case NewSessionDefaultExistingProjectWorkspaceItem(path=path):
+            return ExistingProjectWorkspaceItemResponse(path=path)
+        case NewSessionDefaultGitWorktreeWorkspaceItem(
+            source_project_path=source_project_path,
+            starting_ref=starting_ref,
+        ):
+            return GitWorktreeWorkspaceItemResponse(
+                source_project_path=source_project_path,
+                starting_ref=starting_ref,
+            )
+        case _:
+            assert_never(item)
+
+
 class AgentSessionProjectDefaultsResponse(BaseModel):
     """New AgentSession Project defaults response."""
 
     project_paths: list[str] = Field(description="Default selected Project paths")
+    items: list[AgentSessionWorkspaceItemResponse] = Field(
+        description="Default selected workspace items",
+    )
     source: AgentSessionProjectDefaultsSourceResponse = Field(
         description="Default source metadata",
     )
@@ -702,6 +786,9 @@ class AgentSessionProjectDefaultsResponse(BaseModel):
         """Convert from service model."""
         return cls(
             project_paths=defaults.project_paths,
+            items=[
+                _workspace_item_response_from_domain(item) for item in defaults.items
+            ],
             source=AgentSessionProjectDefaultsSourceResponse.from_domain(
                 defaults.source
             ),

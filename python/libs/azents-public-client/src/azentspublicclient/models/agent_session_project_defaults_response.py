@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List
+from azentspublicclient.models.agent_session_project_defaults_response_items_inner import AgentSessionProjectDefaultsResponseItemsInner
 from azentspublicclient.models.agent_session_project_defaults_source_response import AgentSessionProjectDefaultsSourceResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -28,9 +29,10 @@ class AgentSessionProjectDefaultsResponse(BaseModel):
     New AgentSession Project defaults response.
     """ # noqa: E501
     project_paths: List[StrictStr] = Field(description="Default selected Project paths")
+    items: List[AgentSessionProjectDefaultsResponseItemsInner] = Field(description="Default selected workspace items")
     source: AgentSessionProjectDefaultsSourceResponse = Field(description="Default source metadata")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["project_paths", "source"]
+    __properties: ClassVar[List[str]] = ["project_paths", "items", "source"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -73,6 +75,13 @@ class AgentSessionProjectDefaultsResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in items (list)
+        _items = []
+        if self.items:
+            for _item_items in self.items:
+                if _item_items:
+                    _items.append(_item_items.to_dict())
+            _dict['items'] = _items
         # override the default output from pydantic by calling `to_dict()` of source
         if self.source:
             _dict['source'] = self.source.to_dict()
@@ -94,6 +103,7 @@ class AgentSessionProjectDefaultsResponse(BaseModel):
 
         _obj = cls.model_validate({
             "project_paths": obj.get("project_paths"),
+            "items": [AgentSessionProjectDefaultsResponseItemsInner.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
             "source": AgentSessionProjectDefaultsSourceResponse.from_dict(obj["source"]) if obj.get("source") is not None else None
         })
         # store additional fields in additional_properties

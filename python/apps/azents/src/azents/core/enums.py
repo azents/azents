@@ -109,6 +109,13 @@ class AgentProjectCatalogStatus(enum.StrEnum):
     ERROR = "error"
 
 
+class AgentProjectDefaultItemType(enum.StrEnum):
+    """New-session default workspace item kind."""
+
+    EXISTING_PROJECT = "existing_project"
+    GIT_WORKTREE = "git_worktree"
+
+
 class AgentSessionRunState(enum.StrEnum):
     """Engine execution status of AgentSession."""
 

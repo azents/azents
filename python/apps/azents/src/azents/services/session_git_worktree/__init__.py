@@ -69,8 +69,33 @@ _MAX_COLLISION_ATTEMPTS = 20
 
 
 @dataclasses.dataclass(frozen=True)
+class ExistingProjectWorkspaceItem:
+    """Existing Project item selected for a new AgentSession."""
+
+    path: str
+
+
+@dataclasses.dataclass(frozen=True)
+class GitWorktreeWorkspaceItem:
+    """Git worktree item selected for a new AgentSession."""
+
+    source_project_path: str
+    starting_ref: str
+
+
+NewSessionWorkspaceItem = ExistingProjectWorkspaceItem | GitWorktreeWorkspaceItem
+
+
+@dataclasses.dataclass(frozen=True)
+class WorkspaceItemsWorkspaceMode:
+    """Ordered workspace items selected for a new AgentSession."""
+
+    items: list[NewSessionWorkspaceItem]
+
+
+@dataclasses.dataclass(frozen=True)
 class GitWorktreeWorkspaceMode:
-    """Git worktree mode selected for a new AgentSession."""
+    """Legacy single Git worktree mode selected for a new AgentSession."""
 
     source_project_path: str
     starting_ref: str
@@ -78,12 +103,16 @@ class GitWorktreeWorkspaceMode:
 
 @dataclasses.dataclass(frozen=True)
 class ExplicitProjectsWorkspaceMode:
-    """Existing explicit Project path mode selected for a new AgentSession."""
+    """Legacy existing explicit Project path mode selected for a new AgentSession."""
 
     project_paths: list[str]
 
 
-NewSessionWorkspaceMode = ExplicitProjectsWorkspaceMode | GitWorktreeWorkspaceMode
+NewSessionWorkspaceMode = (
+    WorkspaceItemsWorkspaceMode
+    | ExplicitProjectsWorkspaceMode
+    | GitWorktreeWorkspaceMode
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -203,6 +232,14 @@ class PreparedGitWorktreeInitialization:
     allocation: SessionGitWorktree
 
 
+@dataclasses.dataclass(frozen=True)
+class PreparedGitWorktreeInitializations:
+    """Prepared durable initialization rows for worktree workspace items."""
+
+    initialization: SessionInitialization
+    allocations: list[SessionGitWorktree]
+
+
 @dataclasses.dataclass
 class SessionGitWorktreeService:
     """Orchestrate session Git worktree allocation and initialization."""
@@ -318,31 +355,125 @@ class SessionGitWorktreeService:
         source_project_path: str,
         starting_ref: str,
     ) -> Result[PreparedGitWorktreeInitialization, InvalidProjectPath]:
-        """Create durable initialization rows for a Git worktree session."""
-        del agent_id
-        prepared = await self._prepare_worktree_steps(
+        """Create durable initialization rows for a legacy single-worktree session."""
+        prepared = await self.prepare_git_worktree_initializations(
             session,
+            agent_id=agent_id,
             session_id=session_id,
             session_handle=session_handle,
-            source_project_path=source_project_path,
-            starting_ref=starting_ref,
+            worktree_items=[
+                GitWorktreeWorkspaceItem(
+                    source_project_path=source_project_path,
+                    starting_ref=starting_ref,
+                )
+            ],
         )
         match prepared:
             case Success(value):
-                return Success(value)
+                allocation = value.allocations[0]
+                steps = await self.session_initialization_repository.list_steps(
+                    session,
+                    initialization_id=value.initialization.id,
+                )
+                create_step = next(
+                    (step for step in steps if step.id == allocation.step_id),
+                    None,
+                )
+                if create_step is None:
+                    raise RuntimeError("SessionInitializationStep row is missing")
+                return Success(
+                    PreparedGitWorktreeInitialization(
+                        initialization=value.initialization,
+                        create_step=create_step,
+                        allocation=allocation,
+                    )
+                )
             case Failure(error):
                 return Failure(error)
             case _:
                 assert_never(prepared)
 
+    async def prepare_git_worktree_initializations(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        session_handle: str,
+        worktree_items: list[GitWorktreeWorkspaceItem],
+    ) -> Result[PreparedGitWorktreeInitializations, InvalidProjectPath]:
+        """Create durable initialization rows for selected Git worktree items."""
+        del agent_id
+        if not worktree_items:
+            raise ValueError("worktree_items must not be empty")
+        initialization = (
+            await self.session_initialization_repository.create_initialization(
+                session,
+                SessionInitializationCreate(
+                    session_id=session_id,
+                    status=SessionInitializationStatus.PENDING,
+                    failure_summary=None,
+                    started_at=None,
+                    completed_at=None,
+                    failed_at=None,
+                    canceled_at=None,
+                    cleaned_at=None,
+                ),
+            )
+        )
+        allocations: list[SessionGitWorktree] = []
+        next_sequence = 1
+        for item in worktree_items:
+            prepared = await self._prepare_worktree_steps(
+                session,
+                initialization=initialization,
+                session_id=session_id,
+                session_handle=session_handle,
+                source_project_path=item.source_project_path,
+                starting_ref=item.starting_ref,
+                next_sequence=next_sequence,
+            )
+            match prepared:
+                case Success(value):
+                    allocations.append(value.allocation)
+                    next_sequence += 4
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(prepared)
+        await self.session_initialization_repository.append_event(
+            session,
+            SessionInitializationEventCreate(
+                initialization_id=initialization.id,
+                step_id=None,
+                session_id=session_id,
+                kind=SessionInitializationEventKind.INFO,
+                command_argv=None,
+                content="Git worktree initialization was scheduled.",
+                exit_code=None,
+            ),
+        )
+        await self.session_initialization_repository.mark_pending_for_queue(
+            session,
+            initialization_id=initialization.id,
+        )
+        return Success(
+            PreparedGitWorktreeInitializations(
+                initialization=initialization,
+                allocations=allocations,
+            )
+        )
+
     async def _prepare_worktree_steps(
         self,
         session: AsyncSession,
         *,
+        initialization: SessionInitialization,
         session_id: str,
         session_handle: str,
         source_project_path: str,
         starting_ref: str,
+        next_sequence: int,
     ) -> Result[PreparedGitWorktreeInitialization, InvalidProjectPath]:
         """Create one worktree allocation and its scoped initialization steps."""
         try:
@@ -360,22 +491,6 @@ class SessionGitWorktreeService:
                     reason="Starting Git ref is required.",
                 )
             )
-        initialization = (
-            await self.session_initialization_repository.create_initialization(
-                session,
-                SessionInitializationCreate(
-                    session_id=session_id,
-                    status=SessionInitializationStatus.PENDING,
-                    failure_summary=None,
-                    started_at=None,
-                    completed_at=None,
-                    failed_at=None,
-                    canceled_at=None,
-                    cleaned_at=None,
-                ),
-            )
-        )
-        next_sequence = 1
         worktree_id = uuid7().hex
         create_key = _worktree_step_key(
             SessionInitializationStepType.CREATE_GIT_WORKTREE,
@@ -479,22 +594,6 @@ class SessionGitWorktreeService:
                 status=SessionGitWorktreeStatus.PENDING,
             ),
         )
-        await self.session_initialization_repository.append_event(
-            session,
-            SessionInitializationEventCreate(
-                initialization_id=initialization.id,
-                step_id=None,
-                session_id=session_id,
-                kind=SessionInitializationEventKind.INFO,
-                command_argv=None,
-                content="Git worktree initialization was scheduled.",
-                exit_code=None,
-            ),
-        )
-        await self.session_initialization_repository.mark_pending_for_queue(
-            session,
-            initialization_id=initialization.id,
-        )
         return Success(
             PreparedGitWorktreeInitialization(
                 initialization=initialization,
@@ -519,9 +618,6 @@ class SessionGitWorktreeService:
             )
             if not allocations:
                 raise RuntimeError("SessionGitWorktree row is missing")
-            if len(allocations) != 1:
-                raise RuntimeError("SessionGitWorktree row count must be 1")
-            allocation = allocations[0]
             initialization = (
                 await self.session_initialization_repository.get_by_session_id(
                     session,
@@ -535,49 +631,76 @@ class SessionGitWorktreeService:
                 initialization_id=initialization.id,
             )
 
-        if _worktree_allocation_is_complete(allocation, steps):
+        allocation_steps = [
+            (
+                allocation,
+                _worktree_steps_for_allocation(
+                    allocation=allocation,
+                    steps=steps,
+                ),
+            )
+            for allocation in allocations
+        ]
+        allocation_steps.sort(key=lambda item: item[1].create_step.sequence)
+        if all(
+            _worktree_allocation_is_complete(allocation, steps)
+            for allocation in allocations
+        ):
             return
         claimed = await self._claim_initialization_run(session_id=session_id)
         if not claimed:
             return
 
-        allocation_steps = _worktree_steps_for_allocation(
-            allocation=allocation,
-            steps=steps,
-        )
         runtime = await self._get_runtime(agent_id=agent_id)
         if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+            allocation, steps_for_failure = _first_incomplete_allocation(
+                allocation_steps,
+                steps,
+            )
             await self._fail_initialization(
                 allocation=allocation,
-                step=allocation_steps.create_step,
+                step=steps_for_failure.create_step,
                 reason="Runtime runner is not ready.",
                 on_projection_updated=on_projection_updated,
             )
             return
         if self.runner_operations is None:
+            allocation, steps_for_failure = _first_incomplete_allocation(
+                allocation_steps,
+                steps,
+            )
             await self._fail_initialization(
                 allocation=allocation,
-                step=allocation_steps.create_step,
+                step=steps_for_failure.create_step,
                 reason="Runtime runner operations are unavailable.",
                 on_projection_updated=on_projection_updated,
             )
             return
 
-        completed = await self._run_one_git_worktree_initialization(
-            agent_id=agent_id,
-            runtime=runtime,
-            allocation=allocation,
-            steps=allocation_steps,
-            on_event_appended=on_event_appended,
-            on_projection_updated=on_projection_updated,
-        )
-        if not completed:
-            return
+        last_allocation = allocation_steps[-1][0]
+        for allocation, steps_for_allocation in allocation_steps:
+            if _worktree_allocation_is_complete(allocation, steps):
+                continue
+            completed = await self._run_one_git_worktree_initialization(
+                agent_id=agent_id,
+                runtime=runtime,
+                allocation=allocation,
+                steps=steps_for_allocation,
+                on_event_appended=on_event_appended,
+                on_projection_updated=on_projection_updated,
+            )
+            if not completed:
+                return
+            async with self.session_manager() as session:
+                steps = await self.session_initialization_repository.list_steps(
+                    session,
+                    initialization_id=initialization.id,
+                )
 
         async with self.session_manager() as session:
             await self.session_initialization_repository.update_initialization_status(
                 session,
-                initialization_id=allocation.initialization_id,
+                initialization_id=initialization.id,
                 status=SessionInitializationStatus.READY,
                 failure_summary=None,
                 started_at=None,
@@ -585,7 +708,7 @@ class SessionGitWorktreeService:
                 failed_at=None,
             )
         await self._publish_projection(
-            allocation=allocation,
+            allocation=last_allocation,
             on_projection_updated=on_projection_updated,
         )
 
@@ -1722,6 +1845,17 @@ class _CreateWorktreeSuccess:
     worktree_path: str
     branch_name: str
     base_commit: str
+
+
+def _first_incomplete_allocation(
+    allocation_steps: list[tuple[SessionGitWorktree, _WorktreeInitializationSteps]],
+    steps: list[SessionInitializationStep],
+) -> tuple[SessionGitWorktree, _WorktreeInitializationSteps]:
+    """Return the first allocation whose blocking setup is not complete."""
+    for allocation, allocation_step_group in allocation_steps:
+        if not _worktree_allocation_is_complete(allocation, steps):
+            return allocation, allocation_step_group
+    return allocation_steps[0]
 
 
 def _worktree_allocation_is_complete(

@@ -86,10 +86,32 @@ class NewSessionProjectDefaultsSource:
 
 
 @dataclasses.dataclass(frozen=True)
+class NewSessionDefaultExistingProjectWorkspaceItem:
+    """Existing Project item default for a new AgentSession."""
+
+    path: str
+
+
+@dataclasses.dataclass(frozen=True)
+class NewSessionDefaultGitWorktreeWorkspaceItem:
+    """Git worktree item default for a new AgentSession."""
+
+    source_project_path: str
+    starting_ref: str | None
+
+
+NewSessionProjectDefaultWorkspaceItem = (
+    NewSessionDefaultExistingProjectWorkspaceItem
+    | NewSessionDefaultGitWorktreeWorkspaceItem
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class NewSessionProjectDefaults:
-    """Default Project paths for a new non-primary AgentSession."""
+    """Default workspace items for a new non-primary AgentSession."""
 
     project_paths: list[str]
+    items: list[NewSessionProjectDefaultWorkspaceItem]
     source: NewSessionProjectDefaultsSource
 
 

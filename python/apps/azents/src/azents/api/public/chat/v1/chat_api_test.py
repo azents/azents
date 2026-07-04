@@ -38,6 +38,8 @@ from azents.api.public.chat.v1.data import (
     ChatInputWriteRequest,
     ChatMessageWriteRequest,
     ChatSessionCreateMessageWriteRequest,
+    ExistingProjectWorkspaceItemRequest,
+    GitWorktreeWorkspaceItemRequest,
     GitWorktreeWorkspaceModeRequest,
     GoalStatusUpdateRequest,
 )
@@ -106,7 +108,13 @@ from azents.services.chat_write import (
     AcceptedPendingCommand,
     AcceptedStopRequest,
 )
-from azents.services.session_git_worktree import GitWorktreeWorkspaceMode
+from azents.services.session_git_worktree import (
+    ExplicitProjectsWorkspaceMode,
+    GitWorktreeWorkspaceItem,
+    GitWorktreeWorkspaceMode,
+    NewSessionWorkspaceMode,
+    WorkspaceItemsWorkspaceMode,
+)
 from azents.services.session_initialization import (
     SessionInitializationDetail,
     SessionInitializationProjection,
@@ -765,7 +773,7 @@ class _AgentSessionRouteChatService:
         self.agent_id: str | None = None
         self.session_id: str | None = None
         self.project_paths: list[str] | None = None
-        self.workspace_mode: GitWorktreeWorkspaceMode | None = None
+        self.workspace_mode: NewSessionWorkspaceMode | None = None
         self.primary_session = AgentSession(
             id="1123456789abcdef0123456789abcdef",
             workspace_id="workspace-1",
@@ -844,7 +852,7 @@ class _AgentSessionRouteChatService:
         *,
         agent_id: str,
         user_id: str,
-        workspace_mode: GitWorktreeWorkspaceMode | None = None,
+        workspace_mode: NewSessionWorkspaceMode | None = None,
         project_paths: list[str] | None = None,
     ) -> Result[AgentSession, SessionNotFound]:
         """Return created team session result."""
@@ -983,7 +991,9 @@ class TestAgentSessionRoutes:
         assert response.id == "2123456789abcdef0123456789abcdef"
         assert response.agent_id == "agent-1"
         assert response.primary_kind is None
-        assert chat_service.project_paths == ["/workspace/agent/app"]
+        workspace_mode = chat_service.workspace_mode
+        assert isinstance(workspace_mode, ExplicitProjectsWorkspaceMode)
+        assert workspace_mode.project_paths == ["/workspace/agent/app"]
 
     async def test_create_team_agent_session_accepts_git_worktree_mode(self) -> None:
         """Team session creation route accepts Git worktree workspace mode."""
@@ -1012,8 +1022,39 @@ class TestAgentSessionRoutes:
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 
+    async def test_create_team_agent_session_accepts_workspace_items(self) -> None:
+        """Team session creation route accepts mixed workspace items."""
+        chat_service = _AgentSessionRouteChatService()
+
+        response = await create_team_agent_session(
+            agent_id="agent-1",
+            request=AgentSessionCreateRequest(
+                workspace_items=[
+                    ExistingProjectWorkspaceItemRequest(
+                        type="existing_project",
+                        path="/workspace/agent/app",
+                    ),
+                    GitWorktreeWorkspaceItemRequest(
+                        type="git_worktree",
+                        source_project_path="/workspace/agent/source",
+                        starting_ref="refs/heads/main",
+                    ),
+                ],
+            ),
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            broker=_MemoryBroker(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+        )
+
+        assert response.id == "2123456789abcdef0123456789abcdef"
+        workspace_mode = chat_service.workspace_mode
+        assert isinstance(workspace_mode, WorkspaceItemsWorkspaceMode)
+        assert len(workspace_mode.items) == 2
+        assert isinstance(workspace_mode.items[1], GitWorktreeWorkspaceItem)
+        assert workspace_mode.items[1].starting_ref == "refs/heads/main"
+
     async def test_create_team_agent_session_requires_workspace_selection(self) -> None:
-        """Team session creation route rejects missing workspace mode and Projects."""
+        """Team session creation route rejects missing workspace selection."""
         chat_service = _AgentSessionRouteChatService()
 
         try:
@@ -1026,7 +1067,7 @@ class TestAgentSessionRoutes:
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 400
-            assert getattr(exc, "detail", None) == "workspace_mode is required."
+            assert getattr(exc, "detail", None) == "workspace_items is required."
         else:
             raise AssertionError("Expected HTTPException")
 
@@ -1454,7 +1495,9 @@ class TestRestMessageWriteContract:
 
         assert input_service.calls == ["create_team_session_with_buffered_input"]
         assert input_service.kwargs[0]["client_request_id"] == "client-new-1"
-        assert input_service.kwargs[0]["project_paths"] == ["/workspace/agent/app"]
+        workspace_mode = input_service.kwargs[0]["workspace_mode"]
+        assert isinstance(workspace_mode, ExplicitProjectsWorkspaceMode)
+        assert workspace_mode.project_paths == ["/workspace/agent/app"]
         assert response.session_id == "4123456789abcdef0123456789abcdef"
         assert response.accepted.id == "0123456789abcdef0123456789abcdef"
         snapshot_buffer = response.snapshot.input_buffer_events[0]
@@ -1502,8 +1545,53 @@ class TestRestMessageWriteContract:
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 
+    async def test_new_session_message_accepts_workspace_items(self) -> None:
+        """Draft-session REST write accepts mixed workspace items."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        chat_service = _RestWriteChatService(
+            session_id="4123456789abcdef0123456789abcdef"
+        )
+        input_service = _BufferedInputService()
+
+        response = await _write_new_session_message_via_rest(
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            ChatSessionCreateMessageWriteRequest(
+                client_request_id="client-new-mixed",
+                message="hello from mixed workspace",
+                workspace_items=[
+                    ExistingProjectWorkspaceItemRequest(
+                        type="existing_project",
+                        path="/workspace/agent/app",
+                    ),
+                    GitWorktreeWorkspaceItemRequest(
+                        type="git_worktree",
+                        source_project_path="/workspace/agent/source",
+                        starting_ref="refs/heads/main",
+                    ),
+                ],
+            ),
+            agent_id="agent-1",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert input_service.calls == ["create_team_session_with_buffered_input"]
+        workspace_mode = input_service.kwargs[0]["workspace_mode"]
+        assert isinstance(workspace_mode, WorkspaceItemsWorkspaceMode)
+        assert len(workspace_mode.items) == 2
+        assert isinstance(workspace_mode.items[1], GitWorktreeWorkspaceItem)
+        assert workspace_mode.items[1].source_project_path == "/workspace/agent/source"
+        assert response.session_id == "4123456789abcdef0123456789abcdef"
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+
     async def test_new_session_message_requires_workspace_selection(self) -> None:
-        """Draft-session REST write rejects missing workspace mode and Projects."""
+        """Draft-session REST write rejects missing workspace selection."""
         broker = _MemoryBroker()
         broadcast = _MemoryBroadcast()
         chat_service = _RestWriteChatService()
@@ -1526,7 +1614,7 @@ class TestRestMessageWriteContract:
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 400
-            assert getattr(exc, "detail", None) == "workspace_mode is required."
+            assert getattr(exc, "detail", None) == "workspace_items is required."
         else:
             raise AssertionError("Expected HTTPException")
 

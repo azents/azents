@@ -16,13 +16,13 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-02 | 36 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-04 | 82 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-04 | 83 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-02 | 2 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-02 | 44 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-29 | 5 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-04 | 26 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-04 | 27 |
 
 _8 documents_
 
@@ -144,8 +144,9 @@ _14 documents_
 - [ADR-0090: Backend Project Browser Manifest](adr/0090-backend-project-browser-manifest.md)
 - [ADR-0091: Session Initialization Lifecycle](adr/0091-session-initialization-lifecycle.md)
 - [ADR-0092: Azents-Owned Git Worktree Ownership and Cleanup](adr/0092-azents-owned-git-worktree-ownership-and-cleanup.md)
+- [ADR-0093: New Session Mixed Workspace Selection](adr/0093-new-session-mixed-workspace-selection.md)
 
-_95 documents_
+_96 documents_
 
 ## Issues (Bug Tracking)
 
@@ -177,4 +178,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 341
+- Total documents: 344

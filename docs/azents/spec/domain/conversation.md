@@ -88,7 +88,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-04
-spec_version: 82
+spec_version: 83
 ---
 
 # Conversation & Events
@@ -157,21 +157,26 @@ most recent non-reverted `user_message` event or the session creation time when 
 This lets newly created sessions appear naturally in the active list before their first message. Each
 session item includes `run_state` so azents-web can mark running sessions in the Agent rail session
 list. `POST /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session. The
-request selects a workspace mode. `existing_projects` registers the explicit `project_paths` supplied
-by the client and does not copy Projects from the team primary session. `git_worktree` records a
-durable session initialization that creates an Azents-owned Git worktree from a source Project path and
-starting ref before registering the created worktree as the session Project. For legacy clients,
-`project_paths` is still accepted as the existing-Projects mode. `POST /chat/v1/agents/{agent_id}/sessions/messages`
-creates the same kind of non-primary team session and enqueues the first user message in one write
-boundary. When the selected workspace mode needs blocking initialization, the input buffer remains
-pending until initialization becomes ready and the first run is gated behind that state. The
-first-message create response is `ChatWriteResponse`, including the created `session_id` and live
-snapshot. azents-web Agent detail routes surface the active session list in the Agent rail and navigate
-selected sessions through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action
-navigates to `/w/{handle}/agents/{agent_id}/sessions/new`, which is a draft route and must not create
-an `AgentSession` row. The draft route renders the Agent top bar plus the chat input surface, but it
-does not render session-scoped Projects or Context tabs. On first-message success, azents-web replaces
-the draft URL with the created session URL and invalidates the Agent session list cache.
+current request shape is `workspace_items`: an ordered list of `existing_project` items and
+`git_worktree` items. `existing_project` registers the explicit Project path supplied by the client and
+does not copy Projects from the team primary session. Each `git_worktree` item records durable session
+initialization steps that create an Azents-owned Git worktree from a source Project path and local base
+branch before registering the created worktree as a session Project. For legacy clients,
+`workspace_mode` (`existing_projects` or `git_worktree`) and `project_paths` remain accepted and are
+normalized into the same service workspace selection model.
+`POST /chat/v1/agents/{agent_id}/sessions/messages` creates the same kind of non-primary team session
+and enqueues the first user message in one write boundary. When any selected workspace item needs
+blocking initialization, the input buffer remains pending until initialization becomes ready and the
+first run is gated behind that state. The first-message create response is `ChatWriteResponse`,
+including the created `session_id` and live snapshot. azents-web Agent detail routes surface the active
+session list in the Agent rail and navigate selected sessions through
+`/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action navigates to
+`/w/{handle}/agents/{agent_id}/sessions/new`, which is a draft route and must not create an
+`AgentSession` row. The draft route renders the Agent top bar plus the chat input surface, but it does
+not render session-scoped Projects or Context tabs. The draft composer shows a compact additive
+workspace selector where existing Projects and new worktree items are added to one list; the worktree
+base branch picker shows local branches only. On first-message success, azents-web replaces the draft
+URL with the created session URL and invalidates the Agent session list cache.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":

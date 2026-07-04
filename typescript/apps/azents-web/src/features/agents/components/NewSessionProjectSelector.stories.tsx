@@ -37,13 +37,6 @@ const refs: GitRefEntryResponse[] = [
     target: "def456",
     default: false,
   },
-  {
-    name: "v1.0.0",
-    ref: "refs/tags/v1.0.0",
-    type: "tag",
-    target: "fedcba",
-    default: false,
-  },
 ];
 
 const meta = {
@@ -56,16 +49,21 @@ const meta = {
     ),
   ],
   args: {
-    selectedProjectPaths: ["/workspace/agent/azents"],
-    workspaceMode: { type: "existing_projects" },
+    workspaceItems: [
+      {
+        id: "existing-azents",
+        type: "existing_project",
+        path: "/workspace/agent/azents",
+      },
+    ],
+    activeWorktreeItemId: null,
     gitRefPreviewState: { type: "IDLE" },
     projectPresetState: { type: "READY", presets },
-    onSelectExistingProjectsMode: () => {},
-    onSelectGitWorktreeMode: () => {},
     onAddPresetProject: () => {},
-    onSetWorktreeSourceProject: () => {},
+    onAddWorktreeProject: () => {},
+    onActivateWorktreeItem: () => {},
     onSetWorktreeStartingRef: () => {},
-    onRemoveProject: () => {},
+    onRemoveWorkspaceItem: () => {},
     onOpenProjectPicker: () => {},
   },
 } satisfies Meta<typeof NewSessionProjectSelector>;
@@ -74,55 +72,75 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const ExistingProjects = {} satisfies Story;
+export const ExistingProject = {} satisfies Story;
 
-export const ExistingProjectsEmpty = {
+export const Empty = {
   args: {
-    selectedProjectPaths: [],
+    workspaceItems: [],
   },
 } satisfies Story;
 
-export const GitWorktreeNeedsSource = {
+export const MixedWorkspaces = {
   args: {
-    selectedProjectPaths: [],
-    workspaceMode: {
-      type: "git_worktree",
-      sourceProjectPath: null,
-      startingRef: null,
-    },
-    gitRefPreviewState: { type: "IDLE" },
-  },
-} satisfies Story;
-
-export const GitWorktreeLoadingRefs = {
-  args: {
-    workspaceMode: {
-      type: "git_worktree",
-      sourceProjectPath: "/workspace/agent/azents",
-      startingRef: null,
-    },
-    gitRefPreviewState: { type: "LOADING" },
-  },
-} satisfies Story;
-
-export const GitWorktreeReady = {
-  args: {
-    workspaceMode: {
-      type: "git_worktree",
-      sourceProjectPath: "/workspace/agent/azents",
-      startingRef: "refs/heads/main",
-    },
+    workspaceItems: [
+      {
+        id: "existing-azents",
+        type: "existing_project",
+        path: "/workspace/agent/azents",
+      },
+      {
+        id: "worktree-api",
+        type: "git_worktree",
+        sourceProjectPath: "/workspace/agent/azents/python/apps/azents",
+        startingRef: "refs/heads/main",
+      },
+    ],
+    activeWorktreeItemId: "worktree-api",
     gitRefPreviewState: { type: "READY", refs },
   },
 } satisfies Story;
 
-export const GitWorktreeRefError = {
+export const WorktreeLoadingBranches = {
   args: {
-    workspaceMode: {
-      type: "git_worktree",
-      sourceProjectPath: "/workspace/agent/azents",
-      startingRef: null,
-    },
+    workspaceItems: [
+      {
+        id: "worktree-azents",
+        type: "git_worktree",
+        sourceProjectPath: "/workspace/agent/azents",
+        startingRef: null,
+      },
+    ],
+    activeWorktreeItemId: "worktree-azents",
+    gitRefPreviewState: { type: "LOADING" },
+  },
+} satisfies Story;
+
+export const WorktreeBranchError = {
+  args: {
+    workspaceItems: [
+      {
+        id: "worktree-azents",
+        type: "git_worktree",
+        sourceProjectPath: "/workspace/agent/azents",
+        startingRef: null,
+      },
+    ],
+    activeWorktreeItemId: "worktree-azents",
     gitRefPreviewState: { type: "ERROR", message: "Git ref preview failed." },
+  },
+} satisfies Story;
+
+export const WorktreeNoLocalBranches = {
+  args: {
+    workspaceItems: [
+      {
+        id: "worktree-azents",
+        type: "git_worktree",
+        sourceProjectPath: "/workspace/agent/azents",
+        startingRef: null,
+      },
+    ],
+    activeWorktreeItemId: "worktree-azents",
+    gitRefPreviewState: { type: "READY", refs: [] },
   },
 } satisfies Story;

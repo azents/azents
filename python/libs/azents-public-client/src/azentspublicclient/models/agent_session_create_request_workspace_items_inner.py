@@ -19,28 +19,28 @@ import pprint
 import re  # noqa: F401
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
 from typing import Optional
-from azentspublicclient.models.existing_projects_workspace_mode_request import ExistingProjectsWorkspaceModeRequest
-from azentspublicclient.models.git_worktree_workspace_mode_request import GitWorktreeWorkspaceModeRequest
+from azentspublicclient.models.existing_project_workspace_item_request import ExistingProjectWorkspaceItemRequest
+from azentspublicclient.models.git_worktree_workspace_item_request import GitWorktreeWorkspaceItemRequest
 from typing import Union, Any, List, Set, TYPE_CHECKING, Optional, Dict
 from typing_extensions import Literal, Self
 from pydantic import Field
 
-WORKSPACEMODE_ANY_OF_SCHEMAS = ["ExistingProjectsWorkspaceModeRequest", "GitWorktreeWorkspaceModeRequest"]
+AGENTSESSIONCREATEREQUESTWORKSPACEITEMSINNER_ANY_OF_SCHEMAS = ["ExistingProjectWorkspaceItemRequest", "GitWorktreeWorkspaceItemRequest"]
 
-class WorkspaceMode(BaseModel):
+class AgentSessionCreateRequestWorkspaceItemsInner(BaseModel):
     """
-    Legacy workspace mode for the created session
+    AgentSessionCreateRequestWorkspaceItemsInner
     """
 
-    # data type: ExistingProjectsWorkspaceModeRequest
-    anyof_schema_1_validator: Optional[ExistingProjectsWorkspaceModeRequest] = None
-    # data type: GitWorktreeWorkspaceModeRequest
-    anyof_schema_2_validator: Optional[GitWorktreeWorkspaceModeRequest] = None
+    # data type: ExistingProjectWorkspaceItemRequest
+    anyof_schema_1_validator: Optional[ExistingProjectWorkspaceItemRequest] = None
+    # data type: GitWorktreeWorkspaceItemRequest
+    anyof_schema_2_validator: Optional[GitWorktreeWorkspaceItemRequest] = None
     if TYPE_CHECKING:
-        actual_instance: Optional[Union[ExistingProjectsWorkspaceModeRequest, GitWorktreeWorkspaceModeRequest]] = None
+        actual_instance: Optional[Union[ExistingProjectWorkspaceItemRequest, GitWorktreeWorkspaceItemRequest]] = None
     else:
         actual_instance: Any = None
-    any_of_schemas: Set[str] = { "ExistingProjectsWorkspaceModeRequest", "GitWorktreeWorkspaceModeRequest" }
+    any_of_schemas: Set[str] = { "ExistingProjectWorkspaceItemRequest", "GitWorktreeWorkspaceItemRequest" }
 
     model_config = {
         "validate_assignment": True,
@@ -59,26 +59,23 @@ class WorkspaceMode(BaseModel):
 
     @field_validator('actual_instance')
     def actual_instance_must_validate_anyof(cls, v):
-        if v is None:
-            return v
-
-        instance = WorkspaceMode.model_construct()
+        instance = AgentSessionCreateRequestWorkspaceItemsInner.model_construct()
         error_messages = []
-        # validate data type: ExistingProjectsWorkspaceModeRequest
-        if not isinstance(v, ExistingProjectsWorkspaceModeRequest):
-            error_messages.append(f"Error! Input type `{type(v)}` is not `ExistingProjectsWorkspaceModeRequest`")
+        # validate data type: ExistingProjectWorkspaceItemRequest
+        if not isinstance(v, ExistingProjectWorkspaceItemRequest):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `ExistingProjectWorkspaceItemRequest`")
         else:
             return v
 
-        # validate data type: GitWorktreeWorkspaceModeRequest
-        if not isinstance(v, GitWorktreeWorkspaceModeRequest):
-            error_messages.append(f"Error! Input type `{type(v)}` is not `GitWorktreeWorkspaceModeRequest`")
+        # validate data type: GitWorktreeWorkspaceItemRequest
+        if not isinstance(v, GitWorktreeWorkspaceItemRequest):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `GitWorktreeWorkspaceItemRequest`")
         else:
             return v
 
         if error_messages:
             # no match
-            raise ValueError("No match found when setting the actual_instance in WorkspaceMode with anyOf schemas: ExistingProjectsWorkspaceModeRequest, GitWorktreeWorkspaceModeRequest. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting the actual_instance in AgentSessionCreateRequestWorkspaceItemsInner with anyOf schemas: ExistingProjectWorkspaceItemRequest, GitWorktreeWorkspaceItemRequest. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -90,26 +87,23 @@ class WorkspaceMode(BaseModel):
     def from_json(cls, json_str: str) -> Self:
         """Returns the object represented by the json string"""
         instance = cls.model_construct()
-        if json_str is None:
-            return instance
-
         error_messages = []
-        # anyof_schema_1_validator: Optional[ExistingProjectsWorkspaceModeRequest] = None
+        # anyof_schema_1_validator: Optional[ExistingProjectWorkspaceItemRequest] = None
         try:
-            instance.actual_instance = ExistingProjectsWorkspaceModeRequest.from_json(json_str)
+            instance.actual_instance = ExistingProjectWorkspaceItemRequest.from_json(json_str)
             return instance
         except (ValidationError, ValueError) as e:
              error_messages.append(str(e))
-        # anyof_schema_2_validator: Optional[GitWorktreeWorkspaceModeRequest] = None
+        # anyof_schema_2_validator: Optional[GitWorktreeWorkspaceItemRequest] = None
         try:
-            instance.actual_instance = GitWorktreeWorkspaceModeRequest.from_json(json_str)
+            instance.actual_instance = GitWorktreeWorkspaceItemRequest.from_json(json_str)
             return instance
         except (ValidationError, ValueError) as e:
              error_messages.append(str(e))
 
         if error_messages:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into WorkspaceMode with anyOf schemas: ExistingProjectsWorkspaceModeRequest, GitWorktreeWorkspaceModeRequest. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into AgentSessionCreateRequestWorkspaceItemsInner with anyOf schemas: ExistingProjectWorkspaceItemRequest, GitWorktreeWorkspaceItemRequest. Details: " + ", ".join(error_messages))
         else:
             return instance
 
@@ -123,7 +117,7 @@ class WorkspaceMode(BaseModel):
         else:
             return json.dumps(self.actual_instance)
 
-    def to_dict(self) -> Optional[Union[Dict[str, Any], ExistingProjectsWorkspaceModeRequest, GitWorktreeWorkspaceModeRequest]]:
+    def to_dict(self) -> Optional[Union[Dict[str, Any], ExistingProjectWorkspaceItemRequest, GitWorktreeWorkspaceItemRequest]]:
         """Returns the dict representation of the actual instance"""
         if self.actual_instance is None:
             return None
@@ -136,5 +130,3 @@ class WorkspaceMode(BaseModel):
     def to_str(self) -> str:
         """Returns the string representation of the actual instance"""
         return pprint.pformat(self.model_dump())
-
-

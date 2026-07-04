@@ -7,7 +7,11 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentSessionStatus, InputBufferKind
+from azents.core.enums import (
+    AgentProjectDefaultItemType,
+    AgentSessionStatus,
+    InputBufferKind,
+)
 from azents.engine.run.input import InputMessage
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
@@ -15,6 +19,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
+from azents.repos.agent_project_default.data import AgentProjectDefaultCreate
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -25,14 +30,19 @@ from azents.repos.session_workspace_project.data import SessionWorkspaceProjectC
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.services.session_git_worktree import (
+    ExistingProjectWorkspaceItem,
     ExplicitProjectsWorkspaceMode,
+    GitWorktreeWorkspaceItem,
     GitWorktreeWorkspaceMode,
+    NewSessionWorkspaceItem,
     NewSessionWorkspaceMode,
     SessionGitWorktreeService,
+    WorkspaceItemsWorkspaceMode,
 )
 from azents.services.session_initialization import SessionInitializationService
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
+    normalize_session_workspace_path,
     normalize_session_workspace_project_paths,
 )
 
@@ -244,19 +254,14 @@ class AgentSessionInputService:
                 session,
                 session_id=primary_session.id,
             )
-            normalized_project_paths: list[str] | None = None
-            match workspace_mode:
-                case ExplicitProjectsWorkspaceMode(project_paths=project_paths):
-                    try:
-                        normalized_project_paths = (
-                            normalize_session_workspace_project_paths(project_paths)
-                        )
-                    except ValueError as exc:
-                        return Failure(InvalidProjectPath(path="", reason=str(exc)))
-                case GitWorktreeWorkspaceMode():
+            workspace_items_result = self._workspace_items_from_mode(workspace_mode)
+            match workspace_items_result:
+                case Success(workspace_items):
                     pass
+                case Failure(error):
+                    return Failure(error)
                 case _:
-                    assert_never(workspace_mode)
+                    assert_never(workspace_items_result)
             agent_session = await self.agent_session_repository.create(
                 session,
                 AgentSessionCreate(
@@ -266,45 +271,20 @@ class AgentSessionInputService:
                     primary_kind=None,
                 ),
             )
-            match workspace_mode:
-                case ExplicitProjectsWorkspaceMode():
-                    assert normalized_project_paths is not None
-                    initialization_service = self.session_initialization_service
-                    ensure_ready = (
-                        initialization_service.ensure_ready_noop_initialization
-                    )
-                    await ensure_ready(session, session_id=agent_session.id)
-                    await self._create_session_projects(
-                        session,
-                        agent_id=agent_id,
-                        session_id=agent_session.id,
-                        project_paths=normalized_project_paths,
-                    )
-                case GitWorktreeWorkspaceMode(
-                    source_project_path=source_project_path,
-                    starting_ref=starting_ref,
-                ):
-                    worktree_service = self.session_git_worktree_service
-                    if worktree_service is None:
-                        raise RuntimeError("SessionGitWorktreeService is unavailable")
-                    prepare = worktree_service.prepare_git_worktree_initialization
-                    prepared = await prepare(
-                        session,
-                        agent_id=agent_id,
-                        session_id=agent_session.id,
-                        session_handle=agent_session.handle,
-                        source_project_path=source_project_path,
-                        starting_ref=starting_ref,
-                    )
-                    match prepared:
-                        case Success():
-                            pass
-                        case Failure(error):
-                            return Failure(error)
-                        case _:
-                            assert_never(prepared)
+            workspace_result = await self._create_session_workspace_items(
+                session,
+                agent_id=agent_id,
+                session_id=agent_session.id,
+                session_handle=agent_session.handle,
+                workspace_items=workspace_items,
+            )
+            match workspace_result:
+                case Success():
+                    pass
+                case Failure(error):
+                    return Failure(error)
                 case _:
-                    assert_never(workspace_mode)
+                    assert_never(workspace_result)
             input_buffer = await self._enqueue_user_message(
                 session,
                 agent_session=agent_session,
@@ -347,17 +327,101 @@ class AgentSessionInputService:
         )
         return result.input_buffer
 
-    async def _create_session_projects(
+    def _workspace_items_from_mode(
+        self,
+        workspace_mode: NewSessionWorkspaceMode,
+    ) -> Result[list[NewSessionWorkspaceItem], InvalidProjectPath]:
+        """Normalize legacy and item-list workspace mode inputs."""
+        match workspace_mode:
+            case WorkspaceItemsWorkspaceMode(items=items):
+                try:
+                    normalized_items: list[NewSessionWorkspaceItem] = []
+                    for item in items:
+                        match item:
+                            case ExistingProjectWorkspaceItem(path=path):
+                                normalized_items.append(
+                                    ExistingProjectWorkspaceItem(
+                                        path=normalize_session_workspace_path(path),
+                                    )
+                                )
+                            case GitWorktreeWorkspaceItem(
+                                source_project_path=source_project_path,
+                                starting_ref=starting_ref,
+                            ):
+                                normalized_items.append(
+                                    GitWorktreeWorkspaceItem(
+                                        source_project_path=normalize_session_workspace_path(
+                                            source_project_path
+                                        ),
+                                        starting_ref=starting_ref.strip(),
+                                    )
+                                )
+                            case _:
+                                assert_never(item)
+                except ValueError as exc:
+                    return Failure(InvalidProjectPath(path="", reason=str(exc)))
+                return Success(_dedupe_existing_project_items(normalized_items))
+            case ExplicitProjectsWorkspaceMode(project_paths=project_paths):
+                try:
+                    normalized_project_paths = (
+                        normalize_session_workspace_project_paths(project_paths)
+                    )
+                except ValueError as exc:
+                    return Failure(InvalidProjectPath(path="", reason=str(exc)))
+                existing_items: list[NewSessionWorkspaceItem] = [
+                    ExistingProjectWorkspaceItem(path=path)
+                    for path in normalized_project_paths
+                ]
+                return Success(existing_items)
+            case GitWorktreeWorkspaceMode(
+                source_project_path=source_project_path,
+                starting_ref=starting_ref,
+            ):
+                try:
+                    normalized_source_path = normalize_session_workspace_path(
+                        source_project_path
+                    )
+                except ValueError as exc:
+                    return Failure(
+                        InvalidProjectPath(path=source_project_path, reason=str(exc))
+                    )
+                git_worktree_items: list[NewSessionWorkspaceItem] = [
+                    GitWorktreeWorkspaceItem(
+                        source_project_path=normalized_source_path,
+                        starting_ref=starting_ref.strip(),
+                    )
+                ]
+                return Success(git_worktree_items)
+            case _:
+                assert_never(workspace_mode)
+
+    async def _create_session_workspace_items(
         self,
         session: AsyncSession,
         *,
         agent_id: str,
         session_id: str,
-        project_paths: list[str],
-    ) -> None:
-        """Create session Project rows and refresh Agent Project presets."""
+        session_handle: str,
+        workspace_items: list[NewSessionWorkspaceItem],
+    ) -> Result[None, InvalidProjectPath]:
+        """Create direct Project rows and queue selected worktree items."""
+        existing_project_paths = [
+            item.path
+            for item in workspace_items
+            if isinstance(item, ExistingProjectWorkspaceItem)
+        ]
+        worktree_items = [
+            item
+            for item in workspace_items
+            if isinstance(item, GitWorktreeWorkspaceItem)
+        ]
+        if not worktree_items:
+            await self.session_initialization_service.ensure_ready_noop_initialization(
+                session,
+                session_id=session_id,
+            )
         project_repository = self.session_workspace_project_repository
-        for path in project_paths:
+        for path in existing_project_paths:
             await project_repository.create_project(
                 session,
                 SessionWorkspaceProjectCreate(
@@ -375,12 +439,65 @@ class AgentSessionInputService:
                 agent_id=agent_id,
                 path=path,
             )
-        if project_paths:
-            await self.agent_project_default_repository.replace_defaults(
+        for item in worktree_items:
+            await self.agent_project_preset_repository.upsert_preset(
                 session,
                 agent_id=agent_id,
-                paths=project_paths,
+                path=item.source_project_path,
             )
+        if worktree_items:
+            worktree_service = self.session_git_worktree_service
+            if worktree_service is None:
+                raise RuntimeError("SessionGitWorktreeService is unavailable")
+            prepared = await worktree_service.prepare_git_worktree_initializations(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                session_handle=session_handle,
+                worktree_items=worktree_items,
+            )
+            match prepared:
+                case Success():
+                    pass
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(prepared)
+        if workspace_items:
+            await self.agent_project_default_repository.replace_default_items(
+                session,
+                agent_id=agent_id,
+                items=[
+                    _default_item_from_workspace_item(item) for item in workspace_items
+                ],
+            )
+        return Success(None)
+
+    async def _create_session_projects(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        project_paths: list[str],
+    ) -> None:
+        """Create session Project rows and refresh Agent Project presets."""
+        workspace_result = await self._create_session_workspace_items(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            session_handle="",
+            workspace_items=[
+                ExistingProjectWorkspaceItem(path=path) for path in project_paths
+            ],
+        )
+        match workspace_result:
+            case Success():
+                return
+            case Failure(error):
+                raise ValueError(error.reason)
+            case _:
+                assert_never(workspace_result)
 
     async def _has_workspace_access(
         self,
@@ -396,3 +513,42 @@ class AgentSessionInputService:
             user_id=user_id,
         )
         return workspace_user is not None
+
+
+def _dedupe_existing_project_items(
+    items: list[NewSessionWorkspaceItem],
+) -> list[NewSessionWorkspaceItem]:
+    """Deduplicate exact existing Project rows while preserving worktree items."""
+    seen_project_paths: set[str] = set()
+    deduped: list[NewSessionWorkspaceItem] = []
+    for item in items:
+        match item:
+            case ExistingProjectWorkspaceItem(path=path):
+                if path in seen_project_paths:
+                    continue
+                seen_project_paths.add(path)
+                deduped.append(item)
+            case GitWorktreeWorkspaceItem():
+                deduped.append(item)
+            case _:
+                assert_never(item)
+    return deduped
+
+
+def _default_item_from_workspace_item(
+    item: NewSessionWorkspaceItem,
+) -> AgentProjectDefaultCreate:
+    """Convert a selected workspace item to reusable default metadata."""
+    match item:
+        case ExistingProjectWorkspaceItem(path=path):
+            return AgentProjectDefaultCreate(
+                path=path,
+                item_type=AgentProjectDefaultItemType.EXISTING_PROJECT,
+            )
+        case GitWorktreeWorkspaceItem(source_project_path=source_project_path):
+            return AgentProjectDefaultCreate(
+                path=source_project_path,
+                item_type=AgentProjectDefaultItemType.GIT_WORKTREE,
+            )
+        case _:
+            assert_never(item)

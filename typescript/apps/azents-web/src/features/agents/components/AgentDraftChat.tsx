@@ -25,18 +25,17 @@ export function AgentDraftChat(
     isWritePending,
     canSendMessage,
     onSendMessage,
-    selectedProjectPaths,
-    workspaceMode,
+    workspaceItems,
+    activeWorktreeItemId,
     gitRefPreviewState,
     projectPresetState,
     projectPickerState,
     isProjectPickerOpen,
-    onSelectExistingProjectsMode,
-    onSelectGitWorktreeMode,
     onAddPresetProject,
-    onSetWorktreeSourceProject,
+    onAddWorktreeProject,
+    onActivateWorktreeItem,
     onSetWorktreeStartingRef,
-    onRemoveProject,
+    onRemoveWorkspaceItem,
     onOpenProjectPicker,
     onCloseProjectPicker,
     onOpenProjectPickerDirectory,
@@ -116,16 +115,15 @@ export function AgentDraftChat(
       <Box px="md" py="sm" style={{ flexShrink: 0 }}>
         <Box maw={rem(920)} mx="auto">
           <NewSessionProjectSelector
+            activeWorktreeItemId={activeWorktreeItemId}
             gitRefPreviewState={gitRefPreviewState}
             projectPresetState={projectPresetState}
-            selectedProjectPaths={selectedProjectPaths}
-            workspaceMode={workspaceMode}
+            workspaceItems={workspaceItems}
+            onActivateWorktreeItem={onActivateWorktreeItem}
             onAddPresetProject={onAddPresetProject}
+            onAddWorktreeProject={onAddWorktreeProject}
             onOpenProjectPicker={onOpenProjectPicker}
-            onRemoveProject={onRemoveProject}
-            onSelectExistingProjectsMode={onSelectExistingProjectsMode}
-            onSelectGitWorktreeMode={onSelectGitWorktreeMode}
-            onSetWorktreeSourceProject={onSetWorktreeSourceProject}
+            onRemoveWorkspaceItem={onRemoveWorkspaceItem}
             onSetWorktreeStartingRef={onSetWorktreeStartingRef}
           />
           <ChatInput
