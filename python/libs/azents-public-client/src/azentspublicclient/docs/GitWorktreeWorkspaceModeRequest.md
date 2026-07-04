@@ -6,9 +6,9 @@ Git worktree mode for a new AgentSession.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Workspace mode type |
-**source_project_path** | **str** | Source Project path |
-**starting_ref** | **str** | Starting Git ref |
+**type** | **str** | Workspace mode type | 
+**source_project_path** | **str** | Source Project path | 
+**starting_ref** | **str** | Starting Git ref | 
 
 ## Example
 
@@ -28,3 +28,5 @@ git_worktree_workspace_mode_request_dict = git_worktree_workspace_mode_request_i
 git_worktree_workspace_mode_request_from_dict = GitWorktreeWorkspaceModeRequest.from_dict(git_worktree_workspace_mode_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,11 +6,11 @@ REST first message write request for a draft AgentSession.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**client_request_id** | **str** | Client-generated idempotency key |
-**message** | **str** | Message content |
-**workspace_mode** | [**WorkspaceMode**](WorkspaceMode.md) |  | [optional]
-**project_paths** | **List[str]** |  | [optional]
-**attachments** | **List[str]** |  | [optional]
+**client_request_id** | **str** | Client-generated idempotency key | 
+**message** | **str** | Message content | 
+**workspace_mode** | [**WorkspaceMode**](WorkspaceMode.md) |  | [optional] 
+**project_paths** | **List[str]** |  | [optional] 
+**attachments** | **List[str]** |  | [optional] 
 
 ## Example
 
@@ -30,3 +30,5 @@ chat_session_create_message_write_request_dict = chat_session_create_message_wri
 chat_session_create_message_write_request_from_dict = ChatSessionCreateMessageWriteRequest.from_dict(chat_session_create_message_write_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -1166,14 +1166,7 @@
         "missing": "見つかりません",
         "unavailable": "利用不可",
         "error": "エラー"
-      },
-      "addWorktreeProject": "ワークツリーを追加",
-      "worktreeAttachTitle": "ワークツリー Project を追加",
-      "worktreeSourceProject": "元の Project",
-      "worktreeStartingRef": "開始 ref",
-      "worktreeStartingRefPlaceholder": "ブランチまたはタグを選択",
-      "worktreeChooseDifferentSource": "別の元を選択",
-      "worktreeAttachSubmit": "ワークツリーを作成"
+      }
     },
     "toolCall": {
       "preparing": "コマンドを作成中…",

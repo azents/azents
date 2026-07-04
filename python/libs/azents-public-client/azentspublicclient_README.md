@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Agent Runtime
@@ -117,7 +117,6 @@ Class | Method | HTTP request | Description
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_start_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_start_device) | **POST** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start | Start Device
 *ChatV1Api* | [**chat_v1_approve_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_approve_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/approve | Approve Agent Project Registration Request
 *ChatV1Api* | [**chat_v1_archive_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_archive_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/archive | Archive Agent Session
-*ChatV1Api* | [**chat_v1_attach_session_git_worktree**](azentspublicclient/docs/ChatV1Api.md#chat_v1_attach_session_git_worktree) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktrees | Attach Session Git Worktree
 *ChatV1Api* | [**chat_v1_bulk_delete_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
 *ChatV1Api* | [**chat_v1_bulk_move_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
 *ChatV1Api* | [**chat_v1_cleanup_session_git_worktree**](azentspublicclient/docs/ChatV1Api.md#chat_v1_cleanup_session_git_worktree) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup | Cleanup Session Git Worktree
@@ -438,8 +437,6 @@ Class | Method | HTTP request | Description
  - [SessionContextStatsResponse](azentspublicclient/docs/SessionContextStatsResponse.md)
  - [SessionContextSystemPromptFragmentResponse](azentspublicclient/docs/SessionContextSystemPromptFragmentResponse.md)
  - [SessionContextSystemPromptResponse](azentspublicclient/docs/SessionContextSystemPromptResponse.md)
- - [SessionGitWorktreeAttachRequest](azentspublicclient/docs/SessionGitWorktreeAttachRequest.md)
- - [SessionGitWorktreeAttachResponse](azentspublicclient/docs/SessionGitWorktreeAttachResponse.md)
  - [SessionInitializationDetailResponse](azentspublicclient/docs/SessionInitializationDetailResponse.md)
  - [SessionInitializationEventResponse](azentspublicclient/docs/SessionInitializationEventResponse.md)
  - [SessionInitializationResponse](azentspublicclient/docs/SessionInitializationResponse.md)
@@ -499,3 +496,7 @@ Authentication schemes defined for the API:
 
 
 ## Author
+
+
+
+

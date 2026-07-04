@@ -11,7 +11,6 @@ import {
   Modal,
   Paper,
   rem,
-  Select,
   Stack,
   Tabs,
   Text,
@@ -20,7 +19,6 @@ import { useModals } from "@mantine/modals";
 import {
   IconAlertCircle,
   IconFolderOpen,
-  IconGitBranch,
   IconPower,
   IconSettings,
 } from "@tabler/icons-react";
@@ -69,17 +67,6 @@ interface WorkspacePanelProps {
   onSelectProjectPickerDirectory: (path: string) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
-  worktreeSourceProjectPath: string | null;
-  worktreeStartingRef: string | null;
-  worktreeRefOptions: { value: string; label: string }[];
-  isLoadingWorktreeRefs: boolean;
-  worktreeRefError: string | null;
-  isAttachingWorktreeProject: boolean;
-  attachWorktreeProjectError: string | null;
-  onOpenWorktreeSourcePicker: () => void;
-  onSetWorktreeStartingRef: (ref: string | null) => void;
-  onAttachWorktreeProject: () => void;
-  onCancelWorktreeProjectAttach: () => void;
   onRemoveProjectEntry: (entry: WorkspaceEntry) => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
 }
@@ -113,17 +100,6 @@ export function WorkspacePanel({
   onSelectProjectPickerDirectory,
   onRefreshProjectPicker,
   onStartRuntimeForProjectPicker,
-  worktreeSourceProjectPath,
-  worktreeStartingRef,
-  worktreeRefOptions,
-  isLoadingWorktreeRefs,
-  worktreeRefError,
-  isAttachingWorktreeProject,
-  attachWorktreeProjectError,
-  onOpenWorktreeSourcePicker,
-  onSetWorktreeStartingRef,
-  onAttachWorktreeProject,
-  onCancelWorktreeProjectAttach,
   onRemoveProjectEntry,
   onSetBrowserMode,
 }: WorkspacePanelProps): React.ReactElement {
@@ -638,7 +614,6 @@ export function WorkspacePanel({
                     onRefresh={onRefresh}
                     onSetBrowserMode={onSetBrowserMode}
                     onAddProject={onOpenProjectPicker}
-                    onAddWorktreeProject={onOpenWorktreeSourcePicker}
                   />
                 )}
               </Box>
@@ -687,68 +662,6 @@ export function WorkspacePanel({
           {renderSettingsPanel()}
         </Tabs.Panel>
       </Tabs>
-      <Modal
-        opened={worktreeSourceProjectPath !== null}
-        onClose={onCancelWorktreeProjectAttach}
-        title={t("worktreeAttachTitle")}
-        centered
-      >
-        <Stack gap="md">
-          <Box>
-            <Text size="sm" fw={600}>
-              {t("worktreeSourceProject")}
-            </Text>
-            <Text size="xs" c="dimmed" ff="monospace" truncate>
-              {worktreeSourceProjectPath ?? ""}
-            </Text>
-          </Box>
-          {worktreeRefError ? (
-            <Alert color="red" icon={<IconAlertCircle size="1rem" />}>
-              {worktreeRefError}
-            </Alert>
-          ) : null}
-          {attachWorktreeProjectError ? (
-            <Alert color="red" icon={<IconAlertCircle size="1rem" />}>
-              {attachWorktreeProjectError}
-            </Alert>
-          ) : null}
-          <Select
-            label={t("worktreeStartingRef")}
-            placeholder={t("worktreeStartingRefPlaceholder")}
-            data={worktreeRefOptions}
-            value={worktreeStartingRef}
-            onChange={onSetWorktreeStartingRef}
-            disabled={isLoadingWorktreeRefs || worktreeRefError !== null}
-            searchable
-            leftSection={<IconGitBranch size="1rem" />}
-          />
-          <Group justify="space-between">
-            <Button variant="default" onClick={onOpenWorktreeSourcePicker}>
-              {t("worktreeChooseDifferentSource")}
-            </Button>
-            <Group gap="xs">
-              <Button
-                variant="default"
-                onClick={onCancelWorktreeProjectAttach}
-                disabled={isAttachingWorktreeProject}
-              >
-                {t("cancel")}
-              </Button>
-              <Button
-                onClick={onAttachWorktreeProject}
-                loading={isAttachingWorktreeProject}
-                disabled={
-                  worktreeStartingRef === null ||
-                  isLoadingWorktreeRefs ||
-                  worktreeRefError !== null
-                }
-              >
-                {t("worktreeAttachSubmit")}
-              </Button>
-            </Group>
-          </Group>
-        </Stack>
-      </Modal>
       <WorkspaceDirectoryPickerModal
         opened={isProjectPickerOpen}
         state={projectPickerState}

@@ -69,7 +69,6 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/messages
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/archive
-  - /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktrees
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup
   - /chat/v1/agents/{agent_id}/git-refs
   - /chat/v1/sessions/{session_id}/initialization
@@ -162,16 +161,10 @@ request selects a workspace mode. `existing_projects` registers the explicit `pr
 by the client and does not copy Projects from the team primary session. `git_worktree` records a
 durable session initialization that creates an Azents-owned Git worktree from a source Project path and
 starting ref before registering the created worktree as the session Project. For legacy clients,
-`project_paths` is still accepted as the existing-Projects mode. `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktrees`
-attaches an additional Azents-owned Git worktree to an existing active session by creating a new
-`SessionGitWorktree` allocation, appending worktree-scoped initialization steps to that session's
-single initialization row, and returning the allocation plus the current initialization projection.
-A session can own multiple `SessionGitWorktree` rows, and each successful allocation registers its
-created worktree path as a normal session Project. `POST /chat/v1/agents/{agent_id}/sessions/messages`
+`project_paths` is still accepted as the existing-Projects mode. `POST /chat/v1/agents/{agent_id}/sessions/messages`
 creates the same kind of non-primary team session and enqueues the first user message in one write
-boundary. When the selected workspace mode or an existing-session worktree attachment needs blocking
-initialization, the input buffer remains pending until initialization becomes ready and the first or
-next run is gated behind that state. The
+boundary. When the selected workspace mode needs blocking initialization, the input buffer remains
+pending until initialization becomes ready and the first run is gated behind that state. The
 first-message create response is `ChatWriteResponse`, including the created `session_id` and live
 snapshot. azents-web Agent detail routes surface the active session list in the Agent rail and navigate
 selected sessions through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action
@@ -553,6 +546,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-04** — v83. Removed existing-session Git worktree attachment from the current conversation API and initialization contract.
 - **2026-07-04** — v81. Added session initialization, worktree-mode session creation, run gating, live initialization projections, and Azents-owned Git worktree cleanup semantics.
 - **2026-06-25** — v60. Moved coarse run state, run heartbeat, pending command, and stop intent
   ownership from `AgentRuntime` to `AgentSession`; `AgentRuntime` remains shared sandbox lifecycle

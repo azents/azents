@@ -134,9 +134,6 @@ from azents.services.session_git_worktree import (
     GitRefPreviewAccessDenied,
     GitRefPreviewAgentNotFound,
     GitRefPreviewRuntimeUnavailable,
-    GitWorktreeAttachAccessDenied,
-    GitWorktreeAttachSessionNotFound,
-    GitWorktreeAttachUnavailable,
     GitWorktreeCleanupAccessDenied,
     GitWorktreeCleanupNotFound,
     GitWorktreeCleanupSessionNotFound,
@@ -225,8 +222,6 @@ from .data import (
     ProjectBrowserManifestPreviewRequest,
     ProjectBrowserManifestResponse,
     SessionContextResponse,
-    SessionGitWorktreeAttachRequest,
-    SessionGitWorktreeAttachResponse,
     SessionInitializationDetailResponse,
     SessionInitializationResponse,
     SessionWorkspaceProjectListResponse,
@@ -1706,67 +1701,6 @@ async def retry_session_initialization(
                         detail="Session access denied.",
                     )
                 case GitWorktreeInitializationRetryUnavailable():
-                    raise HTTPException(status_code=409, detail=error.reason)
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
-
-
-@router.post("/agents/{agent_id}/sessions/{session_id}/git-worktrees")
-async def attach_session_git_worktree(
-    agent_id: str,
-    session_id: str,
-    request: SessionGitWorktreeAttachRequest,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
-    broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
-) -> SessionGitWorktreeAttachResponse:
-    """Queue Git worktree registration for an existing AgentSession."""
-    _validate_uuid7_hex(agent_id, label="agent ID")
-    _validate_session_id(session_id)
-    result = await session_git_worktree_service.attach_git_worktree_to_session(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=current_user.user_id,
-        source_project_path=request.source_project_path,
-        starting_ref=request.starting_ref,
-    )
-    match result:
-        case Success(value):
-            await broadcast.publish(
-                session_id,
-                chat_session_initialization_updated_dump(value.initialization),
-            )
-            await broker.send_message(
-                SessionWakeUp(
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    user_id=current_user.user_id,
-                    additional_system_prompt=None,
-                    interface=None,
-                    workspace_id=None,
-                    workspace_handle=None,
-                )
-            )
-            return SessionGitWorktreeAttachResponse(
-                worktree_id=value.worktree.id,
-                initialization=SessionInitializationResponse.from_domain(
-                    value.initialization
-                ),
-            )
-        case Failure(error):
-            match error:
-                case InvalidProjectPath():
-                    raise HTTPException(status_code=400, detail=error.reason)
-                case GitWorktreeAttachSessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case GitWorktreeAttachAccessDenied():
-                    raise HTTPException(
-                        status_code=403, detail="Session access denied."
-                    )
-                case GitWorktreeAttachUnavailable():
                     raise HTTPException(status_code=409, detail=error.reason)
                 case _:
                     assert_never(error)

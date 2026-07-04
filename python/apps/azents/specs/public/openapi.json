@@ -3182,73 +3182,6 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktrees": {
-      "post": {
-        "tags": [
-          "Chat v1"
-        ],
-        "summary": "Attach Session Git Worktree",
-        "description": "Queue Git worktree registration for an existing AgentSession.",
-        "operationId": "chat_v1_attach_session_git_worktree",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SessionGitWorktreeAttachRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionGitWorktreeAttachResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup": {
       "post": {
         "tags": [
@@ -15193,47 +15126,6 @@
         ],
         "title": "SessionContextSystemPromptResponse",
         "description": "Session context system prompt analysis response."
-      },
-      "SessionGitWorktreeAttachRequest": {
-        "properties": {
-          "source_project_path": {
-            "type": "string",
-            "title": "Source Project Path",
-            "description": "Source Project path"
-          },
-          "starting_ref": {
-            "type": "string",
-            "title": "Starting Ref",
-            "description": "Starting Git ref"
-          }
-        },
-        "type": "object",
-        "required": [
-          "source_project_path",
-          "starting_ref"
-        ],
-        "title": "SessionGitWorktreeAttachRequest",
-        "description": "Existing-session Git worktree attach request."
-      },
-      "SessionGitWorktreeAttachResponse": {
-        "properties": {
-          "worktree_id": {
-            "type": "string",
-            "title": "Worktree Id",
-            "description": "Queued SessionGitWorktree ID"
-          },
-          "initialization": {
-            "$ref": "#/components/schemas/SessionInitializationResponse",
-            "description": "Updated session initialization projection"
-          }
-        },
-        "type": "object",
-        "required": [
-          "worktree_id",
-          "initialization"
-        ],
-        "title": "SessionGitWorktreeAttachResponse",
-        "description": "Existing-session Git worktree attach response."
       },
       "SessionInitializationDetailResponse": {
         "properties": {

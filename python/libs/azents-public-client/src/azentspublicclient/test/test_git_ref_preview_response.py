@@ -37,10 +37,10 @@ class TestGitRefPreviewResponse(unittest.TestCase):
             return GitRefPreviewResponse(
                 refs = [
                     azentspublicclient.models.git_ref_entry_response.GitRefEntryResponse(
-                        name = '',
-                        ref = '',
-                        type = 'branch',
-                        target = '',
+                        name = '', 
+                        ref = '', 
+                        type = 'branch', 
+                        target = '', 
                         default = True, )
                     ],
                 default_branch = '',
@@ -50,10 +50,10 @@ class TestGitRefPreviewResponse(unittest.TestCase):
             return GitRefPreviewResponse(
                 refs = [
                     azentspublicclient.models.git_ref_entry_response.GitRefEntryResponse(
-                        name = '',
-                        ref = '',
-                        type = 'branch',
-                        target = '',
+                        name = '', 
+                        ref = '', 
+                        type = 'branch', 
+                        target = '', 
                         default = True, )
                     ],
                 default_branch = '',

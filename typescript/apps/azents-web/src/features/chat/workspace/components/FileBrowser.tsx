@@ -72,7 +72,6 @@ interface FileBrowserProps {
   onRefresh: () => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
   onAddProject: () => void;
-  onAddWorktreeProject: () => void;
 }
 
 type FileTreeNode = WorkspaceEntry & {
@@ -537,7 +536,6 @@ export function FileBrowser({
   onRefresh,
   onSetBrowserMode,
   onAddProject,
-  onAddWorktreeProject,
 }: FileBrowserProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
   const [query, setQuery] = useState("");
@@ -752,14 +750,6 @@ export function FileBrowser({
                   >
                     {t("addProject")}
                   </Button>
-                  <Button
-                    size="xs"
-                    variant="light"
-                    leftSection={<IconFolderPlus size="0.875rem" />}
-                    onClick={onAddWorktreeProject}
-                  >
-                    {t("addWorktreeProject")}
-                  </Button>
                 </Group>
               ) : null}
             </Stack>
@@ -777,16 +767,6 @@ export function FileBrowser({
                       onClick={onAddProject}
                     >
                       {t("addProject")}
-                    </Button>
-                    <Button
-                      fullWidth
-                      justify="flex-start"
-                      size="xs"
-                      variant="subtle"
-                      leftSection={<IconFolderPlus size="0.875rem" />}
-                      onClick={onAddWorktreeProject}
-                    >
-                      {t("addWorktreeProject")}
                     </Button>
                   </Stack>
                 </Box>

@@ -6,10 +6,10 @@ Workspace mode for the created session
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Workspace mode type |
-**project_paths** | **List[str]** | Exact Project paths to register on the created session |
-**source_project_path** | **str** | Source Project path |
-**starting_ref** | **str** | Starting Git ref |
+**type** | **str** | Workspace mode type | 
+**project_paths** | **List[str]** | Exact Project paths to register on the created session | 
+**source_project_path** | **str** | Source Project path | 
+**starting_ref** | **str** | Starting Git ref | 
 
 ## Example
 
@@ -29,3 +29,5 @@ workspace_mode_dict = workspace_mode_instance.to_dict()
 workspace_mode_from_dict = WorkspaceMode.from_dict(workspace_mode_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

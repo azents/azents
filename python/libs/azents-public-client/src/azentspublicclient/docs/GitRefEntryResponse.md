@@ -6,11 +6,11 @@ Git ref entry response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Display ref name |
-**ref** | **str** | Full Git ref |
-**type** | **str** | Git ref type |
-**target** | **str** | Target commit |
-**default** | **bool** | Whether this is the default ref |
+**name** | **str** | Display ref name | 
+**ref** | **str** | Full Git ref | 
+**type** | **str** | Git ref type | 
+**target** | **str** | Target commit | 
+**default** | **bool** | Whether this is the default ref | 
 
 ## Example
 
@@ -30,3 +30,5 @@ git_ref_entry_response_dict = git_ref_entry_response_instance.to_dict()
 git_ref_entry_response_from_dict = GitRefEntryResponse.from_dict(git_ref_entry_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -78,7 +78,7 @@ class SessionInitializationProcessor(Protocol):
         ]
         | None = None,
     ) -> None:
-        """Execute queued Git worktree initialization work for a session."""
+        """Execute pending Git worktree initialization work for a session."""
         ...
 
 
