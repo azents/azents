@@ -6,7 +6,7 @@ Pre-session Project browser manifest preview request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**project_paths** | **List[str]** | Exact Project paths to preview before session creation |
+**project_paths** | **List[str]** | Exact Project paths to preview before session creation | 
 
 ## Example
 
@@ -26,3 +26,5 @@ project_browser_manifest_preview_request_dict = project_browser_manifest_preview
 project_browser_manifest_preview_request_from_dict = ProjectBrowserManifestPreviewRequest.from_dict(project_browser_manifest_preview_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

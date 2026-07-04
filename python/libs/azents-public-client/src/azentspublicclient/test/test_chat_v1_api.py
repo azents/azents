@@ -166,6 +166,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_get_session_initialization(self) -> None:
+        """Test case for chat_v1_get_session_initialization
+
+        Get Session Initialization
+        """
+        pass
+
     def test_chat_v1_get_session_project_browser_manifest(self) -> None:
         """Test case for chat_v1_get_session_project_browser_manifest
 

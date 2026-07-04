@@ -23,6 +23,7 @@ from azentspublicclient.models.agent_session_run_state import AgentSessionRunSta
 from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunStateResponse
 from azentspublicclient.models.goal_state_response import GoalStateResponse
+from azentspublicclient.models.session_initialization_response import SessionInitializationResponse
 from azentspublicclient.models.todo_state_response import TodoStateResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -37,8 +38,9 @@ class ChatWriteSnapshotResponse(BaseModel):
     session_run_state: AgentSessionRunState = Field(description="Authoritative run_state for the current session")
     todo: Optional[TodoStateResponse] = None
     goal: Optional[GoalStateResponse] = None
+    initialization: Optional[SessionInitializationResponse] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["partial_history_events", "input_buffer_events", "run", "session_run_state", "todo", "goal"]
+    __properties: ClassVar[List[str]] = ["partial_history_events", "input_buffer_events", "run", "session_run_state", "todo", "goal", "initialization"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -104,6 +106,9 @@ class ChatWriteSnapshotResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of goal
         if self.goal:
             _dict['goal'] = self.goal.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of initialization
+        if self.initialization:
+            _dict['initialization'] = self.initialization.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -124,6 +129,11 @@ class ChatWriteSnapshotResponse(BaseModel):
         if self.goal is None and "goal" in self.model_fields_set:
             _dict['goal'] = None
 
+        # set to None if initialization (nullable) is None
+        # and model_fields_set contains the field
+        if self.initialization is None and "initialization" in self.model_fields_set:
+            _dict['initialization'] = None
+
         return _dict
 
     @classmethod
@@ -141,7 +151,8 @@ class ChatWriteSnapshotResponse(BaseModel):
             "run": ChatLiveRunStateResponse.from_dict(obj["run"]) if obj.get("run") is not None else None,
             "session_run_state": obj.get("session_run_state"),
             "todo": TodoStateResponse.from_dict(obj["todo"]) if obj.get("todo") is not None else None,
-            "goal": GoalStateResponse.from_dict(obj["goal"]) if obj.get("goal") is not None else None
+            "goal": GoalStateResponse.from_dict(obj["goal"]) if obj.get("goal") is not None else None,
+            "initialization": SessionInitializationResponse.from_dict(obj["initialization"]) if obj.get("initialization") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

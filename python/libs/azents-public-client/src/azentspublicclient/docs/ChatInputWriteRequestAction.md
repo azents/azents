@@ -6,8 +6,8 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'command']
-**name** | **str** | Command name |
-**skill_path** | **str** | Exact SKILL.md path |
+**name** | **str** | Command name | 
+**skill_path** | **str** | Exact SKILL.md path | 
 
 ## Example
 

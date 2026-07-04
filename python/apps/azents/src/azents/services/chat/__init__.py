@@ -35,7 +35,10 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.input_buffer import InputBufferService
-from azents.services.session_initialization import SessionInitializationService
+from azents.services.session_initialization import (
+    SessionInitializationDetail,
+    SessionInitializationService,
+)
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
     normalize_session_workspace_project_paths,
@@ -619,6 +622,10 @@ class ChatSessionService:
             todo = TodoStateSnapshot.from_state(
                 await todo_store.load(agent_session.agent_id, session_id)
             )
+            initialization = await self.session_initialization_service.get_projection(
+                session,
+                session_id=session_id,
+            )
             return Success(
                 ChatLiveStateSnapshot(
                     partial_history_events=partial_history_events,
@@ -643,8 +650,41 @@ class ChatSessionService:
                     session_run_state=agent_session.run_state,
                     todo=todo,
                     goal=goal,
+                    initialization=initialization,
                 )
             )
+
+    async def get_session_initialization_detail(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+    ) -> Result[SessionInitializationDetail, SessionAccessError]:
+        """Fetch durable initialization detail after session access validation."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if (
+                agent_session is None
+                or agent_session.status != AgentSessionStatus.ACTIVE
+            ):
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent_session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionAccessDenied())
+            detail = await self.session_initialization_service.get_detail(
+                session,
+                session_id=session_id,
+            )
+            return Success(detail)
 
     async def delete_session(
         self,

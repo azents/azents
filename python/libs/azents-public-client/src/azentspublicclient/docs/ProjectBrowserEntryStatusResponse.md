@@ -6,10 +6,10 @@ Project browser filesystem status projection response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**value** | **str** | Stored filesystem status projection |
-**detail** | **str** |  | [optional]
-**checked_at** | **datetime** |  | [optional]
-**stale** | **bool** | Whether a background refresh is recommended |
+**value** | **str** | Stored filesystem status projection | 
+**detail** | **str** |  | [optional] 
+**checked_at** | **datetime** |  | [optional] 
+**stale** | **bool** | Whether a background refresh is recommended | 
 
 ## Example
 
@@ -29,3 +29,5 @@ project_browser_entry_status_response_dict = project_browser_entry_status_respon
 project_browser_entry_status_response_from_dict = ProjectBrowserEntryStatusResponse.from_dict(project_browser_entry_status_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -24,6 +24,7 @@ Method | HTTP request | Description
 [**chat_v1_get_agent_session_context**](ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 [**chat_v1_get_agent_session_project_defaults**](ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
 [**chat_v1_get_agent_workspace**](ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
+[**chat_v1_get_session_initialization**](ChatV1Api.md#chat_v1_get_session_initialization) | **GET** /chat/v1/sessions/{session_id}/initialization | Get Session Initialization
 [**chat_v1_get_session_project_browser_manifest**](ChatV1Api.md#chat_v1_get_session_project_browser_manifest) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest | Get Session Project Browser Manifest
 [**chat_v1_get_team_primary_agent_session**](ChatV1Api.md#chat_v1_get_team_primary_agent_session) | **GET** /chat/v1/agents/{agent_id}/team-primary-session | Get Team Primary Agent Session
 [**chat_v1_issue_ws_ticket**](ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
@@ -85,9 +86,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
-    request_id = 'request_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+    request_id = 'request_id_example' # str | 
 
     try:
         # Approve Agent Project Registration Request
@@ -105,9 +106,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
- **request_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+ **request_id** | **str**|  | 
 
 ### Return type
 
@@ -167,8 +168,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
 
     try:
         # Archive Agent Session
@@ -184,8 +185,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
 
 ### Return type
 
@@ -247,8 +248,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    agent_workspace_bulk_delete_request = azentspublicclient.AgentWorkspaceBulkDeleteRequest() # AgentWorkspaceBulkDeleteRequest |
+    agent_id = 'agent_id_example' # str | 
+    agent_workspace_bulk_delete_request = azentspublicclient.AgentWorkspaceBulkDeleteRequest() # AgentWorkspaceBulkDeleteRequest | 
 
     try:
         # Bulk Delete Agent Workspace Paths
@@ -266,8 +267,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **agent_workspace_bulk_delete_request** | [**AgentWorkspaceBulkDeleteRequest**](AgentWorkspaceBulkDeleteRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **agent_workspace_bulk_delete_request** | [**AgentWorkspaceBulkDeleteRequest**](AgentWorkspaceBulkDeleteRequest.md)|  | 
 
 ### Return type
 
@@ -329,8 +330,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    agent_workspace_bulk_move_request = azentspublicclient.AgentWorkspaceBulkMoveRequest() # AgentWorkspaceBulkMoveRequest |
+    agent_id = 'agent_id_example' # str | 
+    agent_workspace_bulk_move_request = azentspublicclient.AgentWorkspaceBulkMoveRequest() # AgentWorkspaceBulkMoveRequest | 
 
     try:
         # Bulk Move Agent Workspace Paths
@@ -348,8 +349,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **agent_workspace_bulk_move_request** | [**AgentWorkspaceBulkMoveRequest**](AgentWorkspaceBulkMoveRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **agent_workspace_bulk_move_request** | [**AgentWorkspaceBulkMoveRequest**](AgentWorkspaceBulkMoveRequest.md)|  | 
 
 ### Return type
 
@@ -411,8 +412,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    agent_workspace_mkdir_request = azentspublicclient.AgentWorkspaceMkdirRequest() # AgentWorkspaceMkdirRequest |
+    agent_id = 'agent_id_example' # str | 
+    agent_workspace_mkdir_request = azentspublicclient.AgentWorkspaceMkdirRequest() # AgentWorkspaceMkdirRequest | 
 
     try:
         # Create Agent Workspace Directory
@@ -430,8 +431,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **agent_workspace_mkdir_request** | [**AgentWorkspaceMkdirRequest**](AgentWorkspaceMkdirRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **agent_workspace_mkdir_request** | [**AgentWorkspaceMkdirRequest**](AgentWorkspaceMkdirRequest.md)|  | 
 
 ### Return type
 
@@ -493,8 +494,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
-    chat_input_write_request = azentspublicclient.ChatInputWriteRequest() # ChatInputWriteRequest |
+    session_id = 'session_id_example' # str | 
+    chat_input_write_request = azentspublicclient.ChatInputWriteRequest() # ChatInputWriteRequest | 
     timezone = 'timezone_example' # str |  (optional)
 
     try:
@@ -513,9 +514,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
- **chat_input_write_request** | [**ChatInputWriteRequest**](ChatInputWriteRequest.md)|  |
- **timezone** | **str**|  | [optional]
+ **session_id** | **str**|  | 
+ **chat_input_write_request** | [**ChatInputWriteRequest**](ChatInputWriteRequest.md)|  | 
+ **timezone** | **str**|  | [optional] 
 
 ### Return type
 
@@ -577,8 +578,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    agent_session_create_request = azentspublicclient.AgentSessionCreateRequest() # AgentSessionCreateRequest |
+    agent_id = 'agent_id_example' # str | 
+    agent_session_create_request = azentspublicclient.AgentSessionCreateRequest() # AgentSessionCreateRequest | 
 
     try:
         # Create Team Agent Session
@@ -596,8 +597,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **agent_session_create_request** | [**AgentSessionCreateRequest**](AgentSessionCreateRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **agent_session_create_request** | [**AgentSessionCreateRequest**](AgentSessionCreateRequest.md)|  | 
 
 ### Return type
 
@@ -659,8 +660,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    chat_session_create_message_write_request = azentspublicclient.ChatSessionCreateMessageWriteRequest() # ChatSessionCreateMessageWriteRequest |
+    agent_id = 'agent_id_example' # str | 
+    chat_session_create_message_write_request = azentspublicclient.ChatSessionCreateMessageWriteRequest() # ChatSessionCreateMessageWriteRequest | 
     timezone = 'timezone_example' # str |  (optional)
 
     try:
@@ -679,9 +680,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **chat_session_create_message_write_request** | [**ChatSessionCreateMessageWriteRequest**](ChatSessionCreateMessageWriteRequest.md)|  |
- **timezone** | **str**|  | [optional]
+ **agent_id** | **str**|  | 
+ **chat_session_create_message_write_request** | [**ChatSessionCreateMessageWriteRequest**](ChatSessionCreateMessageWriteRequest.md)|  | 
+ **timezone** | **str**|  | [optional] 
 
 ### Return type
 
@@ -741,9 +742,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
-    project_id = 'project_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+    project_id = 'project_id_example' # str | 
 
     try:
         # Delete Agent Project
@@ -759,9 +760,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
- **project_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+ **project_id** | **str**|  | 
 
 ### Return type
 
@@ -823,8 +824,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    agent_workspace_delete_request = azentspublicclient.AgentWorkspaceDeleteRequest() # AgentWorkspaceDeleteRequest |
+    agent_id = 'agent_id_example' # str | 
+    agent_workspace_delete_request = azentspublicclient.AgentWorkspaceDeleteRequest() # AgentWorkspaceDeleteRequest | 
 
     try:
         # Delete Agent Workspace Path
@@ -842,8 +843,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **agent_workspace_delete_request** | [**AgentWorkspaceDeleteRequest**](AgentWorkspaceDeleteRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **agent_workspace_delete_request** | [**AgentWorkspaceDeleteRequest**](AgentWorkspaceDeleteRequest.md)|  | 
 
 ### Return type
 
@@ -903,7 +904,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    file_id = 'file_id_example' # str |
+    file_id = 'file_id_example' # str | 
 
     try:
         # Delete Exchange File
@@ -919,7 +920,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **file_id** | **str**|  |
+ **file_id** | **str**|  | 
 
 ### Return type
 
@@ -979,8 +980,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
-    buffer_id = 'buffer_id_example' # str |
+    session_id = 'session_id_example' # str | 
+    buffer_id = 'buffer_id_example' # str | 
 
     try:
         # Delete Input Buffer
@@ -996,8 +997,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
- **buffer_id** | **str**|  |
+ **session_id** | **str**|  | 
+ **buffer_id** | **str**|  | 
 
 ### Return type
 
@@ -1057,7 +1058,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
+    session_id = 'session_id_example' # str | 
 
     try:
         # Delete Session
@@ -1073,7 +1074,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
+ **session_id** | **str**|  | 
 
 ### Return type
 
@@ -1133,7 +1134,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
     path = 'path_example' # str | Agent Workspace file path to download
 
     try:
@@ -1152,8 +1153,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **path** | **str**| Agent Workspace file path to download |
+ **agent_id** | **str**|  | 
+ **path** | **str**| Agent Workspace file path to download | 
 
 ### Return type
 
@@ -1213,7 +1214,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    file_id = 'file_id_example' # str |
+    file_id = 'file_id_example' # str | 
 
     try:
         # Download Exchange File
@@ -1231,7 +1232,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **file_id** | **str**|  |
+ **file_id** | **str**|  | 
 
 ### Return type
 
@@ -1293,8 +1294,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
-    chat_edit_message_write_request = azentspublicclient.ChatEditMessageWriteRequest() # ChatEditMessageWriteRequest |
+    session_id = 'session_id_example' # str | 
+    chat_edit_message_write_request = azentspublicclient.ChatEditMessageWriteRequest() # ChatEditMessageWriteRequest | 
     timezone = 'timezone_example' # str |  (optional)
 
     try:
@@ -1313,9 +1314,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
- **chat_edit_message_write_request** | [**ChatEditMessageWriteRequest**](ChatEditMessageWriteRequest.md)|  |
- **timezone** | **str**|  | [optional]
+ **session_id** | **str**|  | 
+ **chat_edit_message_write_request** | [**ChatEditMessageWriteRequest**](ChatEditMessageWriteRequest.md)|  | 
+ **timezone** | **str**|  | [optional] 
 
 ### Return type
 
@@ -1376,8 +1377,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
 
     try:
         # Get Agent Session
@@ -1395,8 +1396,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
 
 ### Return type
 
@@ -1457,8 +1458,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
     limit = 300 # int |  (optional) (default to 300)
 
     try:
@@ -1477,8 +1478,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
  **limit** | **int**|  | [optional] [default to 300]
 
 ### Return type
@@ -1540,7 +1541,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
 
     try:
         # Get Agent Session Project Defaults
@@ -1558,7 +1559,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
+ **agent_id** | **str**|  | 
 
 ### Return type
 
@@ -1619,7 +1620,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
 
     try:
         # Get Agent Workspace
@@ -1637,11 +1638,90 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
+ **agent_id** | **str**|  | 
 
 ### Return type
 
 [**AgentWorkspaceResponse**](AgentWorkspaceResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_get_session_initialization**
+> SessionInitializationDetailResponse chat_v1_get_session_initialization(session_id)
+
+Get Session Initialization
+
+Get durable initialization detail for a session.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.session_initialization_detail_response import SessionInitializationDetailResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    session_id = 'session_id_example' # str | 
+
+    try:
+        # Get Session Initialization
+        api_response = api_instance.chat_v1_get_session_initialization(session_id)
+        print("The response of ChatV1Api->chat_v1_get_session_initialization:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_get_session_initialization: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **session_id** | **str**|  | 
+
+### Return type
+
+[**SessionInitializationDetailResponse**](SessionInitializationDetailResponse.md)
 
 ### Authorization
 
@@ -1698,8 +1778,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
 
     try:
         # Get Session Project Browser Manifest
@@ -1717,8 +1797,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
 
 ### Return type
 
@@ -1779,7 +1859,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
 
     try:
         # Get Team Primary Agent Session
@@ -1797,7 +1877,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
+ **agent_id** | **str**|  | 
 
 ### Return type
 
@@ -1935,7 +2015,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
 
     try:
         # List Agent Project Presets
@@ -1953,7 +2033,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
+ **agent_id** | **str**|  | 
 
 ### Return type
 
@@ -2014,8 +2094,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
 
     try:
         # List Agent Project Registration Requests
@@ -2033,8 +2113,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
 
 ### Return type
 
@@ -2095,8 +2175,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
 
     try:
         # List Agent Projects
@@ -2114,8 +2194,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
 
 ### Return type
 
@@ -2176,7 +2256,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
 
     try:
         # List Agent Sessions
@@ -2194,7 +2274,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
+ **agent_id** | **str**|  | 
 
 ### Return type
 
@@ -2255,7 +2335,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
+    session_id = 'session_id_example' # str | 
     limit = 50 # int | Number of events to query (optional) (default to 50)
     before = 'before_example' # str | Query only events before this ID, as a backward cursor (optional)
     after = 'after_example' # str | Query only events after this ID, as a forward cursor (optional)
@@ -2276,10 +2356,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
+ **session_id** | **str**|  | 
  **limit** | **int**| Number of events to query | [optional] [default to 50]
- **before** | **str**| Query only events before this ID, as a backward cursor | [optional]
- **after** | **str**| Query only events after this ID, as a forward cursor | [optional]
+ **before** | **str**| Query only events before this ID, as a backward cursor | [optional] 
+ **after** | **str**| Query only events after this ID, as a forward cursor | [optional] 
 
 ### Return type
 
@@ -2340,7 +2420,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
+    session_id = 'session_id_example' # str | 
 
     try:
         # List Input Actions
@@ -2358,7 +2438,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
+ **session_id** | **str**|  | 
 
 ### Return type
 
@@ -2419,7 +2499,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
+    session_id = 'session_id_example' # str | 
 
     try:
         # List Live Events
@@ -2437,7 +2517,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
+ **session_id** | **str**|  | 
 
 ### Return type
 
@@ -2498,7 +2578,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # List Sessions
@@ -2516,7 +2596,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -2578,8 +2658,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    agent_workspace_move_request = azentspublicclient.AgentWorkspaceMoveRequest() # AgentWorkspaceMoveRequest |
+    agent_id = 'agent_id_example' # str | 
+    agent_workspace_move_request = azentspublicclient.AgentWorkspaceMoveRequest() # AgentWorkspaceMoveRequest | 
 
     try:
         # Move Agent Workspace Path
@@ -2597,8 +2677,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **agent_workspace_move_request** | [**AgentWorkspaceMoveRequest**](AgentWorkspaceMoveRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **agent_workspace_move_request** | [**AgentWorkspaceMoveRequest**](AgentWorkspaceMoveRequest.md)|  | 
 
 ### Return type
 
@@ -2660,8 +2740,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    project_browser_manifest_preview_request = azentspublicclient.ProjectBrowserManifestPreviewRequest() # ProjectBrowserManifestPreviewRequest |
+    agent_id = 'agent_id_example' # str | 
+    project_browser_manifest_preview_request = azentspublicclient.ProjectBrowserManifestPreviewRequest() # ProjectBrowserManifestPreviewRequest | 
 
     try:
         # Preview Project Browser Manifest
@@ -2679,8 +2759,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **project_browser_manifest_preview_request** | [**ProjectBrowserManifestPreviewRequest**](ProjectBrowserManifestPreviewRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **project_browser_manifest_preview_request** | [**ProjectBrowserManifestPreviewRequest**](ProjectBrowserManifestPreviewRequest.md)|  | 
 
 ### Return type
 
@@ -2741,7 +2821,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
     path = 'path_example' # str | Agent Workspace path to query (optional)
     limit = 65536 # int | Text preview byte limit (optional) (default to 65536)
 
@@ -2761,8 +2841,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **path** | **str**| Agent Workspace path to query | [optional]
+ **agent_id** | **str**|  | 
+ **path** | **str**| Agent Workspace path to query | [optional] 
  **limit** | **int**| Text preview byte limit | [optional] [default to 65536]
 
 ### Return type
@@ -2825,9 +2905,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
-    session_workspace_project_register_request = azentspublicclient.SessionWorkspaceProjectRegisterRequest() # SessionWorkspaceProjectRegisterRequest |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+    session_workspace_project_register_request = azentspublicclient.SessionWorkspaceProjectRegisterRequest() # SessionWorkspaceProjectRegisterRequest | 
 
     try:
         # Register Agent Project
@@ -2845,9 +2925,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
- **session_workspace_project_register_request** | [**SessionWorkspaceProjectRegisterRequest**](SessionWorkspaceProjectRegisterRequest.md)|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+ **session_workspace_project_register_request** | [**SessionWorkspaceProjectRegisterRequest**](SessionWorkspaceProjectRegisterRequest.md)|  | 
 
 ### Return type
 
@@ -2907,9 +2987,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
-    request_id = 'request_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+    request_id = 'request_id_example' # str | 
 
     try:
         # Reject Agent Project Registration Request
@@ -2925,9 +3005,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
- **request_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+ **request_id** | **str**|  | 
 
 ### Return type
 
@@ -2988,7 +3068,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
     path = 'path_example' # str | Agent Workspace path to inspect (optional)
 
     try:
@@ -3007,8 +3087,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **path** | **str**| Agent Workspace path to inspect | [optional]
+ **agent_id** | **str**|  | 
+ **path** | **str**| Agent Workspace path to inspect | [optional] 
 
 ### Return type
 
@@ -3069,7 +3149,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
+    session_id = 'session_id_example' # str | 
 
     try:
         # Stop Session Run
@@ -3087,7 +3167,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
+ **session_id** | **str**|  | 
 
 ### Return type
 
@@ -3149,8 +3229,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
-    agent_session_title_update_request = azentspublicclient.AgentSessionTitleUpdateRequest() # AgentSessionTitleUpdateRequest |
+    session_id = 'session_id_example' # str | 
+    agent_session_title_update_request = azentspublicclient.AgentSessionTitleUpdateRequest() # AgentSessionTitleUpdateRequest | 
 
     try:
         # Update Agent Session Title
@@ -3168,8 +3248,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
- **agent_session_title_update_request** | [**AgentSessionTitleUpdateRequest**](AgentSessionTitleUpdateRequest.md)|  |
+ **session_id** | **str**|  | 
+ **agent_session_title_update_request** | [**AgentSessionTitleUpdateRequest**](AgentSessionTitleUpdateRequest.md)|  | 
 
 ### Return type
 
@@ -3231,8 +3311,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
-    goal_update_request = azentspublicclient.GoalUpdateRequest() # GoalUpdateRequest |
+    session_id = 'session_id_example' # str | 
+    goal_update_request = azentspublicclient.GoalUpdateRequest() # GoalUpdateRequest | 
 
     try:
         # Update Session Goal
@@ -3250,8 +3330,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
- **goal_update_request** | [**GoalUpdateRequest**](GoalUpdateRequest.md)|  |
+ **session_id** | **str**|  | 
+ **goal_update_request** | [**GoalUpdateRequest**](GoalUpdateRequest.md)|  | 
 
 ### Return type
 
@@ -3313,8 +3393,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
-    goal_status_update_request = azentspublicclient.GoalStatusUpdateRequest() # GoalStatusUpdateRequest |
+    session_id = 'session_id_example' # str | 
+    goal_status_update_request = azentspublicclient.GoalStatusUpdateRequest() # GoalStatusUpdateRequest | 
 
     try:
         # Update Session Goal Status
@@ -3332,8 +3412,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
- **goal_status_update_request** | [**GoalStatusUpdateRequest**](GoalStatusUpdateRequest.md)|  |
+ **session_id** | **str**|  | 
+ **goal_status_update_request** | [**GoalStatusUpdateRequest**](GoalStatusUpdateRequest.md)|  | 
 
 ### Return type
 
@@ -3394,8 +3474,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    file = 'file_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    file = 'file_example' # str | 
 
     try:
         # Upload File For Agent
@@ -3413,8 +3493,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **file** | **str**|  |
+ **agent_id** | **str**|  | 
+ **file** | **str**|  | 
 
 ### Return type
 
@@ -3437,3 +3517,4 @@ Name | Type | Description  | Notes
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

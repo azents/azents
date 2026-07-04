@@ -12,7 +12,11 @@ from azents.core.enums import SessionInitializationStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.session_initialization import SessionInitializationRepository
-from azents.repos.session_initialization.data import SessionInitialization
+from azents.repos.session_initialization.data import (
+    SessionInitialization,
+    SessionInitializationEvent,
+    SessionInitializationStep,
+)
 
 
 class SessionInitializationRunGate(enum.StrEnum):
@@ -30,6 +34,23 @@ class SessionInitializationRunGateResult:
 
     gate: SessionInitializationRunGate
     initialization: SessionInitialization
+
+
+@dataclasses.dataclass(frozen=True)
+class SessionInitializationProjection:
+    """Compact initialization state for live chat projections."""
+
+    initialization: SessionInitialization
+    steps: list[SessionInitializationStep]
+
+
+@dataclasses.dataclass(frozen=True)
+class SessionInitializationDetail:
+    """Durable initialization detail for the session panel."""
+
+    initialization: SessionInitialization
+    steps: list[SessionInitializationStep]
+    events: list[SessionInitializationEvent]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -75,6 +96,47 @@ class SessionInitializationService:
         return SessionInitializationRunGateResult(
             gate=_gate_for_status(initialization.status),
             initialization=initialization,
+        )
+
+    async def get_projection(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> SessionInitializationProjection:
+        """Return compact initialization state for live surfaces."""
+        get_initialization = self.session_initialization_repository.get_by_session_id
+        initialization = await get_initialization(
+            session,
+            session_id=session_id,
+        )
+        if initialization is None:
+            raise RuntimeError("SessionInitialization row is missing")
+        steps = await self.session_initialization_repository.list_steps(
+            session,
+            initialization_id=initialization.id,
+        )
+        return SessionInitializationProjection(
+            initialization=initialization,
+            steps=steps,
+        )
+
+    async def get_detail(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> SessionInitializationDetail:
+        """Return durable initialization detail for an AgentSession."""
+        projection = await self.get_projection(session, session_id=session_id)
+        events = await self.session_initialization_repository.list_events(
+            session,
+            initialization_id=projection.initialization.id,
+        )
+        return SessionInitializationDetail(
+            initialization=projection.initialization,
+            steps=projection.steps,
+            events=events,
         )
 
 

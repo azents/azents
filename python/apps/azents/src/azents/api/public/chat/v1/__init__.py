@@ -200,6 +200,8 @@ from .data import (
     ProjectBrowserManifestPreviewRequest,
     ProjectBrowserManifestResponse,
     SessionContextResponse,
+    SessionInitializationDetailResponse,
+    SessionInitializationResponse,
     SessionWorkspaceProjectListResponse,
     SessionWorkspaceProjectRegisterRequest,
     SessionWorkspaceProjectRegistrationRequestListResponse,
@@ -497,6 +499,11 @@ async def _build_chat_write_snapshot(
                 goal=(
                     GoalStateResponse.from_domain(live.goal)
                     if live.goal is not None
+                    else None
+                ),
+                initialization=(
+                    SessionInitializationResponse.from_domain(live.initialization)
+                    if live.initialization is not None
                     else None
                 ),
             )
@@ -2032,7 +2039,42 @@ async def list_live_events(
                     if value.goal is not None
                     else None
                 ),
+                initialization=(
+                    SessionInitializationResponse.from_domain(value.initialization)
+                    if value.initialization is not None
+                    else None
+                ),
             )
+        case Failure(error):
+            match error:
+                case SessionNotFound():
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Session not found.",
+                    )
+                case SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/sessions/{session_id}/initialization")
+async def get_session_initialization(
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> SessionInitializationDetailResponse:
+    """Get durable initialization detail for a session."""
+    _validate_session_id(session_id)
+    result = await chat_service.get_session_initialization_detail(
+        session_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(value):
+            return SessionInitializationDetailResponse.from_domain(value)
         case Failure(error):
             match error:
                 case SessionNotFound():

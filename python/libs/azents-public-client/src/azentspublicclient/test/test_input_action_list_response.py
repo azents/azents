@@ -37,21 +37,21 @@ class TestInputActionListResponse(unittest.TestCase):
             return InputActionListResponse(
                 items = [
                     azentspublicclient.models.input_action_definition_response.InputActionDefinitionResponse(
-                        id = '',
-                        keyword = '',
-                        label = '',
-                        description = '',
-                        action = null,
-                        category = 'command',
+                        id = '', 
+                        keyword = '', 
+                        label = '', 
+                        description = '', 
+                        action = null, 
+                        category = 'command', 
                         message = azentspublicclient.models.input_action_message_policy_response.InputActionMessagePolicyResponse(
-                            policy = 'none',
-                            placeholder = '',
-                            max_length = 56, ),
+                            policy = 'none', 
+                            placeholder = '', 
+                            max_length = 56, ), 
                         attachments = azentspublicclient.models.input_action_attachment_policy_response.InputActionAttachmentPolicyResponse(
-                            policy = 'unsupported', ),
+                            policy = 'unsupported', ), 
                         availability_hint = azentspublicclient.models.input_action_availability_hint_response.InputActionAvailabilityHintResponse(
-                            state = 'ready', ),
-                        source_label = '',
+                            state = 'ready', ), 
+                        source_label = '', 
                         relative_hint = '', )
                     ]
             )
@@ -59,21 +59,21 @@ class TestInputActionListResponse(unittest.TestCase):
             return InputActionListResponse(
                 items = [
                     azentspublicclient.models.input_action_definition_response.InputActionDefinitionResponse(
-                        id = '',
-                        keyword = '',
-                        label = '',
-                        description = '',
-                        action = null,
-                        category = 'command',
+                        id = '', 
+                        keyword = '', 
+                        label = '', 
+                        description = '', 
+                        action = null, 
+                        category = 'command', 
                         message = azentspublicclient.models.input_action_message_policy_response.InputActionMessagePolicyResponse(
-                            policy = 'none',
-                            placeholder = '',
-                            max_length = 56, ),
+                            policy = 'none', 
+                            placeholder = '', 
+                            max_length = 56, ), 
                         attachments = azentspublicclient.models.input_action_attachment_policy_response.InputActionAttachmentPolicyResponse(
-                            policy = 'unsupported', ),
+                            policy = 'unsupported', ), 
                         availability_hint = azentspublicclient.models.input_action_availability_hint_response.InputActionAvailabilityHintResponse(
-                            state = 'ready', ),
-                        source_label = '',
+                            state = 'ready', ), 
+                        source_label = '', 
                         relative_hint = '', )
                     ],
         )

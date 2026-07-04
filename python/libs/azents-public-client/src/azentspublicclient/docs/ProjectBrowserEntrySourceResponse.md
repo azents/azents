@@ -6,8 +6,8 @@ Project browser entry source metadata response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Entry source type |
-**project_id** | **str** |  | [optional]
+**type** | **str** | Entry source type | 
+**project_id** | **str** |  | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ project_browser_entry_source_response_dict = project_browser_entry_source_respon
 project_browser_entry_source_response_from_dict = ProjectBrowserEntrySourceResponse.from_dict(project_browser_entry_source_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+
