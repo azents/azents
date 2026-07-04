@@ -18,10 +18,13 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentSessionTitleSource,
 )
+from azents.core.session_handle import generate_session_handle
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 
 from .data import AgentSession, AgentSessionCreate, PendingSessionCommand
+
+SESSION_HANDLE_INSERT_ATTEMPTS = 10
 
 
 @dataclass(frozen=True)
@@ -43,16 +46,28 @@ class AgentSessionRepository:
         create: AgentSessionCreate,
     ) -> AgentSession:
         """Create AgentSession."""
-        rdb = RDBAgentSession(
-            workspace_id=create.workspace_id,
-            agent_id=create.agent_id,
-            title=create.title,
-            primary_kind=create.primary_kind,
-            start_reason=create.start_reason,
-        )
-        session.add(rdb)
-        await session.flush()
-        return self._build(rdb)
+        for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
+            result = await session.execute(
+                pg_insert(RDBAgentSession)
+                .values(
+                    id=uuid7().hex,
+                    workspace_id=create.workspace_id,
+                    agent_id=create.agent_id,
+                    handle=generate_session_handle(),
+                    status=AgentSessionStatus.ACTIVE,
+                    title=create.title,
+                    primary_kind=create.primary_kind,
+                    start_reason=create.start_reason,
+                )
+                .on_conflict_do_nothing(index_elements=[RDBAgentSession.handle])
+                .returning(RDBAgentSession)
+            )
+            rdb = result.scalar_one_or_none()
+            if rdb is not None:
+                await session.flush()
+                return self._build(rdb)
+
+        raise RuntimeError("AgentSession handle generation exhausted retry attempts")
 
     async def get_by_id(
         self,
@@ -200,33 +215,32 @@ class AgentSessionRepository:
         start_reason: AgentSessionStartReason,
     ) -> AgentSession:
         """Create team primary AgentSession race-safely or return existing row."""
-        result = await session.execute(
-            pg_insert(RDBAgentSession)
-            .values(
-                id=uuid7().hex,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                status=AgentSessionStatus.ACTIVE,
-                title=None,
-                primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
-                start_reason=start_reason,
+        for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
+            result = await session.execute(
+                pg_insert(RDBAgentSession)
+                .values(
+                    id=uuid7().hex,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    handle=generate_session_handle(),
+                    status=AgentSessionStatus.ACTIVE,
+                    title=None,
+                    primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
+                    start_reason=start_reason,
+                )
+                .on_conflict_do_nothing()
+                .returning(RDBAgentSession)
             )
-            .on_conflict_do_nothing(
-                index_elements=[RDBAgentSession.agent_id],
-                index_where=sa.text(
-                    "status = 'active' AND primary_kind = 'team_primary'"
-                ),
-            )
-            .returning(RDBAgentSession)
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is not None:
-            return self._build(rdb)
+            rdb = result.scalar_one_or_none()
+            if rdb is not None:
+                await session.flush()
+                return self._build(rdb)
 
-        primary = await self.get_team_primary_by_agent_id(session, agent_id)
-        if primary is None:
-            raise RuntimeError("Team primary AgentSession conflict target not found")
-        return primary
+            primary = await self.get_team_primary_by_agent_id(session, agent_id)
+            if primary is not None:
+                return primary
+
+        raise RuntimeError("AgentSession handle generation exhausted retry attempts")
 
     async def update_title(
         self,
@@ -688,6 +702,7 @@ class AgentSessionRepository:
             id=rdb.id,
             workspace_id=rdb.workspace_id,
             agent_id=rdb.agent_id,
+            handle=rdb.handle,
             status=rdb.status,
             primary_kind=rdb.primary_kind,
             start_reason=rdb.start_reason,

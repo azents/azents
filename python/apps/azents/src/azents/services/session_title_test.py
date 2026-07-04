@@ -300,6 +300,7 @@ class _AgentSessionRepository:
             id="session-001",
             workspace_id="workspace-001",
             agent_id="agent-001",
+            handle="test-session-handle",
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,
             title="Compare two insurance options",

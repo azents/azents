@@ -5,10 +5,13 @@ import datetime
 from uuid import uuid4
 
 from azcommon.result import Success
+from pytest import MonkeyPatch
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+import azents.repos.agent_session as agent_session_repo
 from azents.core.enums import (
     AgentSessionPrimaryKind,
+    AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
     LLMProvider,
@@ -20,6 +23,7 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import AgentSessionRepository
+from .data import AgentSessionCreate
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -88,6 +92,53 @@ class TestAgentSessionRepository:
         assert first.status == AgentSessionStatus.ACTIVE
         assert first.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
         assert first.title is None
+        assert first.handle.count("-") == 2
+
+    async def test_create_retries_duplicate_session_handle(
+        self, rdb_session: AsyncSession, monkeypatch: MonkeyPatch
+    ) -> None:
+        """AgentSession handle generation retries unique constraint conflicts."""
+        workspace_id = await _create_workspace(rdb_session, "agent-session-handle-ws")
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "agent-session-handle"
+        )
+        handles = iter(
+            [
+                "abandon-ability-able",
+                "abandon-ability-able",
+                "about-above-absent",
+            ]
+        )
+        monkeypatch.setattr(
+            agent_session_repo,
+            "generate_session_handle",
+            lambda: next(handles),
+        )
+        repo = AgentSessionRepository()
+
+        first = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+            ),
+        )
+        second = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+            ),
+        )
+
+        assert first.handle == "abandon-ability-able"
+        assert second.handle == "about-above-absent"
 
     async def test_update_title_round_trips_custom_title(
         self, rdb_session: AsyncSession

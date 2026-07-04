@@ -124,6 +124,53 @@ class AgentSessionTitleSource(enum.StrEnum):
     AUTO_GENERATED = "auto_generated"
 
 
+class SessionInitializationStatus(enum.StrEnum):
+    """AgentSession initialization lifecycle status."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    READY = "ready"
+    FAILED = "failed"
+    CANCELED = "canceled"
+    CLEANUP_REQUIRED = "cleanup_required"
+    CLEANED = "cleaned"
+
+
+class SessionInitializationStepStatus(enum.StrEnum):
+    """AgentSession initialization step status."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    CANCELED = "canceled"
+
+
+class SessionInitializationStepType(enum.StrEnum):
+    """Typed internal AgentSession initialization step kind."""
+
+    NOOP_READY = "noop_ready"
+    CREATE_GIT_WORKTREE = "create_git_worktree"
+    REGISTER_WORKSPACE_PROJECT = "register_workspace_project"
+    UPSERT_PROJECT_CATALOG = "upsert_project_catalog"
+    REFRESH_PROJECT_STATUS = "refresh_project_status"
+    RUN_WORKSPACE_SETUP_SCRIPT = "run_workspace_setup_script"
+    VERIFY_REQUIRED_CREDENTIALS = "verify_required_credentials"
+
+
+class SessionInitializationEventKind(enum.StrEnum):
+    """AgentSession initialization event kind."""
+
+    INFO = "info"
+    COMMAND_STARTED = "command_started"
+    STDOUT = "stdout"
+    STDERR = "stderr"
+    COMMAND_COMPLETED = "command_completed"
+    WARNING = "warning"
+    FAILED = "failed"
+
+
 class ScheduledTaskStatus(enum.StrEnum):
     """Current scheduler task status."""
 

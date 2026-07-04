@@ -95,6 +95,7 @@ def _agent_session(
         id=session_id,
         workspace_id=workspace_id,
         agent_id=agent_id,
+        handle="test-session-handle",
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,

@@ -259,6 +259,7 @@ def _make_agent_session() -> AgentSession:
         id="session-1",
         workspace_id="workspace-1",
         agent_id="agent-1",
+        handle="test-session-handle",
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,

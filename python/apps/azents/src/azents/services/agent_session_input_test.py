@@ -96,6 +96,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
             id=agent_session_id,
             workspace_id="workspace-1",
             agent_id="agent-1",
+            handle="test-session-handle",
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,
             title=None,
