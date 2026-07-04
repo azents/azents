@@ -1166,7 +1166,14 @@
         "missing": "Missing",
         "unavailable": "Unavailable",
         "error": "Error"
-      }
+      },
+      "addWorktreeProject": "Add worktree",
+      "worktreeAttachTitle": "Add worktree Project",
+      "worktreeSourceProject": "Source Project",
+      "worktreeStartingRef": "Starting ref",
+      "worktreeStartingRefPlaceholder": "Select a branch or tag",
+      "worktreeChooseDifferentSource": "Choose different source",
+      "worktreeAttachSubmit": "Create worktree"
     },
     "toolCall": {
       "preparing": "Writing command...",
