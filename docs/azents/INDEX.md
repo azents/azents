@@ -142,8 +142,10 @@ _14 documents_
 - [ADR-0088: Adopt Claude Rules Loader as a Separate Runtime Toolkit](adr/0088-claude-rules-loader.md)
 - [ADR-0089: Workspace Project Browser Surface](adr/0089-workspace-project-browser-surface.md)
 - [ADR-0090: Backend Project Browser Manifest](adr/0090-backend-project-browser-manifest.md)
+- [ADR-0091: Session Initialization Lifecycle](adr/0091-session-initialization-lifecycle.md)
+- [ADR-0092: Azents-Owned Git Worktree Ownership and Cleanup](adr/0092-azents-owned-git-worktree-ownership-and-cleanup.md)
 
-_93 documents_
+_95 documents_
 
 ## Issues (Bug Tracking)
 
@@ -158,9 +160,10 @@ _3 documents_
 - [Agent Thread / Session Model Blueprint](notes/agent-thread-session-blueprint.md)
 - [Codex Goal Pursuing Research](notes/codex-goal-pursuing-research.md)
 - [Local sandbox provider daemon research](notes/local-sandbox-provider-daemon-research.md)
+- [Session Git Worktree Lifecycle Research](notes/session-git-worktree-lifecycle-research.md)
 - [Session Project Model Research and Discussion Summary](notes/session-project-model-research.md)
 
-_4 documents_
+_5 documents_
 
 ## Documentation Rules · Overview
 
@@ -174,4 +177,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 334
+- Total documents: 339
