@@ -12,6 +12,7 @@ import {
   chatV1ArchiveAgentSession,
   chatV1BulkDeleteAgentWorkspacePaths,
   chatV1BulkMoveAgentWorkspacePaths,
+  chatV1CleanupSessionGitWorktree,
   chatV1CreateAgentWorkspaceDirectory,
   chatV1CreateInput,
   chatV1CreateTeamAgentSession,
@@ -35,10 +36,12 @@ import {
   chatV1ListInputActions,
   chatV1ListLiveEvents,
   chatV1MoveAgentWorkspacePath,
+  chatV1PreviewAgentGitRefs,
   chatV1PreviewProjectBrowserManifest,
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
   chatV1RejectAgentProjectRegistrationRequest,
+  chatV1RetrySessionInitialization,
   chatV1StatAgentWorkspacePath,
   chatV1StopSessionRun,
   chatV1UpdateAgentSessionTitle,
@@ -54,6 +57,18 @@ const inputActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("command"), name: z.string().min(1) }),
   z.object({ type: z.literal("goal") }),
   z.object({ type: z.literal("skill"), skill_path: z.string().min(1) }),
+]);
+
+const newSessionWorkspaceModeSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("existing_projects"),
+    project_paths: z.array(z.string().min(1)),
+  }),
+  z.object({
+    type: z.literal("git_worktree"),
+    source_project_path: z.string().min(1),
+    starting_ref: z.string().min(1),
+  }),
 ]);
 
 export const chatRouter = router({
@@ -102,7 +117,8 @@ export const chatRouter = router({
     .input(
       z.object({
         agentId: z.string().min(1),
-        projectPaths: z.array(z.string().min(1)),
+        projectPaths: z.array(z.string().min(1)).optional(),
+        workspaceMode: newSessionWorkspaceModeSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -110,14 +126,19 @@ export const chatRouter = router({
         const { data } = await chatV1CreateTeamAgentSession({
           client: ctx.apiClient,
           path: { agent_id: input.agentId },
-          body: { project_paths: input.projectPaths },
+          body: {
+            project_paths: input.projectPaths,
+            workspace_mode: input.workspaceMode,
+          },
           throwOnError: true,
         });
         return data;
       } catch (e) {
         throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
           401: "UNAUTHORIZED",
           404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),
@@ -129,7 +150,8 @@ export const chatRouter = router({
         clientRequestId: z.string().min(1).max(64),
         message: z.string().min(1),
         attachments: z.array(z.string().min(1)).optional(),
-        projectPaths: z.array(z.string().min(1)),
+        projectPaths: z.array(z.string().min(1)).optional(),
+        workspaceMode: newSessionWorkspaceModeSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -141,6 +163,7 @@ export const chatRouter = router({
             client_request_id: input.clientRequestId,
             message: input.message,
             project_paths: input.projectPaths,
+            workspace_mode: input.workspaceMode,
             attachments: input.attachments,
           },
           throwOnError: true,
@@ -260,6 +283,33 @@ export const chatRouter = router({
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  previewAgentGitRefs: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sourceProjectPath: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1PreviewAgentGitRefs({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          query: { source_project_path: input.sourceProjectPath },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),
@@ -541,6 +591,48 @@ export const chatRouter = router({
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  retrySessionInitialization: publicProcedure
+    .input(
+      z.object({ agentId: z.string().min(1), sessionId: z.string().min(1) }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await chatV1RetrySessionInitialization({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          throwOnError: true,
+        });
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  cleanupSessionGitWorktree: publicProcedure
+    .input(
+      z.object({ agentId: z.string().min(1), sessionId: z.string().min(1) }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await chatV1CleanupSessionGitWorktree({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          throwOnError: true,
+        });
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

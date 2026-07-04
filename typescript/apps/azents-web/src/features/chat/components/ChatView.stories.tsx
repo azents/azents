@@ -229,6 +229,8 @@ const baseArgs = {
   initialization: null,
   initializationDetailState: { type: "IDLE" },
   onLoadInitializationDetails: noop,
+  onRetryInitialization: noop,
+  onRetryInitializationCleanup: noop,
   onDeletePendingInitializationInputs: noop,
   workspacePanel,
   goal: { objective: null, status: null },

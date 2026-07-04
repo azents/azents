@@ -23,12 +23,19 @@ export function AgentDraftChat(
   const {
     agent,
     isWritePending,
+    canSendMessage,
     onSendMessage,
     selectedProjectPaths,
+    workspaceMode,
+    gitRefPreviewState,
     projectPresetState,
     projectPickerState,
     isProjectPickerOpen,
+    onSelectExistingProjectsMode,
+    onSelectGitWorktreeMode,
     onAddPresetProject,
+    onSetWorktreeSourceProject,
+    onSetWorktreeStartingRef,
     onRemoveProject,
     onOpenProjectPicker,
     onCloseProjectPicker,
@@ -109,11 +116,17 @@ export function AgentDraftChat(
       <Box px="md" py="sm" style={{ flexShrink: 0 }}>
         <Box maw={rem(920)} mx="auto">
           <NewSessionProjectSelector
+            gitRefPreviewState={gitRefPreviewState}
             projectPresetState={projectPresetState}
             selectedProjectPaths={selectedProjectPaths}
+            workspaceMode={workspaceMode}
             onAddPresetProject={onAddPresetProject}
             onOpenProjectPicker={onOpenProjectPicker}
             onRemoveProject={onRemoveProject}
+            onSelectExistingProjectsMode={onSelectExistingProjectsMode}
+            onSelectGitWorktreeMode={onSelectGitWorktreeMode}
+            onSetWorktreeSourceProject={onSetWorktreeSourceProject}
+            onSetWorktreeStartingRef={onSetWorktreeStartingRef}
           />
           <ChatInput
             agentId={agent.id}
@@ -139,7 +152,7 @@ export function AgentDraftChat(
             isStopPending={false}
             onStopRequest={() => {}}
             inputActions={[]}
-            editSendDisabled={isWritePending}
+            editSendDisabled={isWritePending || !canSendMessage}
           />
         </Box>
       </Box>

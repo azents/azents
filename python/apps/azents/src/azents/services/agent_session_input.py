@@ -221,7 +221,6 @@ class AgentSessionInputService:
             if project_paths is None:
                 raise ValueError("workspace_mode is required")
             workspace_mode = ExplicitProjectsWorkspaceMode(project_paths=project_paths)
-        prepared_worktree = False
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
@@ -299,7 +298,7 @@ class AgentSessionInputService:
                     )
                     match prepared:
                         case Success():
-                            prepared_worktree = True
+                            pass
                         case Failure(error):
                             return Failure(error)
                         case _:
@@ -312,15 +311,6 @@ class AgentSessionInputService:
                 message=message,
                 user_id=user_id,
                 client_request_id=client_request_id,
-            )
-
-        if prepared_worktree:
-            worktree_service = self.session_git_worktree_service
-            if worktree_service is None:
-                raise RuntimeError("SessionGitWorktreeService is unavailable")
-            await worktree_service.run_git_worktree_initialization(
-                agent_id=agent_id,
-                session_id=agent_session.id,
             )
 
         return Success(

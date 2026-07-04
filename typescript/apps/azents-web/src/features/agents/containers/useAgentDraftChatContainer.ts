@@ -14,6 +14,7 @@ import type { ProjectDirectoryPickerState } from "@/features/chat/workspace/comp
 import type {
   AgentProjectPresetResponse,
   AgentResponse,
+  GitRefEntryResponse,
 } from "@azents/public-client";
 
 const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
@@ -28,15 +29,36 @@ export type ProjectPresetState =
   | { type: "ERROR"; message: string }
   | { type: "READY"; presets: AgentProjectPresetResponse[] };
 
+export type NewSessionWorkspaceModeState =
+  | { type: "existing_projects" }
+  | {
+      type: "git_worktree";
+      sourceProjectPath: string | null;
+      startingRef: string | null;
+    };
+
+export type GitRefPreviewState =
+  | { type: "IDLE" }
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "READY"; refs: GitRefEntryResponse[] };
+
 export interface AgentDraftChatContainerOutput {
   handle: string;
   agent: AgentResponse;
   isWritePending: boolean;
+  canSendMessage: boolean;
   selectedProjectPaths: string[];
+  workspaceMode: NewSessionWorkspaceModeState;
+  gitRefPreviewState: GitRefPreviewState;
   projectPresetState: ProjectPresetState;
   projectPickerState: ProjectDirectoryPickerState;
   isProjectPickerOpen: boolean;
+  onSelectExistingProjectsMode: () => void;
+  onSelectGitWorktreeMode: () => void;
   onAddPresetProject: (path: string) => void;
+  onSetWorktreeSourceProject: (path: string) => void;
+  onSetWorktreeStartingRef: (ref: string | null) => void;
   onRemoveProject: (path: string) => void;
   onOpenProjectPicker: () => void;
   onCloseProjectPicker: () => void;
@@ -75,6 +97,10 @@ function dedupePaths(paths: string[]): string[] {
   return result;
 }
 
+function defaultStartingRef(refs: GitRefEntryResponse[]): string | null {
+  return refs.find((ref) => ref.default)?.ref ?? refs.at(0)?.ref ?? null;
+}
+
 export function useAgentDraftChatContainer(
   props: AgentDraftChatContainerProps,
 ): AgentDraftChatContainerOutput {
@@ -87,6 +113,8 @@ export function useAgentDraftChatContainer(
   const [selectedProjectPaths, setSelectedProjectPaths] = useState<string[]>(
     [],
   );
+  const [workspaceMode, setWorkspaceMode] =
+    useState<NewSessionWorkspaceModeState>({ type: "existing_projects" });
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectPickerPath, setProjectPickerPath] = useState<string | null>(
     null,
@@ -104,6 +132,7 @@ export function useAgentDraftChatContainer(
   useEffect(() => {
     defaultsAppliedRef.current = false;
     setSelectedProjectPaths([]);
+    setWorkspaceMode({ type: "existing_projects" });
     setProjectPickerPath(null);
   }, [agent.id]);
 
@@ -112,10 +141,41 @@ export function useAgentDraftChatContainer(
       return;
     }
     defaultsAppliedRef.current = true;
-    setSelectedProjectPaths(
-      dedupePaths(projectDefaultsQuery.data.project_paths),
+    const defaultPaths = dedupePaths(projectDefaultsQuery.data.project_paths);
+    setSelectedProjectPaths(defaultPaths);
+    setWorkspaceMode((current) =>
+      current.type === "git_worktree" && current.sourceProjectPath === null
+        ? { ...current, sourceProjectPath: defaultPaths.at(0) ?? null }
+        : current,
     );
   }, [projectDefaultsQuery.data]);
+
+  const sourceProjectPath =
+    workspaceMode.type === "git_worktree"
+      ? workspaceMode.sourceProjectPath
+      : null;
+  const gitRefsQuery = trpc.chat.previewAgentGitRefs.useQuery(
+    { agentId: agent.id, sourceProjectPath: sourceProjectPath ?? "" },
+    {
+      enabled:
+        workspaceMode.type === "git_worktree" && sourceProjectPath !== null,
+    },
+  );
+
+  useEffect(() => {
+    if (workspaceMode.type !== "git_worktree" || !gitRefsQuery.data) {
+      return;
+    }
+    const refs = gitRefsQuery.data.refs;
+    const currentRef = workspaceMode.startingRef;
+    if (currentRef && refs.some((ref) => ref.ref === currentRef)) {
+      return;
+    }
+    setWorkspaceMode({
+      ...workspaceMode,
+      startingRef: defaultStartingRef(refs),
+    });
+  }, [gitRefsQuery.data, workspaceMode]);
 
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
     { agentId: agent.id },
@@ -166,6 +226,15 @@ export function useAgentDraftChatContainer(
     setSelectedProjectPaths((previous) => dedupePaths([...previous, path]));
   }, []);
 
+  const onSetWorktreeSourceProject = useCallback((path: string): void => {
+    defaultsAppliedRef.current = true;
+    setWorkspaceMode({
+      type: "git_worktree",
+      sourceProjectPath: normalizeProjectPath(path),
+      startingRef: null,
+    });
+  }, []);
+
   const onRemoveProject = useCallback((path: string): void => {
     defaultsAppliedRef.current = true;
     setSelectedProjectPaths((previous) =>
@@ -173,9 +242,38 @@ export function useAgentDraftChatContainer(
     );
   }, []);
 
+  const onSelectExistingProjectsMode = useCallback((): void => {
+    setWorkspaceMode({ type: "existing_projects" });
+  }, []);
+
+  const onSelectGitWorktreeMode = useCallback((): void => {
+    setWorkspaceMode((current) =>
+      current.type === "git_worktree"
+        ? current
+        : {
+            type: "git_worktree",
+            sourceProjectPath: selectedProjectPaths.at(0) ?? null,
+            startingRef: null,
+          },
+    );
+  }, [selectedProjectPaths]);
+
+  const onSetWorktreeStartingRef = useCallback((ref: string | null): void => {
+    setWorkspaceMode((current) =>
+      current.type === "git_worktree"
+        ? { ...current, startingRef: ref }
+        : current,
+    );
+  }, []);
+
+  const canSendMessage =
+    workspaceMode.type === "existing_projects" ||
+    (workspaceMode.sourceProjectPath !== null &&
+      workspaceMode.startingRef !== null);
+
   const onSendMessage = useCallback(
     async (message: string, attachments?: UploadedFile[]): Promise<boolean> => {
-      if (writeInFlight) {
+      if (writeInFlight || !canSendMessage) {
         return false;
       }
       const attachmentUris = attachments?.map((attachment) => attachment.uri);
@@ -186,7 +284,21 @@ export function useAgentDraftChatContainer(
           clientRequestId: crypto.randomUUID(),
           message,
           attachments: attachmentUris,
-          projectPaths: selectedProjectPaths,
+          ...(workspaceMode.type === "git_worktree"
+            ? {
+                workspaceMode: {
+                  type: "git_worktree",
+                  source_project_path: workspaceMode.sourceProjectPath ?? "",
+                  starting_ref: workspaceMode.startingRef ?? "",
+                },
+              }
+            : {
+                workspaceMode: {
+                  type: "existing_projects",
+                  project_paths: selectedProjectPaths,
+                },
+                projectPaths: selectedProjectPaths,
+              }),
         });
         await Promise.all([
           utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
@@ -204,12 +316,14 @@ export function useAgentDraftChatContainer(
     },
     [
       agent.id,
+      canSendMessage,
       createMessageMutation,
       handle,
       router,
       selectedProjectPaths,
       utils.chat.listAgentProjectPresets,
       utils.chat.listAgentSessions,
+      workspaceMode,
       writeInFlight,
     ],
   );
@@ -239,6 +353,26 @@ export function useAgentDraftChatContainer(
     projectPresetsQuery.error,
     projectPresetsQuery.isError,
     projectPresetsQuery.isLoading,
+  ]);
+
+  const gitRefPreviewState = useMemo<GitRefPreviewState>(() => {
+    if (workspaceMode.type !== "git_worktree" || sourceProjectPath === null) {
+      return { type: "IDLE" };
+    }
+    if (gitRefsQuery.isLoading) {
+      return { type: "LOADING" };
+    }
+    if (gitRefsQuery.isError) {
+      return { type: "ERROR", message: getErrorMessage(gitRefsQuery.error) };
+    }
+    return { type: "READY", refs: gitRefsQuery.data?.refs ?? [] };
+  }, [
+    gitRefsQuery.data?.refs,
+    gitRefsQuery.error,
+    gitRefsQuery.isError,
+    gitRefsQuery.isLoading,
+    sourceProjectPath,
+    workspaceMode.type,
   ]);
 
   const projectPickerState = useMemo<ProjectDirectoryPickerState>(() => {
@@ -285,17 +419,28 @@ export function useAgentDraftChatContainer(
     handle,
     agent,
     isWritePending: createMessageMutation.isPending || writeInFlight,
+    canSendMessage,
     selectedProjectPaths,
+    workspaceMode,
+    gitRefPreviewState,
     projectPresetState,
     projectPickerState,
     isProjectPickerOpen: projectPickerOpen,
+    onSelectExistingProjectsMode,
+    onSelectGitWorktreeMode,
     onAddPresetProject,
+    onSetWorktreeSourceProject,
+    onSetWorktreeStartingRef,
     onRemoveProject,
     onOpenProjectPicker: () => setProjectPickerOpen(true),
     onCloseProjectPicker: () => setProjectPickerOpen(false),
     onOpenProjectPickerDirectory: setProjectPickerPath,
     onSelectProjectPickerDirectory: (path: string) => {
-      onAddPresetProject(path);
+      if (workspaceMode.type === "git_worktree") {
+        onSetWorktreeSourceProject(path);
+      } else {
+        onAddPresetProject(path);
+      }
       setProjectPickerOpen(false);
     },
     onRefreshProjectPicker: () => {

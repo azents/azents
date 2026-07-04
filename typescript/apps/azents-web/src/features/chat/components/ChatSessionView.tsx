@@ -127,6 +127,8 @@ export function ChatSessionView({
           initialization={output.initialization}
           initializationDetailState={output.initializationDetailState}
           onLoadInitializationDetails={output.onLoadInitializationDetails}
+          onRetryInitialization={output.onRetryInitialization}
+          onRetryInitializationCleanup={output.onRetryInitializationCleanup}
           onDeletePendingInitializationInputs={
             output.onDeletePendingInitializationInputs
           }

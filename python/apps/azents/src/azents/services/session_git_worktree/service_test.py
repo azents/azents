@@ -754,10 +754,16 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
+            initialization = await SessionInitializationRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
 
         assert request.cleanup_requested is True
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANUP_PENDING
+        assert initialization is not None
+        assert initialization.status is SessionInitializationStatus.CLEANUP_REQUIRED
         assert [call["operation"] for call in runner.calls] == ["create_git_worktree"]
 
     async def test_cleanup_removes_worktree_branch_and_catalog(
@@ -792,12 +798,18 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
+            initialization = await SessionInitializationRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
             catalog = await AgentProjectCatalogRepository().list_entries(
                 session,
                 agent_id=agent_id,
             )
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANED
+        assert initialization is not None
+        assert initialization.status is SessionInitializationStatus.CLEANED
         assert catalog == []
         assert [call["operation"] for call in runner.calls] == [
             "create_git_worktree",
@@ -839,6 +851,10 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
+            initialization = await SessionInitializationRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
             catalog = await AgentProjectCatalogRepository().list_entries(
                 session,
                 agent_id=agent_id,
@@ -846,6 +862,11 @@ class TestSessionGitWorktreeService:
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
         assert allocation.cleanup_summary == "worktree remove failed"
+        assert initialization is not None
+        assert initialization.status is SessionInitializationStatus.CLEANUP_REQUIRED
+        assert initialization.failure_summary == (
+            "Git worktree cleanup failed: worktree remove failed"
+        )
         assert len(catalog) == 1
 
     async def test_manual_cleanup_retry_succeeds_after_failure(
@@ -891,8 +912,14 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
+            initialization = await SessionInitializationRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANED
+        assert initialization is not None
+        assert initialization.status is SessionInitializationStatus.CLEANED
 
     async def test_cleanup_rejects_path_without_matching_ownership_boundary(
         self,
