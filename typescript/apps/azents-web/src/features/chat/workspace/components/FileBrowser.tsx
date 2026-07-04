@@ -94,6 +94,22 @@ function getRelativePath(path: string, root: string): string {
   return path.slice(root.length).replace(/^\//, "") || root;
 }
 
+function getBasename(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  return trimmed.slice(trimmed.lastIndexOf("/") + 1) || trimmed;
+}
+
+function getEntryDisplayName(entry: WorkspaceEntry, depth: number): string {
+  if (
+    depth === 0 &&
+    (entry.source?.type === "session_project" ||
+      entry.source?.type === "preview_project")
+  ) {
+    return getBasename(entry.path);
+  }
+  return entry.name;
+}
+
 function getFileExtension(name: string): string {
   const parts = name.split(".");
   return parts.length > 1 ? (parts.at(-1) ?? "").toLowerCase() : "";
@@ -284,14 +300,10 @@ function TreeNode({
   const open = expanded.has(node.path);
   const active = activePath === node.path;
   const checked = selectedPaths.has(node.path);
+  const displayName = getEntryDisplayName(node, depth);
   const isDirectory = node.kind === "directory";
   const selectable = canSelect(node);
   const canRemoveProject = node.capabilities?.removeProject === true;
-  const displayName =
-    node.source?.type === "session_project" ||
-    node.source?.type === "preview_project"
-      ? node.path
-      : node.name;
   const rowStyle = compact
     ? {
         minHeight: rem(28),
