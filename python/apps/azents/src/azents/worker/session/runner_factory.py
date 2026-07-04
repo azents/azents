@@ -13,6 +13,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.services.input_buffer import InputBufferService
+from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.session.idle_continuation import IdleContinuationService
@@ -42,6 +43,9 @@ class SessionRunnerFactory:
     user_stop_finalizer: Annotated[UserStopFinalizer, Depends(UserStopFinalizer)]
     run_executor: Annotated[RunExecutor, Depends(RunExecutor)]
     engine: Annotated[AgentEngineProtocol, Depends(AgentEngineAdapter)]
+    session_git_worktree_service: Annotated[
+        SessionGitWorktreeService, Depends(SessionGitWorktreeService)
+    ]
 
     def create(self, *, shutdown_event: asyncio.Event) -> SessionRunner:
         """Create new SessionRunner bound to global shutdown event."""
@@ -56,4 +60,5 @@ class SessionRunnerFactory:
             user_stop_finalizer=self.user_stop_finalizer,
             run_executor=self.run_executor,
             engine=self.engine,
+            initialization_processor=self.session_git_worktree_service,
         )

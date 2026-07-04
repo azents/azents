@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 from typing import Annotated, Literal, assert_never
 
 from azcommon.result import Failure, Result, Success
+from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -117,6 +118,7 @@ GitRefPreviewError = (
     | GitRefPreviewRuntimeUnavailable
     | InvalidProjectPath
 )
+
 
 SessionInitializationEventCallback = Callable[
     [SessionInitializationEvent], Awaitable[None]
@@ -318,6 +320,31 @@ class SessionGitWorktreeService:
     ) -> Result[PreparedGitWorktreeInitialization, InvalidProjectPath]:
         """Create durable initialization rows for a Git worktree session."""
         del agent_id
+        prepared = await self._prepare_worktree_steps(
+            session,
+            session_id=session_id,
+            session_handle=session_handle,
+            source_project_path=source_project_path,
+            starting_ref=starting_ref,
+        )
+        match prepared:
+            case Success(value):
+                return Success(value)
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(prepared)
+
+    async def _prepare_worktree_steps(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        session_handle: str,
+        source_project_path: str,
+        starting_ref: str,
+    ) -> Result[PreparedGitWorktreeInitialization, InvalidProjectPath]:
+        """Create one worktree allocation and its scoped initialization steps."""
         try:
             normalized_source_path = normalize_session_workspace_path(
                 source_project_path
@@ -348,18 +375,38 @@ class SessionGitWorktreeService:
                 ),
             )
         )
+        next_sequence = 1
+        worktree_id = uuid7().hex
+        create_key = _worktree_step_key(
+            SessionInitializationStepType.CREATE_GIT_WORKTREE,
+            worktree_id,
+        )
+        register_key = _worktree_step_key(
+            SessionInitializationStepType.REGISTER_WORKSPACE_PROJECT,
+            worktree_id,
+        )
+        catalog_key = _worktree_step_key(
+            SessionInitializationStepType.UPSERT_PROJECT_CATALOG,
+            worktree_id,
+        )
+        refresh_key = _worktree_step_key(
+            SessionInitializationStepType.REFRESH_PROJECT_STATUS,
+            worktree_id,
+        )
         create_step = await self.session_initialization_repository.create_step(
             session,
             SessionInitializationStepCreate(
                 initialization_id=initialization.id,
                 session_id=session_id,
-                sequence=1,
-                step_key=SessionInitializationStepType.CREATE_GIT_WORKTREE.value,
+                sequence=next_sequence,
+                step_key=create_key,
                 step_type=SessionInitializationStepType.CREATE_GIT_WORKTREE,
                 blocking=True,
                 retryable=True,
                 depends_on_step_keys=[],
-                resource_descriptors=[],
+                resource_descriptors=[
+                    {"type": "git_worktree", "worktree_id": worktree_id}
+                ],
             ),
         )
         await self.session_initialization_repository.create_step(
@@ -367,13 +414,15 @@ class SessionGitWorktreeService:
             SessionInitializationStepCreate(
                 initialization_id=initialization.id,
                 session_id=session_id,
-                sequence=2,
-                step_key=SessionInitializationStepType.REGISTER_WORKSPACE_PROJECT.value,
+                sequence=next_sequence + 1,
+                step_key=register_key,
                 step_type=SessionInitializationStepType.REGISTER_WORKSPACE_PROJECT,
                 blocking=True,
                 retryable=True,
-                depends_on_step_keys=[create_step.step_key],
-                resource_descriptors=[],
+                depends_on_step_keys=[create_key],
+                resource_descriptors=[
+                    {"type": "git_worktree", "worktree_id": worktree_id}
+                ],
             ),
         )
         await self.session_initialization_repository.create_step(
@@ -381,15 +430,15 @@ class SessionGitWorktreeService:
             SessionInitializationStepCreate(
                 initialization_id=initialization.id,
                 session_id=session_id,
-                sequence=3,
-                step_key=SessionInitializationStepType.UPSERT_PROJECT_CATALOG.value,
+                sequence=next_sequence + 2,
+                step_key=catalog_key,
                 step_type=SessionInitializationStepType.UPSERT_PROJECT_CATALOG,
                 blocking=True,
                 retryable=True,
-                depends_on_step_keys=[
-                    SessionInitializationStepType.REGISTER_WORKSPACE_PROJECT.value
+                depends_on_step_keys=[register_key],
+                resource_descriptors=[
+                    {"type": "git_worktree", "worktree_id": worktree_id}
                 ],
-                resource_descriptors=[],
             ),
         )
         await self.session_initialization_repository.create_step(
@@ -397,15 +446,15 @@ class SessionGitWorktreeService:
             SessionInitializationStepCreate(
                 initialization_id=initialization.id,
                 session_id=session_id,
-                sequence=4,
-                step_key=SessionInitializationStepType.REFRESH_PROJECT_STATUS.value,
+                sequence=next_sequence + 3,
+                step_key=refresh_key,
                 step_type=SessionInitializationStepType.REFRESH_PROJECT_STATUS,
                 blocking=False,
                 retryable=True,
-                depends_on_step_keys=[
-                    SessionInitializationStepType.UPSERT_PROJECT_CATALOG.value
+                depends_on_step_keys=[catalog_key],
+                resource_descriptors=[
+                    {"type": "git_worktree", "worktree_id": worktree_id}
                 ],
-                resource_descriptors=[],
             ),
         )
         worktree_path, branch_name = _target_names(
@@ -417,9 +466,11 @@ class SessionGitWorktreeService:
         allocation = await self.session_git_worktree_repository.create(
             session,
             SessionGitWorktreeCreate(
+                id=worktree_id,
                 session_id=session_id,
                 initialization_id=initialization.id,
                 step_id=create_step.id,
+                session_workspace_project_id=None,
                 source_project_path=normalized_source_path,
                 starting_ref=starting_ref.strip(),
                 worktree_path=worktree_path,
@@ -440,14 +491,9 @@ class SessionGitWorktreeService:
                 exit_code=None,
             ),
         )
-        await self.session_initialization_repository.update_initialization_status(
+        await self.session_initialization_repository.mark_pending_for_queue(
             session,
             initialization_id=initialization.id,
-            status=SessionInitializationStatus.PENDING,
-            failure_summary=None,
-            started_at=None,
-            completed_at=None,
-            failed_at=None,
         )
         return Success(
             PreparedGitWorktreeInitialization(
@@ -465,35 +511,45 @@ class SessionGitWorktreeService:
         on_event_appended: SessionInitializationEventCallback | None = None,
         on_projection_updated: SessionInitializationProjectionCallback | None = None,
     ) -> None:
-        """Execute the prepared Git worktree initialization."""
+        """Execute pending Git worktree initialization work for a session."""
         async with self.session_manager() as session:
-            allocation = await self.session_git_worktree_repository.get_by_session_id(
+            allocations = await self.session_git_worktree_repository.list_by_session_id(
                 session,
                 session_id=session_id,
             )
-            if allocation is None:
+            if not allocations:
                 raise RuntimeError("SessionGitWorktree row is missing")
+            if len(allocations) != 1:
+                raise RuntimeError("SessionGitWorktree row count must be 1")
+            allocation = allocations[0]
+            initialization = (
+                await self.session_initialization_repository.get_by_session_id(
+                    session,
+                    session_id=session_id,
+                )
+            )
+            if initialization is None:
+                raise RuntimeError("SessionInitialization row is missing")
             steps = await self.session_initialization_repository.list_steps(
                 session,
-                initialization_id=allocation.initialization_id,
+                initialization_id=initialization.id,
             )
-        step_by_type = {step.step_type: step for step in steps}
-        create_step = step_by_type[SessionInitializationStepType.CREATE_GIT_WORKTREE]
-        register_step = step_by_type[
-            SessionInitializationStepType.REGISTER_WORKSPACE_PROJECT
-        ]
-        catalog_step = step_by_type[
-            SessionInitializationStepType.UPSERT_PROJECT_CATALOG
-        ]
-        refresh_step = step_by_type[
-            SessionInitializationStepType.REFRESH_PROJECT_STATUS
-        ]
 
+        if _worktree_allocation_is_complete(allocation, steps):
+            return
+        claimed = await self._claim_initialization_run(session_id=session_id)
+        if not claimed:
+            return
+
+        allocation_steps = _worktree_steps_for_allocation(
+            allocation=allocation,
+            steps=steps,
+        )
         runtime = await self._get_runtime(agent_id=agent_id)
         if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
             await self._fail_initialization(
                 allocation=allocation,
-                step=create_step,
+                step=allocation_steps.create_step,
                 reason="Runtime runner is not ready.",
                 on_projection_updated=on_projection_updated,
             )
@@ -501,80 +557,23 @@ class SessionGitWorktreeService:
         if self.runner_operations is None:
             await self._fail_initialization(
                 allocation=allocation,
-                step=create_step,
+                step=allocation_steps.create_step,
                 reason="Runtime runner operations are unavailable.",
                 on_projection_updated=on_projection_updated,
             )
             return
 
-        if create_step.status is SessionInitializationStepStatus.COMPLETED:
-            if allocation.status is not SessionGitWorktreeStatus.READY:
-                await self._fail_initialization(
-                    allocation=allocation,
-                    step=create_step,
-                    reason="Git worktree allocation is not ready.",
-                    on_projection_updated=on_projection_updated,
-                )
-                return
-            create_result = _CreateWorktreeSuccess(
-                worktree_path=allocation.worktree_path,
-                branch_name=allocation.branch_name,
-                base_commit=allocation.base_commit or "",
-            )
-        else:
-            create_result = await self._run_create_worktree_step(
-                runtime=runtime,
-                allocation=allocation,
-                step=create_step,
-                on_event_appended=on_event_appended,
-                on_projection_updated=on_projection_updated,
-            )
-            if create_result is None:
-                return
+        completed = await self._run_one_git_worktree_initialization(
+            agent_id=agent_id,
+            runtime=runtime,
+            allocation=allocation,
+            steps=allocation_steps,
+            on_event_appended=on_event_appended,
+            on_projection_updated=on_projection_updated,
+        )
+        if not completed:
+            return
 
-        if register_step.status is not SessionInitializationStepStatus.COMPLETED:
-            register_ok = await self._complete_backend_step(
-                allocation=allocation,
-                step=register_step,
-                kind="register_project",
-                on_event_appended=on_event_appended,
-                on_projection_updated=on_projection_updated,
-                action=lambda db: (
-                    self.session_workspace_project_repository.create_project(
-                        db,
-                        SessionWorkspaceProjectCreate(
-                            session_id=allocation.session_id,
-                            path=create_result.worktree_path,
-                        ),
-                    )
-                ),
-            )
-            if not register_ok:
-                return
-        if catalog_step.status is not SessionInitializationStepStatus.COMPLETED:
-            catalog_ok = await self._complete_backend_step(
-                allocation=allocation,
-                step=catalog_step,
-                kind="upsert_catalog",
-                on_event_appended=on_event_appended,
-                on_projection_updated=on_projection_updated,
-                action=lambda db: self.agent_project_catalog_repository.upsert_entry(
-                    db,
-                    agent_id=agent_id,
-                    path=create_result.worktree_path,
-                ),
-            )
-            if not catalog_ok:
-                return
-        if refresh_step.status is not SessionInitializationStepStatus.COMPLETED:
-            await self._refresh_project_status(
-                agent_id=agent_id,
-                allocation=allocation,
-                step=refresh_step,
-                path=create_result.worktree_path,
-                on_event_appended=on_event_appended,
-                on_projection_updated=on_projection_updated,
-            )
         async with self.session_manager() as session:
             await self.session_initialization_repository.update_initialization_status(
                 session,
@@ -590,26 +589,139 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
 
+    async def _run_one_git_worktree_initialization(
+        self,
+        *,
+        agent_id: str,
+        runtime: AgentRuntime,
+        allocation: SessionGitWorktree,
+        steps: _WorktreeInitializationSteps,
+        on_event_appended: SessionInitializationEventCallback | None,
+        on_projection_updated: SessionInitializationProjectionCallback | None,
+    ) -> bool:
+        """Execute initialization steps for one worktree allocation."""
+        create_step = steps.create_step
+        register_step = steps.register_step
+        catalog_step = steps.catalog_step
+        refresh_step = steps.refresh_step
+
+        if create_step.status is SessionInitializationStepStatus.COMPLETED:
+            if allocation.status is not SessionGitWorktreeStatus.READY:
+                await self._fail_initialization(
+                    allocation=allocation,
+                    step=create_step,
+                    reason="Git worktree allocation is not ready.",
+                    on_projection_updated=on_projection_updated,
+                )
+                return False
+            create_result = _CreateWorktreeSuccess(
+                worktree_path=allocation.worktree_path,
+                branch_name=allocation.branch_name,
+                base_commit=allocation.base_commit or "",
+            )
+        else:
+            create_result = await self._run_create_worktree_step(
+                runtime=runtime,
+                allocation=allocation,
+                step=create_step,
+                on_event_appended=on_event_appended,
+                on_projection_updated=on_projection_updated,
+            )
+            if create_result is None:
+                return False
+
+        if register_step.status is not SessionInitializationStepStatus.COMPLETED:
+            register_ok = await self._complete_backend_step(
+                allocation=allocation,
+                step=register_step,
+                kind="register_project",
+                on_event_appended=on_event_appended,
+                on_projection_updated=on_projection_updated,
+                action=lambda db: self._create_and_link_workspace_project(
+                    db,
+                    allocation=allocation,
+                    worktree_path=create_result.worktree_path,
+                ),
+            )
+            if not register_ok:
+                return False
+        if catalog_step.status is not SessionInitializationStepStatus.COMPLETED:
+            catalog_ok = await self._complete_backend_step(
+                allocation=allocation,
+                step=catalog_step,
+                kind="upsert_catalog",
+                on_event_appended=on_event_appended,
+                on_projection_updated=on_projection_updated,
+                action=lambda db: self.agent_project_catalog_repository.upsert_entry(
+                    db,
+                    agent_id=agent_id,
+                    path=create_result.worktree_path,
+                ),
+            )
+            if not catalog_ok:
+                return False
+        if refresh_step.status is not SessionInitializationStepStatus.COMPLETED:
+            await self._refresh_project_status(
+                agent_id=agent_id,
+                allocation=allocation,
+                step=refresh_step,
+                path=create_result.worktree_path,
+                on_event_appended=on_event_appended,
+                on_projection_updated=on_projection_updated,
+            )
+        return True
+
+    async def _create_and_link_workspace_project(
+        self,
+        session: AsyncSession,
+        *,
+        allocation: SessionGitWorktree,
+        worktree_path: str,
+    ) -> object:
+        """Register the worktree Project and link it to the allocation."""
+        project = await self.session_workspace_project_repository.create_project(
+            session,
+            SessionWorkspaceProjectCreate(
+                session_id=allocation.session_id,
+                path=worktree_path,
+            ),
+        )
+        await self.session_git_worktree_repository.link_workspace_project(
+            session,
+            worktree_id=allocation.id,
+            session_workspace_project_id=project.id,
+        )
+        return project
+
     async def mark_cleanup_pending_for_session(
         self,
         session: AsyncSession,
         *,
         session_id: str,
     ) -> GitWorktreeCleanupRequest:
-        """Request cleanup for a session-owned Git worktree allocation."""
-        allocation = await self.session_git_worktree_repository.get_by_session_id(
+        """Request cleanup for session-owned Git worktree allocations."""
+        allocations = await self.session_git_worktree_repository.list_by_session_id(
             session,
             session_id=session_id,
         )
-        if allocation is None or allocation.status is SessionGitWorktreeStatus.CLEANED:
+        cleanup_targets = [
+            allocation
+            for allocation in allocations
+            if allocation.status is not SessionGitWorktreeStatus.CLEANED
+        ]
+        if not cleanup_targets:
             return GitWorktreeCleanupRequest(cleanup_requested=False)
-        pending = await self.session_git_worktree_repository.mark_cleanup_pending(
-            session,
-            worktree_id=allocation.id,
-        )
+        pending_allocations: list[SessionGitWorktree] = []
+        for allocation in cleanup_targets:
+            pending_allocations.append(
+                await self.session_git_worktree_repository.mark_cleanup_pending(
+                    session,
+                    worktree_id=allocation.id,
+                )
+            )
         await self.session_initialization_repository.update_initialization_status(
             session,
-            initialization_id=pending.initialization_id,
+            initialization_id=pending_allocations[0].initialization_id,
             status=SessionInitializationStatus.CLEANUP_REQUIRED,
             failure_summary="Git worktree cleanup is pending.",
             started_at=None,
@@ -645,11 +757,11 @@ class SessionGitWorktreeService:
             )
             if workspace_user is None:
                 return Failure(GitWorktreeInitializationRetryAccessDenied())
-            allocation = await self.session_git_worktree_repository.get_by_session_id(
+            allocations = await self.session_git_worktree_repository.list_by_session_id(
                 session,
                 session_id=session_id,
             )
-            if allocation is None:
+            if not allocations:
                 return Failure(GitWorktreeInitializationRetryNotFound())
             initialization = (
                 await self.session_initialization_repository.get_by_session_id(
@@ -681,11 +793,12 @@ class SessionGitWorktreeService:
                 session,
                 initialization_id=initialization.id,
             )
-            if allocation.status is not SessionGitWorktreeStatus.READY:
-                await self.session_git_worktree_repository.mark_pending_for_retry(
-                    session,
-                    worktree_id=allocation.id,
-                )
+            for allocation in allocations:
+                if allocation.status is not SessionGitWorktreeStatus.READY:
+                    await self.session_git_worktree_repository.mark_pending_for_retry(
+                        session,
+                        worktree_id=allocation.id,
+                    )
             await self.session_initialization_repository.append_event(
                 session,
                 SessionInitializationEventCreate(
@@ -724,21 +837,30 @@ class SessionGitWorktreeService:
             )
             if workspace_user is None:
                 return Failure(GitWorktreeCleanupAccessDenied())
-            allocation = await self.session_git_worktree_repository.get_by_session_id(
+            allocations = await self.session_git_worktree_repository.list_by_session_id(
                 session,
                 session_id=session_id,
             )
-            if allocation is None:
+            if not allocations:
                 return Failure(GitWorktreeCleanupNotFound())
-            if allocation.status is SessionGitWorktreeStatus.CLEANED:
+            cleanup_targets = [
+                allocation
+                for allocation in allocations
+                if allocation.status is not SessionGitWorktreeStatus.CLEANED
+            ]
+            if not cleanup_targets:
                 return Success(GitWorktreeCleanupRequest(cleanup_requested=False))
-            pending = await self.session_git_worktree_repository.mark_cleanup_pending(
-                session,
-                worktree_id=allocation.id,
-            )
+            pending_allocations = []
+            for allocation in cleanup_targets:
+                pending_allocations.append(
+                    await self.session_git_worktree_repository.mark_cleanup_pending(
+                        session,
+                        worktree_id=allocation.id,
+                    )
+                )
             await self.session_initialization_repository.update_initialization_status(
                 session,
-                initialization_id=pending.initialization_id,
+                initialization_id=pending_allocations[0].initialization_id,
                 status=SessionInitializationStatus.CLEANUP_REQUIRED,
                 failure_summary="Git worktree cleanup is pending.",
                 started_at=None,
@@ -755,14 +877,87 @@ class SessionGitWorktreeService:
         on_event_appended: SessionInitializationEventCallback | None = None,
         on_projection_updated: SessionInitializationProjectionCallback | None = None,
     ) -> None:
-        """Run best-effort cleanup for a session-owned Git worktree."""
+        """Run best-effort cleanup for session-owned Git worktrees."""
         async with self.session_manager() as session:
-            allocation = await self.session_git_worktree_repository.get_by_session_id(
+            allocations = await self.session_git_worktree_repository.list_by_session_id(
                 session,
                 session_id=session_id,
             )
-        if allocation is None or allocation.status is SessionGitWorktreeStatus.CLEANED:
+        cleanup_targets = [
+            allocation
+            for allocation in allocations
+            if allocation.status is not SessionGitWorktreeStatus.CLEANED
+        ]
+        if not cleanup_targets:
             return
+        runtime = await self._get_runtime(agent_id=agent_id)
+        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+            await self._mark_cleanup_targets_failed(
+                allocations=cleanup_targets,
+                reason="Runtime runner is not ready.",
+                on_event_appended=on_event_appended,
+                on_projection_updated=on_projection_updated,
+            )
+            return
+        if self.runner_operations is None:
+            await self._mark_cleanup_targets_failed(
+                allocations=cleanup_targets,
+                reason="Runtime runner operations are unavailable.",
+                on_event_appended=on_event_appended,
+                on_projection_updated=on_projection_updated,
+            )
+            return
+
+        last_cleaned: SessionGitWorktree | None = None
+        for allocation in cleanup_targets:
+            cleaned = await self._run_cleanup_for_allocation(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime=runtime,
+                allocation=allocation,
+                on_event_appended=on_event_appended,
+                on_projection_updated=on_projection_updated,
+            )
+            if cleaned is not None:
+                last_cleaned = cleaned
+
+        if last_cleaned is None:
+            return
+        async with self.session_manager() as session:
+            remaining = await self.session_git_worktree_repository.list_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            if any(
+                allocation.status is not SessionGitWorktreeStatus.CLEANED
+                for allocation in remaining
+            ):
+                return
+            await self.session_initialization_repository.update_initialization_status(
+                session,
+                initialization_id=last_cleaned.initialization_id,
+                status=SessionInitializationStatus.CLEANED,
+                failure_summary=None,
+                started_at=None,
+                completed_at=datetime.now(UTC),
+                failed_at=None,
+            )
+        await self._publish_projection(
+            allocation=last_cleaned,
+            on_projection_updated=on_projection_updated,
+        )
+
+    async def _run_cleanup_for_allocation(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        runtime: AgentRuntime,
+        allocation: SessionGitWorktree,
+        on_event_appended: SessionInitializationEventCallback | None,
+        on_projection_updated: SessionInitializationProjectionCallback | None,
+    ) -> SessionGitWorktree | None:
+        """Run cleanup for one session-owned Git worktree allocation."""
         ownership_error = _cleanup_ownership_error(
             allocation=allocation,
             session_id=session_id,
@@ -774,26 +969,12 @@ class SessionGitWorktreeService:
                 on_event_appended=on_event_appended,
                 on_projection_updated=on_projection_updated,
             )
-            return
-        runtime = await self._get_runtime(agent_id=agent_id)
-        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
-            await self._mark_cleanup_failed(
-                worktree_id=allocation.id,
-                reason="Runtime runner is not ready.",
-                on_event_appended=on_event_appended,
-                on_projection_updated=on_projection_updated,
-            )
-            return
-        if self.runner_operations is None:
-            await self._mark_cleanup_failed(
-                worktree_id=allocation.id,
-                reason="Runtime runner operations are unavailable.",
-                on_event_appended=on_event_appended,
-                on_projection_updated=on_projection_updated,
-            )
-            return
+            return None
+        runner_operations = self.runner_operations
+        if runner_operations is None:
+            raise RuntimeError("Runtime runner operations are unavailable")
         try:
-            await self.runner_operations.remove_git_worktree(
+            await runner_operations.remove_git_worktree(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 source_project_path=allocation.source_project_path,
@@ -803,7 +984,7 @@ class SessionGitWorktreeService:
                 text_output_callback=None,
             )
             if allocation.branch_created_by is SessionGitWorktreeBranchCreatedBy.AZENTS:
-                await self.runner_operations.delete_git_branch(
+                await runner_operations.delete_git_branch(
                     runtime_id=runtime.id,
                     runner_generation=runtime.runner_generation,
                     source_project_path=allocation.source_project_path,
@@ -824,18 +1005,6 @@ class SessionGitWorktreeService:
                     cleanup_summary="Git worktree cleanup completed.",
                     cleaned_at=cleaned_at,
                 )
-                update_initialization = (
-                    self.session_initialization_repository.update_initialization_status
-                )
-                await update_initialization(
-                    session,
-                    initialization_id=cleaned.initialization_id,
-                    status=SessionInitializationStatus.CLEANED,
-                    failure_summary=None,
-                    started_at=None,
-                    completed_at=cleaned_at,
-                    failed_at=None,
-                )
             await self._append_event(
                 initialization_id=cleaned.initialization_id,
                 step_id=None,
@@ -850,6 +1019,7 @@ class SessionGitWorktreeService:
                 allocation=cleaned,
                 on_projection_updated=on_projection_updated,
             )
+            return cleaned
         except (
             RuntimeRunnerOperationFailedError,
             RuntimeRunnerOperationUnavailable,
@@ -858,6 +1028,24 @@ class SessionGitWorktreeService:
             await self._mark_cleanup_failed(
                 worktree_id=allocation.id,
                 reason=str(exc) or type(exc).__name__,
+                on_event_appended=on_event_appended,
+                on_projection_updated=on_projection_updated,
+            )
+            return None
+
+    async def _mark_cleanup_targets_failed(
+        self,
+        *,
+        allocations: list[SessionGitWorktree],
+        reason: str,
+        on_event_appended: SessionInitializationEventCallback | None,
+        on_projection_updated: SessionInitializationProjectionCallback | None,
+    ) -> None:
+        """Mark multiple cleanup targets failed with the same reason."""
+        for allocation in allocations:
+            await self._mark_cleanup_failed(
+                worktree_id=allocation.id,
+                reason=reason,
                 on_event_appended=on_event_appended,
                 on_projection_updated=on_projection_updated,
             )
@@ -902,6 +1090,33 @@ class SessionGitWorktreeService:
             allocation=allocation,
             on_projection_updated=on_projection_updated,
         )
+
+    async def _claim_initialization_run(self, *, session_id: str) -> bool:
+        """Claim a pending initialization queue run if another worker has not."""
+        async with self.session_manager() as session:
+            get_initialization_for_update = (
+                self.session_initialization_repository.get_by_session_id_for_update
+            )
+            initialization = await get_initialization_for_update(
+                session,
+                session_id=session_id,
+            )
+            if initialization is None:
+                raise RuntimeError("SessionInitialization row is missing")
+            if initialization.status is SessionInitializationStatus.RUNNING:
+                return False
+            if initialization.status is not SessionInitializationStatus.PENDING:
+                return False
+            await self.session_initialization_repository.update_initialization_status(
+                session,
+                initialization_id=initialization.id,
+                status=SessionInitializationStatus.RUNNING,
+                failure_summary=None,
+                started_at=datetime.now(UTC),
+                completed_at=None,
+                failed_at=None,
+            )
+        return True
 
     async def _get_runtime(self, *, agent_id: str) -> AgentRuntime | None:
         """Fetch current AgentRuntime."""
@@ -1207,7 +1422,7 @@ class SessionGitWorktreeService:
                     step_id=step.id,
                     status=SessionInitializationStepStatus.COMPLETED,
                     failure_reason=None,
-                    resource_descriptors=[],
+                    resource_descriptors=step.resource_descriptors,
                     started_at=None,
                     completed_at=datetime.now(UTC),
                     failed_at=None,
@@ -1320,7 +1535,7 @@ class SessionGitWorktreeService:
                             step_id=step.id,
                             status=SessionInitializationStepStatus.COMPLETED,
                             failure_reason=None,
-                            resource_descriptors=[],
+                            resource_descriptors=step.resource_descriptors,
                             started_at=None,
                             completed_at=datetime.now(UTC),
                             failed_at=None,
@@ -1379,7 +1594,7 @@ class SessionGitWorktreeService:
                 step_id=step.id,
                 status=SessionInitializationStepStatus.FAILED,
                 failure_reason=reason,
-                resource_descriptors=[],
+                resource_descriptors=step.resource_descriptors,
                 started_at=None,
                 completed_at=None,
                 failed_at=now,
@@ -1491,12 +1706,125 @@ class SessionGitWorktreeService:
 
 
 @dataclasses.dataclass(frozen=True)
+class _WorktreeInitializationSteps:
+    """Initialization step group for one worktree allocation."""
+
+    create_step: SessionInitializationStep
+    register_step: SessionInitializationStep
+    catalog_step: SessionInitializationStep
+    refresh_step: SessionInitializationStep
+
+
+@dataclasses.dataclass(frozen=True)
 class _CreateWorktreeSuccess:
     """Successful create_git_worktree result."""
 
     worktree_path: str
     branch_name: str
     base_commit: str
+
+
+def _worktree_allocation_is_complete(
+    allocation: SessionGitWorktree,
+    steps: list[SessionInitializationStep],
+) -> bool:
+    """Return whether the allocation has finished all registration work."""
+    if allocation.status is not SessionGitWorktreeStatus.READY:
+        return False
+    allocation_steps = _worktree_steps_for_allocation(
+        allocation=allocation,
+        steps=steps,
+    )
+    if (
+        allocation_steps.create_step.status
+        is not SessionInitializationStepStatus.COMPLETED
+    ):
+        return False
+    if (
+        allocation_steps.register_step.status
+        is not SessionInitializationStepStatus.COMPLETED
+    ):
+        return False
+    if (
+        allocation_steps.catalog_step.status
+        is not SessionInitializationStepStatus.COMPLETED
+    ):
+        return False
+    return allocation_steps.refresh_step.status in {
+        SessionInitializationStepStatus.COMPLETED,
+        SessionInitializationStepStatus.FAILED,
+    }
+
+
+def _worktree_steps_for_allocation(
+    *,
+    allocation: SessionGitWorktree,
+    steps: list[SessionInitializationStep],
+) -> _WorktreeInitializationSteps:
+    """Find the initialization steps that belong to one allocation."""
+    return _WorktreeInitializationSteps(
+        create_step=_worktree_step_for_allocation(
+            allocation=allocation,
+            steps=steps,
+            step_type=SessionInitializationStepType.CREATE_GIT_WORKTREE,
+        ),
+        register_step=_worktree_step_for_allocation(
+            allocation=allocation,
+            steps=steps,
+            step_type=SessionInitializationStepType.REGISTER_WORKSPACE_PROJECT,
+        ),
+        catalog_step=_worktree_step_for_allocation(
+            allocation=allocation,
+            steps=steps,
+            step_type=SessionInitializationStepType.UPSERT_PROJECT_CATALOG,
+        ),
+        refresh_step=_worktree_step_for_allocation(
+            allocation=allocation,
+            steps=steps,
+            step_type=SessionInitializationStepType.REFRESH_PROJECT_STATUS,
+        ),
+    )
+
+
+def _worktree_step_for_allocation(
+    *,
+    allocation: SessionGitWorktree,
+    steps: list[SessionInitializationStep],
+    step_type: SessionInitializationStepType,
+) -> SessionInitializationStep:
+    """Find one typed step for an allocation, with legacy single-worktree fallback."""
+    matching = [step for step in steps if step.step_type is step_type]
+    for step in matching:
+        if _step_describes_worktree(step, allocation.id):
+            return step
+    if len(matching) == 1:
+        return matching[0]
+    raise RuntimeError("SessionInitializationStep row is missing")
+
+
+def _step_describes_worktree(
+    step: SessionInitializationStep,
+    worktree_id: str,
+) -> bool:
+    """Return whether a step belongs to the worktree allocation."""
+    if step.step_key == _worktree_step_key(step.step_type, worktree_id):
+        return True
+    for descriptor in step.resource_descriptors:
+        if (
+            isinstance(descriptor, dict)
+            and descriptor.get("type") == "git_worktree"
+            and descriptor.get("worktree_id") == worktree_id
+        ):
+            return True
+    return False
+
+
+def _worktree_step_key(
+    step_type: SessionInitializationStepType,
+    worktree_id: str,
+) -> str:
+    """Build a stable per-worktree initialization step key."""
+    return f"{step_type.value}:{worktree_id}"
 
 
 def _git_operation_deadline() -> datetime:

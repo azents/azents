@@ -88,7 +88,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-04
-spec_version: 81
+spec_version: 82
 ---
 
 # Conversation & Events
@@ -111,7 +111,7 @@ erDiagram
     AgentSession ||--o{ ExchangeFile : "shows uploads and artifacts"
     AgentSession ||--o{ SessionWorkspaceProject : "working projects"
     AgentSession ||--o| SessionInitialization : "initialization lifecycle"
-    AgentSession ||--o| SessionGitWorktree : "owned worktree"
+    AgentSession ||--o{ SessionGitWorktree : "owned worktrees"
     AgentRuntime ||--o{ ExchangeFile : "owns sandbox artifacts"
     ScheduledTask }o--|| Agent : "targets"
 ```
@@ -546,6 +546,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-04** — v83. Removed existing-session Git worktree attachment from the current conversation API and initialization contract.
 - **2026-07-04** — v81. Added session initialization, worktree-mode session creation, run gating, live initialization projections, and Azents-owned Git worktree cleanup semantics.
 - **2026-06-25** — v60. Moved coarse run state, run heartbeat, pending command, and stop intent
   ownership from `AgentRuntime` to `AgentSession`; `AgentRuntime` remains shared sandbox lifecycle

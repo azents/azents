@@ -437,6 +437,16 @@ class _RestWriteChatService:
             )
         )
 
+    async def get_session_initialization_detail(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+    ) -> Success[SessionInitializationDetail]:
+        """Return initialization detail after background worktree execution."""
+        del session_id, user_id
+        return Success(_initialization_detail())
+
 
 class _StopChatService:
     """Stop access control service double for tests."""
@@ -965,12 +975,9 @@ class TestAgentSessionRoutes:
         response = await create_team_agent_session(
             agent_id="agent-1",
             request=AgentSessionCreateRequest(project_paths=["/workspace/agent/app"]),
-            background_tasks=BackgroundTasks(),
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
             chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-            session_git_worktree_service=_RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
             broker=_MemoryBroker(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-            broadcast=_MemoryBroadcast(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
         )
 
         assert response.id == "2123456789abcdef0123456789abcdef"
@@ -981,6 +988,7 @@ class TestAgentSessionRoutes:
     async def test_create_team_agent_session_accepts_git_worktree_mode(self) -> None:
         """Team session creation route accepts Git worktree workspace mode."""
         chat_service = _AgentSessionRouteChatService()
+        broker = _MemoryBroker()
 
         response = await create_team_agent_session(
             agent_id="agent-1",
@@ -991,12 +999,9 @@ class TestAgentSessionRoutes:
                     starting_ref="main",
                 ),
             ),
-            background_tasks=BackgroundTasks(),
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
             chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-            session_git_worktree_service=_RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-            broker=_MemoryBroker(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-            broadcast=_MemoryBroadcast(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            broker=broker,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
         )
 
         assert response.id == "2123456789abcdef0123456789abcdef"
@@ -1004,6 +1009,8 @@ class TestAgentSessionRoutes:
         assert isinstance(workspace_mode, GitWorktreeWorkspaceMode)
         assert workspace_mode.source_project_path == "/workspace/agent/source"
         assert workspace_mode.starting_ref == "main"
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
 
     async def test_create_team_agent_session_requires_workspace_selection(self) -> None:
         """Team session creation route rejects missing workspace mode and Projects."""
@@ -1013,12 +1020,9 @@ class TestAgentSessionRoutes:
             await create_team_agent_session(
                 agent_id="agent-1",
                 request=AgentSessionCreateRequest(),
-                background_tasks=BackgroundTasks(),
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-                session_git_worktree_service=_RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
                 broker=_MemoryBroker(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-                broadcast=_MemoryBroadcast(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 400
@@ -1435,7 +1439,6 @@ class TestRestMessageWriteContract:
         response = await _write_new_session_message_via_rest(
             chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             InMemoryLiveEventStore(),
@@ -1444,7 +1447,6 @@ class TestRestMessageWriteContract:
                 message="hello from draft",
                 project_paths=["/workspace/agent/app"],
             ),
-            background_tasks=BackgroundTasks(),
             agent_id="agent-1",
             user_id="user-1",
             tz=ZoneInfo("UTC"),
@@ -1474,7 +1476,6 @@ class TestRestMessageWriteContract:
         response = await _write_new_session_message_via_rest(
             chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             InMemoryLiveEventStore(),
@@ -1487,7 +1488,6 @@ class TestRestMessageWriteContract:
                     starting_ref="main",
                 ),
             ),
-            background_tasks=BackgroundTasks(),
             agent_id="agent-1",
             user_id="user-1",
             tz=ZoneInfo("UTC"),
@@ -1500,6 +1500,7 @@ class TestRestMessageWriteContract:
         assert workspace_mode.starting_ref == "main"
         assert response.session_id == "4123456789abcdef0123456789abcdef"
         assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
 
     async def test_new_session_message_requires_workspace_selection(self) -> None:
         """Draft-session REST write rejects missing workspace mode and Projects."""
@@ -1512,7 +1513,6 @@ class TestRestMessageWriteContract:
             await _write_new_session_message_via_rest(
                 chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
                 input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-                _RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
                 broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
                 broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
                 InMemoryLiveEventStore(),
@@ -1520,7 +1520,6 @@ class TestRestMessageWriteContract:
                     client_request_id="client-new-missing",
                     message="hello",
                 ),
-                background_tasks=BackgroundTasks(),
                 agent_id="agent-1",
                 user_id="user-1",
                 tz=ZoneInfo("UTC"),

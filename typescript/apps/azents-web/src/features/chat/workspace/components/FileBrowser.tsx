@@ -304,6 +304,11 @@ function TreeNode({
   const isDirectory = node.kind === "directory";
   const selectable = canSelect(node);
   const canRemoveProject = node.capabilities?.removeProject === true;
+  const displayName =
+    node.source?.type === "session_project" ||
+    node.source?.type === "preview_project"
+      ? node.path
+      : node.name;
   const rowStyle = compact
     ? {
         minHeight: rem(28),
@@ -330,6 +335,17 @@ function TreeNode({
     }
     onOpenFile(node.path);
   }, [isDirectory, node.path, onOpenDirectory, onOpenFile, onToggle]);
+
+  const handleSelectionTargetClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>): void => {
+      event.stopPropagation();
+      if (!selectable) {
+        return;
+      }
+      onToggleSelectedPath(node.path);
+    },
+    [node.path, onToggleSelectedPath, selectable],
+  );
 
   return (
     <>
@@ -361,14 +377,30 @@ function TreeNode({
           width: "100%",
         }}
       >
-        <Checkbox
-          size="xs"
-          checked={checked}
-          disabled={!selectable}
-          aria-label={t("selectPath")}
-          onClick={(event) => event.stopPropagation()}
-          onChange={() => onToggleSelectedPath(node.path)}
-        />
+        <Box
+          onClick={handleSelectionTargetClick}
+          style={{
+            alignItems: "center",
+            cursor: selectable ? "pointer" : "default",
+            display: "inline-flex",
+            flexShrink: 0,
+            justifyContent: "center",
+            marginBottom: rem(-6),
+            marginLeft: rem(-10),
+            marginTop: rem(-6),
+            minHeight: rem(34),
+            width: rem(40),
+          }}
+        >
+          <Checkbox
+            size="xs"
+            checked={checked}
+            disabled={!selectable}
+            aria-label={t("selectPath")}
+            onClick={(event) => event.stopPropagation()}
+            onChange={() => onToggleSelectedPath(node.path)}
+          />
+        </Box>
         <Box
           c="dimmed"
           w={rem(16)}
@@ -753,30 +785,34 @@ export function FileBrowser({
                 </Text>
               ) : null}
               {!query && browserMode === "projects" ? (
-                <Button
-                  size="xs"
-                  variant="light"
-                  leftSection={<IconFolderPlus size="0.875rem" />}
-                  onClick={onAddProject}
-                >
-                  {t("addProject")}
-                </Button>
+                <Group gap="xs">
+                  <Button
+                    size="xs"
+                    variant="light"
+                    leftSection={<IconFolderPlus size="0.875rem" />}
+                    onClick={onAddProject}
+                  >
+                    {t("addProject")}
+                  </Button>
+                </Group>
               ) : null}
             </Stack>
           ) : (
             <>
               {!query && browserMode === "projects" ? (
                 <Box px="xs" py={rem(4)}>
-                  <Button
-                    fullWidth
-                    justify="flex-start"
-                    size="xs"
-                    variant="subtle"
-                    leftSection={<IconFolderPlus size="0.875rem" />}
-                    onClick={onAddProject}
-                  >
-                    {t("addProject")}
-                  </Button>
+                  <Stack gap={rem(4)}>
+                    <Button
+                      fullWidth
+                      justify="flex-start"
+                      size="xs"
+                      variant="subtle"
+                      leftSection={<IconFolderPlus size="0.875rem" />}
+                      onClick={onAddProject}
+                    >
+                      {t("addProject")}
+                    </Button>
+                  </Stack>
                 </Box>
               ) : null}
               {displayTree.map((node) => (

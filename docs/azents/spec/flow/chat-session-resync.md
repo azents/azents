@@ -15,7 +15,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-04
-spec_version: 8
+spec_version: 9
 ---
 
 # Chat Session Resync
@@ -274,6 +274,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-04** — v10. Removed existing-session Git worktree attachment from initialization resync behavior.
 - **2026-07-04** — v8. Added initialization live/detail recovery and WebSocket setup projection actions.
 - **2026-06-13** — v5. Added session todo state to REST live/write snapshot and WebSocket contract, and reflected UI rule that treats todo preview as live state.
 - **2026-06-10** — v4. Removed aggregate live event list from `/live` and REST write snapshot, and reflected live state taxonomy contract separating partial history and input buffer.

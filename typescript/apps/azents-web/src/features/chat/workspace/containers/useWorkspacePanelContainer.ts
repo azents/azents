@@ -166,7 +166,6 @@ export function useWorkspacePanelContainer({
       agentId,
       sessionId,
     });
-
   const manifest = useMemo(() => {
     if (workspaceQuery.data?.workspace.type !== "READY") {
       return null;
@@ -641,6 +640,10 @@ export function useWorkspacePanelContainer({
     [agentId, registerProjectMutation, sessionId],
   );
 
+  const onOpenProjectPicker = useCallback((): void => {
+    setProjectPickerOpen(true);
+  }, []);
+
   const onApproveRegistrationRequest = useCallback(
     (requestId: string) => {
       setPendingApproveRequestId(requestId);
@@ -967,7 +970,7 @@ export function useWorkspacePanelContainer({
     getDownloadHref,
     projectPickerState,
     isProjectPickerOpen: projectPickerOpen,
-    onOpenProjectPicker: () => setProjectPickerOpen(true),
+    onOpenProjectPicker,
     onCloseProjectPicker: () => setProjectPickerOpen(false),
     onOpenProjectPickerDirectory: setCurrentDirectoryPath,
     onSelectProjectPickerDirectory: (path: string) => {

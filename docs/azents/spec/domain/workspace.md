@@ -278,7 +278,9 @@ Because it runs within transaction boundary, there is no state where Workspace h
 
 A Git worktree-created Project is an Agent Workspace Project whose directory is created under the Azents reserved worktree root for one non-primary AgentSession. The source Project path must be an existing Git repository reachable inside the Agent Runtime workspace. The selected starting ref is resolved by Runner Git operations, and creation uses a generated branch/worktree path based on the session handle and source repository leaf. Branch or path collisions are retried with deterministic suffixes and the persisted allocation records the final names.
 
-The created worktree is prompt-eligible only through the session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup. Archive/delete cleanup removes the worktree, removes the Azents-created branch, deletes the catalog entry for the worktree path, and marks the allocation cleaned. Cleanup failure leaves the archive successful and records a cleanup summary for manual retry.
+A non-primary session can own a Git worktree allocation created during new-session `git_worktree` mode. The initialization row processes that blocking setup before the first run and returns initialization to `ready` after the worktree path is created and registered as the session Project.
+
+Each created worktree is prompt-eligible only through its session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Archive/delete cleanup iterates every non-cleaned `SessionGitWorktree` allocation owned by the session, removes each worktree, removes each Azents-created branch, deletes catalog entries for the worktree paths, and marks allocations cleaned. Cleanup failure leaves the archive successful and records a cleanup summary for manual retry.
 
 ## Business Rules
 
@@ -302,6 +304,7 @@ At least 7 rules — all actually verified in code:
 - `[project-registry-only-delete]` — Project delete API removes only registry row, not filesystem folder.
 - `[project-browser-manifest-non-blocking]` — Project browser manifest reads return stored catalog projection and do not block on runner filesystem stat/list operations.
 - `[worktree-project-registration]` — Git worktree sessions register exactly the created worktree path as a session Project after the Runner confirms worktree creation.
+- `[worktree-initialization-gates-first-run]` — new-session Git worktree setup uses the session initialization lifecycle and gates the first run until blocking setup is ready.
 - `[worktree-cleanup-authority]` — destructive cleanup of an Azents-owned worktree requires a matching `session_git_worktrees` ownership row; Project registry rows or reserved-root paths are not sufficient authority.
 - `[project-root-action-policy]` — Project browser root entries expose backend capabilities; filesystem delete, move, and rename are disabled for Project roots, while registry removal is available only for existing session Project rows.
 
