@@ -314,6 +314,17 @@ function TreeNode({
     onOpenFile(node.path);
   }, [isDirectory, node.path, onOpenDirectory, onOpenFile, onToggle]);
 
+  const handleSelectionTargetClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>): void => {
+      event.stopPropagation();
+      if (!selectable) {
+        return;
+      }
+      onToggleSelectedPath(node.path);
+    },
+    [node.path, onToggleSelectedPath, selectable],
+  );
+
   return (
     <>
       <Group
@@ -344,14 +355,30 @@ function TreeNode({
           width: "100%",
         }}
       >
-        <Checkbox
-          size="xs"
-          checked={checked}
-          disabled={!selectable}
-          aria-label={t("selectPath")}
-          onClick={(event) => event.stopPropagation()}
-          onChange={() => onToggleSelectedPath(node.path)}
-        />
+        <Box
+          onClick={handleSelectionTargetClick}
+          style={{
+            alignItems: "center",
+            cursor: selectable ? "pointer" : "default",
+            display: "inline-flex",
+            flexShrink: 0,
+            justifyContent: "center",
+            marginBottom: rem(-6),
+            marginLeft: rem(-10),
+            marginTop: rem(-6),
+            minHeight: rem(34),
+            width: rem(40),
+          }}
+        >
+          <Checkbox
+            size="xs"
+            checked={checked}
+            disabled={!selectable}
+            aria-label={t("selectPath")}
+            onClick={(event) => event.stopPropagation()}
+            onChange={() => onToggleSelectedPath(node.path)}
+          />
+        </Box>
         <Box
           c="dimmed"
           w={rem(16)}
