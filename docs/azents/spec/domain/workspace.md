@@ -52,7 +52,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-04
-spec_version: 25
+spec_version: 26
 ---
 
 # Workspace & Membership
@@ -202,7 +202,7 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, exact duplicate Project path per session forbidden. Nested Project paths are allowed.
 - Registration request is flow where Agent asks user approval to include a folder it created into the current session's Projects. Approve validates active Runtime path and creates registered Project in the selected AgentSession; reject does not create Project.
 
-New-session azents-web UI shows selected Project chips above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, and can preview explicit Project paths through the backend Project browser manifest preview. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project lists display the folder basename as primary text with the full path as secondary text. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
+New-session azents-web UI shows selected Project chips above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, and can preview explicit Project paths through the backend Project browser manifest preview. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project browser root rows display the folder basename only; users inspect file information to see the full path. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
 
 ### Workspace Home / Membership UI
 

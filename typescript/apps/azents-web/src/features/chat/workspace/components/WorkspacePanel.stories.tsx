@@ -1,6 +1,10 @@
 import { Box } from "@mantine/core";
 import { WorkspacePanel } from "./WorkspacePanel";
-import type { AgentWorkspaceServerState, WorkspacePanelState } from "../types";
+import type {
+  AgentWorkspaceServerState,
+  WorkspaceEntry,
+  WorkspacePanelState,
+} from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const noop = (): void => {};
@@ -149,6 +153,85 @@ const readyState: WorkspacePanelState = {
   isResetting: false,
 };
 
+const projectRootEntries: WorkspaceEntry[] = [
+  {
+    name: "/workspace/agent/.azents/worktrees/change-number-cabbage/azents",
+    path: "/workspace/agent/.azents/worktrees/change-number-cabbage/azents",
+    kind: "directory",
+    size: null,
+    mediaType: null,
+    modifiedAt: null,
+    capabilities: {
+      open: true,
+      removeProject: true,
+      filesystemDelete: false,
+      filesystemMove: false,
+      filesystemRename: false,
+    },
+    status: {
+      value: "available",
+      detail: null,
+      checkedAt: "2026-07-04T10:00:00.000Z",
+      stale: false,
+    },
+    source: { type: "session_project", projectId: "project-1" },
+  },
+  {
+    name: "/workspace/agent/home",
+    path: "/workspace/agent/home",
+    kind: "directory",
+    size: null,
+    mediaType: null,
+    modifiedAt: null,
+    capabilities: {
+      open: true,
+      removeProject: true,
+      filesystemDelete: false,
+      filesystemMove: false,
+      filesystemRename: false,
+    },
+    status: {
+      value: "available",
+      detail: null,
+      checkedAt: "2026-07-04T10:00:00.000Z",
+      stale: false,
+    },
+    source: { type: "session_project", projectId: "project-2" },
+  },
+];
+
+const projectsState: WorkspacePanelState = {
+  ...readyState,
+  manifest: {
+    root: "/workspace/agent",
+    cwd: "/workspace/agent",
+    entries: projectRootEntries,
+  },
+  projectBrowserManifest: {
+    root: "/workspace/agent",
+    activeMode: "projects",
+    modes: [
+      { id: "projects", label: "Projects", default: true, rootPath: null },
+      {
+        id: "all_files",
+        label: "All files",
+        default: false,
+        rootPath: "/workspace/agent",
+      },
+    ],
+    entries: projectRootEntries,
+    emptyState: null,
+  },
+  browserMode: "projects",
+  directory: {
+    path: "/workspace/agent",
+    entries: projectRootEntries,
+  },
+  directoryEntriesByPath: {
+    "/workspace/agent": projectRootEntries,
+  },
+};
+
 const fileState: WorkspacePanelState = {
   ...readyState,
   workspaceView: "preview",
@@ -235,6 +318,12 @@ type Story = StoryObj<typeof meta>;
 export const Browser = {
   args: {
     state: readyState,
+  },
+} satisfies Story;
+
+export const ProjectsWithWorktree = {
+  args: {
+    state: projectsState,
   },
 } satisfies Story;
 
