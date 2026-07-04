@@ -33,6 +33,9 @@ _DEFAULT_CANCEL_CHECK_INTERVAL_SECONDS = 1.0
 _DEFAULT_BODY_CHUNK_SIZE_BYTES = 1024 * 1024
 
 type RuntimeOperationCancelCheck = Callable[[], Awaitable[bool]]
+type RuntimeOperationTextCallback = Callable[
+    ["RuntimeOperationTextDelta"], Awaitable[None]
+]
 type RuntimeProcessOutputCallback = Callable[
     ["RuntimeProcessOutputDelta"], Awaitable[None]
 ]
@@ -142,6 +145,14 @@ class RuntimeFileWriteResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeOperationTextDelta:
+    """Live stdout or stderr text delta returned by Runner protocol."""
+
+    stream: Literal["stdout", "stderr"]
+    text: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeProcessOutputDelta:
     """Live process output delta returned by Runner protocol."""
 
@@ -227,6 +238,53 @@ class RuntimeFileBulkMoveResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeGitRefEntry:
+    """Git ref entry discovered by the Runtime Runner."""
+
+    name: str
+    ref: str
+    type: Literal["branch", "remote_branch", "tag", "other"]
+    target: str
+    default: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeGitRefsResult:
+    """Completed Git ref discovery operation result."""
+
+    refs: tuple[RuntimeGitRefEntry, ...]
+    default_branch: str | None
+    head_commit: str | None
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeGitCreateWorktreeResult:
+    """Completed Git worktree creation operation result."""
+
+    base_commit: str
+    worktree_path: str
+    branch_name: str
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeGitRemoveWorktreeResult:
+    """Completed Git worktree removal operation result."""
+
+    worktree_path: str
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeGitDeleteBranchResult:
+    """Completed Git branch deletion operation result."""
+
+    branch_name: str
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeOperationReceipt:
     """Background Runner operation receipt."""
 
@@ -248,6 +306,10 @@ type RuntimeForegroundResult = (
     | RuntimeFileMoveResult
     | RuntimeFileBulkDeleteResult
     | RuntimeFileBulkMoveResult
+    | RuntimeGitRefsResult
+    | RuntimeGitCreateWorktreeResult
+    | RuntimeGitRemoveWorktreeResult
+    | RuntimeGitDeleteBranchResult
 )
 
 
@@ -665,6 +727,152 @@ class RuntimeRunnerOperationClient:
             runtime_id=runtime_id,
             generation=runner_generation,
             deadline_at=deadline_at,
+        )
+
+    async def list_git_refs(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        source_project_path: str,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitRefsResult:
+        """Run a foreground Git ref discovery operation and wait for final result."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="list_git_refs",
+                payload={"source_project_path": source_project_path},
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_git_refs(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+            text_output_callback=text_output_callback,
+        )
+
+    async def create_git_worktree(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        source_project_path: str,
+        worktree_path: str,
+        branch_name: str,
+        starting_ref: str,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitCreateWorktreeResult:
+        """Run a foreground Git worktree creation operation."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="create_git_worktree",
+                payload={
+                    "source_project_path": source_project_path,
+                    "worktree_path": worktree_path,
+                    "branch_name": branch_name,
+                    "starting_ref": starting_ref,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_git_create_worktree(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+            text_output_callback=text_output_callback,
+        )
+
+    async def remove_git_worktree(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        source_project_path: str,
+        worktree_path: str,
+        force: bool,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitRemoveWorktreeResult:
+        """Run a foreground Git worktree removal operation."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="remove_git_worktree",
+                payload={
+                    "source_project_path": source_project_path,
+                    "worktree_path": worktree_path,
+                    "force": force,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_git_remove_worktree(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+            text_output_callback=text_output_callback,
+        )
+
+    async def delete_git_branch(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        source_project_path: str,
+        branch_name: str,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitDeleteBranchResult:
+        """Run a foreground Git branch deletion operation."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="delete_git_branch",
+                payload={
+                    "source_project_path": source_project_path,
+                    "branch_name": branch_name,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+                background=False,
+            )
+        )
+        return await self.resume_git_delete_branch(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+            text_output_callback=text_output_callback,
         )
 
     async def start_process(
@@ -1118,6 +1326,134 @@ class RuntimeRunnerOperationClient:
             final_cursor=final.cursor,
         )
 
+    async def resume_git_refs(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitRefsResult:
+        """Resume reading a Git ref discovery reply stream until final result."""
+        folder = _ReplyFolder(
+            after_cursor=after_cursor,
+            text_output_callback=text_output_callback,
+        )
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeGitRefsResult(
+            refs=tuple(_git_ref_entries(final.event.payload)),
+            default_branch=_optional_str_payload(final.event.payload, "default_branch"),
+            head_commit=_optional_str_payload(final.event.payload, "head_commit"),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_git_create_worktree(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitCreateWorktreeResult:
+        """Resume reading a Git worktree creation reply stream."""
+        folder = _ReplyFolder(
+            after_cursor=after_cursor,
+            text_output_callback=text_output_callback,
+        )
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeGitCreateWorktreeResult(
+            base_commit=_str_payload(final.event.payload, "base_commit"),
+            worktree_path=_str_payload(final.event.payload, "worktree_path"),
+            branch_name=_str_payload(final.event.payload, "branch_name"),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_git_remove_worktree(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitRemoveWorktreeResult:
+        """Resume reading a Git worktree removal reply stream."""
+        folder = _ReplyFolder(
+            after_cursor=after_cursor,
+            text_output_callback=text_output_callback,
+        )
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeGitRemoveWorktreeResult(
+            worktree_path=_str_payload(final.event.payload, "removed_worktree_path"),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_git_delete_branch(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitDeleteBranchResult:
+        """Resume reading a Git branch deletion reply stream."""
+        folder = _ReplyFolder(
+            after_cursor=after_cursor,
+            text_output_callback=text_output_callback,
+        )
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeGitDeleteBranchResult(
+            branch_name=_str_payload(final.event.payload, "deleted_branch_name"),
+            final_cursor=final.cursor,
+        )
+
     async def resume_process(
         self,
         *,
@@ -1334,16 +1670,27 @@ class _ReplyFolder:
     file_chunks: list[bytes] = dataclasses.field(default_factory=list)
     process_stdout: list[str] = dataclasses.field(default_factory=list)
     process_stderr: list[str] = dataclasses.field(default_factory=list)
+    text_output_callback: RuntimeOperationTextCallback | None = None
     process_output_callback: RuntimeProcessOutputCallback | None = None
 
     async def apply(self, record: RuntimeReplyRecord) -> None:
         """Fold one reply record into accumulated output state."""
         event = record.event
         if event.event_type == RuntimeReplyEventType.STDOUT:
-            self.stdout.append(_str_payload(event.payload, "text"))
+            text = _str_payload(event.payload, "text")
+            self.stdout.append(text)
+            if self.text_output_callback is not None:
+                await self.text_output_callback(
+                    RuntimeOperationTextDelta(stream="stdout", text=text)
+                )
             return
         if event.event_type == RuntimeReplyEventType.STDERR:
-            self.stderr.append(_str_payload(event.payload, "text"))
+            text = _str_payload(event.payload, "text")
+            self.stderr.append(text)
+            if self.text_output_callback is not None:
+                await self.text_output_callback(
+                    RuntimeOperationTextDelta(stream="stderr", text=text)
+                )
             return
         if event.event_type == RuntimeReplyEventType.FILE_CHUNK:
             self.file_chunks.append(
@@ -1464,6 +1811,50 @@ def _file_move_entries(values: Sequence[object]) -> list[RuntimeFileMoveEntry]:
                 )
             )
     return entries
+
+
+def _git_ref_entries(payload: dict[str, JsonValue]) -> list[RuntimeGitRefEntry]:
+    raw_entries = payload.get("git_refs")
+    if not isinstance(raw_entries, list):
+        return []
+    entries: list[RuntimeGitRefEntry] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        name = raw_entry.get("name")
+        ref = raw_entry.get("ref")
+        target = raw_entry.get("target")
+        ref_type = _git_ref_type(raw_entry.get("type"))
+        if (
+            isinstance(name, str)
+            and isinstance(ref, str)
+            and isinstance(target, str)
+            and ref_type is not None
+        ):
+            entries.append(
+                RuntimeGitRefEntry(
+                    name=name,
+                    ref=ref,
+                    type=ref_type,
+                    target=target,
+                    default=_bool_payload(raw_entry, "default", default=False),
+                )
+            )
+    return entries
+
+
+def _git_ref_type(
+    value: object,
+) -> Literal["branch", "remote_branch", "tag", "other"] | None:
+    if value == "branch":
+        return "branch"
+    if value == "remote_branch":
+        return "remote_branch"
+    if value == "tag":
+        return "tag"
+    if value == "other":
+        return "other"
+    return None
 
 
 def _file_stat_result(

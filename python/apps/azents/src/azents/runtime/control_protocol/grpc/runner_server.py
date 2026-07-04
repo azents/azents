@@ -576,6 +576,36 @@ def _copy_operation_payload(
         )
         message.file_bulk_move.overwrite = _bool_payload(payload, "overwrite")
         return
+    if operation_type == "list_git_refs":
+        message.git_list_refs.source_project_path = _str_payload(
+            payload, "source_project_path"
+        )
+        return
+    if operation_type == "create_git_worktree":
+        message.git_create_worktree.source_project_path = _str_payload(
+            payload, "source_project_path"
+        )
+        message.git_create_worktree.worktree_path = _str_payload(
+            payload, "worktree_path"
+        )
+        message.git_create_worktree.branch_name = _str_payload(payload, "branch_name")
+        message.git_create_worktree.starting_ref = _str_payload(payload, "starting_ref")
+        return
+    if operation_type == "remove_git_worktree":
+        message.git_remove_worktree.source_project_path = _str_payload(
+            payload, "source_project_path"
+        )
+        message.git_remove_worktree.worktree_path = _str_payload(
+            payload, "worktree_path"
+        )
+        message.git_remove_worktree.force = _bool_payload(payload, "force")
+        return
+    if operation_type == "delete_git_branch":
+        message.git_delete_branch.source_project_path = _str_payload(
+            payload, "source_project_path"
+        )
+        message.git_delete_branch.branch_name = _str_payload(payload, "branch_name")
+        return
 
 
 def _str_payload(payload: dict[str, JsonValue], key: str) -> str:

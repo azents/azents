@@ -475,6 +475,29 @@ def _operation_payload(
             "destination_directory": operation.file_bulk_move.destination_directory,
             "overwrite": operation.file_bulk_move.overwrite,
         }
+    if payload_kind == "git_list_refs":
+        return {"source_project_path": operation.git_list_refs.source_project_path}
+    if payload_kind == "git_create_worktree":
+        payload = operation.git_create_worktree
+        return {
+            "source_project_path": payload.source_project_path,
+            "worktree_path": payload.worktree_path,
+            "branch_name": payload.branch_name,
+            "starting_ref": payload.starting_ref,
+        }
+    if payload_kind == "git_remove_worktree":
+        payload = operation.git_remove_worktree
+        return {
+            "source_project_path": payload.source_project_path,
+            "worktree_path": payload.worktree_path,
+            "force": payload.force,
+        }
+    if payload_kind == "git_delete_branch":
+        payload = operation.git_delete_branch
+        return {
+            "source_project_path": payload.source_project_path,
+            "branch_name": payload.branch_name,
+        }
     return {}
 
 
@@ -583,6 +606,28 @@ def _copy_final_success(
         message.file_move.source_path = _str_payload(payload, "moved_source_path")
         message.file_move.destination_path = _str_payload(
             payload, "moved_destination_path"
+        )
+        return
+    if "git_refs" in payload:
+        git_refs = message.git_list_refs
+        git_refs.refs.extend(_git_ref_entries(payload))
+        git_refs.default_branch = _str_payload(payload, "default_branch")
+        git_refs.head_commit = _str_payload(payload, "head_commit")
+        return
+    if "base_commit" in payload:
+        worktree = message.git_create_worktree
+        worktree.base_commit = _str_payload(payload, "base_commit")
+        worktree.worktree_path = _str_payload(payload, "worktree_path")
+        worktree.branch_name = _str_payload(payload, "branch_name")
+        return
+    if "removed_worktree_path" in payload:
+        message.git_remove_worktree.worktree_path = _str_payload(
+            payload, "removed_worktree_path"
+        )
+        return
+    if "deleted_branch_name" in payload:
+        message.git_delete_branch.branch_name = _str_payload(
+            payload, "deleted_branch_name"
         )
         return
 
@@ -715,7 +760,64 @@ def _final_success_payload(
                 for entry in message.file_bulk_move.entries
             ]
         }
+    if result_kind == "git_list_refs":
+        return {
+            "git_refs": [
+                {
+                    "name": entry.name,
+                    "ref": entry.ref,
+                    "type": entry.type,
+                    "target": entry.target,
+                    "default": entry.default,
+                }
+                for entry in message.git_list_refs.refs
+            ],
+            "default_branch": message.git_list_refs.default_branch,
+            "head_commit": message.git_list_refs.head_commit,
+        }
+    if result_kind == "git_create_worktree":
+        return {
+            "base_commit": message.git_create_worktree.base_commit,
+            "worktree_path": message.git_create_worktree.worktree_path,
+            "branch_name": message.git_create_worktree.branch_name,
+        }
+    if result_kind == "git_remove_worktree":
+        return {"removed_worktree_path": message.git_remove_worktree.worktree_path}
+    if result_kind == "git_delete_branch":
+        return {"deleted_branch_name": message.git_delete_branch.branch_name}
     return {}
+
+
+def _git_ref_entries(
+    payload: Mapping[str, JsonValue],
+) -> list[runtime_runner_control_pb2.RuntimeGitRefEntry]:
+    raw_entries = payload.get("git_refs")
+    if not isinstance(raw_entries, list):
+        return []
+    entries: list[runtime_runner_control_pb2.RuntimeGitRefEntry] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        name = raw_entry.get("name")
+        ref = raw_entry.get("ref")
+        ref_type = raw_entry.get("type")
+        target = raw_entry.get("target")
+        if (
+            isinstance(name, str)
+            and isinstance(ref, str)
+            and isinstance(ref_type, str)
+            and isinstance(target, str)
+        ):
+            entries.append(
+                runtime_runner_control_pb2.RuntimeGitRefEntry(
+                    name=name,
+                    ref=ref,
+                    type=ref_type,
+                    target=target,
+                    default=_bool_payload(raw_entry, "default"),
+                )
+            )
+    return entries
 
 
 def _move_entries(

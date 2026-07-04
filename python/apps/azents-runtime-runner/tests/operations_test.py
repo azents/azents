@@ -1,5 +1,7 @@
 """Runner operation handler tests."""
 
+import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -713,11 +715,152 @@ async def test_file_bulk_move_moves_multiple_files_into_directory(
     assert (tmp_path / "archive" / "b.txt").read_text() == "b"
 
 
+@pytest.mark.asyncio
+async def test_git_list_refs_returns_branches_tags_and_head(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    _git(repo, "tag", "v1")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="list_git_refs",
+            payload={"source_project_path": str(repo)},
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    payload = client.events[-1].payload
+    assert payload["default_branch"] == "main"
+    assert isinstance(payload["head_commit"], str)
+    raw_refs = payload.get("git_refs")
+    assert isinstance(raw_refs, list)
+    refs = {ref["ref"]: ref for ref in raw_refs if isinstance(ref, dict)}
+    assert refs["refs/heads/main"]["default"] is True
+    assert refs["refs/tags/v1"]["type"] == "tag"
+
+
+@pytest.mark.asyncio
+async def test_git_create_remove_worktree_and_delete_branch(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    worktree_path = tmp_path / ".azents" / "worktrees" / "session" / "repo"
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="create_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "branch_name": "azents/session",
+                "starting_ref": "main",
+            },
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    create_payload = client.events[-1].payload
+    assert create_payload["worktree_path"] == str(worktree_path)
+    assert create_payload["branch_name"] == "azents/session"
+    assert (worktree_path / "README.md").read_text() == "hello\n"
+    assert any(
+        event.event_type == RuntimeRunnerEventType.STDERR for event in client.events
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="remove_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "force": True,
+            },
+        )
+    )
+    assert client.events[-1].payload == {"removed_worktree_path": str(worktree_path)}
+    assert not worktree_path.exists()
+
+    await operations.handle(
+        _operation(
+            operation_type="delete_git_branch",
+            payload={
+                "source_project_path": str(repo),
+                "branch_name": "azents/session",
+            },
+        )
+    )
+    assert client.events[-1].payload == {"deleted_branch_name": "azents/session"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "error_code"),
+    [
+        ({"source_project_path": "not-a-repo"}, "not_git_repo"),
+        (
+            {
+                "source_project_path": "repo",
+                "worktree_path": "new-worktree",
+                "branch_name": "azents/session",
+                "starting_ref": "missing-ref",
+            },
+            "invalid_ref",
+        ),
+        (
+            {
+                "source_project_path": "repo",
+                "worktree_path": "existing-path",
+                "branch_name": "azents/session",
+                "starting_ref": "main",
+            },
+            "worktree_path_exists",
+        ),
+        (
+            {
+                "source_project_path": "repo",
+                "worktree_path": "new-worktree",
+                "branch_name": "existing-branch",
+                "starting_ref": "main",
+            },
+            "branch_exists",
+        ),
+    ],
+)
+async def test_git_create_worktree_semantic_failures(
+    tmp_path: Path,
+    payload: dict[str, JsonValue],
+    error_code: str,
+) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    (tmp_path / "existing-path").mkdir()
+    _git(repo, "branch", "existing-branch")
+    normalized_payload: dict[str, JsonValue] = {}
+    for key, value in payload.items():
+        if key.endswith("path") and isinstance(value, str):
+            normalized_payload[key] = str(tmp_path / value)
+        else:
+            normalized_payload[key] = value
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="create_git_worktree",
+            payload=normalized_payload,
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload["error_code"] == error_code
+
+
 def _operation(
     *,
     operation_type: str,
     payload: dict[str, JsonValue],
     body_chunks: tuple[RunnerBodyChunk, ...] = (),
+    deadline_at: datetime | None = None,
 ) -> RunnerOperationEnvelope:
     return RunnerOperationEnvelope(
         request_id="request-1",
@@ -729,5 +872,26 @@ def _operation(
         body_stream_id=None,
         body_chunks=body_chunks,
         background=False,
-        deadline_at=None,
+        deadline_at=deadline_at,
+    )
+
+
+def _init_git_repo(path: Path) -> Path:
+    path.mkdir(parents=True)
+    _git(path, "init", "--initial-branch", "main")
+    _git(path, "config", "user.name", "Azents Test")
+    _git(path, "config", "user.email", "azents-test@example.com")
+    (path / "README.md").write_text("hello\n")
+    _git(path, "add", "README.md")
+    _git(path, "commit", "-m", "Initial commit")
+    return path
+
+
+def _git(path: Path, *args: str) -> None:
+    subprocess.run(
+        ("git", "-C", str(path), *args),
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
