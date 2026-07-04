@@ -96,6 +96,22 @@ class AgentProjectCatalogRepository:
             return None
         return self._build(rdb)
 
+    async def delete_entry_by_path(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        path: str,
+    ) -> None:
+        """Delete one Agent Project catalog row by exact path."""
+        await session.execute(
+            sa.delete(RDBAgentProjectCatalogEntry).where(
+                RDBAgentProjectCatalogEntry.agent_id == agent_id,
+                RDBAgentProjectCatalogEntry.path == path,
+            )
+        )
+        await session.flush()
+
     async def update_status(
         self,
         session: AsyncSession,

@@ -133,6 +133,9 @@ from azents.services.session_git_worktree import (
     GitRefPreviewAccessDenied,
     GitRefPreviewAgentNotFound,
     GitRefPreviewRuntimeUnavailable,
+    GitWorktreeCleanupAccessDenied,
+    GitWorktreeCleanupNotFound,
+    GitWorktreeCleanupSessionNotFound,
     GitWorktreeWorkspaceMode,
     SessionGitWorktreeService,
 )
@@ -1555,8 +1558,10 @@ async def create_team_agent_session(
 async def archive_agent_session(
     agent_id: str,
     session_id: str,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
+    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
 ) -> None:
     """Archive a non-primary inactive AgentSession."""
     _validate_session_id(session_id)
@@ -1566,7 +1571,13 @@ async def archive_agent_session(
         user_id=current_user.user_id,
     )
     match result:
-        case Success():
+        case Success(value):
+            if value.cleanup_requested:
+                background_tasks.add_task(
+                    session_git_worktree_service.run_cleanup_for_session,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                )
             return
         case Failure(error):
             match error:
@@ -1581,6 +1592,52 @@ async def archive_agent_session(
                     raise HTTPException(
                         status_code=409,
                         detail="Running session cannot be archived.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.post(
+    "/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup",
+    status_code=204,
+)
+async def cleanup_session_git_worktree(
+    agent_id: str,
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
+) -> None:
+    """Request manual cleanup retry for an Azents-owned session Git worktree."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_session_id(session_id)
+    result = await session_git_worktree_service.request_manual_cleanup(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(value):
+            if value.cleanup_requested:
+                background_tasks.add_task(
+                    session_git_worktree_service.run_cleanup_for_session,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                )
+            return
+        case Failure(error):
+            match error:
+                case GitWorktreeCleanupSessionNotFound() | GitWorktreeCleanupNotFound():
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Session Git worktree not found.",
+                    )
+                case GitWorktreeCleanupAccessDenied():
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Session access denied.",
                     )
                 case _:
                     assert_never(error)

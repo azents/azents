@@ -27,6 +27,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import (
     SessionGitWorktree,
@@ -117,6 +118,35 @@ GitRefPreviewError = (
 
 
 @dataclasses.dataclass(frozen=True)
+class GitWorktreeCleanupRequest:
+    """Cleanup request result."""
+
+    cleanup_requested: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class GitWorktreeCleanupSessionNotFound:
+    """Session for cleanup was not found."""
+
+
+@dataclasses.dataclass(frozen=True)
+class GitWorktreeCleanupAccessDenied:
+    """Requester cannot clean up this session worktree."""
+
+
+@dataclasses.dataclass(frozen=True)
+class GitWorktreeCleanupNotFound:
+    """No session Git worktree allocation exists."""
+
+
+GitWorktreeCleanupRequestError = (
+    GitWorktreeCleanupSessionNotFound
+    | GitWorktreeCleanupAccessDenied
+    | GitWorktreeCleanupNotFound
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class PreparedGitWorktreeInitialization:
     """Prepared durable initialization rows for a worktree session."""
 
@@ -130,6 +160,9 @@ class SessionGitWorktreeService:
     """Orchestrate session Git worktree allocation and initialization."""
 
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
@@ -472,6 +505,151 @@ class SessionGitWorktreeService:
                 started_at=None,
                 completed_at=datetime.now(UTC),
                 failed_at=None,
+            )
+
+    async def mark_cleanup_pending_for_session(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> GitWorktreeCleanupRequest:
+        """Request cleanup for a session-owned Git worktree allocation."""
+        allocation = await self.session_git_worktree_repository.get_by_session_id(
+            session,
+            session_id=session_id,
+        )
+        if allocation is None or allocation.status is SessionGitWorktreeStatus.CLEANED:
+            return GitWorktreeCleanupRequest(cleanup_requested=False)
+        await self.session_git_worktree_repository.mark_cleanup_pending(
+            session,
+            worktree_id=allocation.id,
+        )
+        return GitWorktreeCleanupRequest(cleanup_requested=True)
+
+    async def request_manual_cleanup(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[GitWorktreeCleanupRequest, GitWorktreeCleanupRequestError]:
+        """Validate access and request manual worktree cleanup retry."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None or agent_session.agent_id != agent_id:
+                return Failure(GitWorktreeCleanupSessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent_session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(GitWorktreeCleanupAccessDenied())
+            allocation = await self.session_git_worktree_repository.get_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            if allocation is None:
+                return Failure(GitWorktreeCleanupNotFound())
+            if allocation.status is SessionGitWorktreeStatus.CLEANED:
+                return Success(GitWorktreeCleanupRequest(cleanup_requested=False))
+            await self.session_git_worktree_repository.mark_cleanup_pending(
+                session,
+                worktree_id=allocation.id,
+            )
+            return Success(GitWorktreeCleanupRequest(cleanup_requested=True))
+
+    async def run_cleanup_for_session(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        """Run best-effort cleanup for a session-owned Git worktree."""
+        async with self.session_manager() as session:
+            allocation = await self.session_git_worktree_repository.get_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        if allocation is None or allocation.status is SessionGitWorktreeStatus.CLEANED:
+            return
+        ownership_error = _cleanup_ownership_error(
+            allocation=allocation,
+            session_id=session_id,
+        )
+        if ownership_error is not None:
+            await self._mark_cleanup_failed(
+                worktree_id=allocation.id,
+                reason=ownership_error,
+            )
+            return
+        runtime = await self._get_runtime(agent_id=agent_id)
+        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+            await self._mark_cleanup_failed(
+                worktree_id=allocation.id,
+                reason="Runtime runner is not ready.",
+            )
+            return
+        if self.runner_operations is None:
+            await self._mark_cleanup_failed(
+                worktree_id=allocation.id,
+                reason="Runtime runner operations are unavailable.",
+            )
+            return
+        try:
+            await self.runner_operations.remove_git_worktree(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                source_project_path=allocation.source_project_path,
+                worktree_path=allocation.worktree_path,
+                force=True,
+                deadline_at=_git_operation_deadline(),
+                text_output_callback=None,
+            )
+            if allocation.branch_created_by is SessionGitWorktreeBranchCreatedBy.AZENTS:
+                await self.runner_operations.delete_git_branch(
+                    runtime_id=runtime.id,
+                    runner_generation=runtime.runner_generation,
+                    source_project_path=allocation.source_project_path,
+                    branch_name=allocation.branch_name,
+                    deadline_at=_git_operation_deadline(),
+                    text_output_callback=None,
+                )
+            async with self.session_manager() as session:
+                await self.agent_project_catalog_repository.delete_entry_by_path(
+                    session,
+                    agent_id=agent_id,
+                    path=allocation.worktree_path,
+                )
+                await self.session_git_worktree_repository.mark_cleaned(
+                    session,
+                    worktree_id=allocation.id,
+                    cleanup_summary="Git worktree cleanup completed.",
+                    cleaned_at=datetime.now(UTC),
+                )
+        except (
+            RuntimeRunnerOperationFailedError,
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ) as exc:
+            await self._mark_cleanup_failed(
+                worktree_id=allocation.id,
+                reason=str(exc) or type(exc).__name__,
+            )
+
+    async def _mark_cleanup_failed(self, *, worktree_id: str, reason: str) -> None:
+        """Persist a user-safe cleanup failure summary."""
+        async with self.session_manager() as session:
+            await self.session_git_worktree_repository.mark_cleanup_failed(
+                session,
+                worktree_id=worktree_id,
+                cleanup_summary=reason,
+                failed_at=datetime.now(UTC),
             )
 
     async def _get_runtime(self, *, agent_id: str) -> AgentRuntime | None:
@@ -1018,6 +1196,25 @@ def _handle_from_worktree_path(worktree_path: str) -> str:
     """Recover the session handle from an allocated worktree path."""
     relative = PurePosixPath(worktree_path).relative_to(_WORKTREE_ROOT)
     return relative.parts[0]
+
+
+def _cleanup_ownership_error(
+    *,
+    allocation: SessionGitWorktree,
+    session_id: str,
+) -> str | None:
+    """Return a cleanup safety error when ownership validation fails."""
+    if allocation.session_id != session_id:
+        return "Cleanup request does not match the owning session."
+    try:
+        PurePosixPath(allocation.worktree_path).relative_to(_WORKTREE_ROOT)
+    except ValueError:
+        return "Recorded worktree path is outside the Azents worktree root."
+    if not allocation.branch_name:
+        return "Recorded Git branch name is missing."
+    if allocation.branch_created_by is not SessionGitWorktreeBranchCreatedBy.AZENTS:
+        return "Recorded Git branch is not Azents-created."
+    return None
 
 
 def _collision_kind(message: str) -> Literal["branch", "path"] | None:

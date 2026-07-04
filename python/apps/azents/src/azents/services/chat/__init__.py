@@ -501,13 +501,27 @@ class ChatSessionService:
                 return Failure(PrimarySessionArchiveBlocked())
             if agent_session.run_state == AgentSessionRunState.RUNNING:
                 return Failure(RunningSessionArchiveBlocked())
+            cleanup_requested = False
+            worktree_service = self.session_git_worktree_service
+            if worktree_service is not None:
+                mark_cleanup_pending = worktree_service.mark_cleanup_pending_for_session
+                cleanup_request = await mark_cleanup_pending(
+                    session,
+                    session_id=session_id,
+                )
+                cleanup_requested = cleanup_request.cleanup_requested
             await self.agent_session_repository.archive(
                 session,
                 session_id,
                 ended_at=datetime.datetime.now(datetime.UTC),
             )
             await session.commit()
-            return Success(ArchiveSessionResult(archived_session_id=session_id))
+            return Success(
+                ArchiveSessionResult(
+                    archived_session_id=session_id,
+                    cleanup_requested=cleanup_requested,
+                )
+            )
 
     async def update_session_title(
         self,
@@ -760,7 +774,7 @@ class ChatSessionService:
         # Access control: reuse get_session
         get_result = await self.get_session(session_id, user_id=user_id)
         match get_result:
-            case Success():
+            case Success(agent_session):
                 pass
             case Failure(error):
                 match error:
@@ -771,6 +785,22 @@ class ChatSessionService:
                         return Failure(error)
                     case _:
                         assert_never(error)
+
+        worktree_service = self.session_git_worktree_service
+        if worktree_service is not None:
+            cleanup_requested = False
+            async with self.session_manager() as session:
+                mark_cleanup_pending = worktree_service.mark_cleanup_pending_for_session
+                cleanup_request = await mark_cleanup_pending(
+                    session,
+                    session_id=session_id,
+                )
+                cleanup_requested = cleanup_request.cleanup_requested
+            if cleanup_requested:
+                await worktree_service.run_cleanup_for_session(
+                    agent_id=agent_session.agent_id,
+                    session_id=session_id,
+                )
 
         # Delete DB record
         async with self.session_manager() as session:
