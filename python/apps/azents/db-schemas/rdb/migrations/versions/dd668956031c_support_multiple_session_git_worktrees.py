@@ -20,11 +20,10 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.execute(
-        sa.text(
-            "ALTER TABLE session_git_worktrees "
-            "DROP CONSTRAINT IF EXISTS uq_session_git_worktrees_session_id"
-        )
+    op.drop_constraint(
+        "uq_session_git_worktrees_session_id",
+        "session_git_worktrees",
+        type_="unique",
     )
     op.add_column(
         "session_git_worktrees",
