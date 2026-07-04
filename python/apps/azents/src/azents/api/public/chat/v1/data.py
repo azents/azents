@@ -205,22 +205,6 @@ class GitWorktreeWorkspaceModeRequest(BaseModel):
     starting_ref: str = Field(description="Starting Git ref")
 
 
-class SessionGitWorktreeAttachRequest(BaseModel):
-    """Existing-session Git worktree attach request."""
-
-    source_project_path: str = Field(description="Source Project path")
-    starting_ref: str = Field(description="Starting Git ref")
-
-
-class SessionGitWorktreeAttachResponse(BaseModel):
-    """Existing-session Git worktree attach response."""
-
-    worktree_id: str = Field(description="Queued SessionGitWorktree ID")
-    initialization: SessionInitializationResponse = Field(
-        description="Updated session initialization projection"
-    )
-
-
 AgentSessionWorkspaceModeRequest = (
     ExistingProjectsWorkspaceModeRequest | GitWorktreeWorkspaceModeRequest
 )

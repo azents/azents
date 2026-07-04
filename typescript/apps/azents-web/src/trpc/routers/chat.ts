@@ -10,7 +10,6 @@ import {
   agentRuntimeV1StopAgentRuntime,
   chatV1ApproveAgentProjectRegistrationRequest,
   chatV1ArchiveAgentSession,
-  chatV1AttachSessionGitWorktree,
   chatV1BulkDeleteAgentWorkspacePaths,
   chatV1BulkMoveAgentWorkspacePaths,
   chatV1CleanupSessionGitWorktree,
@@ -377,38 +376,6 @@ export const chatRouter = router({
           path: { agent_id: input.agentId, session_id: input.sessionId },
           body: {
             path: input.path,
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          400: "BAD_REQUEST",
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-          409: "CONFLICT",
-        });
-      }
-    }),
-
-  attachSessionGitWorktree: publicProcedure
-    .input(
-      z.object({
-        agentId: z.string().min(1),
-        sessionId: z.string().min(1),
-        sourceProjectPath: z.string().min(1),
-        startingRef: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await chatV1AttachSessionGitWorktree({
-          client: ctx.apiClient,
-          path: { agent_id: input.agentId, session_id: input.sessionId },
-          body: {
-            source_project_path: input.sourceProjectPath,
-            starting_ref: input.startingRef,
           },
           throwOnError: true,
         });

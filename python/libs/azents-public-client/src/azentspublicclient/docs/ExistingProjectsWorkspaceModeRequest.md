@@ -6,8 +6,8 @@ Existing Project path mode for a new AgentSession.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Workspace mode type |
-**project_paths** | **List[str]** | Exact Project paths to register on the created session |
+**type** | **str** | Workspace mode type | 
+**project_paths** | **List[str]** | Exact Project paths to register on the created session | 
 
 ## Example
 
@@ -27,3 +27,5 @@ existing_projects_workspace_mode_request_dict = existing_projects_workspace_mode
 existing_projects_workspace_mode_request_from_dict = ExistingProjectsWorkspaceModeRequest.from_dict(existing_projects_workspace_mode_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

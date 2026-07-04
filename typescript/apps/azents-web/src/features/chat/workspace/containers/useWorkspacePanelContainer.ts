@@ -52,17 +52,6 @@ export interface WorkspacePanelContainerOutput {
   onOpenProjectPickerDirectory: (path: string) => void;
   onSelectProjectPickerDirectory: (path: string) => void;
   onRefreshProjectPicker: () => void;
-  worktreeSourceProjectPath: string | null;
-  worktreeStartingRef: string | null;
-  worktreeRefOptions: { value: string; label: string }[];
-  isLoadingWorktreeRefs: boolean;
-  worktreeRefError: string | null;
-  isAttachingWorktreeProject: boolean;
-  attachWorktreeProjectError: string | null;
-  onOpenWorktreeSourcePicker: () => void;
-  onSetWorktreeStartingRef: (ref: string | null) => void;
-  onAttachWorktreeProject: () => void;
-  onCancelWorktreeProjectAttach: () => void;
   onStartRuntimeForProjectPicker: () => void;
   onApproveRegistrationRequest: (requestId: string) => void;
   onRejectRegistrationRequest: (requestId: string) => void;
@@ -123,18 +112,6 @@ export function useWorkspacePanelContainer({
   >({});
   const utils = trpc.useUtils();
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const [projectPickerPurpose, setProjectPickerPurpose] = useState<
-    "register_project" | "worktree_source"
-  >("register_project");
-  const [worktreeSourceProjectPath, setWorktreeSourceProjectPath] = useState<
-    string | null
-  >(null);
-  const [worktreeStartingRef, setWorktreeStartingRef] = useState<string | null>(
-    null,
-  );
-  const [attachWorktreeProjectError, setAttachWorktreeProjectError] = useState<
-    string | null
-  >(null);
   const [registerProjectError, setRegisterProjectError] = useState<
     string | null
   >(null);
@@ -158,10 +135,6 @@ export function useWorkspacePanelContainer({
     setBrowserMode("projects");
     setDirectoryEntriesByPath({});
     setProjectPickerOpen(false);
-    setProjectPickerPurpose("register_project");
-    setWorktreeSourceProjectPath(null);
-    setWorktreeStartingRef(null);
-    setAttachWorktreeProjectError(null);
   }, [agentId, sessionId]);
 
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
@@ -193,27 +166,6 @@ export function useWorkspacePanelContainer({
       agentId,
       sessionId,
     });
-  const gitRefsQuery = trpc.chat.previewAgentGitRefs.useQuery(
-    { agentId, sourceProjectPath: worktreeSourceProjectPath ?? "" },
-    { enabled: worktreeSourceProjectPath !== null },
-  );
-
-  useEffect(() => {
-    if (!gitRefsQuery.data) {
-      return;
-    }
-    const refs = gitRefsQuery.data.refs;
-    if (
-      worktreeStartingRef &&
-      refs.some((ref) => ref.ref === worktreeStartingRef)
-    ) {
-      return;
-    }
-    setWorktreeStartingRef(
-      refs.find((ref) => ref.default)?.ref ?? refs.at(0)?.ref ?? null,
-    );
-  }, [gitRefsQuery.data, worktreeStartingRef]);
-
   const manifest = useMemo(() => {
     if (workspaceQuery.data?.workspace.type !== "READY") {
       return null;
@@ -471,25 +423,6 @@ export function useWorkspacePanelContainer({
     onError: (error) => setRegisterProjectError(error.message),
   });
 
-  const attachWorktreeMutation = trpc.chat.attachSessionGitWorktree.useMutation(
-    {
-      onSuccess: async () => {
-        setWorktreeSourceProjectPath(null);
-        setWorktreeStartingRef(null);
-        setAttachWorktreeProjectError(null);
-        await Promise.all([
-          utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
-          utils.chat.getSessionProjectBrowserManifest.invalidate({
-            agentId,
-            sessionId,
-          }),
-          utils.chat.getSessionInitialization.invalidate({ sessionId }),
-        ]);
-      },
-      onError: (error) => setAttachWorktreeProjectError(error.message),
-    },
-  );
-
   const approveRegistrationRequestMutation =
     trpc.chat.approveAgentProjectRegistrationRequest.useMutation({
       onSuccess: async () => {
@@ -708,33 +641,8 @@ export function useWorkspacePanelContainer({
   );
 
   const onOpenProjectPicker = useCallback((): void => {
-    setProjectPickerPurpose("register_project");
     setProjectPickerOpen(true);
   }, []);
-
-  const onOpenWorktreeSourcePicker = useCallback((): void => {
-    setProjectPickerPurpose("worktree_source");
-    setProjectPickerOpen(true);
-  }, []);
-
-  const onAttachWorktreeProject = useCallback((): void => {
-    if (worktreeSourceProjectPath === null || worktreeStartingRef === null) {
-      return;
-    }
-    setAttachWorktreeProjectError(null);
-    attachWorktreeMutation.mutate({
-      agentId,
-      sessionId,
-      sourceProjectPath: worktreeSourceProjectPath,
-      startingRef: worktreeStartingRef,
-    });
-  }, [
-    agentId,
-    attachWorktreeMutation,
-    sessionId,
-    worktreeSourceProjectPath,
-    worktreeStartingRef,
-  ]);
 
   const onApproveRegistrationRequest = useCallback(
     (requestId: string) => {
@@ -1066,37 +974,10 @@ export function useWorkspacePanelContainer({
     onCloseProjectPicker: () => setProjectPickerOpen(false),
     onOpenProjectPickerDirectory: setCurrentDirectoryPath,
     onSelectProjectPickerDirectory: (path: string) => {
-      if (projectPickerPurpose === "worktree_source") {
-        setWorktreeSourceProjectPath(path);
-        setWorktreeStartingRef(null);
-        setAttachWorktreeProjectError(null);
-      } else {
-        onRegisterProject(path);
-      }
+      onRegisterProject(path);
       setProjectPickerOpen(false);
     },
     onRefreshProjectPicker: onRefresh,
-    worktreeSourceProjectPath,
-    worktreeStartingRef,
-    worktreeRefOptions:
-      gitRefsQuery.data?.refs.map((ref) => ({
-        value: ref.ref,
-        label: ref.default ? `${ref.name} (default)` : ref.name,
-      })) ?? [],
-    isLoadingWorktreeRefs: gitRefsQuery.isLoading,
-    worktreeRefError: gitRefsQuery.isError
-      ? getErrorMessage(gitRefsQuery.error)
-      : null,
-    isAttachingWorktreeProject: attachWorktreeMutation.isPending,
-    attachWorktreeProjectError,
-    onOpenWorktreeSourcePicker,
-    onSetWorktreeStartingRef: setWorktreeStartingRef,
-    onAttachWorktreeProject,
-    onCancelWorktreeProjectAttach: () => {
-      setWorktreeSourceProjectPath(null);
-      setWorktreeStartingRef(null);
-      setAttachWorktreeProjectError(null);
-    },
     onStartRuntimeForProjectPicker: onStartRuntime,
     onApproveRegistrationRequest,
     onRejectRegistrationRequest,

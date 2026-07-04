@@ -6,9 +6,9 @@ Git ref preview response for a source Project.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**refs** | [**List[GitRefEntryResponse]**](GitRefEntryResponse.md) | Available Git refs |
-**default_branch** | **str** |  |
-**head_commit** | **str** |  |
+**refs** | [**List[GitRefEntryResponse]**](GitRefEntryResponse.md) | Available Git refs | 
+**default_branch** | **str** |  | 
+**head_commit** | **str** |  | 
 
 ## Example
 
@@ -28,3 +28,5 @@ git_ref_preview_response_dict = git_ref_preview_response_instance.to_dict()
 git_ref_preview_response_from_dict = GitRefPreviewResponse.from_dict(git_ref_preview_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

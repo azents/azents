@@ -116,7 +116,7 @@ Response fields:
 
 `snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.initialization` is the current setup projection.
 
-`GET /chat/v1/sessions/{session_id}/initialization` returns the durable initialization projection plus ordered setup events. Clients use it to recover the full setup log after reconnect or when the live card requests details. Existing-session worktree attachment appends setup steps and setup events to the same session initialization projection, so clients recover workspace-update progress through the same live and detail endpoints. The endpoint is separate from durable chat history because initialization events are setup telemetry, not transcript events.
+`GET /chat/v1/sessions/{session_id}/initialization` returns the durable initialization projection plus ordered setup events. Clients use it to recover the full setup log after reconnect or when the live card requests details. The endpoint is separate from durable chat history because initialization events are setup telemetry, not transcript events.
 
 ## 6. Timeline State Rules
 
@@ -274,6 +274,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-04** — v10. Removed existing-session Git worktree attachment from initialization resync behavior.
 - **2026-07-04** — v8. Added initialization live/detail recovery and WebSocket setup projection actions.
 - **2026-06-13** — v5. Added session todo state to REST live/write snapshot and WebSocket contract, and reflected UI rule that treats todo preview as live state.
 - **2026-06-10** — v4. Removed aggregate live event list from `/live` and REST write snapshot, and reflected live state taxonomy contract separating partial history and input buffer.

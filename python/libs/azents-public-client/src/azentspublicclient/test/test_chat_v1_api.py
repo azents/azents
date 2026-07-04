@@ -40,13 +40,6 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
-    def test_chat_v1_attach_session_git_worktree(self) -> None:
-        """Test case for chat_v1_attach_session_git_worktree
-
-        Attach Session Git Worktree
-        """
-        pass
-
     def test_chat_v1_bulk_delete_agent_workspace_paths(self) -> None:
         """Test case for chat_v1_bulk_delete_agent_workspace_paths
 
