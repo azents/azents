@@ -929,6 +929,67 @@ class TestSessionGitWorktreeService:
         assert first_path.endswith("/repo")
         assert second_path.endswith("/repo-2")
 
+    async def test_retry_resets_failed_later_worktree_allocation(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Retry resets the failed allocation even when an earlier worktree is ready."""
+        runner = _RunnerOperations()
+        (
+            worktree_service,
+            user_id,
+            agent_id,
+            session_id,
+        ) = await _create_ready_worktree_session(
+            rdb_session_manager,
+            slug="retry-later",
+            runner=runner,
+        )
+        runner.failures.append("invalid_ref: unknown revision")
+        attach_result = await worktree_service.attach_git_worktree_to_session(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            source_project_path="/workspace/agent/other",
+            starting_ref="missing",
+        )
+        assert isinstance(attach_result, Success)
+
+        await worktree_service.run_git_worktree_initialization(
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        retry_result = await worktree_service.request_initialization_retry(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+        )
+        assert isinstance(retry_result, Success)
+        await worktree_service.run_git_worktree_initialization(
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+        async with rdb_session_manager() as session:
+            initialization = await SessionInitializationRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        create_calls = [
+            call for call in runner.calls if call["operation"] == "create_git_worktree"
+        ]
+        assert len(create_calls) == 3
+        assert initialization is not None
+        assert initialization.status is SessionInitializationStatus.READY
+        assert [allocation.status for allocation in allocations] == [
+            SessionGitWorktreeStatus.READY,
+            SessionGitWorktreeStatus.READY,
+        ]
+
     async def test_catalog_upsert_failure_blocks_initialization(
         self,
         rdb_session_manager: SessionManager[AsyncSession],

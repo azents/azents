@@ -30,7 +30,7 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-04 | 53 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-04 | 54 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-04 | 6 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
@@ -40,7 +40,7 @@ _8 documents_
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-03 | 9 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-04 | 9 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-04 | 10 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-03 | 10 |
 | [Subagent Delegation Flow](spec/flow/subagent-delegation.md) | @Hardtack | 2026-07-01 | 13 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |

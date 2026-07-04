@@ -18,7 +18,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-04
-spec_version: 9
+spec_version: 10
 ---
 
 # Run Resume
@@ -167,7 +167,7 @@ The takeover path must preserve single-session execution:
 
 ## Initialization Recovery
 
-Session initialization is a pre-run gate. If a worker receives a wake-up for a session whose initialization is `pending` or `running`, it must leave pending buffers in place and avoid creating an `agent_runs` row. If initialization is `failed`, `canceled`, or otherwise blocks dispatch, recovery remains a session setup concern rather than failed-run retry state. Once initialization becomes `ready`, the next wake-up can process the already-persisted pending input normally.
+Session initialization is a pre-run gate. If a worker receives a wake-up for a session whose initialization is `pending`, the session runner first attempts to process queued setup work, including Git worktree creation and workspace Project registration, under the per-session ownership path. If processing makes initialization `ready`, the same wake-up may process the already-persisted pending input normally. If initialization is still `running`, `failed`, `canceled`, or otherwise blocks dispatch, the worker must leave pending buffers in place and avoid creating an `agent_runs` row. Recovery remains a session setup concern rather than failed-run retry state.
 
 ## Failed-run Retry Recovery
 
@@ -222,4 +222,5 @@ that next run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-04** (spec_version 10) — Clarified that pending initialization is processed by the session runner during wake-up before run creation, and the same wake-up may continue once setup is ready.
 - **2026-07-04** (spec_version 9) — Added initialization-gated wake-up and recovery semantics.
