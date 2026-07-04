@@ -24,6 +24,7 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.services.session_initialization import SessionInitializationService
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
     normalize_session_workspace_project_paths,
@@ -101,6 +102,9 @@ class AgentSessionInputService:
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    session_initialization_service: Annotated[
+        SessionInitializationService, Depends(SessionInitializationService)
+    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -216,10 +220,15 @@ class AgentSessionInputService:
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
             )
-            await self.agent_session_repository.ensure_team_primary_for_agent(
+            ensure_primary = self.agent_session_repository.ensure_team_primary_for_agent
+            primary_session = await ensure_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
+            )
+            await self.session_initialization_service.ensure_ready_noop_initialization(
+                session,
+                session_id=primary_session.id,
             )
             try:
                 normalized_project_paths = normalize_session_workspace_project_paths(
@@ -235,6 +244,10 @@ class AgentSessionInputService:
                     title=None,
                     primary_kind=None,
                 ),
+            )
+            await self.session_initialization_service.ensure_ready_noop_initialization(
+                session,
+                session_id=agent_session.id,
             )
             await self._create_session_projects(
                 session,

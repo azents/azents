@@ -5,6 +5,7 @@ import contextlib
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -51,6 +52,7 @@ from azents.engine.run.types import (
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session.data import PendingSessionCommand
 from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
+from azents.services.session_initialization import SessionInitializationRunGate
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import RunExecutor
@@ -415,6 +417,8 @@ class _Host:
         self.commands: list[PendingSessionCommand] = []
         self.dispatched_events: list[tuple[str, PublishedEvent]] = []
         self.event_dispatched = asyncio.Event()
+        self.initialization_gate = SessionInitializationRunGate.READY
+        self.blocked_initialization_gates: list[SessionInitializationRunGate] = []
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -534,6 +538,22 @@ class _Host:
     async def has_stop_request(self, session_id: str) -> bool:
         """Return stop intent existence specified by test."""
         return session_id in self.stop_request_session_ids
+
+    async def get_initialization_run_gate(self, session_id: str) -> SimpleNamespace:
+        """Return initialization gate specified by test."""
+        del session_id
+        return SimpleNamespace(gate=self.initialization_gate)
+
+    async def block_run_dispatch_for_initialization(
+        self,
+        session_id: str,
+        *,
+        gate: SessionInitializationRunGate,
+    ) -> None:
+        """Record initialization gate block and mimic lifecycle cleanup."""
+        self.blocked_initialization_gates.append(gate)
+        await self.mark_session_idle(session_id)
+        await self.clear_session_activity(session_id)
 
 
 async def _wait_for_owner_heartbeat(host: _Host) -> None:
@@ -806,6 +826,29 @@ async def test_no_actionable_wake_up_marks_session_idle_without_continuation() -
     assert host.processed_messages == [message]
     assert host.idle_session_ids == ["session-001"]
     assert host.idle_continuation_calls == []
+    assert host.lifecycle_events == [
+        "mark_session_idle",
+        "clear_session_activity",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_initialization_gate_blocks_run_dispatch_before_executor() -> None:
+    """Initialization gate leaves input pending and skips run executor."""
+    host = _Host()
+    host.initialization_gate = SessionInitializationRunGate.BLOCKED
+    host.pending_input_session_ids.add("session-001")
+    runner = _start_session_runner(host)
+
+    try:
+        runner.enqueue(_wake_up())
+        await _wait_until(lambda: bool(host.blocked_initialization_gates))
+    finally:
+        await runner.shutdown()
+
+    assert host.processed_messages == []
+    assert host.blocked_initialization_gates == [SessionInitializationRunGate.BLOCKED]
+    assert host.idle_session_ids == ["session-001"]
     assert host.lifecycle_events == [
         "mark_session_idle",
         "clear_session_activity",
