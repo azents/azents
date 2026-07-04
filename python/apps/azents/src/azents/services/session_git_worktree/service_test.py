@@ -781,10 +781,13 @@ class TestSessionGitWorktreeService:
         assert len(create_calls) == 2
         assert create_calls[-1]["source_project_path"] == "/workspace/agent/other"
         assert create_calls[-1]["starting_ref"] == "feature"
-        assert [project.path for project in projects] == [
-            create_calls[0]["worktree_path"],
-            create_calls[1]["worktree_path"],
-        ]
+        first_worktree_path = create_calls[0]["worktree_path"]
+        second_worktree_path = create_calls[1]["worktree_path"]
+        assert isinstance(first_worktree_path, str)
+        assert isinstance(second_worktree_path, str)
+        assert [project.path for project in projects] == sorted(
+            [first_worktree_path, second_worktree_path]
+        )
         assert len(allocations) == 2
         assert all(
             allocation.status is SessionGitWorktreeStatus.READY
