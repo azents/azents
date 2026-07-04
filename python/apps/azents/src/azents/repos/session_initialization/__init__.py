@@ -68,6 +68,23 @@ class SessionInitializationRepository:
             return None
         return self._build_initialization(rdb)
 
+    async def get_by_session_id_for_update(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> SessionInitialization | None:
+        """Fetch and lock initialization lifecycle by AgentSession ID."""
+        result = await session.execute(
+            sa.select(RDBSessionInitialization)
+            .where(RDBSessionInitialization.session_id == session_id)
+            .with_for_update()
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build_initialization(rdb)
+
     async def create_ready_noop_if_absent(
         self,
         session: AsyncSession,
@@ -231,6 +248,27 @@ class SessionInitializationRepository:
             rdb.completed_at = completed_at
         if failed_at is not None:
             rdb.failed_at = failed_at
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build_initialization(rdb)
+
+    async def mark_pending_for_queue(
+        self,
+        session: AsyncSession,
+        *,
+        initialization_id: str,
+    ) -> SessionInitialization:
+        """Mark initialization pending for newly queued work and clear milestones."""
+        rdb = await session.get(RDBSessionInitialization, initialization_id)
+        if rdb is None:
+            raise RuntimeError("SessionInitialization row is missing")
+        rdb.status = SessionInitializationStatus.PENDING
+        rdb.failure_summary = None
+        rdb.started_at = None
+        rdb.completed_at = None
+        rdb.failed_at = None
+        rdb.canceled_at = None
+        rdb.cleaned_at = None
         await session.flush()
         await session.refresh(rdb)
         return self._build_initialization(rdb)

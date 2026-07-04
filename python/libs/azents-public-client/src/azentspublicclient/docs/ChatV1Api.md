@@ -6,6 +6,7 @@ Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**chat_v1_approve_agent_project_registration_request**](ChatV1Api.md#chat_v1_approve_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/approve | Approve Agent Project Registration Request
 [**chat_v1_archive_agent_session**](ChatV1Api.md#chat_v1_archive_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/archive | Archive Agent Session
+[**chat_v1_attach_session_git_worktree**](ChatV1Api.md#chat_v1_attach_session_git_worktree) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktrees | Attach Session Git Worktree
 [**chat_v1_bulk_delete_agent_workspace_paths**](ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
 [**chat_v1_bulk_move_agent_workspace_paths**](ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
 [**chat_v1_cleanup_session_git_worktree**](ChatV1Api.md#chat_v1_cleanup_session_git_worktree) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup | Cleanup Session Git Worktree
@@ -209,6 +210,90 @@ void (empty response body)
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_attach_session_git_worktree**
+> SessionGitWorktreeAttachResponse chat_v1_attach_session_git_worktree(agent_id, session_id, session_git_worktree_attach_request)
+
+Attach Session Git Worktree
+
+Queue Git worktree registration for an existing AgentSession.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.session_git_worktree_attach_request import SessionGitWorktreeAttachRequest
+from azentspublicclient.models.session_git_worktree_attach_response import SessionGitWorktreeAttachResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str |
+    session_id = 'session_id_example' # str |
+    session_git_worktree_attach_request = azentspublicclient.SessionGitWorktreeAttachRequest() # SessionGitWorktreeAttachRequest |
+
+    try:
+        # Attach Session Git Worktree
+        api_response = api_instance.chat_v1_attach_session_git_worktree(agent_id, session_id, session_git_worktree_attach_request)
+        print("The response of ChatV1Api->chat_v1_attach_session_git_worktree:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_attach_session_git_worktree: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  |
+ **session_id** | **str**|  |
+ **session_git_worktree_attach_request** | [**SessionGitWorktreeAttachRequest**](SessionGitWorktreeAttachRequest.md)|  |
+
+### Return type
+
+[**SessionGitWorktreeAttachResponse**](SessionGitWorktreeAttachResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

@@ -17,6 +17,9 @@ class SessionGitWorktree(BaseModel):
     session_id: str = Field(description="AgentSession ID")
     initialization_id: str = Field(description="SessionInitialization ID")
     step_id: str = Field(description="Create Git worktree initialization step ID")
+    session_workspace_project_id: str | None = Field(
+        description="Registered SessionWorkspaceProject ID"
+    )
     source_project_path: str = Field(description="Source Project path")
     starting_ref: str = Field(description="User-selected starting ref")
     base_commit: str | None = Field(description="Runner-resolved base commit")
@@ -38,9 +41,13 @@ class SessionGitWorktree(BaseModel):
 class SessionGitWorktreeCreate(BaseModel):
     """Session Git worktree create schema."""
 
+    id: str = Field(description="Session Git worktree ID")
     session_id: str = Field(description="AgentSession ID")
     initialization_id: str = Field(description="SessionInitialization ID")
     step_id: str = Field(description="Create Git worktree initialization step ID")
+    session_workspace_project_id: str | None = Field(
+        description="Registered SessionWorkspaceProject ID"
+    )
     source_project_path: str = Field(description="Source Project path")
     starting_ref: str = Field(description="User-selected starting ref")
     worktree_path: str = Field(description="Allocated worktree path")

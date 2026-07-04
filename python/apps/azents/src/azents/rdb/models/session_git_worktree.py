@@ -48,12 +48,17 @@ class RDBSessionGitWorktree(RDBModel):
 
     __tablename__ = "session_git_worktrees"
 
-    UQ_SESSION_ID = sa.UniqueConstraint(
-        "session_id",
-        name="uq_session_git_worktrees_session_id",
-    )
     IX_SESSION_ID = sa.Index("ix_session_git_worktrees_session_id", "session_id")
     IX_STATUS = sa.Index("ix_session_git_worktrees_status", "status")
+    IX_SESSION_STATUS = sa.Index(
+        "ix_session_git_worktrees_session_id_status",
+        "session_id",
+        "status",
+    )
+    IX_SESSION_WORKSPACE_PROJECT_ID = sa.Index(
+        "ix_session_git_worktrees_session_workspace_project_id",
+        "session_workspace_project_id",
+    )
     IX_WORKTREE_PATH = sa.Index(
         "ix_session_git_worktrees_worktree_path",
         "worktree_path",
@@ -99,6 +104,12 @@ class RDBSessionGitWorktree(RDBModel):
         nullable=False,
         default=SessionGitWorktreeStatus.PENDING,
     )
+    session_workspace_project_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("session_workspace_projects.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+    )
     base_commit: Mapped[str | None] = mapped_column(
         sa.String(64),
         nullable=True,
@@ -142,9 +153,10 @@ class RDBSessionGitWorktree(RDBModel):
     )
 
     __table_args__ = (
-        UQ_SESSION_ID,
         IX_SESSION_ID,
         IX_STATUS,
+        IX_SESSION_STATUS,
+        IX_SESSION_WORKSPACE_PROJECT_ID,
         IX_WORKTREE_PATH,
         IX_BRANCH_NAME,
     )
