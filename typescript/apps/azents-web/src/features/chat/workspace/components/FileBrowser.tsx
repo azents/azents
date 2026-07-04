@@ -288,6 +288,11 @@ function TreeNode({
   const isDirectory = node.kind === "directory";
   const selectable = canSelect(node);
   const canRemoveProject = node.capabilities?.removeProject === true;
+  const displayName =
+    node.source?.type === "session_project" ||
+    node.source?.type === "preview_project"
+      ? node.path
+      : node.name;
   const rowStyle = compact
     ? {
         minHeight: rem(28),
@@ -389,7 +394,7 @@ function TreeNode({
           truncate
           style={{ flex: "1 1 auto", minWidth: 0 }}
         >
-          {node.name}
+          {displayName}
         </Text>
         {node.status && node.status.value !== "available" ? (
           <Badge

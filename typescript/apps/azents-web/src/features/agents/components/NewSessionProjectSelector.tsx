@@ -136,8 +136,11 @@ export function NewSessionProjectSelector({
                         leftSection={<IconGitBranch size={14} />}
                         size="compact-sm"
                         variant="light"
+                        style={{ maxWidth: "100%" }}
                       >
-                        {basename(sourceProjectPath)}
+                        <Text component="span" size="xs" truncate>
+                          {sourceProjectPath}
+                        </Text>
                       </Button>
                     </Popover.Target>
                     <Popover.Dropdown>
