@@ -502,6 +502,15 @@ class TestSessionGitWorktreeService:
 
         assert isinstance(result, Success)
         created = result.value.agent_session
+        async with rdb_session_manager() as session:
+            projects_before_initialization = (
+                await SessionWorkspaceProjectRepository().list_projects(
+                    session,
+                    session_id=created.id,
+                )
+            )
+        assert projects_before_initialization == []
+
         await worktree_service.run_git_worktree_initialization(
             agent_id=agent_id,
             session_id=created.id,
@@ -526,9 +535,9 @@ class TestSessionGitWorktreeService:
             )
 
         assert initialization.status is SessionInitializationStatus.READY
-        assert [project.path for project in projects] == [
-            runner.calls[-1]["worktree_path"]
-        ]
+        project_paths = [project.path for project in projects]
+        assert project_paths == [runner.calls[-1]["worktree_path"]]
+        assert "/workspace/agent/repo" not in project_paths
         assert [entry.path for entry in catalog] == [runner.calls[-1]["worktree_path"]]
         assert all(
             step.status is SessionInitializationStepStatus.COMPLETED for step in steps

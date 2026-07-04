@@ -602,6 +602,7 @@ async def _write_message_via_rest(
         user_id=user_id,
         client_request_id=request.client_request_id,
         input_buffer=result.input_buffer,
+        wake_worker=True,
     )
 
 
@@ -638,22 +639,24 @@ async def _finalize_message_write_response(
     user_id: str,
     client_request_id: str,
     input_buffer: InputBuffer,
+    wake_worker: bool,
 ) -> ChatWriteResponse:
-    """Publish live state, wake the worker, and return a write snapshot."""
+    """Publish live state, optionally wake the worker, and return a snapshot."""
     live_event_upserted = chat_live_event_upserted_dump(
         input_buffer_to_live_event(input_buffer)
     )
     await broadcast.publish(session_id, live_event_upserted)
-    broker_message = SessionWakeUp(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=user_id,
-        additional_system_prompt=None,
-        interface=None,
-        workspace_id=None,
-        workspace_handle=None,
-    )
-    await broker.send_message(broker_message)
+    if wake_worker:
+        broker_message = SessionWakeUp(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            additional_system_prompt=None,
+            interface=None,
+            workspace_id=None,
+            workspace_handle=None,
+        )
+        await broker.send_message(broker_message)
     snapshot = await _build_chat_write_snapshot(
         chat_service,
         live_event_store,
@@ -1066,6 +1069,7 @@ async def _write_new_session_message_via_rest(
         user_id=user_id,
         client_request_id=request.client_request_id,
         input_buffer=result.input_buffer,
+        wake_worker=not isinstance(workspace_mode, GitWorktreeWorkspaceMode),
     )
 
 
@@ -1266,6 +1270,7 @@ async def _write_turn_action_via_rest(
         user_id=user_id,
         client_request_id=request.client_request_id,
         input_buffer=result.input_buffer,
+        wake_worker=True,
     )
 
 

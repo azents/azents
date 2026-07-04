@@ -437,6 +437,16 @@ class _RestWriteChatService:
             )
         )
 
+    async def get_session_initialization_detail(
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+    ) -> Success[SessionInitializationDetail]:
+        """Return initialization detail after background worktree execution."""
+        del session_id, user_id
+        return Success(_initialization_detail())
+
 
 class _StopChatService:
     """Stop access control service double for tests."""
@@ -1470,11 +1480,13 @@ class TestRestMessageWriteContract:
             session_id="4123456789abcdef0123456789abcdef"
         )
         input_service = _BufferedInputService()
+        worktree_service = _RouteWorktreeCleanupService()
+        background_tasks = BackgroundTasks()
 
         response = await _write_new_session_message_via_rest(
             chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            worktree_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             InMemoryLiveEventStore(),
@@ -1487,7 +1499,7 @@ class TestRestMessageWriteContract:
                     starting_ref="main",
                 ),
             ),
-            background_tasks=BackgroundTasks(),
+            background_tasks=background_tasks,
             agent_id="agent-1",
             user_id="user-1",
             tz=ZoneInfo("UTC"),
@@ -1499,7 +1511,15 @@ class TestRestMessageWriteContract:
         assert workspace_mode.source_project_path == "/workspace/agent/source"
         assert workspace_mode.starting_ref == "main"
         assert response.session_id == "4123456789abcdef0123456789abcdef"
+        assert broker.messages == []
+
+        await background_tasks()
+
+        assert worktree_service.initialization_calls == [
+            ("agent-1", "4123456789abcdef0123456789abcdef")
+        ]
         assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
 
     async def test_new_session_message_requires_workspace_selection(self) -> None:
         """Draft-session REST write rejects missing workspace mode and Projects."""
