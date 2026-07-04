@@ -278,7 +278,6 @@ class ChatSessionService:
             if project_paths is None:
                 raise ValueError("workspace_mode is required")
             workspace_mode = ExplicitProjectsWorkspaceMode(project_paths=project_paths)
-        prepared_worktree = False
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
@@ -356,7 +355,7 @@ class ChatSessionService:
                     )
                     match prepared:
                         case Success():
-                            prepared_worktree = True
+                            pass
                         case Failure(error):
                             return Failure(error)
                         case _:
@@ -364,14 +363,6 @@ class ChatSessionService:
                 case _:
                     assert_never(workspace_mode)
             await session.commit()
-        if prepared_worktree:
-            worktree_service = self.session_git_worktree_service
-            if worktree_service is None:
-                raise RuntimeError("SessionGitWorktreeService is unavailable")
-            await worktree_service.run_git_worktree_initialization(
-                agent_id=agent_id,
-                session_id=created.id,
-            )
         return Success(created)
 
     async def list_agent_project_presets(

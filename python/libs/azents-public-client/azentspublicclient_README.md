@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Get Agent Runtime
@@ -119,6 +119,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_archive_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_archive_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/archive | Archive Agent Session
 *ChatV1Api* | [**chat_v1_bulk_delete_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
 *ChatV1Api* | [**chat_v1_bulk_move_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
+*ChatV1Api* | [**chat_v1_cleanup_session_git_worktree**](azentspublicclient/docs/ChatV1Api.md#chat_v1_cleanup_session_git_worktree) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup | Cleanup Session Git Worktree
 *ChatV1Api* | [**chat_v1_create_agent_workspace_directory**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_agent_workspace_directory) | **POST** /chat/v1/agents/{agent_id}/workspace/directories | Create Agent Workspace Directory
 *ChatV1Api* | [**chat_v1_create_input**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_input) | **POST** /chat/v1/sessions/{session_id}/inputs | Create Input
 *ChatV1Api* | [**chat_v1_create_team_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions | Create Team Agent Session
@@ -153,6 +154,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
 *ChatV1Api* | [**chat_v1_reject_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reject_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject | Reject Agent Project Registration Request
+*ChatV1Api* | [**chat_v1_retry_session_initialization**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_session_initialization) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/initialization/retry | Retry Session Initialization
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
 *ChatV1Api* | [**chat_v1_stop_session_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
 *ChatV1Api* | [**chat_v1_update_agent_session_title**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_agent_session_title) | **PATCH** /chat/v1/sessions/{session_id}/title | Update Agent Session Title
@@ -494,7 +496,3 @@ Authentication schemes defined for the API:
 
 
 ## Author
-
-
-
-

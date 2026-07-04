@@ -91,6 +91,24 @@ class SessionGitWorktreeRepository:
         await session.refresh(rdb)
         return self._build(rdb)
 
+    async def mark_pending_for_retry(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_id: str,
+    ) -> SessionGitWorktree:
+        """Reset a failed allocation so initialization can be retried."""
+        rdb = await session.get(RDBSessionGitWorktree, worktree_id)
+        if rdb is None:
+            raise RuntimeError("SessionGitWorktree row is missing")
+        rdb.status = SessionGitWorktreeStatus.PENDING
+        rdb.failure_summary = None
+        rdb.cleanup_summary = None
+        rdb.failed_at = None
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
     async def mark_creating(
         self,
         session: AsyncSession,

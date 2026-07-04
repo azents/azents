@@ -265,6 +265,64 @@ class SessionInitializationRepository:
         await session.refresh(rdb)
         return self._build_step(rdb)
 
+    async def reset_for_retry(
+        self,
+        session: AsyncSession,
+        *,
+        initialization_id: str,
+    ) -> SessionInitialization:
+        """Reset failed retryable steps and downstream steps for another attempt."""
+        initialization = await session.get(RDBSessionInitialization, initialization_id)
+        if initialization is None:
+            raise RuntimeError("SessionInitialization row is missing")
+        initialization.status = SessionInitializationStatus.PENDING
+        initialization.failure_summary = None
+        initialization.retry_count += 1
+        initialization.started_at = None
+        initialization.completed_at = None
+        initialization.failed_at = None
+        initialization.canceled_at = None
+        initialization.cleaned_at = None
+
+        result = await session.execute(
+            sa.select(RDBSessionInitializationStep)
+            .where(RDBSessionInitializationStep.initialization_id == initialization_id)
+            .order_by(RDBSessionInitializationStep.sequence)
+        )
+        steps = list(result.scalars())
+        failed_keys = {
+            step.step_key
+            for step in steps
+            if step.status == SessionInitializationStepStatus.FAILED
+        }
+        reset_keys = set(failed_keys)
+        changed = True
+        while changed:
+            changed = False
+            for step in steps:
+                if step.step_key in reset_keys:
+                    continue
+                if any(key in reset_keys for key in step.depends_on_step_keys):
+                    reset_keys.add(step.step_key)
+                    changed = True
+
+        for step in steps:
+            if step.step_key not in reset_keys:
+                continue
+            if not step.retryable:
+                continue
+            step.status = SessionInitializationStepStatus.PENDING
+            step.failure_reason = None
+            step.resource_descriptors = []
+            step.attempt += 1
+            step.started_at = None
+            step.completed_at = None
+            step.failed_at = None
+
+        await session.flush()
+        await session.refresh(initialization)
+        return self._build_initialization(initialization)
+
     def _build_initialization(
         self,
         rdb: RDBSessionInitialization,

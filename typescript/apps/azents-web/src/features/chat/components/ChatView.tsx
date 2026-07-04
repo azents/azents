@@ -292,6 +292,10 @@ interface ChatViewProps {
   initializationDetailState: SessionInitializationDetailState;
   /** load durable initialization details */
   onLoadInitializationDetails: () => void;
+  /** retry failed session initialization */
+  onRetryInitialization: () => void;
+  /** retry Git worktree cleanup */
+  onRetryInitializationCleanup: () => void;
   /** delete all pending inputs blocked behind initialization */
   onDeletePendingInitializationInputs: () => void;
   /** Workspace panel container output */
@@ -336,6 +340,8 @@ export function ChatView({
   initialization,
   initializationDetailState,
   onLoadInitializationDetails,
+  onRetryInitialization,
+  onRetryInitializationCleanup,
   onDeletePendingInitializationInputs,
   workspacePanel,
   goal,
@@ -1086,6 +1092,8 @@ export function ChatView({
                       detailState={initializationDetailState}
                       pendingInputCount={pendingInputBuffers.length}
                       onLoadDetails={onLoadInitializationDetails}
+                      onRetryInitialization={onRetryInitialization}
+                      onRetryCleanup={onRetryInitializationCleanup}
                       onDeletePendingInputs={
                         onDeletePendingInitializationInputs
                       }

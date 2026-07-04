@@ -65,6 +65,7 @@ from azents.engine.tools.skill import (
     skill_actions_from_snapshot,
 )
 from azents.repos.input_buffer.data import InputBuffer
+from azents.repos.session_initialization.data import SessionInitializationEvent
 from azents.services.agent_session_input import (
     AgentSessionInputError,
     AgentSessionInputInactiveSession,
@@ -136,9 +137,14 @@ from azents.services.session_git_worktree import (
     GitWorktreeCleanupAccessDenied,
     GitWorktreeCleanupNotFound,
     GitWorktreeCleanupSessionNotFound,
+    GitWorktreeInitializationRetryAccessDenied,
+    GitWorktreeInitializationRetryNotFound,
+    GitWorktreeInitializationRetrySessionNotFound,
+    GitWorktreeInitializationRetryUnavailable,
     GitWorktreeWorkspaceMode,
     SessionGitWorktreeService,
 )
+from azents.services.session_initialization import SessionInitializationProjection
 from azents.services.session_storage import guess_media_type
 from azents.services.session_workspace_project import (
     AgentNotFound as ProjectAgentNotFound,
@@ -156,6 +162,8 @@ from azents.transport.chat import (
     chat_history_event_appended_dump,
     chat_live_event_removed_dump,
     chat_live_event_upserted_dump,
+    chat_session_initialization_event_appended_dump,
+    chat_session_initialization_updated_dump,
     chat_subscription_ack_dump,
     chat_subscription_health_check_ack_dump,
 )
@@ -928,9 +936,11 @@ async def create_input(
 async def create_team_agent_session_message(
     agent_id: str,
     request: ChatSessionCreateMessageWriteRequest,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
     agent_session_input_service: Annotated[AgentSessionInputService, Depends()],
+    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
     broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
     live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
@@ -941,10 +951,12 @@ async def create_team_agent_session_message(
     return await _write_new_session_message_via_rest(
         chat_service,
         agent_session_input_service,
+        session_git_worktree_service,
         broker,
         broadcast,
         live_event_store,
         request,
+        background_tasks=background_tasks,
         agent_id=agent_id,
         user_id=current_user.user_id,
         tz=_parse_timezone(timezone),
@@ -981,11 +993,13 @@ def _workspace_mode_from_request(
 async def _write_new_session_message_via_rest(
     chat_service: ChatSessionService,
     agent_session_input_service: AgentSessionInputService,
+    session_git_worktree_service: SessionGitWorktreeService,
     broker: SessionBroker,
     broadcast: WebSocketBroadcast,
     live_event_store: LiveEventStore,
     request: ChatSessionCreateMessageWriteRequest,
     *,
+    background_tasks: BackgroundTasks,
     agent_id: str,
     user_id: str,
     tz: ZoneInfo,
@@ -1025,6 +1039,18 @@ async def _write_new_session_message_via_rest(
         case _:
             assert_never(workspace_mode)
     result = _handle_created_agent_session_input_result(input_result)
+    if isinstance(workspace_mode, GitWorktreeWorkspaceMode):
+        _queue_git_worktree_initialization(
+            background_tasks,
+            session_git_worktree_service=session_git_worktree_service,
+            chat_service=chat_service,
+            broker=broker,
+            broadcast=broadcast,
+            agent_id=agent_id,
+            session_id=result.agent_session.id,
+            user_id=user_id,
+            wake_after_ready=True,
+        )
     return await _finalize_message_write_response(
         chat_service,
         broker,
@@ -1512,12 +1538,143 @@ async def preview_agent_git_refs(
             assert_never(result)
 
 
+def _queue_git_worktree_initialization(
+    background_tasks: BackgroundTasks,
+    *,
+    session_git_worktree_service: SessionGitWorktreeService,
+    chat_service: ChatSessionService,
+    broker: SessionBroker,
+    broadcast: WebSocketBroadcast,
+    agent_id: str,
+    session_id: str,
+    user_id: str,
+    wake_after_ready: bool,
+) -> None:
+    """Run prepared Git worktree initialization after returning the response."""
+    background_tasks.add_task(
+        _run_git_worktree_initialization_background,
+        session_git_worktree_service,
+        chat_service,
+        broker,
+        broadcast,
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=user_id,
+        wake_after_ready=wake_after_ready,
+    )
+
+
+async def _run_git_worktree_initialization_background(
+    session_git_worktree_service: SessionGitWorktreeService,
+    chat_service: ChatSessionService,
+    broker: SessionBroker,
+    broadcast: WebSocketBroadcast,
+    *,
+    agent_id: str,
+    session_id: str,
+    user_id: str,
+    wake_after_ready: bool,
+) -> None:
+    """Execute Git worktree initialization and publish the latest projection."""
+
+    async def publish_event(event: SessionInitializationEvent) -> None:
+        await broadcast.publish(
+            session_id,
+            chat_session_initialization_event_appended_dump(event),
+        )
+
+    async def publish_projection(
+        projection: SessionInitializationProjection,
+    ) -> None:
+        await broadcast.publish(
+            session_id,
+            chat_session_initialization_updated_dump(projection),
+        )
+
+    await session_git_worktree_service.run_git_worktree_initialization(
+        agent_id=agent_id,
+        session_id=session_id,
+        on_event_appended=publish_event,
+        on_projection_updated=publish_projection,
+    )
+    detail_result = await chat_service.get_session_initialization_detail(
+        session_id,
+        user_id=user_id,
+    )
+    match detail_result:
+        case Success(detail):
+            await broadcast.publish(
+                session_id,
+                chat_session_initialization_updated_dump(
+                    SessionInitializationProjection(
+                        initialization=detail.initialization,
+                        steps=detail.steps,
+                    )
+                ),
+            )
+        case Failure(error):
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
+                    pass
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(detail_result)
+    if wake_after_ready:
+        await broker.send_message(
+            SessionWakeUp(
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
+                additional_system_prompt=None,
+                interface=None,
+                workspace_id=None,
+                workspace_handle=None,
+            )
+        )
+
+
+async def _run_git_worktree_cleanup_background(
+    session_git_worktree_service: SessionGitWorktreeService,
+    broadcast: WebSocketBroadcast,
+    *,
+    agent_id: str,
+    session_id: str,
+) -> None:
+    """Execute Git worktree cleanup and publish initialization updates."""
+
+    async def publish_event(event: SessionInitializationEvent) -> None:
+        await broadcast.publish(
+            session_id,
+            chat_session_initialization_event_appended_dump(event),
+        )
+
+    async def publish_projection(
+        projection: SessionInitializationProjection,
+    ) -> None:
+        await broadcast.publish(
+            session_id,
+            chat_session_initialization_updated_dump(projection),
+        )
+
+    await session_git_worktree_service.run_cleanup_for_session(
+        agent_id=agent_id,
+        session_id=session_id,
+        on_event_appended=publish_event,
+        on_projection_updated=publish_projection,
+    )
+
+
 @router.post("/agents/{agent_id}/sessions")
 async def create_team_agent_session(
     agent_id: str,
     request: AgentSessionCreateRequest,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
+    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
+    broker: Annotated[SessionBroker, Depends(get_broker)],
+    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> AgentSessionResponse:
     """Create a non-primary team AgentSession for an Agent."""
     workspace_mode = _workspace_mode_from_request(
@@ -1541,6 +1698,18 @@ async def create_team_agent_session(
             assert_never(workspace_mode)
     match result:
         case Success(session):
+            if isinstance(workspace_mode, GitWorktreeWorkspaceMode):
+                _queue_git_worktree_initialization(
+                    background_tasks,
+                    session_git_worktree_service=session_git_worktree_service,
+                    chat_service=chat_service,
+                    broker=broker,
+                    broadcast=broadcast,
+                    agent_id=agent_id,
+                    session_id=session.id,
+                    user_id=current_user.user_id,
+                    wake_after_ready=False,
+                )
             return AgentSessionResponse.from_domain(session)
         case Failure(error):
             match error:
@@ -1600,6 +1769,66 @@ async def archive_agent_session(
 
 
 @router.post(
+    "/agents/{agent_id}/sessions/{session_id}/initialization/retry",
+    status_code=204,
+)
+async def retry_session_initialization(
+    agent_id: str,
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
+    broker: Annotated[SessionBroker, Depends(get_broker)],
+    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+) -> None:
+    """Request retry for a failed session initialization."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_session_id(session_id)
+    result = await session_git_worktree_service.request_initialization_retry(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(value):
+            if value.retry_requested:
+                _queue_git_worktree_initialization(
+                    background_tasks,
+                    session_git_worktree_service=session_git_worktree_service,
+                    chat_service=chat_service,
+                    broker=broker,
+                    broadcast=broadcast,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    user_id=current_user.user_id,
+                    wake_after_ready=True,
+                )
+            return
+        case Failure(error):
+            match error:
+                case (
+                    GitWorktreeInitializationRetrySessionNotFound()
+                    | GitWorktreeInitializationRetryNotFound()
+                ):
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Session initialization not found.",
+                    )
+                case GitWorktreeInitializationRetryAccessDenied():
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Session access denied.",
+                    )
+                case GitWorktreeInitializationRetryUnavailable():
+                    raise HTTPException(status_code=409, detail=error.reason)
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.post(
     "/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup",
     status_code=204,
 )
@@ -1609,6 +1838,7 @@ async def cleanup_session_git_worktree(
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
+    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> None:
     """Request manual cleanup retry for an Azents-owned session Git worktree."""
     _validate_uuid7_hex(agent_id, label="agent ID")
@@ -1622,7 +1852,9 @@ async def cleanup_session_git_worktree(
         case Success(value):
             if value.cleanup_requested:
                 background_tasks.add_task(
-                    session_git_worktree_service.run_cleanup_for_session,
+                    _run_git_worktree_cleanup_background,
+                    session_git_worktree_service,
+                    broadcast,
                     agent_id=agent_id,
                     session_id=session_id,
                 )

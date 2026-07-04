@@ -430,6 +430,10 @@ async def _create_ready_worktree_session(
         client_request_id=f"worktree-{slug}",
     )
     assert isinstance(result, Success)
+    await worktree_service.run_git_worktree_initialization(
+        agent_id=agent_id,
+        session_id=result.value.agent_session.id,
+    )
     return worktree_service, user_id, agent_id, result.value.agent_session.id
 
 
@@ -494,6 +498,10 @@ class TestSessionGitWorktreeService:
 
         assert isinstance(result, Success)
         created = result.value.agent_session
+        await worktree_service.run_git_worktree_initialization(
+            agent_id=agent_id,
+            session_id=created.id,
+        )
         async with rdb_session_manager() as session:
             initialization = await SessionInitializationRepository().get_by_session_id(
                 session,
@@ -530,10 +538,8 @@ class TestSessionGitWorktreeService:
         async with rdb_session_manager() as session:
             _, user_id, agent_id = await _create_agent_context(session, "invalid-ref")
         runner = _RunnerOperations(failures=["invalid_ref: unknown revision"])
-        input_service = _input_service(
-            rdb_session_manager,
-            _service(rdb_session_manager, runner),
-        )
+        worktree_service = _service(rdb_session_manager, runner)
+        input_service = _input_service(rdb_session_manager, worktree_service)
 
         result = await input_service.create_team_session_with_buffered_input(
             agent_id=agent_id,
@@ -553,6 +559,10 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
+        await worktree_service.run_git_worktree_initialization(
+            agent_id=agent_id,
+            session_id=result.value.agent_session.id,
+        )
         async with rdb_session_manager() as session:
             initialization = await SessionInitializationRepository().get_by_session_id(
                 session,
@@ -574,10 +584,8 @@ class TestSessionGitWorktreeService:
         async with rdb_session_manager() as session:
             _, user_id, agent_id = await _create_agent_context(session, "branch")
         runner = _RunnerOperations(failures=["branch_exists: branch exists"])
-        input_service = _input_service(
-            rdb_session_manager,
-            _service(rdb_session_manager, runner),
-        )
+        worktree_service = _service(rdb_session_manager, runner)
+        input_service = _input_service(rdb_session_manager, worktree_service)
 
         result = await input_service.create_team_session_with_buffered_input(
             agent_id=agent_id,
@@ -597,6 +605,10 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
+        await worktree_service.run_git_worktree_initialization(
+            agent_id=agent_id,
+            session_id=result.value.agent_session.id,
+        )
         first_branch = runner.calls[0]["branch_name"]
         second_branch = runner.calls[1]["branch_name"]
         assert isinstance(first_branch, str)
@@ -612,10 +624,8 @@ class TestSessionGitWorktreeService:
         async with rdb_session_manager() as session:
             _, user_id, agent_id = await _create_agent_context(session, "path")
         runner = _RunnerOperations(failures=["worktree_path_exists: path exists"])
-        input_service = _input_service(
-            rdb_session_manager,
-            _service(rdb_session_manager, runner),
-        )
+        worktree_service = _service(rdb_session_manager, runner)
+        input_service = _input_service(rdb_session_manager, worktree_service)
 
         result = await input_service.create_team_session_with_buffered_input(
             agent_id=agent_id,
@@ -635,6 +645,10 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
+        await worktree_service.run_git_worktree_initialization(
+            agent_id=agent_id,
+            session_id=result.value.agent_session.id,
+        )
         first_path = runner.calls[0]["worktree_path"]
         second_path = runner.calls[1]["worktree_path"]
         assert isinstance(first_path, str)
@@ -650,14 +664,12 @@ class TestSessionGitWorktreeService:
         async with rdb_session_manager() as session:
             _, user_id, agent_id = await _create_agent_context(session, "catalog")
         runner = _RunnerOperations()
-        input_service = _input_service(
+        worktree_service = _service(
             rdb_session_manager,
-            _service(
-                rdb_session_manager,
-                runner,
-                catalog_repository=_FailingCatalogRepository(),
-            ),
+            runner,
+            catalog_repository=_FailingCatalogRepository(),
         )
+        input_service = _input_service(rdb_session_manager, worktree_service)
 
         result = await input_service.create_team_session_with_buffered_input(
             agent_id=agent_id,
@@ -677,6 +689,10 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
+        await worktree_service.run_git_worktree_initialization(
+            agent_id=agent_id,
+            session_id=result.value.agent_session.id,
+        )
         async with rdb_session_manager() as session:
             initialization = await SessionInitializationRepository().get_by_session_id(
                 session,
@@ -693,14 +709,12 @@ class TestSessionGitWorktreeService:
         async with rdb_session_manager() as session:
             _, user_id, agent_id = await _create_agent_context(session, "warning")
         runner = _RunnerOperations()
-        input_service = _input_service(
+        worktree_service = _service(
             rdb_session_manager,
-            _service(
-                rdb_session_manager,
-                runner,
-                refresh_status=AgentProjectCatalogStatus.UNAVAILABLE,
-            ),
+            runner,
+            refresh_status=AgentProjectCatalogStatus.UNAVAILABLE,
         )
+        input_service = _input_service(rdb_session_manager, worktree_service)
 
         result = await input_service.create_team_session_with_buffered_input(
             agent_id=agent_id,
@@ -720,6 +734,10 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
+        await worktree_service.run_git_worktree_initialization(
+            agent_id=agent_id,
+            session_id=result.value.agent_session.id,
+        )
         async with rdb_session_manager() as session:
             initialization = await SessionInitializationRepository().get_by_session_id(
                 session,
@@ -754,10 +772,16 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
+            initialization = await SessionInitializationRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
 
         assert request.cleanup_requested is True
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANUP_PENDING
+        assert initialization is not None
+        assert initialization.status is SessionInitializationStatus.CLEANUP_REQUIRED
         assert [call["operation"] for call in runner.calls] == ["create_git_worktree"]
 
     async def test_cleanup_removes_worktree_branch_and_catalog(
@@ -792,12 +816,18 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
+            initialization = await SessionInitializationRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
             catalog = await AgentProjectCatalogRepository().list_entries(
                 session,
                 agent_id=agent_id,
             )
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANED
+        assert initialization is not None
+        assert initialization.status is SessionInitializationStatus.CLEANED
         assert catalog == []
         assert [call["operation"] for call in runner.calls] == [
             "create_git_worktree",
@@ -839,6 +869,10 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
+            initialization = await SessionInitializationRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
             catalog = await AgentProjectCatalogRepository().list_entries(
                 session,
                 agent_id=agent_id,
@@ -846,6 +880,11 @@ class TestSessionGitWorktreeService:
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
         assert allocation.cleanup_summary == "worktree remove failed"
+        assert initialization is not None
+        assert initialization.status is SessionInitializationStatus.CLEANUP_REQUIRED
+        assert initialization.failure_summary == (
+            "Git worktree cleanup failed: worktree remove failed"
+        )
         assert len(catalog) == 1
 
     async def test_manual_cleanup_retry_succeeds_after_failure(
@@ -891,8 +930,14 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
+            initialization = await SessionInitializationRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANED
+        assert initialization is not None
+        assert initialization.status is SessionInitializationStatus.CLEANED
 
     async def test_cleanup_rejects_path_without_matching_ownership_boundary(
         self,

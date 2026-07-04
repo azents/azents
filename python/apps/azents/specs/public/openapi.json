@@ -3132,6 +3132,56 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/initialization/retry": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Retry Session Initialization",
+        "description": "Request retry for a failed session initialization.",
+        "operationId": "chat_v1_retry_session_initialization",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup": {
       "post": {
         "tags": [

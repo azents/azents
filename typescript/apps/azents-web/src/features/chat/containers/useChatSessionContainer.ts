@@ -132,6 +132,10 @@ export interface ChatSessionContainerOutput {
   initializationDetailState: SessionInitializationDetailState;
   /** load durable initialization details */
   onLoadInitializationDetails: () => void;
+  /** retry failed session initialization */
+  onRetryInitialization: () => void;
+  /** retry Git worktree cleanup */
+  onRetryInitializationCleanup: () => void;
   /** delete all pending inputs blocked behind initialization */
   onDeletePendingInitializationInputs: () => void;
   /** latest turn usage */
@@ -1444,11 +1448,15 @@ export function useChatSessionContainer(
         "type" in event &&
         event.type === "session_initialization_event_appended"
       ) {
-        setInitializationDetailState((prev) =>
-          prev.type === "READY"
-            ? { type: "READY", events: [...prev.events, event.event] }
-            : prev,
-        );
+        setInitializationDetailState((prev) => {
+          if (prev.type !== "READY") {
+            return prev;
+          }
+          if (prev.events.some((item) => item.id === event.event.id)) {
+            return prev;
+          }
+          return { type: "READY", events: [...prev.events, event.event] };
+        });
         return;
       }
 
@@ -1847,6 +1855,11 @@ export function useChatSessionContainer(
     void applyLatestSnapshot(sessionId);
   }, [applyLatestSnapshot, sessionId]);
 
+  const retryInitializationMutation =
+    trpc.chat.retrySessionInitialization.useMutation();
+  const cleanupWorktreeMutation =
+    trpc.chat.cleanupSessionGitWorktree.useMutation();
+
   const onLoadInitializationDetails = useCallback((): void => {
     setInitializationDetailState({ type: "LOADING" });
     void utils.chat.getSessionInitialization
@@ -1865,6 +1878,46 @@ export function useChatSessionContainer(
         });
       });
   }, [sessionId, utils.chat.getSessionInitialization]);
+
+  const refreshInitializationDetail = useCallback((): void => {
+    void utils.chat.getSessionInitialization
+      .fetch({ sessionId })
+      .then((detail) => {
+        setManagedLiveState((prev) => ({
+          ...prev,
+          initialization: detail.initialization,
+        }));
+        setInitializationDetailState({ type: "READY", events: detail.events });
+      });
+  }, [sessionId, utils.chat.getSessionInitialization]);
+
+  const onRetryInitialization = useCallback((): void => {
+    if (retryInitializationMutation.isPending) {
+      return;
+    }
+    void retryInitializationMutation
+      .mutateAsync({ agentId: agent.id, sessionId })
+      .then(() => refreshInitializationDetail());
+  }, [
+    agent.id,
+    refreshInitializationDetail,
+    retryInitializationMutation,
+    sessionId,
+  ]);
+
+  const onRetryInitializationCleanup = useCallback((): void => {
+    if (cleanupWorktreeMutation.isPending) {
+      return;
+    }
+    void cleanupWorktreeMutation
+      .mutateAsync({ agentId: agent.id, sessionId })
+      .then(() => refreshInitializationDetail());
+  }, [
+    agent.id,
+    cleanupWorktreeMutation,
+    refreshInitializationDetail,
+    sessionId,
+  ]);
 
   const onAuthorizationComplete = useCallback((toolkitId: string) => {
     setAuthorizationRequests((prev) =>
@@ -2200,6 +2253,8 @@ export function useChatSessionContainer(
     initialization,
     initializationDetailState,
     onLoadInitializationDetails,
+    onRetryInitialization,
+    onRetryInitializationCleanup,
     onDeletePendingInitializationInputs,
     tokenUsage,
     goal: managedLiveState.goal,

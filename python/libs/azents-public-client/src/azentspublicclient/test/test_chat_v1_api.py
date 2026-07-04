@@ -54,6 +54,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_cleanup_session_git_worktree(self) -> None:
+        """Test case for chat_v1_cleanup_session_git_worktree
+
+        Cleanup Session Git Worktree
+        """
+        pass
+
     def test_chat_v1_create_agent_workspace_directory(self) -> None:
         """Test case for chat_v1_create_agent_workspace_directory
 
@@ -289,6 +296,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_reject_agent_project_registration_request
 
         Reject Agent Project Registration Request
+        """
+        pass
+
+    def test_chat_v1_retry_session_initialization(self) -> None:
+        """Test case for chat_v1_retry_session_initialization
+
+        Retry Session Initialization
         """
         pass
 
