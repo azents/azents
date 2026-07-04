@@ -704,11 +704,19 @@ class SessionGitWorktreeService:
                 initialization_id=initialization.id,
             )
 
-        pending_allocations = [
-            allocation
-            for allocation in allocations
-            if not _worktree_allocation_is_complete(allocation, steps)
-        ]
+        pending_allocations = sorted(
+            (
+                allocation
+                for allocation in allocations
+                if not _worktree_allocation_is_complete(allocation, steps)
+            ),
+            key=lambda allocation: (
+                _worktree_steps_for_allocation(
+                    allocation=allocation,
+                    steps=steps,
+                ).create_step.sequence
+            ),
+        )
         if not pending_allocations:
             return
         claimed = await self._claim_initialization_run(session_id=session_id)
@@ -947,11 +955,11 @@ class SessionGitWorktreeService:
             )
             if workspace_user is None:
                 return Failure(GitWorktreeInitializationRetryAccessDenied())
-            allocation = await self.session_git_worktree_repository.get_by_session_id(
+            allocations = await self.session_git_worktree_repository.list_by_session_id(
                 session,
                 session_id=session_id,
             )
-            if allocation is None:
+            if not allocations:
                 return Failure(GitWorktreeInitializationRetryNotFound())
             initialization = (
                 await self.session_initialization_repository.get_by_session_id(
@@ -983,11 +991,12 @@ class SessionGitWorktreeService:
                 session,
                 initialization_id=initialization.id,
             )
-            if allocation.status is not SessionGitWorktreeStatus.READY:
-                await self.session_git_worktree_repository.mark_pending_for_retry(
-                    session,
-                    worktree_id=allocation.id,
-                )
+            for allocation in allocations:
+                if allocation.status is not SessionGitWorktreeStatus.READY:
+                    await self.session_git_worktree_repository.mark_pending_for_retry(
+                        session,
+                        worktree_id=allocation.id,
+                    )
             await self.session_initialization_repository.append_event(
                 session,
                 SessionInitializationEventCreate(
@@ -1995,7 +2004,9 @@ def _step_describes_worktree(
     step: SessionInitializationStep,
     worktree_id: str,
 ) -> bool:
-    """Return whether a step resource descriptor references the worktree."""
+    """Return whether a step belongs to the worktree allocation."""
+    if step.step_key == _worktree_step_key(step.step_type, worktree_id):
+        return True
     for descriptor in step.resource_descriptors:
         if (
             isinstance(descriptor, dict)

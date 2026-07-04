@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-04
-spec_version: 53
+spec_version: 54
 ---
 
 # Agent Execution Loop
@@ -355,12 +355,15 @@ command from the session and passes it into `RunExecutor`, which prepares the sa
 `RunContext` used by normal runs before invoking the registered command handler. Running sessions,
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
 Before any pending input buffer becomes durable model input, the session runner observes the
-session initialization projection. `ready` initialization allows run creation.
-`pending` or `running` initialization leaves input buffers pending and relies on later wake-up/retry to
-resume. `failed`, `canceled`, or cleanup-required states do not create an `agent_runs` row; users must
-retry setup, delete pending input, or create a different session. This gate belongs to the session
-runner boundary, not the model execution core, so failed setup is not represented as failed-run retry
-state or durable transcript `system_error`.
+session initialization projection. `ready` initialization allows run creation. `pending` initialization
+causes the session runner to process queued setup work, such as Git worktree creation and Project
+registration, under the same per-session ownership path before checking the gate again. If setup
+becomes `ready`, the same wake-up continues into normal run dispatch. `running` initialization owned by
+another processor leaves input buffers pending until a later wake-up or retry. `failed`, `canceled`, or
+cleanup-required states do not create an `agent_runs` row; users must retry setup, delete pending input,
+or create a different session. This gate belongs to the session runner boundary, not the model
+execution core, so failed setup is not represented as failed-run retry state or durable transcript
+`system_error`.
 
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
@@ -468,6 +471,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-04** (spec_version 54) — Clarified that the session runner drains pending initialization work before dispatch and may continue into run creation on the same wake-up once setup becomes ready.
 - **2026-07-04** (spec_version 52) — Added the session initialization gate before run creation.
 - **2026-07-01** (spec_version 50) — Unified pending runtime commands into the `RunExecutor` run boundary.
 - **2026-06-28** (spec_version 47) — Added failed-run retry state foundation, live retry projection contract, and Goal continuation gating by successful terminal run status.

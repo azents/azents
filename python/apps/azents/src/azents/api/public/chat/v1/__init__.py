@@ -639,7 +639,7 @@ async def _finalize_message_write_response(
     client_request_id: str,
     input_buffer: InputBuffer,
 ) -> ChatWriteResponse:
-    """Publish live state, wake the worker, and return a write snapshot."""
+    """Publish live state, wake the worker, and return a snapshot."""
     live_event_upserted = chat_live_event_upserted_dump(
         input_buffer_to_live_event(input_buffer)
     )
@@ -941,11 +941,9 @@ async def create_input(
 async def create_team_agent_session_message(
     agent_id: str,
     request: ChatSessionCreateMessageWriteRequest,
-    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
     agent_session_input_service: Annotated[AgentSessionInputService, Depends()],
-    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
     broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
     live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
@@ -956,12 +954,10 @@ async def create_team_agent_session_message(
     return await _write_new_session_message_via_rest(
         chat_service,
         agent_session_input_service,
-        session_git_worktree_service,
         broker,
         broadcast,
         live_event_store,
         request,
-        background_tasks=background_tasks,
         agent_id=agent_id,
         user_id=current_user.user_id,
         tz=_parse_timezone(timezone),
@@ -998,13 +994,11 @@ def _workspace_mode_from_request(
 async def _write_new_session_message_via_rest(
     chat_service: ChatSessionService,
     agent_session_input_service: AgentSessionInputService,
-    session_git_worktree_service: SessionGitWorktreeService,
     broker: SessionBroker,
     broadcast: WebSocketBroadcast,
     live_event_store: LiveEventStore,
     request: ChatSessionCreateMessageWriteRequest,
     *,
-    background_tasks: BackgroundTasks,
     agent_id: str,
     user_id: str,
     tz: ZoneInfo,
@@ -1044,18 +1038,6 @@ async def _write_new_session_message_via_rest(
         case _:
             assert_never(workspace_mode)
     result = _handle_created_agent_session_input_result(input_result)
-    if isinstance(workspace_mode, GitWorktreeWorkspaceMode):
-        _queue_git_worktree_initialization(
-            background_tasks,
-            session_git_worktree_service=session_git_worktree_service,
-            chat_service=chat_service,
-            broker=broker,
-            broadcast=broadcast,
-            agent_id=agent_id,
-            session_id=result.agent_session.id,
-            user_id=user_id,
-            wake_after_ready=True,
-        )
     return await _finalize_message_write_response(
         chat_service,
         broker,
@@ -1543,102 +1525,6 @@ async def preview_agent_git_refs(
             assert_never(result)
 
 
-def _queue_git_worktree_initialization(
-    background_tasks: BackgroundTasks,
-    *,
-    session_git_worktree_service: SessionGitWorktreeService,
-    chat_service: ChatSessionService,
-    broker: SessionBroker,
-    broadcast: WebSocketBroadcast,
-    agent_id: str,
-    session_id: str,
-    user_id: str,
-    wake_after_ready: bool,
-) -> None:
-    """Run prepared Git worktree initialization after returning the response."""
-    background_tasks.add_task(
-        _run_git_worktree_initialization_background,
-        session_git_worktree_service,
-        chat_service,
-        broker,
-        broadcast,
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=user_id,
-        wake_after_ready=wake_after_ready,
-    )
-
-
-async def _run_git_worktree_initialization_background(
-    session_git_worktree_service: SessionGitWorktreeService,
-    chat_service: ChatSessionService,
-    broker: SessionBroker,
-    broadcast: WebSocketBroadcast,
-    *,
-    agent_id: str,
-    session_id: str,
-    user_id: str,
-    wake_after_ready: bool,
-) -> None:
-    """Execute Git worktree initialization and publish the latest projection."""
-
-    async def publish_event(event: SessionInitializationEvent) -> None:
-        await broadcast.publish(
-            session_id,
-            chat_session_initialization_event_appended_dump(event),
-        )
-
-    async def publish_projection(
-        projection: SessionInitializationProjection,
-    ) -> None:
-        await broadcast.publish(
-            session_id,
-            chat_session_initialization_updated_dump(projection),
-        )
-
-    await session_git_worktree_service.run_git_worktree_initialization(
-        agent_id=agent_id,
-        session_id=session_id,
-        on_event_appended=publish_event,
-        on_projection_updated=publish_projection,
-    )
-    detail_result = await chat_service.get_session_initialization_detail(
-        session_id,
-        user_id=user_id,
-    )
-    match detail_result:
-        case Success(detail):
-            await broadcast.publish(
-                session_id,
-                chat_session_initialization_updated_dump(
-                    SessionInitializationProjection(
-                        initialization=detail.initialization,
-                        steps=detail.steps,
-                    )
-                ),
-            )
-        case Failure(error):
-            match error:
-                case SessionNotFound() | SessionAccessDenied():
-                    pass
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(detail_result)
-    if wake_after_ready:
-        await broker.send_message(
-            SessionWakeUp(
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-                additional_system_prompt=None,
-                interface=None,
-                workspace_id=None,
-                workspace_handle=None,
-            )
-        )
-
-
 async def _run_git_worktree_cleanup_background(
     session_git_worktree_service: SessionGitWorktreeService,
     broadcast: WebSocketBroadcast,
@@ -1674,12 +1560,9 @@ async def _run_git_worktree_cleanup_background(
 async def create_team_agent_session(
     agent_id: str,
     request: AgentSessionCreateRequest,
-    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
-    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> AgentSessionResponse:
     """Create a non-primary team AgentSession for an Agent."""
     workspace_mode = _workspace_mode_from_request(
@@ -1704,16 +1587,16 @@ async def create_team_agent_session(
     match result:
         case Success(session):
             if isinstance(workspace_mode, GitWorktreeWorkspaceMode):
-                _queue_git_worktree_initialization(
-                    background_tasks,
-                    session_git_worktree_service=session_git_worktree_service,
-                    chat_service=chat_service,
-                    broker=broker,
-                    broadcast=broadcast,
-                    agent_id=agent_id,
-                    session_id=session.id,
-                    user_id=current_user.user_id,
-                    wake_after_ready=False,
+                await broker.send_message(
+                    SessionWakeUp(
+                        agent_id=agent_id,
+                        session_id=session.id,
+                        user_id=current_user.user_id,
+                        additional_system_prompt=None,
+                        interface=None,
+                        workspace_id=None,
+                        workspace_handle=None,
+                    )
                 )
             return AgentSessionResponse.from_domain(session)
         case Failure(error):
@@ -1780,12 +1663,9 @@ async def archive_agent_session(
 async def retry_session_initialization(
     agent_id: str,
     session_id: str,
-    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    chat_service: Annotated[ChatSessionService, Depends()],
     session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> None:
     """Request retry for a failed session initialization."""
     _validate_uuid7_hex(agent_id, label="agent ID")
@@ -1798,16 +1678,16 @@ async def retry_session_initialization(
     match result:
         case Success(value):
             if value.retry_requested:
-                _queue_git_worktree_initialization(
-                    background_tasks,
-                    session_git_worktree_service=session_git_worktree_service,
-                    chat_service=chat_service,
-                    broker=broker,
-                    broadcast=broadcast,
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    user_id=current_user.user_id,
-                    wake_after_ready=True,
+                await broker.send_message(
+                    SessionWakeUp(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        user_id=current_user.user_id,
+                        additional_system_prompt=None,
+                        interface=None,
+                        workspace_id=None,
+                        workspace_handle=None,
+                    )
                 )
             return
         case Failure(error):
@@ -1838,9 +1718,7 @@ async def attach_session_git_worktree(
     agent_id: str,
     session_id: str,
     request: SessionGitWorktreeAttachRequest,
-    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    chat_service: Annotated[ChatSessionService, Depends()],
     session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
     broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
@@ -1861,16 +1739,16 @@ async def attach_session_git_worktree(
                 session_id,
                 chat_session_initialization_updated_dump(value.initialization),
             )
-            _queue_git_worktree_initialization(
-                background_tasks,
-                session_git_worktree_service=session_git_worktree_service,
-                chat_service=chat_service,
-                broker=broker,
-                broadcast=broadcast,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=current_user.user_id,
-                wake_after_ready=False,
+            await broker.send_message(
+                SessionWakeUp(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    user_id=current_user.user_id,
+                    additional_system_prompt=None,
+                    interface=None,
+                    workspace_id=None,
+                    workspace_handle=None,
+                )
             )
             return SessionGitWorktreeAttachResponse(
                 worktree_id=value.worktree.id,
