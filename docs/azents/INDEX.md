@@ -16,13 +16,13 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-02 | 36 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-04 | 81 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-04 | 82 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-02 | 2 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-02 | 44 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-29 | 5 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-04 | 25 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-04 | 26 |
 
 _8 documents_
 
@@ -30,11 +30,11 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-04 | 52 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-04 | 53 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-04 | 6 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-04 | 8 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-04 | 9 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-01 | 17 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-03 | 9 |

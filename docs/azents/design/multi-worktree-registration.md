@@ -1,6 +1,7 @@
 ---
 title: "Multi-Worktree Registration"
 created: 2026-07-04
+implemented: 2026-07-04
 tags: [backend, frontend, runtime, session, workspace, git]
 ---
 

@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-04
-spec_version: 52
+spec_version: 53
 ---
 
 # Agent Execution Loop
@@ -344,7 +344,9 @@ Web chat user writes enter through REST commit endpoints. Message writes create 
 `AgentSession`, materialize user input attachments, record the accepted write under
 `client_request_id`, commit an input buffer, then send a broker wake-up signal. New-session writes may
 also create blocking initialization rows, such as Git worktree setup, before the first run is allowed
-to start. Edit writes are
+to start. Existing-session worktree attachment can append additional blocking setup rows to the same
+session initialization after a session has already become ready; the run gate treats those appended
+workspace updates the same way as first-run setup. Edit writes are
 idle-only: the REST transaction rewrites durable history state, clears pending input buffers,
 creates an `edited_user_message` input buffer, marks the session running, and sends a wake-up.
 Command writes are idle-only control actions: the REST transaction stores one pending command on

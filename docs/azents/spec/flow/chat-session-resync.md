@@ -15,7 +15,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-04
-spec_version: 8
+spec_version: 9
 ---
 
 # Chat Session Resync
@@ -116,7 +116,7 @@ Response fields:
 
 `snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.initialization` is the current setup projection.
 
-`GET /chat/v1/sessions/{session_id}/initialization` returns the durable initialization projection plus ordered setup events. Clients use it to recover the full setup log after reconnect or when the live card requests details. The endpoint is separate from durable chat history because initialization events are setup telemetry, not transcript events.
+`GET /chat/v1/sessions/{session_id}/initialization` returns the durable initialization projection plus ordered setup events. Clients use it to recover the full setup log after reconnect or when the live card requests details. Existing-session worktree attachment appends setup steps and setup events to the same session initialization projection, so clients recover workspace-update progress through the same live and detail endpoints. The endpoint is separate from durable chat history because initialization events are setup telemetry, not transcript events.
 
 ## 6. Timeline State Rules
 
