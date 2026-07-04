@@ -35,6 +35,12 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.input_buffer import InputBufferService
+from azents.services.session_git_worktree import (
+    ExplicitProjectsWorkspaceMode,
+    GitWorktreeWorkspaceMode,
+    NewSessionWorkspaceMode,
+    SessionGitWorktreeService,
+)
 from azents.services.session_initialization import (
     SessionInitializationDetail,
     SessionInitializationService,
@@ -119,6 +125,9 @@ class ChatSessionService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    session_git_worktree_service: Annotated[
+        SessionGitWorktreeService | None, Depends(SessionGitWorktreeService)
+    ] = None
 
     async def get_team_primary_session(
         self,
@@ -261,9 +270,15 @@ class ChatSessionService:
         *,
         agent_id: str,
         user_id: str,
-        project_paths: list[str],
+        workspace_mode: NewSessionWorkspaceMode | None = None,
+        project_paths: list[str] | None = None,
     ) -> Result[AgentSession, EnsureSessionError | InvalidProjectPath]:
-        """Create a non-primary team session with explicit Projects."""
+        """Create a non-primary team session with selected workspace mode."""
+        if workspace_mode is None:
+            if project_paths is None:
+                raise ValueError("workspace_mode is required")
+            workspace_mode = ExplicitProjectsWorkspaceMode(project_paths=project_paths)
+        prepared_worktree = False
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
@@ -287,12 +302,19 @@ class ChatSessionService:
                 session,
                 session_id=primary_session.id,
             )
-            try:
-                normalized_project_paths = normalize_session_workspace_project_paths(
-                    project_paths
-                )
-            except ValueError as exc:
-                return Failure(InvalidProjectPath(path="", reason=str(exc)))
+            normalized_project_paths: list[str] | None = None
+            match workspace_mode:
+                case ExplicitProjectsWorkspaceMode(project_paths=project_paths):
+                    try:
+                        normalized_project_paths = (
+                            normalize_session_workspace_project_paths(project_paths)
+                        )
+                    except ValueError as exc:
+                        return Failure(InvalidProjectPath(path="", reason=str(exc)))
+                case GitWorktreeWorkspaceMode():
+                    pass
+                case _:
+                    assert_never(workspace_mode)
             created = await self.agent_session_repository.create(
                 session,
                 AgentSessionCreate(
@@ -302,18 +324,55 @@ class ChatSessionService:
                     primary_kind=None,
                 ),
             )
-            await self.session_initialization_service.ensure_ready_noop_initialization(
-                session,
-                session_id=created.id,
-            )
-            await self._create_session_projects(
-                session,
+            match workspace_mode:
+                case ExplicitProjectsWorkspaceMode():
+                    assert normalized_project_paths is not None
+                    initialization_service = self.session_initialization_service
+                    ensure_ready = (
+                        initialization_service.ensure_ready_noop_initialization
+                    )
+                    await ensure_ready(session, session_id=created.id)
+                    await self._create_session_projects(
+                        session,
+                        agent_id=agent_id,
+                        session_id=created.id,
+                        project_paths=normalized_project_paths,
+                    )
+                case GitWorktreeWorkspaceMode(
+                    source_project_path=source_project_path,
+                    starting_ref=starting_ref,
+                ):
+                    worktree_service = self.session_git_worktree_service
+                    if worktree_service is None:
+                        raise RuntimeError("SessionGitWorktreeService is unavailable")
+                    prepare = worktree_service.prepare_git_worktree_initialization
+                    prepared = await prepare(
+                        session,
+                        agent_id=agent_id,
+                        session_id=created.id,
+                        session_handle=created.handle,
+                        source_project_path=source_project_path,
+                        starting_ref=starting_ref,
+                    )
+                    match prepared:
+                        case Success():
+                            prepared_worktree = True
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(prepared)
+                case _:
+                    assert_never(workspace_mode)
+            await session.commit()
+        if prepared_worktree:
+            worktree_service = self.session_git_worktree_service
+            if worktree_service is None:
+                raise RuntimeError("SessionGitWorktreeService is unavailable")
+            await worktree_service.run_git_worktree_initialization(
                 agent_id=agent_id,
                 session_id=created.id,
-                project_paths=normalized_project_paths,
             )
-            await session.commit()
-            return Success(created)
+        return Success(created)
 
     async def list_agent_project_presets(
         self,

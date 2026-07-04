@@ -171,6 +171,24 @@ class SessionInitializationEventKind(enum.StrEnum):
     FAILED = "failed"
 
 
+class SessionGitWorktreeStatus(enum.StrEnum):
+    """Azents-owned Git worktree lifecycle status."""
+
+    PENDING = "pending"
+    CREATING = "creating"
+    READY = "ready"
+    FAILED = "failed"
+    CLEANUP_PENDING = "cleanup_pending"
+    CLEANED = "cleaned"
+    CLEANUP_FAILED = "cleanup_failed"
+
+
+class SessionGitWorktreeBranchCreatedBy(enum.StrEnum):
+    """Creator of a session Git worktree branch."""
+
+    AZENTS = "azents"
+
+
 class ScheduledTaskStatus(enum.StrEnum):
     """Current scheduler task status."""
 

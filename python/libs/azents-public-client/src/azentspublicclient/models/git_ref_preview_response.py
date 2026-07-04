@@ -17,20 +17,21 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.workspace_mode import WorkspaceMode
+from azentspublicclient.models.git_ref_entry_response import GitRefEntryResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
-class AgentSessionCreateRequest(BaseModel):
+class GitRefPreviewResponse(BaseModel):
     """
-    REST non-primary AgentSession create request.
+    Git ref preview response for a source Project.
     """ # noqa: E501
-    workspace_mode: Optional[WorkspaceMode] = None
-    project_paths: Optional[List[StrictStr]] = None
+    refs: List[GitRefEntryResponse] = Field(description="Available Git refs")
+    default_branch: Optional[StrictStr]
+    head_commit: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["workspace_mode", "project_paths"]
+    __properties: ClassVar[List[str]] = ["refs", "default_branch", "head_commit"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -50,7 +51,7 @@ class AgentSessionCreateRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of AgentSessionCreateRequest from a JSON string"""
+        """Create an instance of GitRefPreviewResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,29 +74,33 @@ class AgentSessionCreateRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of workspace_mode
-        if self.workspace_mode:
-            _dict['workspace_mode'] = self.workspace_mode.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of each item in refs (list)
+        _items = []
+        if self.refs:
+            for _item_refs in self.refs:
+                if _item_refs:
+                    _items.append(_item_refs.to_dict())
+            _dict['refs'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if workspace_mode (nullable) is None
+        # set to None if default_branch (nullable) is None
         # and model_fields_set contains the field
-        if self.workspace_mode is None and "workspace_mode" in self.model_fields_set:
-            _dict['workspace_mode'] = None
+        if self.default_branch is None and "default_branch" in self.model_fields_set:
+            _dict['default_branch'] = None
 
-        # set to None if project_paths (nullable) is None
+        # set to None if head_commit (nullable) is None
         # and model_fields_set contains the field
-        if self.project_paths is None and "project_paths" in self.model_fields_set:
-            _dict['project_paths'] = None
+        if self.head_commit is None and "head_commit" in self.model_fields_set:
+            _dict['head_commit'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of AgentSessionCreateRequest from a dict"""
+        """Create an instance of GitRefPreviewResponse from a dict"""
         if obj is None:
             return None
 
@@ -103,8 +108,9 @@ class AgentSessionCreateRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "workspace_mode": WorkspaceMode.from_dict(obj["workspace_mode"]) if obj.get("workspace_mode") is not None else None,
-            "project_paths": obj.get("project_paths")
+            "refs": [GitRefEntryResponse.from_dict(_item) for _item in obj["refs"]] if obj.get("refs") is not None else None,
+            "default_branch": obj.get("default_branch"),
+            "head_commit": obj.get("head_commit")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
@@ -112,5 +118,3 @@ class AgentSessionCreateRequest(BaseModel):
                 _obj.additional_properties[_key] = obj.get(_key)
 
         return _obj
-
-

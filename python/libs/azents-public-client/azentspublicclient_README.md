@@ -148,6 +148,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_list_live_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
 *ChatV1Api* | [**chat_v1_list_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_sessions) | **GET** /chat/v1/workspaces/{handle}/sessions | List Sessions
 *ChatV1Api* | [**chat_v1_move_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_move_agent_workspace_path) | **POST** /chat/v1/agents/{agent_id}/workspace/move | Move Agent Workspace Path
+*ChatV1Api* | [**chat_v1_preview_agent_git_refs**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_agent_git_refs) | **GET** /chat/v1/agents/{agent_id}/git-refs | Preview Agent Git Refs
 *ChatV1Api* | [**chat_v1_preview_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_project_browser_manifest) | **POST** /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview | Preview Project Browser Manifest
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
@@ -323,6 +324,7 @@ Class | Method | HTTP request | Description
  - [ElevateWithEmailRequest](azentspublicclient/docs/ElevateWithEmailRequest.md)
  - [ElevateWithPasswordRequest](azentspublicclient/docs/ElevateWithPasswordRequest.md)
  - [EventKind](azentspublicclient/docs/EventKind.md)
+ - [ExistingProjectsWorkspaceModeRequest](azentspublicclient/docs/ExistingProjectsWorkspaceModeRequest.md)
  - [GcpConfig](azentspublicclient/docs/GcpConfig.md)
  - [GcpSecrets](azentspublicclient/docs/GcpSecrets.md)
  - [GetAuthMethodsResponse](azentspublicclient/docs/GetAuthMethodsResponse.md)
@@ -331,6 +333,9 @@ Class | Method | HTTP request | Description
  - [GitHubPlatformInstallationsRequest](azentspublicclient/docs/GitHubPlatformInstallationsRequest.md)
  - [GitHubPlatformInstallationsResponse](azentspublicclient/docs/GitHubPlatformInstallationsResponse.md)
  - [GitHubPlatformOAuthUrlResponse](azentspublicclient/docs/GitHubPlatformOAuthUrlResponse.md)
+ - [GitRefEntryResponse](azentspublicclient/docs/GitRefEntryResponse.md)
+ - [GitRefPreviewResponse](azentspublicclient/docs/GitRefPreviewResponse.md)
+ - [GitWorktreeWorkspaceModeRequest](azentspublicclient/docs/GitWorktreeWorkspaceModeRequest.md)
  - [GoalAction](azentspublicclient/docs/GoalAction.md)
  - [GoalStateResponse](azentspublicclient/docs/GoalStateResponse.md)
  - [GoalStatusUpdateRequest](azentspublicclient/docs/GoalStatusUpdateRequest.md)
@@ -467,6 +472,7 @@ Class | Method | HTTP request | Description
  - [VerifyCodeResponse](azentspublicclient/docs/VerifyCodeResponse.md)
  - [Workspace](azentspublicclient/docs/Workspace.md)
  - [WorkspaceListResponse](azentspublicclient/docs/WorkspaceListResponse.md)
+ - [WorkspaceMode](azentspublicclient/docs/WorkspaceMode.md)
  - [WorkspaceModelSettingsResponse](azentspublicclient/docs/WorkspaceModelSettingsResponse.md)
  - [WorkspaceModelSettingsUpdateRequest](azentspublicclient/docs/WorkspaceModelSettingsUpdateRequest.md)
  - [WorkspaceResponse](azentspublicclient/docs/WorkspaceResponse.md)

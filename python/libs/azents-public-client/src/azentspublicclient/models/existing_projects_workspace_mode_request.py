@@ -17,20 +17,26 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.workspace_mode import WorkspaceMode
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class AgentSessionCreateRequest(BaseModel):
+class ExistingProjectsWorkspaceModeRequest(BaseModel):
     """
-    REST non-primary AgentSession create request.
+    Existing Project path mode for a new AgentSession.
     """ # noqa: E501
-    workspace_mode: Optional[WorkspaceMode] = None
-    project_paths: Optional[List[StrictStr]] = None
+    type: StrictStr = Field(description="Workspace mode type")
+    project_paths: List[StrictStr] = Field(description="Exact Project paths to register on the created session")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["workspace_mode", "project_paths"]
+    __properties: ClassVar[List[str]] = ["type", "project_paths"]
+
+    @field_validator('type')
+    def type_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['existing_projects']):
+            raise ValueError("must be one of enum values ('existing_projects')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -50,7 +56,7 @@ class AgentSessionCreateRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of AgentSessionCreateRequest from a JSON string"""
+        """Create an instance of ExistingProjectsWorkspaceModeRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,29 +79,16 @@ class AgentSessionCreateRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of workspace_mode
-        if self.workspace_mode:
-            _dict['workspace_mode'] = self.workspace_mode.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if workspace_mode (nullable) is None
-        # and model_fields_set contains the field
-        if self.workspace_mode is None and "workspace_mode" in self.model_fields_set:
-            _dict['workspace_mode'] = None
-
-        # set to None if project_paths (nullable) is None
-        # and model_fields_set contains the field
-        if self.project_paths is None and "project_paths" in self.model_fields_set:
-            _dict['project_paths'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of AgentSessionCreateRequest from a dict"""
+        """Create an instance of ExistingProjectsWorkspaceModeRequest from a dict"""
         if obj is None:
             return None
 
@@ -103,7 +96,7 @@ class AgentSessionCreateRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "workspace_mode": WorkspaceMode.from_dict(obj["workspace_mode"]) if obj.get("workspace_mode") is not None else None,
+            "type": obj.get("type"),
             "project_paths": obj.get("project_paths")
         })
         # store additional fields in additional_properties
@@ -112,5 +105,3 @@ class AgentSessionCreateRequest(BaseModel):
                 _obj.additional_properties[_key] = obj.get(_key)
 
         return _obj
-
-

@@ -75,6 +75,7 @@ from azents.services.project_browser_manifest import (
     ProjectBrowserManifest,
     ProjectBrowserMode,
 )
+from azents.services.session_git_worktree import GitRefPreview
 from azents.services.session_initialization import (
     SessionInitializationDetail,
     SessionInitializationProjection,
@@ -187,6 +188,28 @@ class ChatMessageWriteRequest(BaseModel):
     )
 
 
+class ExistingProjectsWorkspaceModeRequest(BaseModel):
+    """Existing Project path mode for a new AgentSession."""
+
+    type: Literal["existing_projects"] = Field(description="Workspace mode type")
+    project_paths: list[str] = Field(
+        description="Exact Project paths to register on the created session",
+    )
+
+
+class GitWorktreeWorkspaceModeRequest(BaseModel):
+    """Git worktree mode for a new AgentSession."""
+
+    type: Literal["git_worktree"] = Field(description="Workspace mode type")
+    source_project_path: str = Field(description="Source Project path")
+    starting_ref: str = Field(description="Starting Git ref")
+
+
+AgentSessionWorkspaceModeRequest = (
+    ExistingProjectsWorkspaceModeRequest | GitWorktreeWorkspaceModeRequest
+)
+
+
 class ChatSessionCreateMessageWriteRequest(BaseModel):
     """REST first message write request for a draft AgentSession."""
 
@@ -196,7 +219,12 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         description="Client-generated idempotency key",
     )
     message: str = Field(description="Message content")
-    project_paths: list[str] = Field(
+    workspace_mode: AgentSessionWorkspaceModeRequest | None = Field(
+        default=None,
+        description="Workspace mode for the created session",
+    )
+    project_paths: list[str] | None = Field(
+        default=None,
         description="Exact Project paths to register on the created session",
     )
     attachments: list[str] | None = Field(
@@ -208,9 +236,52 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
 class AgentSessionCreateRequest(BaseModel):
     """REST non-primary AgentSession create request."""
 
-    project_paths: list[str] = Field(
+    workspace_mode: AgentSessionWorkspaceModeRequest | None = Field(
+        default=None,
+        description="Workspace mode for the created session",
+    )
+    project_paths: list[str] | None = Field(
+        default=None,
         description="Exact Project paths to register on the created session",
     )
+
+
+class GitRefEntryResponse(BaseModel):
+    """Git ref entry response."""
+
+    name: str = Field(description="Display ref name")
+    ref: str = Field(description="Full Git ref")
+    type: Literal["branch", "remote_branch", "tag", "other"] = Field(
+        description="Git ref type"
+    )
+    target: str = Field(description="Target commit")
+    default: bool = Field(description="Whether this is the default ref")
+
+
+class GitRefPreviewResponse(BaseModel):
+    """Git ref preview response for a source Project."""
+
+    refs: list[GitRefEntryResponse] = Field(description="Available Git refs")
+    default_branch: str | None = Field(description="Default branch name")
+    head_commit: str | None = Field(description="Current HEAD commit")
+
+    @classmethod
+    def from_domain(cls, value: GitRefPreview) -> Self:
+        """Build response from domain model."""
+        return cls(
+            refs=[
+                GitRefEntryResponse(
+                    name=ref.name,
+                    ref=ref.ref,
+                    type=ref.type,
+                    target=ref.target,
+                    default=ref.default,
+                )
+                for ref in value.refs
+            ],
+            default_branch=value.default_branch,
+            head_commit=value.head_commit,
+        )
 
 
 class ChatEditMessageWriteRequest(BaseModel):

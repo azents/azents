@@ -37,6 +37,7 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
             return ChatSessionCreateMessageWriteRequest(
                 client_request_id = '0',
                 message = '',
+                workspace_mode = None,
                 project_paths = [
                     ''
                     ],
@@ -48,9 +49,6 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
             return ChatSessionCreateMessageWriteRequest(
                 client_request_id = '0',
                 message = '',
-                project_paths = [
-                    ''
-                    ],
         )
         """
 

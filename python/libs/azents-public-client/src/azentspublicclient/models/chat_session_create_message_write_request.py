@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
+from azentspublicclient.models.workspace_mode import WorkspaceMode
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,10 +30,11 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
     """ # noqa: E501
     client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
     message: StrictStr = Field(description="Message content")
-    project_paths: List[StrictStr] = Field(description="Exact Project paths to register on the created session")
+    workspace_mode: Optional[WorkspaceMode] = None
+    project_paths: Optional[List[StrictStr]] = None
     attachments: Optional[List[StrictStr]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["client_request_id", "message", "project_paths", "attachments"]
+    __properties: ClassVar[List[str]] = ["client_request_id", "message", "workspace_mode", "project_paths", "attachments"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -75,10 +77,23 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of workspace_mode
+        if self.workspace_mode:
+            _dict['workspace_mode'] = self.workspace_mode.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
+
+        # set to None if workspace_mode (nullable) is None
+        # and model_fields_set contains the field
+        if self.workspace_mode is None and "workspace_mode" in self.model_fields_set:
+            _dict['workspace_mode'] = None
+
+        # set to None if project_paths (nullable) is None
+        # and model_fields_set contains the field
+        if self.project_paths is None and "project_paths" in self.model_fields_set:
+            _dict['project_paths'] = None
 
         # set to None if attachments (nullable) is None
         # and model_fields_set contains the field
@@ -99,6 +114,7 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         _obj = cls.model_validate({
             "client_request_id": obj.get("client_request_id"),
             "message": obj.get("message"),
+            "workspace_mode": WorkspaceMode.from_dict(obj["workspace_mode"]) if obj.get("workspace_mode") is not None else None,
             "project_paths": obj.get("project_paths"),
             "attachments": obj.get("attachments")
         })

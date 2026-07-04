@@ -122,6 +122,7 @@ azentspublicclient/docs/ElevateResponse.md
 azentspublicclient/docs/ElevateWithEmailRequest.md
 azentspublicclient/docs/ElevateWithPasswordRequest.md
 azentspublicclient/docs/EventKind.md
+azentspublicclient/docs/ExistingProjectsWorkspaceModeRequest.md
 azentspublicclient/docs/GcpConfig.md
 azentspublicclient/docs/GcpSecrets.md
 azentspublicclient/docs/GetAuthMethodsResponse.md
@@ -130,6 +131,9 @@ azentspublicclient/docs/GitHubPlatformInstallUrlResponse.md
 azentspublicclient/docs/GitHubPlatformInstallationsRequest.md
 azentspublicclient/docs/GitHubPlatformInstallationsResponse.md
 azentspublicclient/docs/GitHubPlatformOAuthUrlResponse.md
+azentspublicclient/docs/GitRefEntryResponse.md
+azentspublicclient/docs/GitRefPreviewResponse.md
+azentspublicclient/docs/GitWorktreeWorkspaceModeRequest.md
 azentspublicclient/docs/GoalAction.md
 azentspublicclient/docs/GoalStateResponse.md
 azentspublicclient/docs/GoalStatusUpdateRequest.md
@@ -274,6 +278,7 @@ azentspublicclient/docs/VerifyCodeRequest.md
 azentspublicclient/docs/VerifyCodeResponse.md
 azentspublicclient/docs/Workspace.md
 azentspublicclient/docs/WorkspaceListResponse.md
+azentspublicclient/docs/WorkspaceMode.md
 azentspublicclient/docs/WorkspaceModelSettingsResponse.md
 azentspublicclient/docs/WorkspaceModelSettingsUpdateRequest.md
 azentspublicclient/docs/WorkspaceModelSettingsV1Api.md
@@ -384,6 +389,7 @@ azentspublicclient/models/elevate_response.py
 azentspublicclient/models/elevate_with_email_request.py
 azentspublicclient/models/elevate_with_password_request.py
 azentspublicclient/models/event_kind.py
+azentspublicclient/models/existing_projects_workspace_mode_request.py
 azentspublicclient/models/gcp_config.py
 azentspublicclient/models/gcp_secrets.py
 azentspublicclient/models/get_auth_methods_response.py
@@ -392,6 +398,9 @@ azentspublicclient/models/git_hub_platform_install_url_response.py
 azentspublicclient/models/git_hub_platform_installations_request.py
 azentspublicclient/models/git_hub_platform_installations_response.py
 azentspublicclient/models/git_hub_platform_o_auth_url_response.py
+azentspublicclient/models/git_ref_entry_response.py
+azentspublicclient/models/git_ref_preview_response.py
+azentspublicclient/models/git_worktree_workspace_mode_request.py
 azentspublicclient/models/goal_action.py
 azentspublicclient/models/goal_state_response.py
 azentspublicclient/models/goal_status_update_request.py
@@ -528,6 +537,7 @@ azentspublicclient/models/verify_code_request.py
 azentspublicclient/models/verify_code_response.py
 azentspublicclient/models/workspace.py
 azentspublicclient/models/workspace_list_response.py
+azentspublicclient/models/workspace_mode.py
 azentspublicclient/models/workspace_model_settings_response.py
 azentspublicclient/models/workspace_model_settings_update_request.py
 azentspublicclient/models/workspace_response.py
@@ -640,6 +650,7 @@ azentspublicclient/test/test_elevate_response.py
 azentspublicclient/test/test_elevate_with_email_request.py
 azentspublicclient/test/test_elevate_with_password_request.py
 azentspublicclient/test/test_event_kind.py
+azentspublicclient/test/test_existing_projects_workspace_mode_request.py
 azentspublicclient/test/test_gcp_config.py
 azentspublicclient/test/test_gcp_secrets.py
 azentspublicclient/test/test_get_auth_methods_response.py
@@ -648,6 +659,9 @@ azentspublicclient/test/test_git_hub_platform_install_url_response.py
 azentspublicclient/test/test_git_hub_platform_installations_request.py
 azentspublicclient/test/test_git_hub_platform_installations_response.py
 azentspublicclient/test/test_git_hub_platform_o_auth_url_response.py
+azentspublicclient/test/test_git_ref_entry_response.py
+azentspublicclient/test/test_git_ref_preview_response.py
+azentspublicclient/test/test_git_worktree_workspace_mode_request.py
 azentspublicclient/test/test_goal_action.py
 azentspublicclient/test/test_goal_state_response.py
 azentspublicclient/test/test_goal_status_update_request.py
@@ -792,6 +806,7 @@ azentspublicclient/test/test_verify_code_request.py
 azentspublicclient/test/test_verify_code_response.py
 azentspublicclient/test/test_workspace.py
 azentspublicclient/test/test_workspace_list_response.py
+azentspublicclient/test/test_workspace_mode.py
 azentspublicclient/test/test_workspace_model_settings_response.py
 azentspublicclient/test/test_workspace_model_settings_update_request.py
 azentspublicclient/test/test_workspace_model_settings_v1_api.py

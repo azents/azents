@@ -141,6 +141,7 @@ __all__ = [
     "ElevateWithEmailRequest",
     "ElevateWithPasswordRequest",
     "EventKind",
+    "ExistingProjectsWorkspaceModeRequest",
     "GcpConfig",
     "GcpSecrets",
     "GetAuthMethodsResponse",
@@ -149,6 +150,9 @@ __all__ = [
     "GitHubPlatformInstallationsRequest",
     "GitHubPlatformInstallationsResponse",
     "GitHubPlatformOAuthUrlResponse",
+    "GitRefEntryResponse",
+    "GitRefPreviewResponse",
+    "GitWorktreeWorkspaceModeRequest",
     "GoalAction",
     "GoalStateResponse",
     "GoalStatusUpdateRequest",
@@ -285,6 +289,7 @@ __all__ = [
     "VerifyCodeResponse",
     "Workspace",
     "WorkspaceListResponse",
+    "WorkspaceMode",
     "WorkspaceModelSettingsResponse",
     "WorkspaceModelSettingsUpdateRequest",
     "WorkspaceResponse",
@@ -422,6 +427,7 @@ from azentspublicclient.models.elevate_response import ElevateResponse as Elevat
 from azentspublicclient.models.elevate_with_email_request import ElevateWithEmailRequest as ElevateWithEmailRequest
 from azentspublicclient.models.elevate_with_password_request import ElevateWithPasswordRequest as ElevateWithPasswordRequest
 from azentspublicclient.models.event_kind import EventKind as EventKind
+from azentspublicclient.models.existing_projects_workspace_mode_request import ExistingProjectsWorkspaceModeRequest as ExistingProjectsWorkspaceModeRequest
 from azentspublicclient.models.gcp_config import GcpConfig as GcpConfig
 from azentspublicclient.models.gcp_secrets import GcpSecrets as GcpSecrets
 from azentspublicclient.models.get_auth_methods_response import GetAuthMethodsResponse as GetAuthMethodsResponse
@@ -430,6 +436,9 @@ from azentspublicclient.models.git_hub_platform_install_url_response import GitH
 from azentspublicclient.models.git_hub_platform_installations_request import GitHubPlatformInstallationsRequest as GitHubPlatformInstallationsRequest
 from azentspublicclient.models.git_hub_platform_installations_response import GitHubPlatformInstallationsResponse as GitHubPlatformInstallationsResponse
 from azentspublicclient.models.git_hub_platform_o_auth_url_response import GitHubPlatformOAuthUrlResponse as GitHubPlatformOAuthUrlResponse
+from azentspublicclient.models.git_ref_entry_response import GitRefEntryResponse as GitRefEntryResponse
+from azentspublicclient.models.git_ref_preview_response import GitRefPreviewResponse as GitRefPreviewResponse
+from azentspublicclient.models.git_worktree_workspace_mode_request import GitWorktreeWorkspaceModeRequest as GitWorktreeWorkspaceModeRequest
 from azentspublicclient.models.goal_action import GoalAction as GoalAction
 from azentspublicclient.models.goal_state_response import GoalStateResponse as GoalStateResponse
 from azentspublicclient.models.goal_status_update_request import GoalStatusUpdateRequest as GoalStatusUpdateRequest
@@ -566,6 +575,7 @@ from azentspublicclient.models.verify_code_request import VerifyCodeRequest as V
 from azentspublicclient.models.verify_code_response import VerifyCodeResponse as VerifyCodeResponse
 from azentspublicclient.models.workspace import Workspace as Workspace
 from azentspublicclient.models.workspace_list_response import WorkspaceListResponse as WorkspaceListResponse
+from azentspublicclient.models.workspace_mode import WorkspaceMode as WorkspaceMode
 from azentspublicclient.models.workspace_model_settings_response import WorkspaceModelSettingsResponse as WorkspaceModelSettingsResponse
 from azentspublicclient.models.workspace_model_settings_update_request import WorkspaceModelSettingsUpdateRequest as WorkspaceModelSettingsUpdateRequest
 from azentspublicclient.models.workspace_response import WorkspaceResponse as WorkspaceResponse
