@@ -48,6 +48,7 @@ import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
 import { CompactionDivider } from "./CompactionDivider";
 import { CompactionIndicator } from "./CompactionIndicator";
+import { InitializationTimelineCard } from "./InitializationTimelineCard";
 import { MessageBubble } from "./MessageBubble";
 import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
@@ -63,10 +64,14 @@ import type {
   GoalStateSnapshot,
   InputActionDefinition,
   PendingInputBuffer,
+  SessionInitializationDetailState,
   TodoStateSnapshot,
 } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
-import type { AgentResponse } from "@azents/public-client";
+import type {
+  AgentResponse,
+  SessionInitializationResponse,
+} from "@azents/public-client";
 
 /** older messages load trigger scroll position (px) */
 const LOAD_MORE_THRESHOLD = 100;
@@ -184,10 +189,14 @@ function getLatestCompactionIndex(messages: ChatMessage[]): number {
 function getTimelineItemIds(
   messages: ChatMessage[],
   pendingInputBuffers: PendingInputBuffer[],
+  initialization: SessionInitializationResponse | null,
 ): string[] {
   return [
     ...messages.map((message) => `message:${message.id}`),
     ...pendingInputBuffers.map((buffer) => `pending:${buffer.id}`),
+    ...(initialization === null
+      ? []
+      : [`initialization:${initialization.id}:${initialization.status}`]),
   ];
 }
 
@@ -277,6 +286,14 @@ interface ChatViewProps {
   authorizationRequests: AuthorizationRequest[];
   /** auth complete when remove corresponding request */
   onAuthorizationComplete: (toolkitId: string) => void;
+  /** current session initialization projection */
+  initialization: SessionInitializationResponse | null;
+  /** durable initialization event detail state */
+  initializationDetailState: SessionInitializationDetailState;
+  /** load durable initialization details */
+  onLoadInitializationDetails: () => void;
+  /** delete all pending inputs blocked behind initialization */
+  onDeletePendingInitializationInputs: () => void;
   /** Workspace panel container output */
   workspacePanel: WorkspacePanelContainerOutput;
   /** current session goal snapshot */
@@ -316,6 +333,10 @@ export function ChatView({
   inputActions,
   authorizationRequests,
   onAuthorizationComplete,
+  initialization,
+  initializationDetailState,
+  onLoadInitializationDetails,
+  onDeletePendingInitializationInputs,
   workspacePanel,
   goal,
   todo,
@@ -378,8 +399,14 @@ export function ChatView({
   const hasDetachedNewer =
     chatTimelineState.type === "DETACHED_HISTORY_BROWSING" &&
     chatTimelineState.hasNewer;
+  const shouldShowInitializationCard =
+    initialization !== null &&
+    (initialization.status !== "ready" ||
+      initialization.steps.some((step) => step.status === "failed"));
   const hasTimelineItems =
-    messages.length > 0 || pendingInputBuffers.length > 0;
+    messages.length > 0 ||
+    pendingInputBuffers.length > 0 ||
+    shouldShowInitializationCard;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
       return null;
@@ -571,10 +598,16 @@ export function ChatView({
       viewport.scrollTop = saved.scrollTop + diff;
       savedScrollRef.current = null;
       prevMessageIdsRef.current = new Set(
-        getTimelineItemIds(messages, pendingInputBuffers),
+        getTimelineItemIds(messages, pendingInputBuffers, initialization),
       );
     }
-  }, [messages, pendingInputBuffers, isLoadingMore, markProgrammaticScroll]);
+  }, [
+    messages,
+    pendingInputBuffers,
+    initialization,
+    isLoadingMore,
+    markProgrammaticScroll,
+  ]);
 
   // initial load when paint before to bottom with scroll.
   // useEffect(paint after) itext useLayoutEffect(paint before) in handledtext
@@ -582,7 +615,9 @@ export function ChatView({
   useLayoutEffect(() => {
     if (
       !isInitialScrollRef.current ||
-      (messages.length === 0 && pendingInputBuffers.length === 0) ||
+      (messages.length === 0 &&
+        pendingInputBuffers.length === 0 &&
+        !shouldShowInitializationCard) ||
       savedScrollRef.current
     ) {
       return;
@@ -613,14 +648,21 @@ export function ChatView({
     }
     isInitialScrollRef.current = false;
     prevMessageIdsRef.current = new Set(
-      getTimelineItemIds(messages, pendingInputBuffers),
+      getTimelineItemIds(messages, pendingInputBuffers, initialization),
     );
 
     // text after next frame pagination enable (sectext scroll insidetext waiting)
     requestAnimationFrame(() => {
       isReadyForPaginationRef.current = true;
     });
-  }, [messages, pendingInputBuffers, markProgrammaticScroll, pinToBottom]);
+  }, [
+    messages,
+    pendingInputBuffers,
+    initialization,
+    shouldShowInitializationCard,
+    markProgrammaticScroll,
+    pinToBottom,
+  ]);
 
   useEffect(() => {
     const el = contentRef.current;
@@ -659,7 +701,8 @@ export function ChatView({
     if (
       chatViewState.type === "LOADING_HISTORY" &&
       messages.length === 0 &&
-      pendingInputBuffers.length === 0
+      pendingInputBuffers.length === 0 &&
+      !shouldShowInitializationCard
     ) {
       isInitialScrollRef.current = true;
       isReadyForPaginationRef.current = false;
@@ -667,7 +710,12 @@ export function ChatView({
       setShowNewMessageChip(false);
       prevMessageIdsRef.current = new Set();
     }
-  }, [chatViewState.type, messages.length, pendingInputBuffers.length]);
+  }, [
+    chatViewState.type,
+    messages.length,
+    pendingInputBuffers.length,
+    shouldShowInitializationCard,
+  ]);
 
   // message/pending buffer change when conditional scroll (initial load except — useLayoutEffect in handle)
   // - new timeline item + follow active: smooth scroll
@@ -680,7 +728,11 @@ export function ChatView({
     }
 
     const prevIds = prevMessageIdsRef.current;
-    const timelineItemIds = getTimelineItemIds(messages, pendingInputBuffers);
+    const timelineItemIds = getTimelineItemIds(
+      messages,
+      pendingInputBuffers,
+      initialization,
+    );
     const hasNewMessage = timelineItemIds.some((id) => !prevIds.has(id));
 
     // snapshot update
@@ -700,7 +752,7 @@ export function ChatView({
     } else {
       setShowNewMessageChip(true);
     }
-  }, [messages, pendingInputBuffers, schedulePinToBottom]);
+  }, [messages, pendingInputBuffers, initialization, schedulePinToBottom]);
 
   // integration scroll handler: bottom detection + new message chip release + older messages  withtext + mobile header hide/display
   useEffect(() => {
@@ -1026,6 +1078,18 @@ export function ChatView({
                         onDelete={onDeletePendingInputBuffer}
                       />
                     ),
+                  )}
+                {chatTimelineState.type === "LATEST_FOLLOWING" &&
+                  shouldShowInitializationCard && (
+                    <InitializationTimelineCard
+                      initialization={initialization}
+                      detailState={initializationDetailState}
+                      pendingInputCount={pendingInputBuffers.length}
+                      onLoadDetails={onLoadInitializationDetails}
+                      onDeletePendingInputs={
+                        onDeletePendingInitializationInputs
+                      }
+                    />
                   )}
               </Stack>
             )}
