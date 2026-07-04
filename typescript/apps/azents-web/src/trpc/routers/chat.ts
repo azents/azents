@@ -71,6 +71,18 @@ const newSessionWorkspaceModeSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
+const newSessionWorkspaceItemSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("existing_project"),
+    path: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("git_worktree"),
+    source_project_path: z.string().min(1),
+    starting_ref: z.string().min(1),
+  }),
+]);
+
 export const chatRouter = router({
   getAgentSession: publicProcedure
     .input(
@@ -118,6 +130,7 @@ export const chatRouter = router({
       z.object({
         agentId: z.string().min(1),
         projectPaths: z.array(z.string().min(1)).optional(),
+        workspaceItems: z.array(newSessionWorkspaceItemSchema).optional(),
         workspaceMode: newSessionWorkspaceModeSchema.optional(),
       }),
     )
@@ -128,6 +141,7 @@ export const chatRouter = router({
           path: { agent_id: input.agentId },
           body: {
             project_paths: input.projectPaths,
+            workspace_items: input.workspaceItems,
             workspace_mode: input.workspaceMode,
           },
           throwOnError: true,
@@ -151,6 +165,7 @@ export const chatRouter = router({
         message: z.string().min(1),
         attachments: z.array(z.string().min(1)).optional(),
         projectPaths: z.array(z.string().min(1)).optional(),
+        workspaceItems: z.array(newSessionWorkspaceItemSchema).optional(),
         workspaceMode: newSessionWorkspaceModeSchema.optional(),
       }),
     )
@@ -163,6 +178,7 @@ export const chatRouter = router({
             client_request_id: input.clientRequestId,
             message: input.message,
             project_paths: input.projectPaths,
+            workspace_items: input.workspaceItems,
             workspace_mode: input.workspaceMode,
             attachments: input.attachments,
           },

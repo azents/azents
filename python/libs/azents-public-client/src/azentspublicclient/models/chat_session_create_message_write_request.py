@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
+from azentspublicclient.models.agent_session_create_request_workspace_items_inner import AgentSessionCreateRequestWorkspaceItemsInner
 from azentspublicclient.models.workspace_mode import WorkspaceMode
 from typing import Optional, Set
 from typing_extensions import Self
@@ -30,11 +31,12 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
     """ # noqa: E501
     client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
     message: StrictStr = Field(description="Message content")
+    workspace_items: Optional[List[AgentSessionCreateRequestWorkspaceItemsInner]] = None
     workspace_mode: Optional[WorkspaceMode] = None
     project_paths: Optional[List[StrictStr]] = None
     attachments: Optional[List[StrictStr]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["client_request_id", "message", "workspace_mode", "project_paths", "attachments"]
+    __properties: ClassVar[List[str]] = ["client_request_id", "message", "workspace_items", "workspace_mode", "project_paths", "attachments"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -77,6 +79,13 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in workspace_items (list)
+        _items = []
+        if self.workspace_items:
+            for _item_workspace_items in self.workspace_items:
+                if _item_workspace_items:
+                    _items.append(_item_workspace_items.to_dict())
+            _dict['workspace_items'] = _items
         # override the default output from pydantic by calling `to_dict()` of workspace_mode
         if self.workspace_mode:
             _dict['workspace_mode'] = self.workspace_mode.to_dict()
@@ -84,6 +93,11 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
+
+        # set to None if workspace_items (nullable) is None
+        # and model_fields_set contains the field
+        if self.workspace_items is None and "workspace_items" in self.model_fields_set:
+            _dict['workspace_items'] = None
 
         # set to None if workspace_mode (nullable) is None
         # and model_fields_set contains the field
@@ -114,6 +128,7 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         _obj = cls.model_validate({
             "client_request_id": obj.get("client_request_id"),
             "message": obj.get("message"),
+            "workspace_items": [AgentSessionCreateRequestWorkspaceItemsInner.from_dict(_item) for _item in obj["workspace_items"]] if obj.get("workspace_items") is not None else None,
             "workspace_mode": WorkspaceMode.from_dict(obj["workspace_mode"]) if obj.get("workspace_mode") is not None else None,
             "project_paths": obj.get("project_paths"),
             "attachments": obj.get("attachments")

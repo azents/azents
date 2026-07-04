@@ -35,6 +35,9 @@ class TestAgentSessionCreateRequest(unittest.TestCase):
         model = AgentSessionCreateRequest()
         if include_optional:
             return AgentSessionCreateRequest(
+                workspace_items = [
+                    null
+                    ],
                 workspace_mode = None,
                 project_paths = [
                     ''

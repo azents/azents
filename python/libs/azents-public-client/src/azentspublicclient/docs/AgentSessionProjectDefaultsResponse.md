@@ -6,8 +6,9 @@ New AgentSession Project defaults response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**project_paths** | **List[str]** | Default selected Project paths | 
-**source** | [**AgentSessionProjectDefaultsSourceResponse**](AgentSessionProjectDefaultsSourceResponse.md) | Default source metadata | 
+**project_paths** | **List[str]** | Default selected Project paths |
+**items** | [**List[AgentSessionProjectDefaultsResponseItemsInner]**](AgentSessionProjectDefaultsResponseItemsInner.md) | Default selected workspace items |
+**source** | [**AgentSessionProjectDefaultsSourceResponse**](AgentSessionProjectDefaultsSourceResponse.md) | Default source metadata |
 
 ## Example
 

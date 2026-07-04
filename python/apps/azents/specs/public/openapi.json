@@ -8869,6 +8869,28 @@
       },
       "AgentSessionCreateRequest": {
         "properties": {
+          "workspace_items": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExistingProjectWorkspaceItemRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GitWorktreeWorkspaceItemRequest"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Items",
+            "description": "Ordered workspace items for the created session"
+          },
           "workspace_mode": {
             "anyOf": [
               {
@@ -8882,7 +8904,7 @@
               }
             ],
             "title": "Workspace Mode",
-            "description": "Workspace mode for the created session"
+            "description": "Legacy workspace mode for the created session"
           },
           "project_paths": {
             "anyOf": [
@@ -8940,6 +8962,21 @@
             "title": "Project Paths",
             "description": "Default selected Project paths"
           },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ExistingProjectWorkspaceItemResponse"
+                },
+                {
+                  "$ref": "#/components/schemas/GitWorktreeWorkspaceItemResponse"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Default selected workspace items"
+          },
           "source": {
             "$ref": "#/components/schemas/AgentSessionProjectDefaultsSourceResponse",
             "description": "Default source metadata"
@@ -8948,6 +8985,7 @@
         "type": "object",
         "required": [
           "project_paths",
+          "items",
           "source"
         ],
         "title": "AgentSessionProjectDefaultsResponse",
@@ -11101,6 +11139,28 @@
             "title": "Message",
             "description": "Message content"
           },
+          "workspace_items": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExistingProjectWorkspaceItemRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GitWorktreeWorkspaceItemRequest"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Items",
+            "description": "Ordered workspace items for the created session"
+          },
           "workspace_mode": {
             "anyOf": [
               {
@@ -11114,7 +11174,7 @@
               }
             ],
             "title": "Workspace Mode",
-            "description": "Workspace mode for the created session"
+            "description": "Legacy workspace mode for the created session"
           },
           "project_paths": {
             "anyOf": [
@@ -11525,6 +11585,50 @@
         "title": "EventKind",
         "description": "Event transcript event kind."
       },
+      "ExistingProjectWorkspaceItemRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "existing_project",
+            "title": "Type",
+            "description": "Workspace item type"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Existing Project path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "path"
+        ],
+        "title": "ExistingProjectWorkspaceItemRequest",
+        "description": "Existing Project workspace item for a new AgentSession."
+      },
+      "ExistingProjectWorkspaceItemResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "existing_project",
+            "title": "Type",
+            "description": "Workspace item type",
+            "default": "existing_project"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Existing Project path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "ExistingProjectWorkspaceItemResponse",
+        "description": "Existing Project default workspace item response."
+      },
       "ExistingProjectsWorkspaceModeRequest": {
         "properties": {
           "type": {
@@ -11806,6 +11910,68 @@
         ],
         "title": "GitRefPreviewResponse",
         "description": "Git ref preview response for a source Project."
+      },
+      "GitWorktreeWorkspaceItemRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "git_worktree",
+            "title": "Type",
+            "description": "Workspace item type"
+          },
+          "source_project_path": {
+            "type": "string",
+            "title": "Source Project Path",
+            "description": "Source Project path"
+          },
+          "starting_ref": {
+            "type": "string",
+            "title": "Starting Ref",
+            "description": "Starting local Git branch ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "source_project_path",
+          "starting_ref"
+        ],
+        "title": "GitWorktreeWorkspaceItemRequest",
+        "description": "Git worktree workspace item for a new AgentSession."
+      },
+      "GitWorktreeWorkspaceItemResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "git_worktree",
+            "title": "Type",
+            "description": "Workspace item type",
+            "default": "git_worktree"
+          },
+          "source_project_path": {
+            "type": "string",
+            "title": "Source Project Path",
+            "description": "Source Project path"
+          },
+          "starting_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Ref",
+            "description": "Starting local Git branch ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_project_path"
+        ],
+        "title": "GitWorktreeWorkspaceItemResponse",
+        "description": "Git worktree default workspace item response."
       },
       "GitWorktreeWorkspaceModeRequest": {
         "properties": {

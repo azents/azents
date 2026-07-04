@@ -4,22 +4,34 @@ import datetime
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
+from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
+from azents.core.enums import AgentProjectDefaultItemType
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 
+def _agent_project_default_item_type_values(
+    enum_cls: type[AgentProjectDefaultItemType],
+) -> list[str]:
+    """Return AgentProjectDefaultItemType enum values stored in the DB."""
+    return [v.value for v in enum_cls]
+
+
+agent_project_default_item_type_enum = ENUM(
+    AgentProjectDefaultItemType,
+    name="agent_project_default_item_type",
+    create_type=False,
+    values_callable=_agent_project_default_item_type_values,
+)
+
+
 class RDBAgentProjectDefault(RDBModel):
-    """Agent-owned default Project path for new sessions."""
+    """Agent-owned default workspace item for new sessions."""
 
     __tablename__ = "agent_project_defaults"
 
-    UQ_AGENT_PATH = sa.UniqueConstraint(
-        "agent_id",
-        "path",
-        name="uq_agent_project_defaults_agent_path",
-    )
     UQ_AGENT_POSITION = sa.UniqueConstraint(
         "agent_id",
         "position",
@@ -38,6 +50,11 @@ class RDBAgentProjectDefault(RDBModel):
     )
     path: Mapped[str] = mapped_column(sa.Text, nullable=False)
     position: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    item_type: Mapped[AgentProjectDefaultItemType] = mapped_column(
+        agent_project_default_item_type_enum,
+        nullable=False,
+        default=AgentProjectDefaultItemType.EXISTING_PROJECT,
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -57,4 +74,4 @@ class RDBAgentProjectDefault(RDBModel):
         onupdate=sa.func.now(),
     )
 
-    __table_args__ = (UQ_AGENT_PATH, UQ_AGENT_POSITION, IX_AGENT_POSITION)
+    __table_args__ = (UQ_AGENT_POSITION, IX_AGENT_POSITION)

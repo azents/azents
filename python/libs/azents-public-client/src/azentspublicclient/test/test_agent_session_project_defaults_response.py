@@ -38,6 +38,9 @@ class TestAgentSessionProjectDefaultsResponse(unittest.TestCase):
                 project_paths = [
                     ''
                     ],
+                items = [
+                    null
+                    ],
                 source = azentspublicclient.models.agent_session_project_defaults_source_response.AgentSessionProjectDefaultsSourceResponse(
                     type = 'empty', 
                     session_id = '', )
@@ -46,6 +49,9 @@ class TestAgentSessionProjectDefaultsResponse(unittest.TestCase):
             return AgentSessionProjectDefaultsResponse(
                 project_paths = [
                     ''
+                    ],
+                items = [
+                    null
                     ],
                 source = azentspublicclient.models.agent_session_project_defaults_source_response.AgentSessionProjectDefaultsSourceResponse(
                     type = 'empty', 

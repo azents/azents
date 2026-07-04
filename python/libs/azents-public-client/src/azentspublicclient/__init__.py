@@ -65,9 +65,11 @@ __all__ = [
     "AgentRuntimeResponse",
     "AgentRuntimeSummaryResponse",
     "AgentSessionCreateRequest",
+    "AgentSessionCreateRequestWorkspaceItemsInner",
     "AgentSessionListResponse",
     "AgentSessionPrimaryKind",
     "AgentSessionProjectDefaultsResponse",
+    "AgentSessionProjectDefaultsResponseItemsInner",
     "AgentSessionProjectDefaultsSourceResponse",
     "AgentSessionResponse",
     "AgentSessionRunState",
@@ -141,6 +143,8 @@ __all__ = [
     "ElevateWithEmailRequest",
     "ElevateWithPasswordRequest",
     "EventKind",
+    "ExistingProjectWorkspaceItemRequest",
+    "ExistingProjectWorkspaceItemResponse",
     "ExistingProjectsWorkspaceModeRequest",
     "GcpConfig",
     "GcpSecrets",
@@ -152,6 +156,8 @@ __all__ = [
     "GitHubPlatformOAuthUrlResponse",
     "GitRefEntryResponse",
     "GitRefPreviewResponse",
+    "GitWorktreeWorkspaceItemRequest",
+    "GitWorktreeWorkspaceItemResponse",
     "GitWorktreeWorkspaceModeRequest",
     "GoalAction",
     "GoalStateResponse",
@@ -351,9 +357,11 @@ from azentspublicclient.models.agent_runtime_raw_state_response import AgentRunt
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse as AgentRuntimeResponse
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse as AgentRuntimeSummaryResponse
 from azentspublicclient.models.agent_session_create_request import AgentSessionCreateRequest as AgentSessionCreateRequest
+from azentspublicclient.models.agent_session_create_request_workspace_items_inner import AgentSessionCreateRequestWorkspaceItemsInner as AgentSessionCreateRequestWorkspaceItemsInner
 from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse as AgentSessionListResponse
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind as AgentSessionPrimaryKind
 from azentspublicclient.models.agent_session_project_defaults_response import AgentSessionProjectDefaultsResponse as AgentSessionProjectDefaultsResponse
+from azentspublicclient.models.agent_session_project_defaults_response_items_inner import AgentSessionProjectDefaultsResponseItemsInner as AgentSessionProjectDefaultsResponseItemsInner
 from azentspublicclient.models.agent_session_project_defaults_source_response import AgentSessionProjectDefaultsSourceResponse as AgentSessionProjectDefaultsSourceResponse
 from azentspublicclient.models.agent_session_response import AgentSessionResponse as AgentSessionResponse
 from azentspublicclient.models.agent_session_run_state import AgentSessionRunState as AgentSessionRunState
@@ -427,6 +435,8 @@ from azentspublicclient.models.elevate_response import ElevateResponse as Elevat
 from azentspublicclient.models.elevate_with_email_request import ElevateWithEmailRequest as ElevateWithEmailRequest
 from azentspublicclient.models.elevate_with_password_request import ElevateWithPasswordRequest as ElevateWithPasswordRequest
 from azentspublicclient.models.event_kind import EventKind as EventKind
+from azentspublicclient.models.existing_project_workspace_item_request import ExistingProjectWorkspaceItemRequest as ExistingProjectWorkspaceItemRequest
+from azentspublicclient.models.existing_project_workspace_item_response import ExistingProjectWorkspaceItemResponse as ExistingProjectWorkspaceItemResponse
 from azentspublicclient.models.existing_projects_workspace_mode_request import ExistingProjectsWorkspaceModeRequest as ExistingProjectsWorkspaceModeRequest
 from azentspublicclient.models.gcp_config import GcpConfig as GcpConfig
 from azentspublicclient.models.gcp_secrets import GcpSecrets as GcpSecrets
@@ -438,6 +448,8 @@ from azentspublicclient.models.git_hub_platform_installations_response import Gi
 from azentspublicclient.models.git_hub_platform_o_auth_url_response import GitHubPlatformOAuthUrlResponse as GitHubPlatformOAuthUrlResponse
 from azentspublicclient.models.git_ref_entry_response import GitRefEntryResponse as GitRefEntryResponse
 from azentspublicclient.models.git_ref_preview_response import GitRefPreviewResponse as GitRefPreviewResponse
+from azentspublicclient.models.git_worktree_workspace_item_request import GitWorktreeWorkspaceItemRequest as GitWorktreeWorkspaceItemRequest
+from azentspublicclient.models.git_worktree_workspace_item_response import GitWorktreeWorkspaceItemResponse as GitWorktreeWorkspaceItemResponse
 from azentspublicclient.models.git_worktree_workspace_mode_request import GitWorktreeWorkspaceModeRequest as GitWorktreeWorkspaceModeRequest
 from azentspublicclient.models.goal_action import GoalAction as GoalAction
 from azentspublicclient.models.goal_state_response import GoalStateResponse as GoalStateResponse
