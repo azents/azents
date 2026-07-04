@@ -252,6 +252,8 @@ __all__ = [
     "SessionContextStatsResponse",
     "SessionContextSystemPromptFragmentResponse",
     "SessionContextSystemPromptResponse",
+    "SessionGitWorktreeAttachRequest",
+    "SessionGitWorktreeAttachResponse",
     "SessionInitializationDetailResponse",
     "SessionInitializationEventResponse",
     "SessionInitializationResponse",
@@ -538,6 +540,8 @@ from azentspublicclient.models.session_context_session_response import SessionCo
 from azentspublicclient.models.session_context_stats_response import SessionContextStatsResponse as SessionContextStatsResponse
 from azentspublicclient.models.session_context_system_prompt_fragment_response import SessionContextSystemPromptFragmentResponse as SessionContextSystemPromptFragmentResponse
 from azentspublicclient.models.session_context_system_prompt_response import SessionContextSystemPromptResponse as SessionContextSystemPromptResponse
+from azentspublicclient.models.session_git_worktree_attach_request import SessionGitWorktreeAttachRequest as SessionGitWorktreeAttachRequest
+from azentspublicclient.models.session_git_worktree_attach_response import SessionGitWorktreeAttachResponse as SessionGitWorktreeAttachResponse
 from azentspublicclient.models.session_initialization_detail_response import SessionInitializationDetailResponse as SessionInitializationDetailResponse
 from azentspublicclient.models.session_initialization_event_response import SessionInitializationEventResponse as SessionInitializationEventResponse
 from azentspublicclient.models.session_initialization_response import SessionInitializationResponse as SessionInitializationResponse
@@ -583,4 +587,3 @@ from azentspublicclient.models.workspace_user_list_response import WorkspaceUser
 from azentspublicclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
 from azentspublicclient.models.ws_ticket_response import WsTicketResponse as WsTicketResponse
-
