@@ -1135,6 +1135,10 @@ class AgentWorkspaceEntryResponse(BaseModel):
         default=None,
         description="Updated time",
     )
+    repository_type: Literal["git"] | None = Field(
+        default=None,
+        description="Repository type when the directory is backed by a VCS repository",
+    )
 
     @classmethod
     def from_domain(cls, entry: AgentWorkspaceEntry) -> Self:
@@ -1146,6 +1150,7 @@ class AgentWorkspaceEntryResponse(BaseModel):
             size=entry.size,
             media_type=entry.media_type,
             modified_at=entry.modified_at,
+            repository_type=entry.repository_type,
         )
 
 

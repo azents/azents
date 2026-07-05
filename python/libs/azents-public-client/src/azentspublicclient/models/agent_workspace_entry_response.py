@@ -33,14 +33,25 @@ class AgentWorkspaceEntryResponse(BaseModel):
     size: Optional[StrictInt] = None
     media_type: Optional[StrictStr] = None
     modified_at: Optional[datetime] = None
+    repository_type: Optional[StrictStr] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "path", "kind", "size", "media_type", "modified_at"]
+    __properties: ClassVar[List[str]] = ["name", "path", "kind", "size", "media_type", "modified_at", "repository_type"]
 
     @field_validator('kind')
     def kind_validate_enum(cls, value):
         """Validates the enum"""
         if value not in set(['file', 'directory']):
             raise ValueError("must be one of enum values ('file', 'directory')")
+        return value
+
+    @field_validator('repository_type')
+    def repository_type_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        if value not in set(['git']):
+            raise ValueError("must be one of enum values ('git')")
         return value
 
     model_config = ConfigDict(
@@ -104,6 +115,11 @@ class AgentWorkspaceEntryResponse(BaseModel):
         if self.modified_at is None and "modified_at" in self.model_fields_set:
             _dict['modified_at'] = None
 
+        # set to None if repository_type (nullable) is None
+        # and model_fields_set contains the field
+        if self.repository_type is None and "repository_type" in self.model_fields_set:
+            _dict['repository_type'] = None
+
         return _dict
 
     @classmethod
@@ -121,7 +137,8 @@ class AgentWorkspaceEntryResponse(BaseModel):
             "kind": obj.get("kind"),
             "size": obj.get("size"),
             "media_type": obj.get("media_type"),
-            "modified_at": obj.get("modified_at")
+            "modified_at": obj.get("modified_at"),
+            "repository_type": obj.get("repository_type")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

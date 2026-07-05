@@ -106,6 +106,7 @@ class _FakeRunnerOperations:
             (AGENT_WORKSPACE_ROOT / "README.md").as_posix(): b"# Workspace\n",
             (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix(): b"hello",
         }
+        self.directories = {AGENT_WORKSPACE_ROOT.as_posix()}
         self.list_calls: list[tuple[str, int, str]] = []
         self.read_calls: list[tuple[str, int, str]] = []
         self.stat_calls: list[tuple[str, int, str]] = []
@@ -166,20 +167,30 @@ class _FakeRunnerOperations:
     ) -> RuntimeFileListResult:
         del recursive, exclude_patterns, deadline_at
         self.list_calls.append((runtime_id, runner_generation, path))
-        return RuntimeFileListResult(
-            entries=(
-                *(
-                    RuntimeFileListEntry(
-                        path=file_path,
-                        type="file",
-                        size_bytes=len(data),
-                        modified_at="2026-05-24T00:00:00+00:00",
-                    )
-                    for file_path, data in self.files.items()
-                ),
-            ),
-            final_cursor="0-1",
-        )
+        entries: list[RuntimeFileListEntry] = []
+        for directory_path in sorted(self.directories):
+            if directory_path == path or directory_path.rsplit("/", 1)[0] != path:
+                continue
+            entries.append(
+                RuntimeFileListEntry(
+                    path=directory_path,
+                    type="directory",
+                    size_bytes=None,
+                    modified_at="2026-05-24T00:00:00+00:00",
+                )
+            )
+        for file_path, data in sorted(self.files.items()):
+            if file_path.rsplit("/", 1)[0] != path:
+                continue
+            entries.append(
+                RuntimeFileListEntry(
+                    path=file_path,
+                    type="file",
+                    size_bytes=len(data),
+                    modified_at="2026-05-24T00:00:00+00:00",
+                )
+            )
+        return RuntimeFileListResult(entries=tuple(entries), final_cursor="0-1")
 
     async def read_file(
         self,
@@ -221,7 +232,7 @@ class _FakeRunnerOperations:
                 modified_at="2026-05-24T00:00:00+00:00",
                 final_cursor="0-1",
             )
-        if path == AGENT_WORKSPACE_ROOT.as_posix():
+        if path in self.directories:
             return RuntimeFileStatResult(
                 path=path,
                 kind="directory",
@@ -526,6 +537,48 @@ async def test_read_path_uses_stat_to_return_directory_listing() -> None:
     assert runner_operations.list_calls == [
         ("runtime-1", 1, AGENT_WORKSPACE_ROOT.as_posix())
     ]
+
+
+@pytest.mark.asyncio
+async def test_read_path_marks_git_repository_directories() -> None:
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    plain_path = (AGENT_WORKSPACE_ROOT / "plain").as_posix()
+    git_directory_path = (AGENT_WORKSPACE_ROOT / "repo-dir").as_posix()
+    worktree_path = (AGENT_WORKSPACE_ROOT / "repo-worktree").as_posix()
+    runner_operations.directories.update(
+        {
+            plain_path,
+            git_directory_path,
+            (AGENT_WORKSPACE_ROOT / "repo-dir" / ".git").as_posix(),
+            worktree_path,
+        }
+    )
+    runner_operations.files[
+        (AGENT_WORKSPACE_ROOT / "repo-worktree" / ".git").as_posix()
+    ] = b"gitdir: ../.git/worktrees/repo-worktree\n"
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.read_path(
+        "agent-1",
+        "user-1",
+        AGENT_WORKSPACE_ROOT.as_posix(),
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.type == "DIRECTORY"
+    repository_types = {
+        entry.name: entry.repository_type for entry in result.value.entries
+    }
+    assert repository_types["plain"] is None
+    assert repository_types["repo-dir"] == "git"
+    assert repository_types["repo-worktree"] == "git"
 
 
 @pytest.mark.asyncio

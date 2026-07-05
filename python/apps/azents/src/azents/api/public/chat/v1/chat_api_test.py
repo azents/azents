@@ -1542,6 +1542,48 @@ class TestRestMessageWriteContract:
 
         assert broker.messages == []
 
+    async def test_existing_session_create_git_worktree_action_commits_action_buffer(
+        self,
+    ) -> None:
+        """REST input write accepts CreateGitWorktreeAction turn actions."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        chat_service = _RestWriteChatService()
+        input_service = _BufferedInputService()
+
+        response = await _write_input_via_rest(
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            AsyncMock(),  # ChatWriteService is not used for CreateGitWorktreeAction.
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            ChatInputWriteRequest(
+                agent_id="agent-1",
+                client_request_id="worktree-1",
+                message="",
+                action=CreateGitWorktreeAction(
+                    source_project_path="/workspace/agent/source",
+                    starting_ref="refs/heads/main",
+                ),
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert input_service.calls == ["create_buffered_agent_action_input"]
+        assert input_service.kwargs[0]["action"] == {
+            "type": "create_git_worktree",
+            "source_project_path": "/workspace/agent/source",
+            "starting_ref": "refs/heads/main",
+        }
+        assert response.accepted.type == "input_buffer"
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+
     async def test_skill_action_write_commits_action_buffer_and_wakes_once(
         self,
     ) -> None:

@@ -39,12 +39,13 @@ class TestResponseChatV1ReadAgentWorkspacePath(unittest.TestCase):
                 path = '',
                 entries = [
                     azentspublicclient.models.agent_workspace_entry_response.AgentWorkspaceEntryResponse(
-                        name = '', 
-                        path = '', 
-                        kind = 'file', 
-                        size = 56, 
-                        media_type = '', 
-                        modified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                        name = '',
+                        path = '',
+                        kind = 'file',
+                        size = 56,
+                        media_type = '',
+                        modified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        repository_type = 'git', )
                     ],
                 media_type = '',
                 size = 56,
@@ -57,12 +58,13 @@ class TestResponseChatV1ReadAgentWorkspacePath(unittest.TestCase):
                 path = '',
                 entries = [
                     azentspublicclient.models.agent_workspace_entry_response.AgentWorkspaceEntryResponse(
-                        name = '', 
-                        path = '', 
-                        kind = 'file', 
-                        size = 56, 
-                        media_type = '', 
-                        modified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                        name = '',
+                        path = '',
+                        kind = 'file',
+                        size = 56,
+                        media_type = '',
+                        modified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        repository_type = 'git', )
                     ],
                 media_type = '',
                 size = 56,

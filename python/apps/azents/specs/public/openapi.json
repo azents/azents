@@ -10183,6 +10183,19 @@
             ],
             "title": "Modified At",
             "description": "Updated time"
+          },
+          "repository_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "git"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository Type",
+            "description": "Repository type when the directory is backed by a VCS repository"
           }
         },
         "type": "object",
