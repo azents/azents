@@ -2,6 +2,7 @@
 
 import shlex
 import time
+from pathlib import PurePosixPath
 from typing import Any, cast
 
 import azentsadminclient
@@ -264,17 +265,20 @@ def _create_git_worktree_session(
     source_project_path: str,
     starting_ref: str,
 ) -> str:
-    """Create a non-primary session in Git worktree mode."""
+    """Create a non-primary session with an ordered Git worktree action."""
     payload = _post_json(
         server_url=server_url,
         token=token,
         path=f"/chat/v1/agents/{agent_id}/sessions",
         payload={
-            "workspace_mode": {
-                "type": "git_worktree",
-                "source_project_path": source_project_path,
-                "starting_ref": starting_ref,
-            }
+            "existing_project_paths": [],
+            "setup_actions": [
+                {
+                    "type": "create_git_worktree",
+                    "source_project_path": source_project_path,
+                    "starting_ref": starting_ref,
+                }
+            ],
         },
     )
     session_id = payload.get("id")
@@ -283,60 +287,127 @@ def _create_git_worktree_session(
     return session_id
 
 
-def _initialization_detail(
+def _live_projection(
     *,
     server_url: str,
     token: str,
     session_id: str,
 ) -> dict[str, object]:
-    """Fetch session initialization detail."""
+    """Fetch the current live projection for a session."""
     return _get_json(
         server_url=server_url,
         token=token,
-        path=f"/chat/v1/sessions/{session_id}/initialization",
+        path=f"/chat/v1/sessions/{session_id}/live",
     )
 
 
-def _wait_for_initialization_ready(
+def _action_execution_projection(live: dict[str, object]) -> dict[str, object]:
+    """Return the first action execution projection from a live snapshot."""
+    projections = _object_list(
+        live.get("action_executions"),
+        label="action execution projections",
+    )
+    if len(projections) != 1:
+        raise AssertionError(f"expected one action execution projection: {live!r}")
+    return projections[0]
+
+
+def _action_execution_status(projection: dict[str, object]) -> str:
+    """Return an action execution status from a projection."""
+    execution = _OBJECT_ADAPTER.validate_python(projection.get("execution"))
+    status = execution.get("status")
+    if not isinstance(status, str):
+        raise AssertionError(f"action execution status is missing: {projection!r}")
+    return status
+
+
+def _action_execution_id(projection: dict[str, object]) -> str:
+    """Return an action execution ID from a projection."""
+    execution = _OBJECT_ADAPTER.validate_python(projection.get("execution"))
+    execution_id = execution.get("id")
+    if not isinstance(execution_id, str):
+        raise AssertionError(f"action execution id is missing: {projection!r}")
+    return execution_id
+
+
+def _wait_for_action_execution_status(
     *,
     server_url: str,
     token: str,
     session_id: str,
+    status: str,
 ) -> dict[str, object]:
-    """Wait for Git worktree initialization to become ready."""
+    """Wait for the session action execution to reach a status."""
     deadline = time.monotonic() + 90
-    last_detail: dict[str, object] | None = None
+    last_live: dict[str, object] | None = None
     while time.monotonic() < deadline:
-        detail = _initialization_detail(
+        live = _live_projection(
             server_url=server_url,
             token=token,
             session_id=session_id,
         )
-        last_detail = detail
-        initialization = _OBJECT_ADAPTER.validate_python(detail.get("initialization"))
-        if initialization.get("status") == "ready":
-            return detail
-        if initialization.get("status") == "failed":
-            raise AssertionError(f"initialization failed: {detail!r}")
-        time.sleep(0.5)
-    raise TimeoutError(f"initialization did not become ready: {last_detail!r}")
-
-
-def _worktree_descriptor(detail: dict[str, object]) -> dict[str, object]:
-    """Return the Git worktree resource descriptor from initialization detail."""
-    initialization = _OBJECT_ADAPTER.validate_python(detail.get("initialization"))
-    steps = _object_list(initialization.get("steps"), label="initialization steps")
-    for step in steps:
-        if step.get("step_type") != "create_git_worktree":
+        last_live = live
+        try:
+            projection = _action_execution_projection(live)
+        except AssertionError:
+            time.sleep(0.5)
             continue
-        descriptors = _object_list(
-            step.get("resource_descriptors"),
-            label="create_git_worktree resource descriptors",
+        current_status = _action_execution_status(projection)
+        if current_status == status:
+            return projection
+        if current_status == "failed" and status != "failed":
+            raise AssertionError(f"action execution failed: {projection!r}")
+        time.sleep(0.5)
+    raise TimeoutError(f"action execution did not reach {status}: {last_live!r}")
+
+
+def _list_session_projects(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+) -> list[dict[str, object]]:
+    """List registered Projects for a session."""
+    response = _get_json(
+        server_url=server_url,
+        token=token,
+        path=f"/chat/v1/agents/{agent_id}/sessions/{session_id}/projects",
+    )
+    return _object_list(response.get("items"), label="session projects")
+
+
+def _wait_for_worktree_project_path(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+) -> str:
+    """Wait for action-created worktree Project registration."""
+    deadline = time.monotonic() + 60
+    last_projects: list[dict[str, object]] | None = None
+    while time.monotonic() < deadline:
+        projects = _list_session_projects(
+            server_url=server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
         )
-        for descriptor in descriptors:
-            if descriptor.get("type") == "git_worktree":
-                return descriptor
-    raise AssertionError(f"Git worktree descriptor not found: {detail!r}")
+        last_projects = projects
+        if len(projects) == 1:
+            path = projects[0].get("path")
+            if isinstance(path, str):
+                return path
+        time.sleep(0.5)
+    raise TimeoutError(f"worktree Project was not registered: {last_projects!r}")
+
+
+def _branch_name_from_worktree_path(worktree_path: str) -> str:
+    """Return the default Azents branch name for a worktree path."""
+    path = PurePosixPath(worktree_path)
+    session_handle = path.parent.name
+    return f"azents/{session_handle}"
 
 
 def _assert_path_absent(container: Container, path: str) -> None:
@@ -400,23 +471,34 @@ class TestSessionGitWorktreeLifecycle:
             source_project_path=source_path,
             starting_ref="main",
         )
-        detail = _wait_for_initialization_ready(
+        projection = _wait_for_action_execution_status(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
+            status="completed",
         )
-        descriptor = _worktree_descriptor(detail)
-        worktree_path = descriptor.get("worktree_path")
-        branch_name = descriptor.get("branch_name")
-        base_commit = descriptor.get("base_commit")
-        assert isinstance(worktree_path, str)
-        assert isinstance(branch_name, str)
-        assert isinstance(base_commit, str)
+        assert _action_execution_id(projection)
+        events = _object_list(projection.get("events"), label="action events")
+        assert {event.get("step_key") for event in events} >= {
+            "create_git_worktree",
+            "register_project",
+            "upsert_catalog",
+            "refresh_project_status",
+        }
+
+        worktree_path = _wait_for_worktree_project_path(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        branch_name = _branch_name_from_worktree_path(worktree_path)
         _exec(
             container,
             f"test -f {shlex.quote(worktree_path)}/README.md && "
             f"cd {shlex.quote(worktree_path)} && "
-            f'test "$(git rev-parse HEAD)" = {shlex.quote(base_commit)}',
+            f'test "$(git rev-parse HEAD)" = '
+            f'"$(git -C {shlex.quote(source_path)} rev-parse main)"',
         )
 
         _exec(
