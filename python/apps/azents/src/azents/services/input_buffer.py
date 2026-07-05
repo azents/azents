@@ -14,6 +14,7 @@ from azents.core.enums import EventKind, InputBufferKind
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
     ChatAction,
+    CreateGitWorktreeAction,
     GoalAction,
     SkillAction,
 )
@@ -250,6 +251,7 @@ class InputBufferService:
         session_id: str,
         model: str | None,
         limit: int | None = None,
+        include_action_messages: bool = True,
     ) -> PromotedInputBuffers:
         """Flush pending buffers of session in claim, append, delete order."""
         del model
@@ -273,6 +275,7 @@ class InputBufferService:
                 session,
                 session_id=session_id,
                 claimed=claimed,
+                include_action_messages=include_action_messages,
             )
             event_inserted = await self._append_input_buffer_events(
                 session,
@@ -346,9 +349,16 @@ class InputBufferService:
         *,
         session_id: str,
         claimed: list[InputBuffer],
+        include_action_messages: bool,
     ) -> list[_PromotedInputBuffer]:
         """Convert the next FIFO barrier segment into durable event payloads."""
         prefix = _next_flush_prefix(claimed)
+        if (
+            prefix
+            and prefix[0].kind == InputBufferKind.ACTION_MESSAGE
+            and not include_action_messages
+        ):
+            return []
         promoted: list[_PromotedInputBuffer] = []
         for buffer in prefix:
             if buffer.kind == InputBufferKind.ACTION_MESSAGE:
@@ -418,13 +428,10 @@ class InputBufferService:
                         action=action,
                     )
                 )
+            case CreateGitWorktreeAction():
+                pass
             case _:
-                promoted.append(
-                    _system_error_promoted_buffer(
-                        buffer,
-                        "This action is not supported yet.",
-                    )
-                )
+                assert_never(action)
         return promoted
 
     async def _promote_goal_action(

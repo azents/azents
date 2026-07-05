@@ -6,7 +6,9 @@ from azcommon.result import Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ActionExecutionStatus,
     AgentProjectCatalogStatus,
+    EventKind,
     LLMProvider,
     RuntimeRunnerState,
     SessionGitWorktreeStatus,
@@ -14,13 +16,19 @@ from azents.core.enums import (
     SessionInitializationStepStatus,
     WorkspaceUserRole,
 )
+from azents.engine.events.action_messages import (
+    ActionMessagePayload,
+    CreateGitWorktreeAction,
+)
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_git_worktree import RDBSessionGitWorktree
 from azents.rdb.session import SessionManager
+from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogEntry
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
@@ -28,6 +36,7 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_initialization import SessionInitializationRepository
@@ -366,6 +375,7 @@ def _service(
         agent_project_catalog_repository=catalog_repository
         or AgentProjectCatalogRepository(),
         agent_project_catalog_service=_CatalogRefreshService(refresh_status),
+        action_execution_repository=ActionExecutionRepository(),
         session_manager=session_manager,
         runner_operations=runner,  # pyright: ignore[reportArgumentType]
     )
@@ -442,6 +452,83 @@ async def _create_ready_worktree_session(
 
 class TestSessionGitWorktreeService:
     """Session Git worktree service tests."""
+
+    async def test_run_git_worktree_action_registers_project_and_catalog(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """create_git_worktree TurnAction execution creates a Project boundary."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(session, "action")
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            action_payload = ActionMessagePayload(
+                action=CreateGitWorktreeAction(
+                    source_project_path="/workspace/agent/repo",
+                    starting_ref="main",
+                ),
+                message="",
+            )
+            action_event = await EventTranscriptRepository().append(
+                session,
+                EventCreate(
+                    session_id=agent_session.id,
+                    kind=EventKind.ACTION_MESSAGE,
+                    payload=action_payload.model_dump(mode="json"),
+                    external_id="action-worktree-buffer",
+                ),
+            )
+        runner = _RunnerOperations()
+        service = _service(rdb_session_manager, runner)
+
+        assert isinstance(action_payload.action, CreateGitWorktreeAction)
+        result = await service.run_git_worktree_action(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            action_event_id=action_event.id,
+            action=action_payload.action,
+        )
+
+        assert result.completed is True
+        assert result.context_invalidated is True
+        async with rdb_session_manager() as session:
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=agent_session.id,
+            )
+            projects = await SessionWorkspaceProjectRepository().list_projects(
+                session,
+                session_id=agent_session.id,
+            )
+            projection = (
+                await ActionExecutionRepository().get_projection_by_action_event_id(
+                    session,
+                    action_event_id=action_event.id,
+                )
+            )
+        assert len(allocations) == 1
+        assert allocations[0].action_execution_id is not None
+        assert allocations[0].status is SessionGitWorktreeStatus.READY
+        assert [project.path for project in projects] == [allocations[0].worktree_path]
+        assert projection is not None
+        assert projection.execution.status is ActionExecutionStatus.COMPLETED
+        assert runner.calls == [
+            {
+                "operation": "create_git_worktree",
+                "runtime_id": "runtime-1",
+                "runner_generation": 7,
+                "source_project_path": "/workspace/agent/repo",
+                "worktree_path": allocations[0].worktree_path,
+                "branch_name": allocations[0].branch_name,
+                "starting_ref": "main",
+            }
+        ]
 
     async def test_preview_git_refs_lists_source_project_refs(
         self,
