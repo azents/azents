@@ -113,7 +113,7 @@ def _create_session(
         server_url=server_url,
         token=token,
         path=f"/chat/v1/agents/{agent_id}/sessions",
-        payload={"project_paths": project_paths},
+        payload={"existing_project_paths": project_paths, "setup_actions": []},
     )
     session_id = payload.get("id")
     if not isinstance(session_id, str):

@@ -35,16 +35,27 @@ class TestAgentSessionCreateRequest(unittest.TestCase):
         model = AgentSessionCreateRequest()
         if include_optional:
             return AgentSessionCreateRequest(
-                workspace_items = [
-                    null
-                    ],
-                workspace_mode = None,
-                project_paths = [
+                existing_project_paths = [
                     ''
+                    ],
+                setup_actions = [
+                    azentspublicclient.models.create_git_worktree_action.CreateGitWorktreeAction(
+                        type = 'create_git_worktree',
+                        source_project_path = '0',
+                        starting_ref = '0', )
                     ]
             )
         else:
             return AgentSessionCreateRequest(
+                existing_project_paths = [
+                    ''
+                    ],
+                setup_actions = [
+                    azentspublicclient.models.create_git_worktree_action.CreateGitWorktreeAction(
+                        type = 'create_git_worktree',
+                        source_project_path = '0',
+                        starting_ref = '0', )
+                    ],
         )
         """
 

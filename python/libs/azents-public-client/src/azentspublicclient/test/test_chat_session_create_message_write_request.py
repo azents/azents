@@ -37,12 +37,14 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
             return ChatSessionCreateMessageWriteRequest(
                 client_request_id = '0',
                 message = '',
-                workspace_items = [
-                    null
-                    ],
-                workspace_mode = None,
-                project_paths = [
+                existing_project_paths = [
                     ''
+                    ],
+                setup_actions = [
+                    azentspublicclient.models.create_git_worktree_action.CreateGitWorktreeAction(
+                        type = 'create_git_worktree',
+                        source_project_path = '0',
+                        starting_ref = '0', )
                     ],
                 attachments = [
                     ''
@@ -52,6 +54,15 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
             return ChatSessionCreateMessageWriteRequest(
                 client_request_id = '0',
                 message = '',
+                existing_project_paths = [
+                    ''
+                    ],
+                setup_actions = [
+                    azentspublicclient.models.create_git_worktree_action.CreateGitWorktreeAction(
+                        type = 'create_git_worktree',
+                        source_project_path = '0',
+                        starting_ref = '0', )
+                    ],
         )
         """
 

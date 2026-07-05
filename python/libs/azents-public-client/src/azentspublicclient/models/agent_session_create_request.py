@@ -17,10 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.agent_session_create_request_workspace_items_inner import AgentSessionCreateRequestWorkspaceItemsInner
-from azentspublicclient.models.workspace_mode import WorkspaceMode
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from typing import Any, ClassVar, Dict, List
+from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,11 +27,10 @@ class AgentSessionCreateRequest(BaseModel):
     """
     REST non-primary AgentSession create request.
     """ # noqa: E501
-    workspace_items: Optional[List[AgentSessionCreateRequestWorkspaceItemsInner]] = None
-    workspace_mode: Optional[WorkspaceMode] = None
-    project_paths: Optional[List[StrictStr]] = None
+    existing_project_paths: List[StrictStr] = Field(description="Existing Project paths to register on the created session")
+    setup_actions: List[CreateGitWorktreeAction] = Field(description="Ordered setup actions to enqueue for the created session")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["workspace_items", "workspace_mode", "project_paths"]
+    __properties: ClassVar[List[str]] = ["existing_project_paths", "setup_actions"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -75,35 +73,17 @@ class AgentSessionCreateRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in workspace_items (list)
+        # override the default output from pydantic by calling `to_dict()` of each item in setup_actions (list)
         _items = []
-        if self.workspace_items:
-            for _item_workspace_items in self.workspace_items:
-                if _item_workspace_items:
-                    _items.append(_item_workspace_items.to_dict())
-            _dict['workspace_items'] = _items
-        # override the default output from pydantic by calling `to_dict()` of workspace_mode
-        if self.workspace_mode:
-            _dict['workspace_mode'] = self.workspace_mode.to_dict()
+        if self.setup_actions:
+            for _item_setup_actions in self.setup_actions:
+                if _item_setup_actions:
+                    _items.append(_item_setup_actions.to_dict())
+            _dict['setup_actions'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
-
-        # set to None if workspace_items (nullable) is None
-        # and model_fields_set contains the field
-        if self.workspace_items is None and "workspace_items" in self.model_fields_set:
-            _dict['workspace_items'] = None
-
-        # set to None if workspace_mode (nullable) is None
-        # and model_fields_set contains the field
-        if self.workspace_mode is None and "workspace_mode" in self.model_fields_set:
-            _dict['workspace_mode'] = None
-
-        # set to None if project_paths (nullable) is None
-        # and model_fields_set contains the field
-        if self.project_paths is None and "project_paths" in self.model_fields_set:
-            _dict['project_paths'] = None
 
         return _dict
 
@@ -117,9 +97,8 @@ class AgentSessionCreateRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "workspace_items": [AgentSessionCreateRequestWorkspaceItemsInner.from_dict(_item) for _item in obj["workspace_items"]] if obj.get("workspace_items") is not None else None,
-            "workspace_mode": WorkspaceMode.from_dict(obj["workspace_mode"]) if obj.get("workspace_mode") is not None else None,
-            "project_paths": obj.get("project_paths")
+            "existing_project_paths": obj.get("existing_project_paths"),
+            "setup_actions": [CreateGitWorktreeAction.from_dict(_item) for _item in obj["setup_actions"]] if obj.get("setup_actions") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

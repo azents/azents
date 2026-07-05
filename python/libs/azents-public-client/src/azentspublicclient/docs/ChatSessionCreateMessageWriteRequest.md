@@ -6,12 +6,11 @@ REST first message write request for a draft AgentSession.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**client_request_id** | **str** | Client-generated idempotency key | 
-**message** | **str** | Message content | 
-**workspace_items** | [**List[AgentSessionCreateRequestWorkspaceItemsInner]**](AgentSessionCreateRequestWorkspaceItemsInner.md) |  | [optional] 
-**workspace_mode** | [**WorkspaceMode**](WorkspaceMode.md) |  | [optional] 
-**project_paths** | **List[str]** |  | [optional] 
-**attachments** | **List[str]** |  | [optional] 
+**client_request_id** | **str** | Client-generated idempotency key |
+**message** | **str** | Message content |
+**existing_project_paths** | **List[str]** | Existing Project paths to register on the created session |
+**setup_actions** | [**List[CreateGitWorktreeAction]**](CreateGitWorktreeAction.md) | Ordered setup actions to enqueue before the first message |
+**attachments** | **List[str]** |  | [optional]
 
 ## Example
 
