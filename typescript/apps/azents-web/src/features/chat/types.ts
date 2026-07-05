@@ -243,6 +243,19 @@ export type FailedRunRetryability =
   | "user_action_required"
   | "non_retryable";
 
+export interface FailedRunAttemptSummary {
+  attemptNumber: number;
+  userMessage: string;
+  errorType: string;
+  source: string;
+  failedAt: string;
+  backoffSeconds: number;
+  nextRetryAt: string;
+  retryability: string;
+  failureCode?: string | null;
+  truncated: boolean;
+}
+
 export interface FailedRunFailureMetadata {
   kind: "failed_run";
   finalization_reason: FailedRunFinalizationReason;
@@ -252,6 +265,7 @@ export interface FailedRunFailureMetadata {
   retryability?: FailedRunRetryability | null;
   failure_code?: string | null;
   action_hint?: string | null;
+  attempts?: FailedRunAttemptSummary[];
 }
 
 export interface SystemErrorPayload {
@@ -568,6 +582,17 @@ export interface SubscriptionHealthCheckAckEvent {
   request_id?: string | null;
 }
 
+export interface LiveRunUpdatedEvent {
+  type: "live_run_updated";
+  session_id: string;
+  run: ChatLiveRunState;
+}
+
+export interface LiveRunClearedEvent {
+  type: "live_run_cleared";
+  session_id: string;
+}
+
 export type AgentRunStatus =
   | "running"
   | "completed"
@@ -575,10 +600,21 @@ export type AgentRunStatus =
   | "failed"
   | "interrupted";
 
+export interface ChatLiveRunRetryState {
+  status: string;
+  lastErrorMessage: string;
+  failedAttemptCount: number;
+  maxRetries: number;
+  backoffSeconds: number;
+  nextRetryAt: string;
+  attempts: FailedRunAttemptSummary[];
+}
+
 export interface ChatLiveRunState {
   run_id: string;
   phase: AgentRunPhase;
   status: AgentRunStatus;
+  retry?: ChatLiveRunRetryState | null;
 }
 
 export type ChatEvent =
@@ -610,6 +646,8 @@ export type ChatEvent =
   | SessionInitializationUpdatedEvent
   | SessionInitializationEventAppendedEvent
   | SubscriptionHealthCheckAckEvent
+  | LiveRunUpdatedEvent
+  | LiveRunClearedEvent
   | ChatHistoryEvent;
 
 /** authorization request data (UIfor camelCase convert).
@@ -725,6 +763,8 @@ export interface ChatMessage {
   action?: ChatAction | null;
   /** message metadata (subagent event etc.) */
   metadata?: Record<string, string> | null;
+  /** failed-run recovery metadata for terminal failed-run errors */
+  failedRunFailure?: FailedRunFailureMetadata | null;
 }
 
 /** Agent list status */

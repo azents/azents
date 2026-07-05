@@ -1,0 +1,352 @@
+import {
+  Badge,
+  Box,
+  Button,
+  Collapse,
+  Group,
+  Paper,
+  rem,
+  ScrollArea,
+  Stack,
+  Text,
+} from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
+import {
+  IconAlertTriangle,
+  IconChevronRight,
+  IconClock,
+  IconRefresh,
+  IconRepeat,
+  IconRepeatOff,
+} from "@tabler/icons-react";
+import { useLocale, useTranslations } from "next-intl";
+import { useEffect, useMemo, useState } from "react";
+import type {
+  AgentRunPhase,
+  ChatLiveRunRetryState,
+  FailedRunAttemptSummary,
+  FailedRunFailureMetadata,
+} from "../types";
+
+type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
+
+type RunRetryCardProps =
+  | {
+      variant: "live";
+      retry: ChatLiveRunRetryState;
+      phase: AgentRunPhase;
+    }
+  | {
+      variant: "terminal";
+      message: string;
+      failure: FailedRunFailureMetadata;
+      canRetry: boolean;
+      isRetryPending: boolean;
+      onRetry: () => void;
+    };
+
+function formatAttemptCount(
+  failedAttemptCount: number,
+  maxRetries: number,
+  t: ChatTranslator,
+): string {
+  return t("failedRunRecovery.attempts", {
+    failedAttemptCount,
+    maxRetries,
+  });
+}
+
+function timestampMs(iso: string): number | null {
+  const value = new Date(iso).getTime();
+  return Number.isFinite(value) ? value : null;
+}
+
+function useRetryCountdown(nextRetryAt: string | null): number | null {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (nextRetryAt === null) {
+      return;
+    }
+    const target = timestampMs(nextRetryAt);
+    if (target === null || target <= Date.now()) {
+      setNow(Date.now());
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [nextRetryAt]);
+
+  if (nextRetryAt === null) {
+    return null;
+  }
+  const target = timestampMs(nextRetryAt);
+  if (target === null) {
+    return null;
+  }
+  return Math.max(0, Math.ceil((target - now) / 1000));
+}
+
+function phaseLabel(phase: AgentRunPhase, t: ChatTranslator): string {
+  switch (phase) {
+    case "waiting_for_model":
+    case "streaming_model":
+      return t("failedRunRecovery.phaseModel");
+    case "preparing_input":
+      return t("failedRunRecovery.phasePreparing");
+    case "normalizing_output":
+    case "executing_tools":
+    case "appending_events":
+      return t("failedRunRecovery.phaseRecovering");
+    case "compacting":
+      return t("failedRunRecovery.phaseCompacting");
+    case "stopping":
+      return t("failedRunRecovery.phaseStopping");
+    case "idle":
+      return t("failedRunRecovery.phaseWaiting");
+  }
+}
+
+function formatFullDateTime(iso: string, locale: string): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) {
+    return iso;
+  }
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function AttemptHistory({
+  attempts,
+}: {
+  attempts: FailedRunAttemptSummary[];
+}): React.ReactElement | null {
+  const t = useTranslations("chat");
+  const locale = useLocale();
+  const [opened, { toggle }] = useDisclosure(false);
+  const sortedAttempts = useMemo(
+    () => [...attempts].sort((a, b) => b.attemptNumber - a.attemptNumber),
+    [attempts],
+  );
+
+  if (sortedAttempts.length === 0) {
+    return null;
+  }
+
+  return (
+    <Stack gap={rem(6)}>
+      <Group
+        gap={rem(6)}
+        wrap="nowrap"
+        role="button"
+        tabIndex={0}
+        style={{ cursor: "pointer", userSelect: "none" }}
+        onClick={toggle}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggle();
+          }
+        }}
+      >
+        <IconChevronRight
+          aria-hidden="true"
+          size={14}
+          stroke={1.8}
+          color="var(--mantine-color-dimmed)"
+          style={{
+            flexShrink: 0,
+            transform: opened ? "rotate(90deg)" : "none",
+            transition: "transform 160ms",
+          }}
+        />
+        <Text size="xs" fw={600} c="dimmed">
+          {t("failedRunRecovery.history", { count: sortedAttempts.length })}
+        </Text>
+      </Group>
+      <Collapse expanded={opened}>
+        <ScrollArea.Autosize mah={rem(280)} scrollbars="y">
+          <Stack gap="xs">
+            {sortedAttempts.map((attempt) => (
+              <Paper
+                key={`${attempt.attemptNumber}:${attempt.failedAt}`}
+                withBorder
+                radius="md"
+                p="xs"
+                bg="var(--mantine-color-body)"
+              >
+                <Stack gap={rem(4)}>
+                  <Group gap="xs" justify="space-between" wrap="nowrap">
+                    <Text size="xs" fw={600}>
+                      {t("failedRunRecovery.attemptTitle", {
+                        attemptNumber: attempt.attemptNumber,
+                      })}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {formatFullDateTime(attempt.failedAt, locale)}
+                    </Text>
+                  </Group>
+                  <Text size="xs" style={{ overflowWrap: "anywhere" }}>
+                    {attempt.userMessage}
+                  </Text>
+                  <Group gap="xs" wrap="wrap">
+                    <Badge size="xs" variant="light" color="gray">
+                      {attempt.errorType}
+                    </Badge>
+                    <Badge size="xs" variant="light" color="orange">
+                      {t("failedRunRecovery.retryInSeconds", {
+                        seconds: attempt.backoffSeconds,
+                      })}
+                    </Badge>
+                  </Group>
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        </ScrollArea.Autosize>
+      </Collapse>
+    </Stack>
+  );
+}
+
+export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
+  const t = useTranslations("chat");
+  const isLive = props.variant === "live";
+  const attempts = isLive
+    ? props.retry.attempts
+    : (props.failure.attempts ?? []);
+  const retry = isLive ? props.retry : null;
+  const failure = isLive ? null : props.failure;
+  const failedAttemptCount = isLive
+    ? props.retry.failedAttemptCount
+    : props.failure.failed_attempt_count;
+  const maxRetries = isLive
+    ? props.retry.maxRetries
+    : props.failure.max_retries;
+  const countdown = useRetryCountdown(isLive ? props.retry.nextRetryAt : null);
+  const nonRetryable =
+    failure?.finalization_reason === "non_retryable" ||
+    failure?.retryability === "non_retryable";
+  const title = isLive
+    ? t("failedRunRecovery.liveTitle")
+    : nonRetryable
+      ? t("failedRunRecovery.nonRetryableTitle")
+      : t("failedRunRecovery.terminalTitle");
+  const message = isLive ? retry?.lastErrorMessage : props.message;
+
+  return (
+    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
+      <Paper
+        withBorder
+        radius="lg"
+        p="sm"
+        bg="var(--mantine-color-body)"
+        style={{ maxWidth: rem(680), overflow: "hidden" }}
+      >
+        <Stack gap="sm">
+          <Group gap="xs" align="flex-start" wrap="nowrap">
+            {nonRetryable ? (
+              <IconRepeatOff
+                aria-hidden="true"
+                size={20}
+                stroke={1.8}
+                color="var(--mantine-color-orange-6)"
+                style={{ flexShrink: 0 }}
+              />
+            ) : isLive ? (
+              <IconRepeat
+                aria-hidden="true"
+                size={20}
+                stroke={1.8}
+                color="var(--mantine-color-orange-6)"
+                style={{ flexShrink: 0 }}
+              />
+            ) : (
+              <IconAlertTriangle
+                aria-hidden="true"
+                size={20}
+                stroke={1.8}
+                color="var(--mantine-color-orange-6)"
+                style={{ flexShrink: 0 }}
+              />
+            )}
+            <Stack gap={rem(4)} style={{ minWidth: 0 }}>
+              <Group gap="xs" wrap="wrap">
+                <Text size="sm" fw={700}>
+                  {title}
+                </Text>
+                {isLive && (
+                  <Badge size="sm" variant="light" color="orange">
+                    {phaseLabel(props.phase, t)}
+                  </Badge>
+                )}
+              </Group>
+              <Text size="xs" c="dimmed">
+                {formatAttemptCount(failedAttemptCount, maxRetries, t)}
+              </Text>
+            </Stack>
+          </Group>
+
+          {message && (
+            <Paper
+              withBorder
+              radius="md"
+              p="xs"
+              bg="var(--mantine-color-default-hover)"
+            >
+              <Text size="sm" style={{ overflowWrap: "anywhere" }}>
+                {message}
+              </Text>
+            </Paper>
+          )}
+
+          {isLive && countdown !== null && (
+            <Group gap={rem(6)} c="dimmed" wrap="nowrap">
+              <IconClock aria-hidden="true" size={15} stroke={1.8} />
+              <Text size="xs">
+                {countdown > 0
+                  ? t("failedRunRecovery.nextRetryCountdown", {
+                      seconds: countdown,
+                    })
+                  : t("failedRunRecovery.retryingNow")}
+              </Text>
+            </Group>
+          )}
+
+          {!isLive && failure?.action_hint && (
+            <Text size="xs" c="dimmed">
+              {failure.action_hint}
+            </Text>
+          )}
+
+          <AttemptHistory attempts={attempts} />
+
+          {!isLive && (
+            <Group gap="xs" justify="space-between" wrap="wrap">
+              {!props.canRetry && (
+                <Text size="xs" c="dimmed">
+                  {t("failedRunRecovery.retryUnavailable")}
+                </Text>
+              )}
+              <Button
+                size="xs"
+                variant="light"
+                color="orange"
+                leftSection={<IconRefresh size={14} />}
+                loading={props.isRetryPending}
+                disabled={!props.canRetry}
+                onClick={props.onRetry}
+              >
+                {t("failedRunRecovery.retryAction")}
+              </Button>
+            </Group>
+          )}
+        </Stack>
+      </Paper>
+    </Box>
+  );
+}

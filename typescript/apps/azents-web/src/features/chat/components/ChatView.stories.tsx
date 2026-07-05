@@ -204,6 +204,7 @@ const baseArgs = {
   isResponsePending: false,
   isWritePending: false,
   isModelResponsePending: false,
+  liveRun: null,
   handle: "azents",
   onSendInput: sendMessage,
   onDeletePendingInputBuffer: noop,
@@ -218,6 +219,7 @@ const baseArgs = {
   onLoadNewer: noop,
   onResetToLatest: noop,
   onSubmitMessageEdit: sendMessage,
+  onRetryFailedRun: sendMessage,
   isCompacting: false,
   wasCommandBlocked: false,
   isStopAvailable: false,
@@ -258,6 +260,41 @@ export const LongMobileConversation = {
   args: {
     ...baseArgs,
     messages: longConversationMessages,
+  },
+} satisfies Story;
+
+export const WithLiveRunRetry = {
+  args: {
+    ...baseArgs,
+    isResponsePending: true,
+    liveRun: {
+      run_id: "run-retry-story",
+      phase: "waiting_for_model",
+      status: "running",
+      retry: {
+        status: "running",
+        lastErrorMessage: "The provider returned a temporary rate limit.",
+        failedAttemptCount: 1,
+        maxRetries: 5,
+        backoffSeconds: 10,
+        nextRetryAt: new Date(Date.now() + 30_000).toISOString(),
+        attempts: [
+          {
+            attemptNumber: 1,
+            userMessage: "The provider returned a temporary rate limit.",
+            errorType: "RateLimitError",
+            source: "model_provider",
+            failedAt: "2026-05-01T10:00:00.000Z",
+            backoffSeconds: 10,
+            nextRetryAt: "2026-05-01T10:00:10.000Z",
+            retryability: "transient",
+            failureCode: "provider_rate_limited",
+            truncated: false,
+          },
+        ],
+      },
+    },
+    isModelResponsePending: true,
   },
 } satisfies Story;
 

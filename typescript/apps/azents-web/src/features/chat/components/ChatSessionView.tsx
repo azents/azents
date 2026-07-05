@@ -102,6 +102,7 @@ export function ChatSessionView({
           isResponsePending={output.isResponsePending}
           isWritePending={output.isWritePending}
           isModelResponsePending={output.isModelResponsePending}
+          liveRun={output.liveRun}
           handle={handle}
           onSendInput={output.onSendInput}
           onDeletePendingInputBuffer={output.onDeletePendingInputBuffer}
@@ -116,6 +117,7 @@ export function ChatSessionView({
           onLoadNewer={output.onLoadNewer}
           onResetToLatest={output.onResetToLatest}
           onSubmitMessageEdit={output.onSubmitMessageEdit}
+          onRetryFailedRun={output.onRetryFailedRun}
           isCompacting={output.isCompacting}
           wasCommandBlocked={output.wasCommandBlocked}
           isStopAvailable={output.isStopAvailable}

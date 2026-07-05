@@ -1408,7 +1408,26 @@
     "localBranchesOnly": "Worktree 생성에는 로컬 브랜치만 표시됩니다.",
     "loadingLocalBranches": "로컬 브랜치 불러오는 중…",
     "noLocalBranches": "이 Project에서 사용할 수 있는 로컬 브랜치가 없습니다.",
-    "chooseWorktreeSourceFolder": "원본 폴더 선택…"
+    "chooseWorktreeSourceFolder": "원본 폴더 선택…",
+    "failedRunRecovery": {
+      "liveTitle": "실패한 실행 재시도 중",
+      "terminalTitle": "재시도 후 실행 실패",
+      "nonRetryableTitle": "재시도하지 않고 실행 실패",
+      "attempts": "실패한 시도: {failedAttemptCount} / {maxRetries}",
+      "history": "시도 기록 ({count})",
+      "attemptTitle": "시도 {attemptNumber}",
+      "retryInSeconds": "대기 {seconds}초",
+      "nextRetryCountdown": "다음 재시도까지 {seconds}초",
+      "retryingNow": "지금 재시도 중",
+      "phaseWaiting": "재시도 대기 중",
+      "phasePreparing": "재시도 준비 중",
+      "phaseModel": "모델 호출 중",
+      "phaseRecovering": "출력 복구 중",
+      "phaseCompacting": "컨텍스트 압축 중",
+      "phaseStopping": "중지 중",
+      "retryAction": "실행 재시도",
+      "retryUnavailable": "세션이 유휴 상태이고 최신 실패 실행일 때만 재시도할 수 있습니다."
+    }
   },
   "oauth": {
     "title": "인증",
