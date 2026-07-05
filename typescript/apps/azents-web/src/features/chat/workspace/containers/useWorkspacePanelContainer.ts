@@ -147,6 +147,9 @@ export function useWorkspacePanelContainer({
   >({});
   const utils = trpc.useUtils();
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectPickerDirectoryPath, setProjectPickerDirectoryPath] = useState<
+    string | null
+  >(null);
   const [registerProjectError, setRegisterProjectError] = useState<
     string | null
   >(null);
@@ -186,6 +189,7 @@ export function useWorkspacePanelContainer({
     setBrowserMode("projects");
     setDirectoryEntriesByPath({});
     setProjectPickerOpen(false);
+    setProjectPickerDirectoryPath(null);
     setRegistrationPath(null);
     setRegistrationRepositoryType(null);
     setRegistrationMode("existing_project");
@@ -296,6 +300,17 @@ export function useWorkspacePanelContainer({
           browserMode === "projects" &&
           activeDirectoryPath === projectBrowserRoot
         ),
+    },
+  );
+
+  const projectPickerPath = projectPickerDirectoryPath ?? manifest?.cwd ?? "";
+  const projectPickerDirectoryQuery = trpc.chat.readAgentWorkspacePath.useQuery(
+    { agentId, sessionId, path: projectPickerPath },
+    {
+      enabled:
+        projectPickerOpen &&
+        workspaceQuery.data?.workspace.type === "READY" &&
+        projectPickerPath !== "",
     },
   );
 
@@ -784,6 +799,7 @@ export function useWorkspacePanelContainer({
   );
 
   const onOpenProjectPicker = useCallback((): void => {
+    setProjectPickerDirectoryPath(null);
     setProjectPickerOpen(true);
   }, []);
 
@@ -932,55 +948,84 @@ export function useWorkspacePanelContainer({
     }));
   }, [directoryQuery.data]);
 
+  useEffect(() => {
+    if (!projectPickerDirectoryQuery.data) {
+      return;
+    }
+    const mappedDirectory = mapWorkspacePathResult(
+      projectPickerDirectoryQuery.data,
+    );
+    if (mappedDirectory.type !== "DIRECTORY") {
+      return;
+    }
+    setDirectoryEntriesByPath((previous) => ({
+      ...previous,
+      [mappedDirectory.path]: mappedDirectory.entries,
+    }));
+  }, [projectPickerDirectoryQuery.data]);
+
   const projectPickerState = useMemo<ProjectDirectoryPickerState>(() => {
     if (!projectPickerOpen) {
       return { type: "CLOSED" };
     }
-    if (workspaceQuery.isLoading || projectBrowserManifestQuery.isLoading) {
+    if (workspaceQuery.isLoading) {
       return { type: "LOADING" };
     }
     if (workspaceQuery.isError) {
       return { type: "ERROR", message: getErrorMessage(workspaceQuery.error) };
     }
-    if (!workspaceQuery.data) {
+    if (!workspaceQuery.data || !manifest) {
       return { type: "LOADING" };
     }
-    const directoryResult = directoryQuery.data;
+    if (projectPickerDirectoryQuery.isError) {
+      return {
+        type: "ERROR",
+        message: getErrorMessage(projectPickerDirectoryQuery.error),
+      };
+    }
+    const pickerDirectory = projectPickerDirectoryQuery.data
+      ? mapWorkspacePathResult(projectPickerDirectoryQuery.data)
+      : null;
+    if (
+      projectPickerDirectoryPath !== null &&
+      projectPickerDirectoryQuery.isLoading &&
+      !pickerDirectory
+    ) {
+      return { type: "LOADING" };
+    }
     const entries =
-      directoryResult?.type === "DIRECTORY"
-        ? directoryResult.entries.map((entry) => ({
+      pickerDirectory?.type === "DIRECTORY"
+        ? pickerDirectory.entries.map((entry) => ({
             path: entry.path,
             kind: entry.kind,
-            repositoryType: entry.repository_type ?? null,
+            repositoryType: entry.repositoryType ?? null,
           }))
-        : activeDirectoryPath === projectBrowserManifest?.root
-          ? projectBrowserManifest.entries.map((entry) => ({
+        : projectPickerDirectoryPath === null
+          ? manifest.entries.map((entry) => ({
               path: entry.path,
               kind: entry.kind,
               repositoryType: entry.repositoryType ?? null,
             }))
-          : (manifest?.entries.map((entry) => ({
-              path: entry.path,
-              kind: entry.kind,
-              repositoryType: entry.repositoryType ?? null,
-            })) ?? []);
+          : [];
     return {
       type: "SERVER",
       server: workspaceQuery.data,
-      currentPath: activeDirectoryPath,
+      currentPath: projectPickerPath || manifest.cwd,
       entries,
-      isRefreshing: workspaceQuery.isFetching || directoryQuery.isFetching,
+      isRefreshing:
+        workspaceQuery.isFetching || projectPickerDirectoryQuery.isFetching,
       isStarting: startRuntimeMutation.isPending,
     };
   }, [
-    activeDirectoryPath,
-    directoryQuery.data,
-    directoryQuery.isFetching,
-    manifest?.entries,
-    projectBrowserManifest?.entries,
-    projectBrowserManifest?.root,
-    projectBrowserManifestQuery.isLoading,
+    manifest,
+    projectPickerDirectoryPath,
+    projectPickerDirectoryQuery.data,
+    projectPickerDirectoryQuery.error,
+    projectPickerDirectoryQuery.isError,
+    projectPickerDirectoryQuery.isFetching,
+    projectPickerDirectoryQuery.isLoading,
     projectPickerOpen,
+    projectPickerPath,
     startRuntimeMutation.isPending,
     workspaceQuery.data,
     workspaceQuery.error,
@@ -1258,8 +1303,11 @@ export function useWorkspacePanelContainer({
     projectPickerState,
     isProjectPickerOpen: projectPickerOpen,
     onOpenProjectPicker,
-    onCloseProjectPicker: () => setProjectPickerOpen(false),
-    onOpenProjectPickerDirectory: setCurrentDirectoryPath,
+    onCloseProjectPicker: () => {
+      setProjectPickerOpen(false);
+      setProjectPickerDirectoryPath(null);
+    },
+    onOpenProjectPickerDirectory: setProjectPickerDirectoryPath,
     onSelectProjectPickerDirectory,
     onRefreshProjectPicker: onRefresh,
     onStartRuntimeForProjectPicker: onStartRuntime,
