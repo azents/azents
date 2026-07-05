@@ -10,7 +10,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import type { UploadedFile } from "@/features/chat/hooks/useFileUpload";
-import type { ProjectDirectoryPickerState } from "@/features/chat/workspace/components/WorkspaceDirectoryPickerModal";
+import type {
+  ProjectDirectoryPickerEntry,
+  ProjectDirectoryPickerState,
+} from "@/features/chat/workspace/components/WorkspaceDirectoryPickerModal";
 import type {
   AgentProjectPresetResponse,
   AgentResponse,
@@ -72,7 +75,7 @@ export interface AgentDraftChatContainerOutput {
   onOpenProjectPicker: (purpose: ProjectPickerPurpose) => void;
   onCloseProjectPicker: () => void;
   onOpenProjectPickerDirectory: (path: string) => void;
-  onSelectProjectPickerDirectory: (path: string) => void;
+  onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
   onSendMessage: (
@@ -578,8 +581,16 @@ export function useAgentDraftChatContainer(
     const directoryResult = directoryQuery.data;
     const entries =
       directoryResult?.type === "DIRECTORY"
-        ? directoryResult.entries
-        : (manifest?.entries ?? []);
+        ? directoryResult.entries.map((entry) => ({
+            path: entry.path,
+            kind: entry.kind,
+            repositoryType: entry.repository_type ?? null,
+          }))
+        : (manifest?.entries.map((entry) => ({
+            path: entry.path,
+            kind: entry.kind,
+            repositoryType: entry.repository_type ?? null,
+          })) ?? []);
     return {
       type: "SERVER",
       server: workspaceQuery.data,
@@ -626,11 +637,11 @@ export function useAgentDraftChatContainer(
     },
     onCloseProjectPicker: () => setProjectPickerOpen(false),
     onOpenProjectPickerDirectory: setProjectPickerPath,
-    onSelectProjectPickerDirectory: (path: string) => {
+    onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => {
       if (projectPickerPurpose === "git_worktree") {
-        onAddWorktreeProject(path);
+        onAddWorktreeProject(entry.path);
       } else {
-        onAddPresetProject(path);
+        onAddPresetProject(entry.path);
       }
       setProjectPickerOpen(false);
     },

@@ -388,6 +388,45 @@ export const chatRouter = router({
       }
     }),
 
+  createSessionGitWorktreeProject: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        clientRequestId: z.string().min(1).max(64),
+        sourceProjectPath: z.string().min(1),
+        startingRef: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1CreateInput({
+          client: ctx.apiClient,
+          path: { session_id: input.sessionId },
+          body: {
+            agent_id: input.agentId,
+            client_request_id: input.clientRequestId,
+            message: "",
+            action: {
+              type: "create_git_worktree",
+              source_project_path: input.sourceProjectPath,
+              starting_ref: input.startingRef,
+            },
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
   deleteAgentProject: publicProcedure
     .input(
       z.object({

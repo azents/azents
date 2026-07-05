@@ -8,12 +8,19 @@ import {
   mapWorkspaceManifest,
   mapWorkspacePathResult,
   mapWorkspacePathStat,
+  type ProjectGitRefPreviewState,
+  type ProjectRegistrationMode,
   type WorkspaceBrowserMode,
   type WorkspaceEntry,
   type WorkspacePanelState,
   type WorkspaceProjectPanelState,
 } from "../types";
-import type { ProjectDirectoryPickerState } from "../components/WorkspaceDirectoryPickerModal";
+import type { ActionExecutionProjection } from "../../types";
+import type {
+  ProjectDirectoryPickerEntry,
+  ProjectDirectoryPickerState,
+} from "../components/WorkspaceDirectoryPickerModal";
+import type { GitRefEntryResponse } from "@azents/public-client";
 
 const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
 
@@ -22,6 +29,7 @@ interface UseWorkspacePanelContainerInput {
   agentId: string;
   sessionId: string;
   autoRefreshVisible: boolean;
+  actionExecutions: ActionExecutionProjection[];
 }
 
 export interface WorkspacePanelContainerOutput {
@@ -50,9 +58,13 @@ export interface WorkspacePanelContainerOutput {
   onOpenProjectPicker: () => void;
   onCloseProjectPicker: () => void;
   onOpenProjectPickerDirectory: (path: string) => void;
-  onSelectProjectPickerDirectory: (path: string) => void;
+  onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onCloseProjectRegistration: () => void;
+  onSetProjectRegistrationMode: (mode: ProjectRegistrationMode) => void;
+  onSetProjectRegistrationStartingRef: (ref: string | null) => void;
+  onSubmitProjectRegistration: () => void;
   onApproveRegistrationRequest: (requestId: string) => void;
   onRejectRegistrationRequest: (requestId: string) => void;
   onDeleteProject: (projectId: string) => void;
@@ -73,6 +85,27 @@ function parentPath(path: string): string {
 
 function isSameOrDescendant(path: string, targetPath: string): boolean {
   return path === targetPath || path.startsWith(`${targetPath}/`);
+}
+
+function localBranchRefs(refs: GitRefEntryResponse[]): GitRefEntryResponse[] {
+  return refs.filter((ref) => ref.type === "branch");
+}
+
+function defaultStartingRef(refs: GitRefEntryResponse[]): string | null {
+  return refs.find((ref) => ref.default)?.ref ?? refs.at(0)?.ref ?? null;
+}
+
+function repositoryTypeForPath(
+  entriesByPath: Record<string, WorkspaceEntry[]>,
+  path: string,
+): "git" | null {
+  for (const entries of Object.values(entriesByPath)) {
+    const entry = entries.find((candidate) => candidate.path === path);
+    if (entry?.repositoryType === "git") {
+      return "git";
+    }
+  }
+  return null;
 }
 
 function removeDeletedWorkspaceEntries(
@@ -96,6 +129,7 @@ export function useWorkspacePanelContainer({
   agentId,
   sessionId,
   autoRefreshVisible,
+  actionExecutions,
 }: UseWorkspacePanelContainerInput): WorkspacePanelContainerOutput {
   const [currentDirectoryPath, setCurrentDirectoryPath] = useState<
     string | null
@@ -124,6 +158,22 @@ export function useWorkspacePanelContainer({
   const [pendingDeleteProjectId, setPendingDeleteProjectId] = useState<
     string | null
   >(null);
+  const [registrationPath, setRegistrationPath] = useState<string | null>(null);
+  const [registrationRepositoryType, setRegistrationRepositoryType] = useState<
+    "git" | null
+  >(null);
+  const [registrationMode, setRegistrationMode] =
+    useState<ProjectRegistrationMode>("existing_project");
+  const [registrationStartingRef, setRegistrationStartingRef] = useState<
+    string | null
+  >(null);
+  const [registrationSubmitError, setRegistrationSubmitError] = useState<
+    string | null
+  >(null);
+  const [
+    lastCompletedWorktreeExecutionId,
+    setLastCompletedWorktreeExecutionId,
+  ] = useState<string | null>(null);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const autoRefreshKeyRef = useRef<string | null>(null);
 
@@ -135,6 +185,12 @@ export function useWorkspacePanelContainer({
     setBrowserMode("projects");
     setDirectoryEntriesByPath({});
     setProjectPickerOpen(false);
+    setRegistrationPath(null);
+    setRegistrationRepositoryType(null);
+    setRegistrationMode("existing_project");
+    setRegistrationStartingRef(null);
+    setRegistrationSubmitError(null);
+    setLastCompletedWorktreeExecutionId(null);
   }, [agentId, sessionId]);
 
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
@@ -166,6 +222,15 @@ export function useWorkspacePanelContainer({
       agentId,
       sessionId,
     });
+  const gitRefsQuery = trpc.chat.previewAgentGitRefs.useQuery(
+    { agentId, sourceProjectPath: registrationPath ?? "" },
+    {
+      enabled:
+        registrationPath !== null &&
+        registrationRepositoryType === "git" &&
+        registrationMode === "git_worktree",
+    },
+  );
   const manifest = useMemo(() => {
     if (workspaceQuery.data?.workspace.type !== "READY") {
       return null;
@@ -195,6 +260,20 @@ export function useWorkspacePanelContainer({
       [manifest.cwd]: manifest.entries,
     }));
   }, [manifest]);
+
+  useEffect(() => {
+    if (!gitRefsQuery.data || registrationMode !== "git_worktree") {
+      return;
+    }
+    const refs = localBranchRefs(gitRefsQuery.data.refs);
+    if (
+      registrationStartingRef &&
+      refs.some((ref) => ref.ref === registrationStartingRef)
+    ) {
+      return;
+    }
+    setRegistrationStartingRef(defaultStartingRef(refs));
+  }, [gitRefsQuery.data, registrationMode, registrationStartingRef]);
 
   useEffect(() => {
     if (!projectBrowserManifest) {
@@ -423,6 +502,19 @@ export function useWorkspacePanelContainer({
     onError: (error) => setRegisterProjectError(error.message),
   });
 
+  const createWorktreeProjectMutation =
+    trpc.chat.createSessionGitWorktreeProject.useMutation({
+      onSuccess: async () => {
+        setRegistrationPath(null);
+        setRegistrationRepositoryType(null);
+        setRegistrationMode("existing_project");
+        setRegistrationStartingRef(null);
+        setRegistrationSubmitError(null);
+        await utils.chat.listInputActions.invalidate({ sessionId });
+      },
+      onError: (error) => setRegistrationSubmitError(error.message),
+    });
+
   const approveRegistrationRequestMutation =
     trpc.chat.approveAgentProjectRegistrationRequest.useMutation({
       onSuccess: async () => {
@@ -467,6 +559,37 @@ export function useWorkspacePanelContainer({
     },
     onError: () => setPendingDeleteProjectId(null),
   });
+
+  useEffect(() => {
+    const completedWorktreeExecution = actionExecutions.find(
+      (actionExecution) =>
+        actionExecution.execution.action_type === "create_git_worktree" &&
+        actionExecution.execution.status === "completed" &&
+        actionExecution.execution.id !== lastCompletedWorktreeExecutionId,
+    );
+    if (!completedWorktreeExecution) {
+      return;
+    }
+    setLastCompletedWorktreeExecutionId(
+      completedWorktreeExecution.execution.id,
+    );
+    void Promise.all([
+      utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
+      utils.chat.getSessionProjectBrowserManifest.invalidate({
+        agentId,
+        sessionId,
+      }),
+      utils.chat.listInputActions.invalidate({ sessionId }),
+    ]);
+  }, [
+    actionExecutions,
+    agentId,
+    lastCompletedWorktreeExecutionId,
+    sessionId,
+    utils.chat.getSessionProjectBrowserManifest,
+    utils.chat.listAgentProjects,
+    utils.chat.listInputActions,
+  ]);
 
   const onStartRuntime = useCallback(
     () => startRuntimeMutation.mutate({ handle, agentId }),
@@ -631,6 +754,11 @@ export function useWorkspacePanelContainer({
   const onRegisterProject = useCallback(
     (path: string) => {
       setRegisterProjectError(null);
+      setRegistrationPath(null);
+      setRegistrationRepositoryType(null);
+      setRegistrationMode("existing_project");
+      setRegistrationStartingRef(null);
+      setRegistrationSubmitError(null);
       registerProjectMutation.mutate({
         agentId,
         sessionId,
@@ -643,6 +771,65 @@ export function useWorkspacePanelContainer({
   const onOpenProjectPicker = useCallback((): void => {
     setProjectPickerOpen(true);
   }, []);
+
+  const onSelectProjectPickerDirectory = useCallback(
+    (entry: ProjectDirectoryPickerEntry): void => {
+      const repositoryType =
+        entry.repositoryType ??
+        repositoryTypeForPath(directoryEntriesByPath, entry.path);
+      setProjectPickerOpen(false);
+      if (repositoryType === "git") {
+        setRegistrationPath(entry.path);
+        setRegistrationRepositoryType("git");
+        setRegistrationMode("existing_project");
+        setRegistrationStartingRef(null);
+        setRegistrationSubmitError(null);
+        return;
+      }
+      onRegisterProject(entry.path);
+    },
+    [directoryEntriesByPath, onRegisterProject],
+  );
+
+  const onCloseProjectRegistration = useCallback((): void => {
+    setRegistrationPath(null);
+    setRegistrationRepositoryType(null);
+    setRegistrationMode("existing_project");
+    setRegistrationStartingRef(null);
+    setRegistrationSubmitError(null);
+  }, []);
+
+  const onSubmitProjectRegistration = useCallback((): void => {
+    if (!registrationPath) {
+      return;
+    }
+    if (registrationMode === "existing_project") {
+      onRegisterProject(registrationPath);
+      return;
+    }
+    if (!registrationStartingRef) {
+      setRegistrationSubmitError(
+        "Select a starting ref before creating the worktree.",
+      );
+      return;
+    }
+    setRegistrationSubmitError(null);
+    createWorktreeProjectMutation.mutate({
+      agentId,
+      sessionId,
+      clientRequestId: crypto.randomUUID(),
+      sourceProjectPath: registrationPath,
+      startingRef: registrationStartingRef,
+    });
+  }, [
+    agentId,
+    createWorktreeProjectMutation,
+    onRegisterProject,
+    registrationMode,
+    registrationPath,
+    registrationStartingRef,
+    sessionId,
+  ]);
 
   const onApproveRegistrationRequest = useCallback(
     (requestId: string) => {
@@ -728,8 +915,22 @@ export function useWorkspacePanelContainer({
     const directoryResult = directoryQuery.data;
     const entries =
       directoryResult?.type === "DIRECTORY"
-        ? directoryResult.entries
-        : (manifest?.entries ?? []);
+        ? directoryResult.entries.map((entry) => ({
+            path: entry.path,
+            kind: entry.kind,
+            repositoryType: entry.repository_type ?? null,
+          }))
+        : activeDirectoryPath === projectBrowserManifest?.root
+          ? projectBrowserManifest.entries.map((entry) => ({
+              path: entry.path,
+              kind: entry.kind,
+              repositoryType: entry.repositoryType ?? null,
+            }))
+          : (manifest?.entries.map((entry) => ({
+              path: entry.path,
+              kind: entry.kind,
+              repositoryType: entry.repositoryType ?? null,
+            })) ?? []);
     return {
       type: "SERVER",
       server: workspaceQuery.data,
@@ -743,6 +944,8 @@ export function useWorkspacePanelContainer({
     directoryQuery.data,
     directoryQuery.isFetching,
     manifest?.entries,
+    projectBrowserManifest?.entries,
+    projectBrowserManifest?.root,
     projectBrowserManifestQuery.isLoading,
     projectPickerOpen,
     startRuntimeMutation.isPending,
@@ -908,6 +1111,32 @@ export function useWorkspacePanelContainer({
     workspaceView,
   ]);
 
+  const gitRefPreviewState = useMemo<ProjectGitRefPreviewState>(() => {
+    if (
+      registrationMode !== "git_worktree" ||
+      registrationRepositoryType !== "git"
+    ) {
+      return { type: "IDLE" };
+    }
+    if (gitRefsQuery.isLoading) {
+      return { type: "LOADING" };
+    }
+    if (gitRefsQuery.isError) {
+      return { type: "ERROR", message: getErrorMessage(gitRefsQuery.error) };
+    }
+    if (!gitRefsQuery.data) {
+      return { type: "LOADING" };
+    }
+    return { type: "READY", refs: localBranchRefs(gitRefsQuery.data.refs) };
+  }, [
+    gitRefsQuery.data,
+    gitRefsQuery.error,
+    gitRefsQuery.isError,
+    gitRefsQuery.isLoading,
+    registrationMode,
+    registrationRepositoryType,
+  ]);
+
   const projectState = useMemo<WorkspaceProjectPanelState>(() => {
     if (projectsQuery.isLoading || registrationRequestsQuery.isLoading) {
       return { type: "LOADING" };
@@ -925,7 +1154,23 @@ export function useWorkspacePanelContainer({
       type: "READY",
       projects: projectsQuery.data?.items ?? [],
       registrationRequests: registrationRequestsQuery.data?.items ?? [],
+      registrationDialog:
+        registrationPath === null
+          ? { type: "CLOSED" }
+          : {
+              type: "OPEN",
+              path: registrationPath,
+              repositoryType: registrationRepositoryType,
+              mode: registrationMode,
+              startingRef: registrationStartingRef,
+              gitRefPreview: gitRefPreviewState,
+              submitError: registrationSubmitError,
+              isSubmitting:
+                registerProjectMutation.isPending ||
+                createWorktreeProjectMutation.isPending,
+            },
       isRegisteringProject: registerProjectMutation.isPending,
+      isCreatingWorktree: createWorktreeProjectMutation.isPending,
       registerProjectError,
       pendingApproveRequestId,
       pendingRejectRequestId,
@@ -933,6 +1178,8 @@ export function useWorkspacePanelContainer({
     };
   }, [
     pendingApproveRequestId,
+    createWorktreeProjectMutation.isPending,
+    gitRefPreviewState,
     pendingDeleteProjectId,
     pendingRejectRequestId,
     projectsQuery.data?.items,
@@ -941,6 +1188,11 @@ export function useWorkspacePanelContainer({
     projectsQuery.isLoading,
     registerProjectError,
     registerProjectMutation.isPending,
+    registrationMode,
+    registrationPath,
+    registrationRepositoryType,
+    registrationStartingRef,
+    registrationSubmitError,
     registrationRequestsQuery.data?.items,
     registrationRequestsQuery.error,
     registrationRequestsQuery.isError,
@@ -973,12 +1225,13 @@ export function useWorkspacePanelContainer({
     onOpenProjectPicker,
     onCloseProjectPicker: () => setProjectPickerOpen(false),
     onOpenProjectPickerDirectory: setCurrentDirectoryPath,
-    onSelectProjectPickerDirectory: (path: string) => {
-      onRegisterProject(path);
-      setProjectPickerOpen(false);
-    },
+    onSelectProjectPickerDirectory,
     onRefreshProjectPicker: onRefresh,
     onStartRuntimeForProjectPicker: onStartRuntime,
+    onCloseProjectRegistration,
+    onSetProjectRegistrationMode: setRegistrationMode,
+    onSetProjectRegistrationStartingRef: setRegistrationStartingRef,
+    onSubmitProjectRegistration,
     onApproveRegistrationRequest,
     onRejectRegistrationRequest,
     onDeleteProject,

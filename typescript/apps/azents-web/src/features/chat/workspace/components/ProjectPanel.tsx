@@ -9,15 +9,26 @@ import {
   Loader,
   Modal,
   Paper,
+  Select,
   Stack,
   Text,
 } from "@mantine/core";
-import { IconAlertCircle, IconFolderOpen } from "@tabler/icons-react";
+import {
+  IconAlertCircle,
+  IconBrandGit,
+  IconFolderOpen,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { WorkspaceDirectoryPickerModal } from "./WorkspaceDirectoryPickerModal";
-import type { WorkspaceProjectPanelState } from "../types";
-import type { ProjectDirectoryPickerState } from "./WorkspaceDirectoryPickerModal";
+import type {
+  ProjectRegistrationMode,
+  WorkspaceProjectPanelState,
+} from "../types";
+import type {
+  ProjectDirectoryPickerEntry,
+  ProjectDirectoryPickerState,
+} from "./WorkspaceDirectoryPickerModal";
 
 interface ProjectPanelProps {
   projectState: WorkspaceProjectPanelState;
@@ -26,9 +37,13 @@ interface ProjectPanelProps {
   onOpenProjectPicker: () => void;
   onCloseProjectPicker: () => void;
   onOpenProjectPickerDirectory: (path: string) => void;
-  onSelectProjectPickerDirectory: (path: string) => void;
+  onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onCloseProjectRegistration: () => void;
+  onSetProjectRegistrationMode: (mode: ProjectRegistrationMode) => void;
+  onSetProjectRegistrationStartingRef: (ref: string | null) => void;
+  onSubmitProjectRegistration: () => void;
   onApproveRegistrationRequest: (requestId: string) => void;
   onRejectRegistrationRequest: (requestId: string) => void;
   onDeleteProject: (projectId: string) => void;
@@ -44,6 +59,10 @@ export function ProjectPanel({
   onSelectProjectPickerDirectory,
   onRefreshProjectPicker,
   onStartRuntimeForProjectPicker,
+  onCloseProjectRegistration,
+  onSetProjectRegistrationMode,
+  onSetProjectRegistrationStartingRef,
+  onSubmitProjectRegistration,
   onApproveRegistrationRequest,
   onRejectRegistrationRequest,
   onDeleteProject,
@@ -85,6 +104,20 @@ export function ProjectPanel({
     const trimmed = path.replace(/\/+$/, "");
     return trimmed.slice(trimmed.lastIndexOf("/") + 1) || trimmed;
   };
+  const registrationDialog = projectState.registrationDialog;
+  const gitRefOptions =
+    registrationDialog.type === "OPEN" &&
+    registrationDialog.gitRefPreview.type === "READY"
+      ? registrationDialog.gitRefPreview.refs.map((ref) => ({
+          value: ref.ref,
+          label: ref.default ? `${ref.name} (${t("defaultRef")})` : ref.name,
+        }))
+      : [];
+  const worktreeSubmitDisabled =
+    registrationDialog.type === "OPEN" &&
+    registrationDialog.mode === "git_worktree" &&
+    (registrationDialog.gitRefPreview.type !== "READY" ||
+      registrationDialog.startingRef === null);
 
   return (
     <>
@@ -229,6 +262,106 @@ export function ProjectPanel({
         onRefresh={onRefreshProjectPicker}
         onStartRuntime={onStartRuntimeForProjectPicker}
       />
+
+      <Modal
+        centered
+        opened={registrationDialog.type === "OPEN"}
+        title={t("registrationModalTitle")}
+        onClose={onCloseProjectRegistration}
+      >
+        {registrationDialog.type === "OPEN" ? (
+          <Stack gap="md">
+            <Box>
+              <Text fw={600} size="sm">
+                {basename(registrationDialog.path)}
+              </Text>
+              <Text c="dimmed" size="xs" style={{ overflowWrap: "anywhere" }}>
+                {registrationDialog.path}
+              </Text>
+            </Box>
+            <Select
+              allowDeselect={false}
+              data={[
+                {
+                  value: "existing_project",
+                  label: t("registrationModeExistingProject"),
+                },
+                {
+                  value: "git_worktree",
+                  label: t("registrationModeGitWorktree"),
+                },
+              ]}
+              label={t("registrationModeLabel")}
+              value={registrationDialog.mode}
+              onChange={(value) => {
+                if (value === "existing_project" || value === "git_worktree") {
+                  onSetProjectRegistrationMode(value);
+                }
+              }}
+            />
+            {registrationDialog.mode === "existing_project" ? (
+              <Text c="dimmed" size="sm">
+                {t("registrationExistingProjectDescription")}
+              </Text>
+            ) : (
+              <Stack gap="xs">
+                <Text c="dimmed" size="sm">
+                  {t("registrationGitWorktreeDescription")}
+                </Text>
+                <Select
+                  data={gitRefOptions}
+                  disabled={
+                    registrationDialog.gitRefPreview.type === "LOADING" ||
+                    registrationDialog.gitRefPreview.type === "ERROR" ||
+                    gitRefOptions.length === 0
+                  }
+                  label={t("startingRef")}
+                  leftSection={
+                    registrationDialog.gitRefPreview.type === "LOADING" ? (
+                      <Loader size="xs" />
+                    ) : (
+                      <IconBrandGit size={16} />
+                    )
+                  }
+                  placeholder={t("startingRefPlaceholder")}
+                  value={registrationDialog.startingRef}
+                  onChange={onSetProjectRegistrationStartingRef}
+                />
+                {registrationDialog.gitRefPreview.type === "ERROR" ? (
+                  <Alert color="red">
+                    {registrationDialog.gitRefPreview.message}
+                  </Alert>
+                ) : null}
+                {registrationDialog.gitRefPreview.type === "READY" &&
+                gitRefOptions.length === 0 ? (
+                  <Text c="red" size="xs">
+                    {t("noLocalBranches")}
+                  </Text>
+                ) : null}
+              </Stack>
+            )}
+            {registrationDialog.submitError ? (
+              <Text c="red" size="xs">
+                {registrationDialog.submitError}
+              </Text>
+            ) : null}
+            <Group justify="flex-end">
+              <Button variant="default" onClick={onCloseProjectRegistration}>
+                {t("cancel")}
+              </Button>
+              <Button
+                disabled={worktreeSubmitDisabled}
+                loading={registrationDialog.isSubmitting}
+                onClick={onSubmitProjectRegistration}
+              >
+                {registrationDialog.mode === "git_worktree"
+                  ? t("createWorktree")
+                  : t("registerProjectSubmit")}
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
+      </Modal>
 
       <Modal
         opened={deleteProject !== null}
