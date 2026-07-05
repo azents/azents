@@ -50,7 +50,12 @@ from azents.core.auth.jwt import (
 from azents.core.config import AuthConfig, Config
 from azents.core.deps import get_appctx, get_auth_config
 from azents.core.redis import create_redis_client
-from azents.engine.events.action_messages import CommandAction, GoalAction, SkillAction
+from azents.engine.events.action_messages import (
+    CommandAction,
+    CreateGitWorktreeAction,
+    GoalAction,
+    SkillAction,
+)
 from azents.engine.events.types import FileOutputPart
 from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
 from azents.engine.run.input import InputMessage
@@ -1314,7 +1319,7 @@ async def _write_turn_action_via_rest(
                 raise HTTPException(
                     status_code=400, detail="Goal objective is required."
                 )
-        case SkillAction():
+        case SkillAction() | CreateGitWorktreeAction():
             pass
         case _:
             raise HTTPException(status_code=400, detail="This action is not supported.")
@@ -1405,7 +1410,7 @@ async def _write_input_via_rest(
                 user_id=user_id,
                 payload_override=request.model_dump(mode="json"),
             )
-        case GoalAction() | SkillAction():
+        case GoalAction() | SkillAction() | CreateGitWorktreeAction():
             return await _write_turn_action_via_rest(
                 chat_service,
                 agent_session_input_service,

@@ -18,13 +18,14 @@ import pprint
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
 from typing import Any, List, Optional
 from azentspublicclient.models.command_action import CommandAction
+from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction
 from azentspublicclient.models.goal_action import GoalAction
 from azentspublicclient.models.skill_action import SkillAction
 from pydantic import StrictStr, Field
 from typing import Union, List, Set, Optional, Dict
 from typing_extensions import Literal, Self
 
-CHATINPUTWRITEREQUESTACTION_ONE_OF_SCHEMAS = ["CommandAction", "GoalAction", "SkillAction"]
+CHATINPUTWRITEREQUESTACTION_ONE_OF_SCHEMAS = ["CommandAction", "CreateGitWorktreeAction", "GoalAction", "SkillAction"]
 
 class ChatInputWriteRequestAction(BaseModel):
     """
@@ -36,8 +37,10 @@ class ChatInputWriteRequestAction(BaseModel):
     oneof_schema_2_validator: Optional[GoalAction] = None
     # data type: SkillAction
     oneof_schema_3_validator: Optional[SkillAction] = None
-    actual_instance: Optional[Union[CommandAction, GoalAction, SkillAction]] = None
-    one_of_schemas: Set[str] = { "CommandAction", "GoalAction", "SkillAction" }
+    # data type: CreateGitWorktreeAction
+    oneof_schema_4_validator: Optional[CreateGitWorktreeAction] = None
+    actual_instance: Optional[Union[CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction]] = None
+    one_of_schemas: Set[str] = { "CommandAction", "CreateGitWorktreeAction", "GoalAction", "SkillAction" }
 
     model_config = ConfigDict(
         validate_assignment=True,
@@ -81,12 +84,17 @@ class ChatInputWriteRequestAction(BaseModel):
             error_messages.append(f"Error! Input type `{type(v)}` is not `SkillAction`")
         else:
             match += 1
+        # validate data type: CreateGitWorktreeAction
+        if not isinstance(v, CreateGitWorktreeAction):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `CreateGitWorktreeAction`")
+        else:
+            match += 1
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when setting `actual_instance` in ChatInputWriteRequestAction with oneOf schemas: CommandAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when setting `actual_instance` in ChatInputWriteRequestAction with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when setting `actual_instance` in ChatInputWriteRequestAction with oneOf schemas: CommandAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting `actual_instance` in ChatInputWriteRequestAction with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -122,13 +130,19 @@ class ChatInputWriteRequestAction(BaseModel):
             match += 1
         except (ValidationError, ValueError) as e:
             error_messages.append(str(e))
+        # deserialize data into CreateGitWorktreeAction
+        try:
+            instance.actual_instance = CreateGitWorktreeAction.from_json(json_str)
+            match += 1
+        except (ValidationError, ValueError) as e:
+            error_messages.append(str(e))
 
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when deserializing the JSON string into ChatInputWriteRequestAction with oneOf schemas: CommandAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when deserializing the JSON string into ChatInputWriteRequestAction with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into ChatInputWriteRequestAction with oneOf schemas: CommandAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into ChatInputWriteRequestAction with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
         else:
             return instance
 
@@ -142,7 +156,7 @@ class ChatInputWriteRequestAction(BaseModel):
         else:
             return json.dumps(self.actual_instance)
 
-    def to_dict(self) -> Optional[Union[Dict[str, Any], CommandAction, GoalAction, SkillAction]]:
+    def to_dict(self) -> Optional[Union[Dict[str, Any], CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction]]:
         """Returns the dict representation of the actual instance"""
         if self.actual_instance is None:
             return None

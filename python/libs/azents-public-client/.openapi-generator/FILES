@@ -117,6 +117,7 @@ azentspublicclient/docs/ChatWriteAcceptedResponse.md
 azentspublicclient/docs/ChatWriteResponse.md
 azentspublicclient/docs/ChatWriteSnapshotResponse.md
 azentspublicclient/docs/CommandAction.md
+azentspublicclient/docs/CreateGitWorktreeAction.md
 azentspublicclient/docs/CreateInvitationRequest.md
 azentspublicclient/docs/CreateJoinRequestRequest.md
 azentspublicclient/docs/CreateWorkspaceRequest.md
@@ -392,6 +393,7 @@ azentspublicclient/models/chat_write_accepted_response.py
 azentspublicclient/models/chat_write_response.py
 azentspublicclient/models/chat_write_snapshot_response.py
 azentspublicclient/models/command_action.py
+azentspublicclient/models/create_git_worktree_action.py
 azentspublicclient/models/create_invitation_request.py
 azentspublicclient/models/create_join_request_request.py
 azentspublicclient/models/create_workspace_request.py
@@ -661,6 +663,7 @@ azentspublicclient/test/test_chat_write_accepted_response.py
 azentspublicclient/test/test_chat_write_response.py
 azentspublicclient/test/test_chat_write_snapshot_response.py
 azentspublicclient/test/test_command_action.py
+azentspublicclient/test/test_create_git_worktree_action.py
 azentspublicclient/test/test_create_invitation_request.py
 azentspublicclient/test/test_create_join_request_request.py
 azentspublicclient/test/test_create_workspace_request.py

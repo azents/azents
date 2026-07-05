@@ -235,6 +235,7 @@ class TestProjectBrowserManifestService:
                 session_id=fixture.session_id,
                 initialization_id=initialization.id,
                 step_id=steps[0].id,
+                action_execution_id=None,
                 session_workspace_project_id=project.id,
                 source_project_path="/workspace/agent/app",
                 starting_ref="main",

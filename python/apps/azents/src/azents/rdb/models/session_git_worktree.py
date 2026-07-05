@@ -59,6 +59,10 @@ class RDBSessionGitWorktree(RDBModel):
         "ix_session_git_worktrees_session_workspace_project_id",
         "session_workspace_project_id",
     )
+    IX_ACTION_EXECUTION_ID = sa.Index(
+        "ix_session_git_worktrees_action_execution_id",
+        "action_execution_id",
+    )
     IX_WORKTREE_PATH = sa.Index(
         "ix_session_git_worktrees_worktree_path",
         "worktree_path",
@@ -91,6 +95,12 @@ class RDBSessionGitWorktree(RDBModel):
         session_git_worktree_branch_created_by_enum,
         nullable=False,
         default=SessionGitWorktreeBranchCreatedBy.AZENTS,
+    )
+    action_execution_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("action_executions.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
     )
 
     id: Mapped[str] = mapped_column(
@@ -157,6 +167,7 @@ class RDBSessionGitWorktree(RDBModel):
         IX_STATUS,
         IX_SESSION_STATUS,
         IX_SESSION_WORKSPACE_PROJECT_ID,
+        IX_ACTION_EXECUTION_ID,
         IX_WORKTREE_PATH,
         IX_BRANCH_NAME,
     )

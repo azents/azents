@@ -322,6 +322,7 @@ Class | Method | HTTP request | Description
  - [ChatWriteResponse](azentspublicclient/docs/ChatWriteResponse.md)
  - [ChatWriteSnapshotResponse](azentspublicclient/docs/ChatWriteSnapshotResponse.md)
  - [CommandAction](azentspublicclient/docs/CommandAction.md)
+ - [CreateGitWorktreeAction](azentspublicclient/docs/CreateGitWorktreeAction.md)
  - [CreateInvitationRequest](azentspublicclient/docs/CreateInvitationRequest.md)
  - [CreateJoinRequestRequest](azentspublicclient/docs/CreateJoinRequestRequest.md)
  - [CreateWorkspaceRequest](azentspublicclient/docs/CreateWorkspaceRequest.md)

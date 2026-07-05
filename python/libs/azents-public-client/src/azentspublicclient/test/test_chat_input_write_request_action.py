@@ -37,12 +37,16 @@ class TestChatInputWriteRequestAction(unittest.TestCase):
             return ChatInputWriteRequestAction(
                 type = 'command',
                 name = '0',
-                skill_path = '0'
+                skill_path = '0',
+                source_project_path = '0',
+                starting_ref = '0'
             )
         else:
             return ChatInputWriteRequestAction(
                 name = '0',
                 skill_path = '0',
+                source_project_path = '0',
+                starting_ref = '0',
         )
         """
 

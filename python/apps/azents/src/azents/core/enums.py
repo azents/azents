@@ -196,6 +196,32 @@ class SessionGitWorktreeBranchCreatedBy(enum.StrEnum):
     AZENTS = "azents"
 
 
+class ActionExecutionStatus(enum.StrEnum):
+    """Durable TurnAction execution status."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    FAILED_FINAL = "failed_final"
+
+
+class ActionExecutionEventKind(enum.StrEnum):
+    """Durable TurnAction execution event kind."""
+
+    INFO = "info"
+    STEP_STARTED = "step_started"
+    COMMAND_STARTED = "command_started"
+    STDOUT = "stdout"
+    STDERR = "stderr"
+    COMMAND_COMPLETED = "command_completed"
+    WARNING = "warning"
+    FAILED = "failed"
+    RETRY_REQUESTED = "retry_requested"
+    FAILED_FINALIZED = "failed_finalized"
+    COMPLETED = "completed"
+
+
 class ScheduledTaskStatus(enum.StrEnum):
     """Current scheduler task status."""
 
