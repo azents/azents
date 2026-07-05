@@ -42,6 +42,7 @@ from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_initialization import SessionInitializationRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -64,7 +65,10 @@ from azents.services.agent_session_input import AgentSessionInputService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
-from azents.services.session_git_worktree import SessionGitWorktreeService
+from azents.services.session_git_worktree import (
+    GitWorktreeCleanupNotFound,
+    SessionGitWorktreeService,
+)
 from azents.services.session_initialization import SessionInitializationService
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -1229,6 +1233,7 @@ class TestSessionGitWorktreeService:
         await worktree_service.run_cleanup_for_session(
             agent_id=agent_id,
             session_id=session_id,
+            session_workspace_project_id=None,
         )
 
         async with rdb_session_manager() as session:
@@ -1244,11 +1249,16 @@ class TestSessionGitWorktreeService:
                 session,
                 agent_id=agent_id,
             )
+            projects = await SessionWorkspaceProjectRepository().list_projects(
+                session,
+                session_id=session_id,
+            )
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANED
         assert initialization is not None
         assert initialization.status is SessionInitializationStatus.CLEANED
         assert catalog == []
+        assert projects == []
         assert [call["operation"] for call in runner.calls] == [
             "create_git_worktree",
             "remove_git_worktree",
@@ -1257,7 +1267,43 @@ class TestSessionGitWorktreeService:
             "delete_file",
         ]
         remove_call = runner.calls[1]
-        assert remove_call["force"] is True
+        assert remove_call["force"] is False
+
+    async def test_manual_cleanup_rejects_ordinary_project_target(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Project-targeted cleanup cannot delete ordinary Project rows."""
+        runner = _RunnerOperations()
+        (
+            worktree_service,
+            user_id,
+            agent_id,
+            session_id,
+        ) = await _create_ready_worktree_session(
+            rdb_session_manager,
+            slug="cleanup-ordinary-project",
+            runner=runner,
+        )
+        async with rdb_session_manager() as session:
+            ordinary_project = await SessionWorkspaceProjectRepository().create_project(
+                session,
+                SessionWorkspaceProjectCreate(
+                    session_id=session_id,
+                    path="/workspace/agent/ordinary",
+                ),
+            )
+
+        result = await worktree_service.request_manual_cleanup(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            session_workspace_project_id=ordinary_project.id,
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, GitWorktreeCleanupNotFound)
+        assert [call["operation"] for call in runner.calls] == ["create_git_worktree"]
 
     async def test_cleanup_failure_marks_failed_without_raising(
         self,
@@ -1284,6 +1330,7 @@ class TestSessionGitWorktreeService:
         await worktree_service.run_cleanup_for_session(
             agent_id=agent_id,
             session_id=session_id,
+            session_workspace_project_id=None,
         )
 
         async with rdb_session_manager() as session:
@@ -1302,6 +1349,8 @@ class TestSessionGitWorktreeService:
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
         assert allocation.cleanup_summary == "worktree remove failed"
+        remove_call = runner.calls[1]
+        assert remove_call["force"] is False
         assert initialization is not None
         assert initialization.status is SessionInitializationStatus.CLEANUP_REQUIRED
         assert initialization.failure_summary == (
@@ -1333,18 +1382,21 @@ class TestSessionGitWorktreeService:
         await worktree_service.run_cleanup_for_session(
             agent_id=agent_id,
             session_id=session_id,
+            session_workspace_project_id=None,
         )
 
         retry = await worktree_service.request_manual_cleanup(
             agent_id=agent_id,
             session_id=session_id,
             user_id=user_id,
+            session_workspace_project_id=None,
         )
         assert isinstance(retry, Success)
         assert retry.value.cleanup_requested is True
         await worktree_service.run_cleanup_for_session(
             agent_id=agent_id,
             session_id=session_id,
+            session_workspace_project_id=None,
         )
 
         async with rdb_session_manager() as session:
@@ -1395,6 +1447,7 @@ class TestSessionGitWorktreeService:
         await worktree_service.run_cleanup_for_session(
             agent_id=agent_id,
             session_id=session_id,
+            session_workspace_project_id=None,
         )
 
         async with rdb_session_manager() as session:

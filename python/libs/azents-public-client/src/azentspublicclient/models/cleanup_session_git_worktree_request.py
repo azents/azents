@@ -17,23 +17,18 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, StrictStr
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
+class CleanupSessionGitWorktreeRequest(BaseModel):
     """
-    Backend-provided Project root action policy response.
+    Request a cleanup target for an Azents-owned session Git worktree.
     """ # noqa: E501
-    open: StrictBool = Field(description="Whether the entry can be opened in the browser")
-    remove_project: StrictBool = Field(description="Whether the registry Project row can be removed")
-    delete_worktree: StrictBool = Field(description="Whether an Azents-owned worktree cleanup can be requested")
-    filesystem_delete: StrictBool = Field(description="Whether filesystem delete is allowed for this entry")
-    filesystem_move: StrictBool = Field(description="Whether filesystem move is allowed for this entry")
-    filesystem_rename: StrictBool = Field(description="Whether filesystem rename is allowed for this entry")
+    project_id: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["open", "remove_project", "delete_worktree", "filesystem_delete", "filesystem_move", "filesystem_rename"]
+    __properties: ClassVar[List[str]] = ["project_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -53,7 +48,7 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ProjectBrowserEntryCapabilitiesResponse from a JSON string"""
+        """Create an instance of CleanupSessionGitWorktreeRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -81,11 +76,16 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if project_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.project_id is None and "project_id" in self.model_fields_set:
+            _dict['project_id'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ProjectBrowserEntryCapabilitiesResponse from a dict"""
+        """Create an instance of CleanupSessionGitWorktreeRequest from a dict"""
         if obj is None:
             return None
 
@@ -93,12 +93,7 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "open": obj.get("open"),
-            "remove_project": obj.get("remove_project"),
-            "delete_worktree": obj.get("delete_worktree"),
-            "filesystem_delete": obj.get("filesystem_delete"),
-            "filesystem_move": obj.get("filesystem_move"),
-            "filesystem_rename": obj.get("filesystem_rename")
+            "project_id": obj.get("project_id")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

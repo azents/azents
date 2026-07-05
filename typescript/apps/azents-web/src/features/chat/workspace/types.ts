@@ -17,6 +17,7 @@ export type AgentWorkspaceServerState = AgentWorkspaceResponse;
 export type WorkspaceEntryCapabilities = {
   open: boolean;
   removeProject: boolean;
+  deleteWorktree: boolean;
   filesystemDelete: boolean;
   filesystemMove: boolean;
   filesystemRename: boolean;
@@ -204,6 +205,7 @@ export function mapProjectBrowserEntry(
     capabilities: {
       open: entry.capabilities.open,
       removeProject: entry.capabilities.remove_project,
+      deleteWorktree: entry.capabilities.delete_worktree,
       filesystemDelete: entry.capabilities.filesystem_delete,
       filesystemMove: entry.capabilities.filesystem_move,
       filesystemRename: entry.capabilities.filesystem_rename,

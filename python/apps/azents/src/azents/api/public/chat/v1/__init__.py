@@ -216,6 +216,7 @@ from .data import (
     ChatWriteAcceptedResponse,
     ChatWriteResponse,
     ChatWriteSnapshotResponse,
+    CleanupSessionGitWorktreeRequest,
     GitRefPreviewResponse,
     GoalStateResponse,
     GoalStatusUpdateRequest,
@@ -1577,6 +1578,7 @@ async def _run_git_worktree_cleanup_background(
     *,
     agent_id: str,
     session_id: str,
+    session_workspace_project_id: str | None,
 ) -> None:
     """Execute Git worktree cleanup and publish initialization updates."""
 
@@ -1597,6 +1599,7 @@ async def _run_git_worktree_cleanup_background(
     await session_git_worktree_service.run_cleanup_for_session(
         agent_id=agent_id,
         session_id=session_id,
+        session_workspace_project_id=session_workspace_project_id,
         on_event_appended=publish_event,
         on_projection_updated=publish_projection,
     )
@@ -1667,6 +1670,7 @@ async def archive_agent_session(
                     session_git_worktree_service.run_cleanup_for_session,
                     agent_id=agent_id,
                     session_id=session_id,
+                    session_workspace_project_id=None,
                 )
             return
         case Failure(error):
@@ -1847,6 +1851,7 @@ async def discard_action_execution(
 async def cleanup_session_git_worktree(
     agent_id: str,
     session_id: str,
+    request: CleanupSessionGitWorktreeRequest,
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
@@ -1859,6 +1864,7 @@ async def cleanup_session_git_worktree(
         agent_id=agent_id,
         session_id=session_id,
         user_id=current_user.user_id,
+        session_workspace_project_id=request.project_id,
     )
     match result:
         case Success(value):
@@ -1869,6 +1875,7 @@ async def cleanup_session_git_worktree(
                     broadcast,
                     agent_id=agent_id,
                     session_id=session_id,
+                    session_workspace_project_id=request.project_id,
                 )
             return
         case Failure(error):

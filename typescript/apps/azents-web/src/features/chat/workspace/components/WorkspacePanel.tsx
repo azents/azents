@@ -85,6 +85,7 @@ interface WorkspacePanelProps {
   onSetProjectRegistrationStartingRef: (ref: string | null) => void;
   onSubmitProjectRegistration: () => void;
   onRemoveProjectEntry: (entry: WorkspaceEntry) => void;
+  onDeleteWorktreeProjectEntry: (entry: WorkspaceEntry) => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
 }
 
@@ -123,6 +124,7 @@ export function WorkspacePanel({
   onSetProjectRegistrationStartingRef,
   onSubmitProjectRegistration,
   onRemoveProjectEntry,
+  onDeleteWorktreeProjectEntry,
   onSetBrowserMode,
 }: WorkspacePanelProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
@@ -177,6 +179,21 @@ export function WorkspacePanel({
       confirmProps: { color: "red" },
       centered: true,
       onConfirm: () => onRemoveProjectEntry(entry),
+    });
+  };
+
+  const openDeleteWorktreeProjectConfirm = (entry: WorkspaceEntry): void => {
+    modals.openConfirmModal({
+      title: t("deleteWorktreeConfirmTitle"),
+      children: (
+        <Text size="sm">
+          {t("deleteWorktreeConfirmDescription", { path: entry.path })}
+        </Text>
+      ),
+      labels: { confirm: t("deleteWorktree"), cancel: t("cancel") },
+      confirmProps: { color: "red" },
+      centered: true,
+      onConfirm: () => onDeleteWorktreeProjectEntry(entry),
     });
   };
 
@@ -654,6 +671,7 @@ export function WorkspacePanel({
                       )
                     }
                     onRemoveProject={openRemoveProjectConfirm}
+                    onDeleteWorktreeProject={openDeleteWorktreeProjectConfirm}
                     onRefresh={onRefresh}
                     onSetBrowserMode={onSetBrowserMode}
                     onAddProject={onOpenProjectPicker}

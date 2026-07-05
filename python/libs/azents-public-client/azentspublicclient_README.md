@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Get Agent Runtime
@@ -326,6 +326,7 @@ Class | Method | HTTP request | Description
  - [ChatWriteAcceptedResponse](azentspublicclient/docs/ChatWriteAcceptedResponse.md)
  - [ChatWriteResponse](azentspublicclient/docs/ChatWriteResponse.md)
  - [ChatWriteSnapshotResponse](azentspublicclient/docs/ChatWriteSnapshotResponse.md)
+ - [CleanupSessionGitWorktreeRequest](azentspublicclient/docs/CleanupSessionGitWorktreeRequest.md)
  - [CommandAction](azentspublicclient/docs/CommandAction.md)
  - [CreateGitWorktreeAction](azentspublicclient/docs/CreateGitWorktreeAction.md)
  - [CreateInvitationRequest](azentspublicclient/docs/CreateInvitationRequest.md)

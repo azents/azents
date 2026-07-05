@@ -166,6 +166,7 @@ const projectRootEntries: WorkspaceEntry[] = [
     capabilities: {
       open: true,
       removeProject: true,
+      deleteWorktree: true,
       filesystemDelete: false,
       filesystemMove: false,
       filesystemRename: false,
@@ -189,6 +190,7 @@ const projectRootEntries: WorkspaceEntry[] = [
     capabilities: {
       open: true,
       removeProject: true,
+      deleteWorktree: false,
       filesystemDelete: false,
       filesystemMove: false,
       filesystemRename: false,
@@ -328,6 +330,7 @@ const meta = {
     onSetProjectRegistrationStartingRef: noop,
     onSubmitProjectRegistration: noop,
     onRemoveProjectEntry: noop,
+    onDeleteWorktreeProjectEntry: noop,
     onSetBrowserMode: noop,
   },
 } satisfies Meta<typeof WorkspacePanel>;

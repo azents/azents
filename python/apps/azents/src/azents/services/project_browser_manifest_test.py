@@ -200,6 +200,7 @@ class TestProjectBrowserManifestService:
         assert entry.status.value == AgentProjectCatalogStatus.AVAILABLE
         assert entry.status.checked_at == checked_at
         assert entry.capabilities.remove_project is True
+        assert entry.capabilities.delete_worktree is False
         assert entry.capabilities.filesystem_delete is False
         assert entry.capabilities.filesystem_move is False
         assert entry.capabilities.filesystem_rename is False
@@ -253,9 +254,9 @@ class TestProjectBrowserManifestService:
         )
 
         assert isinstance(result, Success)
-        assert [entry.repository_type for entry in result.value.manifest.entries] == [
-            "git"
-        ]
+        entry = result.value.manifest.entries[0]
+        assert entry.repository_type == "git"
+        assert entry.capabilities.delete_worktree is True
 
     async def test_session_manifest_empty_projects_has_empty_state(
         self,
@@ -304,6 +305,7 @@ class TestProjectBrowserManifestService:
         assert entry.status.value == AgentProjectCatalogStatus.UNCHECKED
         assert entry.status.stale is True
         assert entry.capabilities.remove_project is False
+        assert entry.capabilities.delete_worktree is False
         assert result.value.refresh_paths == ["/workspace/agent/app"]
 
     async def test_session_manifest_rejects_agent_mismatch(

@@ -714,13 +714,18 @@ export const chatRouter = router({
 
   cleanupSessionGitWorktree: publicProcedure
     .input(
-      z.object({ agentId: z.string().min(1), sessionId: z.string().min(1) }),
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        projectId: z.string().min(1).nullable(),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
         await chatV1CleanupSessionGitWorktree({
           client: ctx.apiClient,
           path: { agent_id: input.agentId, session_id: input.sessionId },
+          body: { project_id: input.projectId },
           throwOnError: true,
         });
       } catch (e) {

@@ -173,6 +173,7 @@ const workspacePanel: WorkspacePanelContainerOutput = {
   onRejectRegistrationRequest: noop,
   onDeleteProject: noop,
   onRemoveProjectEntry: noop,
+  onDeleteWorktreeProjectEntry: noop,
   onSetBrowserMode: noop,
 };
 

@@ -2231,7 +2231,7 @@ export function useChatSessionContainer(
       return;
     }
     void cleanupWorktreeMutation
-      .mutateAsync({ agentId: agent.id, sessionId })
+      .mutateAsync({ agentId: agent.id, sessionId, projectId: null })
       .then(() => refreshInitializationDetail());
   }, [
     agent.id,

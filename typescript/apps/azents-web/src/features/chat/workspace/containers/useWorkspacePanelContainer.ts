@@ -69,6 +69,7 @@ export interface WorkspacePanelContainerOutput {
   onRejectRegistrationRequest: (requestId: string) => void;
   onDeleteProject: (projectId: string) => void;
   onRemoveProjectEntry: (entry: WorkspaceEntry) => void;
+  onDeleteWorktreeProjectEntry: (entry: WorkspaceEntry) => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
 }
 
@@ -560,6 +561,20 @@ export function useWorkspacePanelContainer({
     onError: () => setPendingDeleteProjectId(null),
   });
 
+  const deleteWorktreeProjectMutation =
+    trpc.chat.cleanupSessionGitWorktree.useMutation({
+      onSuccess: async () => {
+        await Promise.all([
+          utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
+          utils.chat.getSessionProjectBrowserManifest.invalidate({
+            agentId,
+            sessionId,
+          }),
+          utils.chat.getSessionInitialization.invalidate({ sessionId }),
+        ]);
+      },
+    });
+
   useEffect(() => {
     const completedWorktreeExecution = actionExecutions.find(
       (actionExecution) =>
@@ -877,6 +892,24 @@ export function useWorkspacePanelContainer({
     [onDeleteProject],
   );
 
+  const onDeleteWorktreeProjectEntry = useCallback(
+    (entry: WorkspaceEntry) => {
+      const projectId =
+        entry.source?.type === "session_project"
+          ? entry.source.projectId
+          : null;
+      if (!projectId || entry.capabilities?.deleteWorktree !== true) {
+        return;
+      }
+      deleteWorktreeProjectMutation.mutate({
+        agentId,
+        sessionId,
+        projectId,
+      });
+    },
+    [agentId, deleteWorktreeProjectMutation, sessionId],
+  );
+
   const onSetBrowserMode = useCallback((mode: WorkspaceBrowserMode) => {
     setBrowserMode(mode);
     setCurrentDirectoryPath(null);
@@ -1059,7 +1092,8 @@ export function useWorkspacePanelContainer({
         deletePathMutation.isPending ||
         bulkDeletePathsMutation.isPending ||
         movePathMutation.isPending ||
-        bulkMovePathsMutation.isPending,
+        bulkMovePathsMutation.isPending ||
+        deleteWorktreeProjectMutation.isPending,
       isStarting:
         startRuntimeMutation.isPending ||
         restartRuntimeMutation.isPending ||
@@ -1079,6 +1113,7 @@ export function useWorkspacePanelContainer({
     bulkMovePathsMutation.isPending,
     createDirectoryMutation.isPending,
     deletePathMutation.isPending,
+    deleteWorktreeProjectMutation.isPending,
     directoryEntriesByPath,
     directoryQuery.data,
     directoryQuery.isFetching,
@@ -1236,6 +1271,7 @@ export function useWorkspacePanelContainer({
     onRejectRegistrationRequest,
     onDeleteProject,
     onRemoveProjectEntry,
+    onDeleteWorktreeProjectEntry,
     onSetBrowserMode,
   };
 }

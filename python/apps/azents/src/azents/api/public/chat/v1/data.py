@@ -298,6 +298,17 @@ class ChatCommandWriteRequest(BaseModel):
     command: str = Field(description="Command name, for example compact")
 
 
+class CleanupSessionGitWorktreeRequest(BaseModel):
+    """Request a cleanup target for an Azents-owned session Git worktree."""
+
+    project_id: str | None = Field(
+        description=(
+            "SessionWorkspaceProject ID linked to the owned worktree. "
+            "Null keeps the session-level cleanup retry behavior."
+        ),
+    )
+
+
 class ChatFailedRunRetryRequest(BaseModel):
     """REST failed-run retry request."""
 
@@ -989,6 +1000,9 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
     remove_project: bool = Field(
         description="Whether the registry Project row can be removed",
     )
+    delete_worktree: bool = Field(
+        description="Whether an Azents-owned worktree cleanup can be requested",
+    )
     filesystem_delete: bool = Field(
         description="Whether filesystem delete is allowed for this entry",
     )
@@ -1005,6 +1019,7 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
         return cls(
             open=capabilities.open,
             remove_project=capabilities.remove_project,
+            delete_worktree=capabilities.delete_worktree,
             filesystem_delete=capabilities.filesystem_delete,
             filesystem_move=capabilities.filesystem_move,
             filesystem_rename=capabilities.filesystem_rename,
