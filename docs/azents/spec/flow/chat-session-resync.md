@@ -14,8 +14,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/deps.py
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-04
-spec_version: 9
+last_verified_at: 2026-07-05
+spec_version: 11
 ---
 
 # Chat Session Resync
@@ -68,6 +68,8 @@ sequenceDiagram
 | `history_event_appended` | server → client | `session_id`, `event` | persisted event append. |
 | `live_event_upserted` | server → client | `session_id`, `event` | non-durable live event projection upsert. |
 | `live_event_removed` | server → client | `session_id`, `event_id` | non-durable live projection removal. |
+| `live_run_updated` | server → client | `session_id`, `run` | authoritative current run projection replacement, including `run.retry`. |
+| `live_run_cleared` | server → client | `session_id` | authoritative current run projection removal after terminal cleanup. |
 | `input_actions_updated` | server → client | `session_id` | composer action definitions changed; client reloads `/actions`. |
 | `todo_state_changed` | server → client | `todo` | session todo Toolkit State snapshot changed. |
 | `session_initialization_updated` | server → client | `session_id`, `initialization` | Session initialization status or step projection changed. |
@@ -109,7 +111,7 @@ Response fields:
 | --- | --- |
 | `partial_history.items` | ordered partial history projection list to synthesize after durable history. |
 | `input_buffers` | pending user input buffer projection list not yet injected into model turn. |
-| `run` | currently running run projection. `null` if absent. |
+| `run` | currently running run projection. `null` if absent. Includes `run.retry` with failed-run retry status, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history when retry is active. |
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |
 | `initialization` | session initialization projection with status, timestamps, and steps. `null` only when no initialization row exists. |
@@ -126,6 +128,8 @@ Response fields:
 - WS events are replayed on baseline, then applied in realtime.
 - Initialization updates are reconciled by the same baseline/replay ordering: `/live.initialization` provides the latest projection, and initialization event detail can be reloaded from the detail endpoint.
 - Can display pending input buffer, model response pending indicator, compaction indicator, todo preview.
+- When `run.retry` is present, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history; the normal model dots indicator remains below the card when the run phase is `waiting_for_model` or `streaming_model`.
+- Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
 - Follow is active only when scroll viewport is at bottom or in iOS bottom bounce area.
 - When Follow is active, new timeline item and streaming update automatically scroll to bottom.
 - If scroll viewport leaves bottom/bounce area, immediately stop follow; subsequent new timeline items are rendered immediately but do not auto-scroll, and “new message” chip is displayed.
@@ -261,6 +265,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 - WebSocket open is not subscribe completion.
 - REST baseline is applied as latest source only after session subscription ack.
 - REST `/live` does not return aggregate event list and returns live state taxonomy snapshot split into `partial_history`, `input_buffers`, `run`, `session_run_state`, `todo`.
+- `live_run_updated` and REST `/live.run` are the authoritative current run snapshot sources; clients replace the stored run snapshot rather than merging individual retry fields.
 - REST write `snapshot` does not return aggregate `live_events` and returns live state taxonomy snapshot split into `partial_history_events`, `input_buffer_events`, `run`, `session_run_state`, `todo`.
 - Detached state does not synthesize live state below history window.
 - Entering detached state itself does not mean “new message” exists.
@@ -274,6 +279,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-05** — v11. Added failed-run retry live card, terminal recovery card, and live-run update/clear resync behavior.
 - **2026-07-04** — v10. Removed existing-session Git worktree attachment from initialization resync behavior.
 - **2026-07-04** — v8. Added initialization live/detail recovery and WebSocket setup projection actions.
 - **2026-06-13** — v5. Added session todo state to REST live/write snapshot and WebSocket contract, and reflected UI rule that treats todo preview as live state.
