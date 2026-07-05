@@ -11,14 +11,17 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/session_initialization.py
+  - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/services/action_execution.py
+  - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/agent_run/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-04
-spec_version: 10
+last_verified_at: 2026-07-05
+spec_version: 11
 ---
 
 # Run Resume
@@ -37,6 +40,7 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Active event run | `agent_runs.phase`, `active_tool_calls`, and `retry_state` | Runtime reconciles phase/tool/retry state and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime executes or interrupts the missing result path without duplicating completed results |
 | Blocked initialization | Session has pending input but initialization is not ready | Worker preserves pending buffers and does not create an `agent_runs` row until initialization is ready |
+| Blocked operation action | Session has pending action execution that failed or has not completed | Worker preserves later pending buffers and does not create a model run until the action completes or is discarded |
 
 ## Ownership Lease
 
@@ -162,12 +166,14 @@ The takeover path must preserve single-session execution:
 - A live owner heartbeat prevents non-owner processing.
 - A stale heartbeat permits lease stealing even if the 30-minute sticky key remains.
 - Wake-up signals remain in the per-session Redis list until a worker with valid ownership drains
-  them. Model input payloads and control state remain durable in Postgres. For newly created sessions with blocking initialization, pending input buffers are also durable while setup is pending or failed; takeover must resume from the initialization state before run creation.
+  them. Model input payloads, operation action inputs, and control state remain durable in Postgres. For newly created sessions with blocking initialization or setup action execution, pending input buffers are also durable while setup is pending, failed, or waiting for discard; takeover must resume from the initialization or action execution state before run creation.
 - Durable transcript and `agent_runs` remain the execution source of truth after takeover.
 
-## Initialization Recovery
+## Initialization and Operation Action Recovery
 
-Session initialization is a pre-run gate. If a worker receives a wake-up for a session whose initialization is `pending`, the session runner first attempts to process queued setup work, including Git worktree creation and workspace Project registration, under the per-session ownership path. If processing makes initialization `ready`, the same wake-up may process the already-persisted pending input normally. If initialization is still `running`, `failed`, `canceled`, or otherwise blocks dispatch, the worker must leave pending buffers in place and avoid creating an `agent_runs` row. Recovery remains a session setup concern rather than failed-run retry state.
+Session initialization remains a pre-run gate. If a worker receives a wake-up for a session whose initialization is `pending`, the session runner first attempts to process queued legacy setup work under the per-session ownership path. If processing makes initialization `ready`, the same wake-up may process the already-persisted pending input normally. If initialization is still `running`, `failed`, `canceled`, or otherwise blocks dispatch, the worker must leave pending buffers in place and avoid creating an `agent_runs` row. Recovery remains a session setup concern rather than failed-run retry state.
+
+Operation TurnActions are durable `action_message` inputs. When takeover sees pending setup action input or a pending retry action execution, the worker resumes from the durable action message and `action_executions` projection. A completed action is not duplicated. A failed action leaves later pending input in place until user retry or discard changes the action execution state. If a Project-mutating action completes and later input remains, the worker uses a follow-up wake-up boundary so model/tool context is rebuilt from the updated Project registry before run creation.
 
 ## Failed-run Retry Recovery
 
@@ -217,10 +223,12 @@ that next run to observe `check_stop()` as true.
 - Completed tool results are not duplicated.
 - User stop intent is consumed by stop finalization and must not interrupt the next wake-up.
 - Blocking session initialization must be ready before recovery creates or resumes a run for pending input.
+- Blocking operation action execution must complete or be discarded before recovery creates a model run for later pending input.
 - SDK `RunState` compatibility is not preserved.
 
 
 ## Changelog
 
+- **2026-07-05** (spec_version 11) — Added operation TurnAction recovery semantics for action-based Git worktree setup.
 - **2026-07-04** (spec_version 10) — Clarified that pending initialization is processed by the session runner during wake-up before run creation, and the same wake-up may continue once setup is ready.
 - **2026-07-04** (spec_version 9) — Added initialization-gated wake-up and recovery semantics.
