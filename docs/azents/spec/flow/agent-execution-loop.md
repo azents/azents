@@ -20,13 +20,16 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/session_initialization.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/services/model_file.py
   - python/apps/azents/src/azents/repos/input_buffer/**
+  - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/rdb/models/event.py
+  - python/apps/azents/src/azents/rdb/models/action_execution.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/model_file.py
@@ -52,18 +55,19 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker checks session initialization. Blocking initialization must be `ready` before a run can start.
-2. Worker promotes input buffers to event `RunUserMessage` input.
-3. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
-4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
-5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
-6. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
+1. Worker checks session initialization. Blocking initialization must be `ready` before input promotion can start.
+2. Worker promotes input buffers to durable event input, including ordered `action_message` events.
+3. Worker executes operation TurnActions such as `create_git_worktree` before model dispatch; a failed operation blocks later model input until retry or discard.
+4. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
+5. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
+6. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
+7. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
    into a LiteLLM Responses native request.
-7. `PostLowerFilterPipeline` applies adapter-native request size guard.
-8. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
-9. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
-10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
-11. When no foreground client tool call or pending follow-up remains, the runner observes the
+8. `PostLowerFilterPipeline` applies adapter-native request size guard.
+9. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
+10. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
+11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
+12. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
 Streaming deltas are UI projection only. Durable events are appended based on completed output items
@@ -348,8 +352,8 @@ entrypoints depend on `AgentEngineProtocol`, not SDK concrete adapters.
 Web chat user writes enter through REST commit endpoints. Message writes create or reuse an
 `AgentSession`, materialize user input attachments, record the accepted write under
 `client_request_id`, commit an input buffer, then send a broker wake-up signal. New-session writes may
-also create blocking initialization rows, such as Git worktree setup, before the first run is allowed
-to start. Edit writes are
+also enqueue ordered setup action inputs, such as `create_git_worktree`, before the first user message
+so operation setup runs before the first model run. Edit writes are
 idle-only: the REST transaction rewrites durable history state, clears pending input buffers,
 creates an `edited_user_message` input buffer, marks the session running, and sends a wake-up.
 Command writes are idle-only control actions: the REST transaction stores one pending command on
@@ -364,16 +368,23 @@ user message. `SessionRunner` reads the pending
 command from the session and passes it into `RunExecutor`, which prepares the same `RunRequest` and
 `RunContext` used by normal runs before invoking the registered command handler. Running sessions,
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
-Before any pending input buffer becomes durable model input, the session runner observes the
-session initialization projection. `ready` initialization allows run creation. `pending` initialization
-causes the session runner to process queued setup work, such as Git worktree creation and Project
-registration, under the same per-session ownership path before checking the gate again. If setup
-becomes `ready`, the same wake-up continues into normal run dispatch. `running` initialization owned by
-another processor leaves input buffers pending until a later wake-up or retry. `failed`, `canceled`, or
-cleanup-required states do not create an `agent_runs` row; users must retry setup, delete pending input,
-or create a different session. This gate belongs to the session runner boundary, not the model
-execution core, so failed setup is not represented as failed-run retry state or durable transcript
-`system_error`.
+Before pending user input becomes model input, the session runner observes the session initialization
+projection. `ready` initialization allows input promotion. `pending` initialization causes the session
+runner to process legacy queued setup work before checking the gate again. `running` initialization
+owned by another processor leaves input buffers pending until a later wake-up or retry. `failed`,
+`canceled`, or cleanup-required states do not create an `agent_runs` row; users must retry setup,
+delete pending input, or create a different session. This gate belongs to the session runner boundary,
+not the model execution core, so failed setup is not represented as failed-run retry state or durable
+transcript `system_error`.
+
+Operation TurnActions are processed after input-buffer promotion and before model dispatch.
+`create_git_worktree` action execution is keyed by its durable `action_message` event, records durable
+progress in `action_executions`, creates the worktree through typed Runner Git operations, registers
+the created path as a session Project, refreshes catalog/Skill projection, and then invalidates the
+prepared context boundary. If later pending input remains after a Project-mutating action succeeds, the
+runner sends a follow-up wake-up and stops the current processing boundary so the next pass rebuilds
+model/tool context from the updated Project registry. If an action fails, later pending input remains
+blocked until retry succeeds or discard marks the action `failed_final`.
 
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
@@ -419,7 +430,7 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/execution_test.py src/azents/engine/events/filters_test.py src/azents/engine/events/engine_adapter_test.py`
 - `cd python/apps/azents && uv run pyright`
 - deterministic azents E2E CI for text/tool/UI projection behavior
-- deterministic session initialization and Git worktree lifecycle E2E coverage
+- deterministic action-based Git worktree lifecycle E2E coverage
 - `cd testenv/azents/e2e && uv run pyright src/tests/azents/public/test_chat_input_buffer.py`
 - Failed-run retry recovery E2E: `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_agent_execution_persistence.py -q -k failed_run`
 - REST chat write targeted verification: `cd python/apps/azents && uv run pytest -q src/azents/api/public/chat/v1/chat_api_test.py src/azents/repos/chat_write_request/repository_test.py src/azents/services/chat/input_buffer_test.py`
@@ -427,6 +438,10 @@ Primary checks:
 - static scan for removed `openai-agents`, `azents.engine.sdk`, `azents.runtime.llm`, and
   legacy `LLMClient` references
 
+
+## Changelog
+
+- **2026-07-05** — v56. Reflected operation TurnAction processing before model dispatch and Project context invalidation after worktree setup.
 
 ## Idle continuation
 

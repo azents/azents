@@ -2,6 +2,7 @@
 title: "Session Operation Turn Action Migration Design"
 created: 2026-07-05
 updated: 2026-07-05
+implemented: 2026-07-05
 tags: [backend, frontend, api, session, workspace, git]
 ---
 

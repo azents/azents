@@ -23,9 +23,12 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_project_default.py
   - python/apps/azents/src/azents/rdb/models/agent_project_catalog.py
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
+  - python/apps/azents/src/azents/rdb/models/action_execution.py
   - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/repos/session_git_worktree/**
+  - python/apps/azents/src/azents/repos/action_execution/**
+  - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/api/internal/agent_home/v1/projects.py
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/features/workspace/**
@@ -52,7 +55,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-05
-spec_version: 29
+spec_version: 30
 ---
 
 # Workspace & Membership
@@ -187,11 +190,11 @@ Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/r
 Agent Workspace Project is a boundary registry explicitly registered by user for an existing directory under AgentRuntime's Provider-reported Agent Workspace. Agent Workspace root itself is not a Project. Current public API registers any non-root descendant directory under `/workspace/agent`, including nested folders.
 
 - Project Source, archive upload, empty folder bootstrap, Runtime pending load/ACK do not exist in public API or current DB/service/runtime provisioning layers. Provisioning such as file creation, archive extract, and git clone is separated into future Project Import/Provisioning phase.
-- New session creation is workspace-item based. `workspace_items` may mix `existing_project` items and `git_worktree` items in one ordered selection. Existing Project items register explicit Project paths and do not copy Projects from the team-primary session. Git worktree items create Azents-owned Git worktrees from source Project paths and local base branches, then register the created worktree paths as session Projects. Legacy `workspace_mode` and `project_paths` requests are normalized into the same workspace selection model.
-- `agent_project_defaults` stores the last non-empty new-session workspace item selection used when creating a non-primary session for the Agent. New-session defaults come from this table, not from the current live Project rows of the most recent session. Creating a new session with non-empty workspace items replaces the stored defaults in selection order; creating a session with an empty workspace item list leaves the stored defaults unchanged.
+- New session creation accepts `existing_project_paths` plus ordered `setup_actions`. Existing Project paths register explicit Project paths and do not copy Projects from the team-primary session. `create_git_worktree` setup actions create Azents-owned Git worktrees from source Project paths and starting refs, then register the created worktree paths as session Projects. Legacy `workspace_items`, `workspace_mode`, and `project_paths` requests are not part of the current contract.
+- `agent_project_defaults` stores the last non-empty new-session workspace selection used when creating a non-primary session for the Agent. New-session defaults come from this table, not from the current live Project rows of the most recent session. Creating a new session with non-empty existing Project paths or setup actions replaces the stored defaults in selection order; creating a session with an empty selection leaves the stored defaults unchanged.
 - `GET /chat/v1/agents/{agent_id}/session-project-defaults` returns both legacy `project_paths` and ordered `items` for the new-session UI, including source metadata (`empty` or `last_created_session`).
 - `agent_project_presets` stores agent-scoped recent Project path presets. Creating a new session with selected Projects, registering an existing Project, or approving a registration request refreshes matching presets. `GET /chat/v1/agents/{agent_id}/project-presets` returns these presets ordered by recent use.
-- `agent_project_catalog` stores Agent-scoped reusable Project path candidates and filesystem status projection (`unchecked`, `available`, `missing`, `unavailable`, or `error`) with optional detail and `last_checked_at`. Catalog status is a UI projection; it does not decide prompt Project eligibility. Worktree session creation upserts the created worktree path into the catalog and may refresh status, but it does not update Project presets or last-created-session defaults.
+- `agent_project_catalog` stores Agent-scoped reusable Project path candidates and filesystem status projection (`unchecked`, `available`, `missing`, `unavailable`, or `error`) with optional detail and `last_checked_at`. Catalog status is a UI projection; it does not decide prompt Project eligibility. Worktree action execution upserts the created worktree path into the catalog and may refresh status, but it does not update last-created-session defaults after execution.
 - `GET /chat/v1/agents/{agent_id}/git-refs?source_project_path=...` previews branches, tags, default branch, and HEAD commit for a Git source Project through typed Runtime Runner Git operations. Runtime unavailable or Git semantic failures are surfaced as user-safe preview errors.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` registers an existing directory as Project for the selected AgentSession. Server validates user access, agent/session match, active Runtime directory existence, and Project path policy, then creates the session-owned registry row. This API does not modify filesystem.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/projects` returns registered Project list for the selected AgentSession. Public response exposes only `id`, `path`, `created_at`, `updated_at`.
@@ -278,7 +281,7 @@ Because it runs within transaction boundary, there is no state where Workspace h
 
 A Git worktree-created Project is an Agent Workspace Project whose directory is created under the Azents reserved worktree root for one non-primary AgentSession. The source Project path must be an existing Git repository reachable inside the Agent Runtime workspace. The selected starting ref is resolved by Runner Git operations, and creation uses a generated branch/worktree path based on the session handle and source repository leaf. Branch or path collisions are retried with deterministic suffixes and the persisted allocation records the final names.
 
-A non-primary session can own a Git worktree allocation created during new-session `git_worktree` mode. The initialization row processes that blocking setup before the first run and returns initialization to `ready` after the worktree path is created and registered as the session Project.
+A non-primary session can own a Git worktree allocation created by a `create_git_worktree` setup action. The action is stored as an ordered `action_message` input before the first user message, and the action execution blocks later model input until the worktree path is created and registered as the session Project.
 
 Each created worktree is prompt-eligible only through its session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Archive/delete cleanup iterates every non-cleaned `SessionGitWorktree` allocation owned by the session, removes each worktree, removes each Azents-created branch, deletes catalog entries for the worktree paths, and marks allocations cleaned. Cleanup failure leaves the archive successful and records a cleanup summary for manual retry.
 
@@ -304,7 +307,7 @@ At least 7 rules — all actually verified in code:
 - `[project-registry-only-delete]` — Project delete API removes only registry row, not filesystem folder.
 - `[project-browser-manifest-non-blocking]` — Project browser manifest reads return stored catalog projection and do not block on runner filesystem stat/list operations.
 - `[worktree-project-registration]` — Git worktree sessions register exactly the created worktree path as a session Project after the Runner confirms worktree creation.
-- `[worktree-initialization-gates-first-run]` — new-session Git worktree setup uses the session initialization lifecycle and gates the first run until blocking setup is ready.
+- `[worktree-action-gates-first-run]` — new-session Git worktree setup uses ordered operation TurnAction execution and gates the first run until blocking setup action execution completes or is explicitly discarded after failure.
 - `[worktree-cleanup-authority]` — destructive cleanup of an Azents-owned worktree requires a matching `session_git_worktrees` ownership row; Project registry rows or reserved-root paths are not sufficient authority.
 - `[project-root-action-policy]` — Project browser root entries expose backend capabilities; filesystem delete, move, and rename are disabled for Project roots, while registry removal is available only for existing session Project rows.
 
@@ -457,3 +460,4 @@ stateDiagram-v2
 - **2026-06-22 (spec_version=15)** — Removed Workspace Team and TeamMember as current domain concepts. WorkspaceUser is the only current membership model.
 - **2026-06-26 (spec_version=18)** — Project and registration request public APIs became AgentSession-scoped. Removed team-primary compatibility lookup from project list/register/delete/approval routes.
 - **2026-07-03 (spec_version=24)** — Promoted Workspace Project Browser behavior: backend Project browser manifests, Agent Project catalog status projection, Project-first Workspace UI, explicit All files mode, and backend Project root capabilities.
+- **2026-07-05 (spec_version=30)** — Reflected action-based new-session worktree setup request fields and first-run gating.
