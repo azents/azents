@@ -10,3 +10,7 @@ class AgentWorkerConfig:
     web_url: str
     oauth_secret_key: str
     mcp_proxy_url: str | None
+    failed_run_max_retries: int
+    failed_run_base_backoff_seconds: int
+    failed_run_backoff_multiplier: int
+    failed_run_max_backoff_seconds: int

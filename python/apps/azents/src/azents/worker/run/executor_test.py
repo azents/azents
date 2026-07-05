@@ -365,6 +365,7 @@ def _executor(
     command_registry: dict[str, CommandHandler] | None = None,
     agent_session_repository: _AgentSessionRepository | None = None,
     live_event_projector: _LiveEventProjector | None = None,
+    failed_run_max_retries: int = 10,
 ) -> RunExecutor:
     """Create a RunExecutor for resolve-failure tests."""
     if session_lifecycle is None:
@@ -401,6 +402,10 @@ def _executor(
             web_url="http://localhost:3000",
             oauth_secret_key="test-secret",
             mcp_proxy_url=None,
+            failed_run_max_retries=failed_run_max_retries,
+            failed_run_base_backoff_seconds=1,
+            failed_run_backoff_multiplier=2,
+            failed_run_max_backoff_seconds=60,
         ),
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
@@ -698,7 +703,6 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Command run-stopping errors use shared failed-run finalization."""
-    monkeypatch.setattr(run_executor_module, "_FAILED_RUN_MAX_RETRIES", 1)
     _patch_successful_resolution(monkeypatch)
     lifecycle = _SessionLifecycle()
     session_repository = _AgentSessionRepository()
@@ -708,6 +712,7 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
         command_registry={"compact": cast(CommandHandler, _FailingCommandHandler())},
         agent_session_repository=session_repository,
         failed_run_finalizer=finalizer,
+        failed_run_max_retries=1,
     )
     dispatched: list[tuple[str, PublishedEvent]] = []
 
@@ -1069,7 +1074,6 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Retry exhaustion promotes the latest attempt through the finalizer."""
-    monkeypatch.setattr(run_executor_module, "_FAILED_RUN_MAX_RETRIES", 1)
     lifecycle = _SessionLifecycle()
     engine = _AlwaysFailingEngine()
     finalizer = _FailedRunFinalizer()
@@ -1077,6 +1081,7 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
         lifecycle,
         engine=cast(AgentEngineProtocol, engine),
         failed_run_finalizer=finalizer,
+        failed_run_max_retries=1,
     )
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
@@ -1147,7 +1152,6 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Known non-retryable model failures are finalized on the first attempt."""
-    monkeypatch.setattr(run_executor_module, "_FAILED_RUN_MAX_RETRIES", 10)
     lifecycle = _SessionLifecycle()
     engine = _AlwaysFailingEngine(
         'Model call failed (503): {"error":{"code":"no_fixture_match"}}'
