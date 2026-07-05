@@ -37,8 +37,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-05
-spec_version: 57
+last_verified_at: 2026-07-06
+spec_version: 58
 ---
 
 # Agent Execution Loop
@@ -353,7 +353,10 @@ Web chat user writes enter through REST commit endpoints. Message writes create 
 `AgentSession`, materialize user input attachments, record the accepted write under
 `client_request_id`, commit an input buffer, then send a broker wake-up signal. New-session writes may
 also enqueue ordered setup action inputs, such as `create_git_worktree`, before the first user message
-so operation setup runs before the first model run. Edit writes are
+so operation setup runs before the first model run. Existing-session writes may also enqueue ordered
+operation action inputs for user-requested workspace mutations, such as Register Project → New
+worktree. Those action inputs are durable `action_message` events in the turn order, not
+session-initialization setup rows. Edit writes are
 idle-only: the REST transaction rewrites durable history state, clears pending input buffers,
 creates an `edited_user_message` input buffer, marks the session running, and sends a wake-up.
 Command writes are idle-only control actions: the REST transaction stores one pending command on
@@ -381,10 +384,15 @@ Operation TurnActions are processed after input-buffer promotion and before mode
 `create_git_worktree` action execution is keyed by its durable `action_message` event, records durable
 progress in `action_executions`, publishes action execution projection updates while status or log
 entries change, creates the worktree through typed Runner Git operations, registers the created path
-as a session Project, refreshes catalog/Skill projection, and then invalidates the prepared context boundary. If later pending input remains after a Project-mutating action succeeds, the
+as a session Project, refreshes catalog/Skill projection, and then invalidates the prepared context
+boundary. This same operation-action path covers new-session setup actions and existing-session
+Register Project worktree actions; existing-session worktree creation does not reuse the session
+initialization gate. If later pending input remains after a Project-mutating action succeeds, the
 runner sends a follow-up wake-up and stops the current processing boundary so the next pass rebuilds
 model/tool context from the updated Project registry. If an action fails, later pending input remains
-blocked until retry succeeds or discard marks the action `failed_final`.
+blocked until retry succeeds or discard marks the action `failed_final`. Retry and discard mutations
+reset or finalize only failed operation action executions, return the updated action execution
+projection, and enqueue a normal broker wake-up when more runner work is needed.
 
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
@@ -396,8 +404,8 @@ Public web chat projection is split by lifecycle:
 
 - durable transcript reads use `GET /chat/v1/sessions/{session_id}/history`;
 - current streaming/tool/pending-input state uses `GET /chat/v1/sessions/{session_id}/live`;
-- WebSocket transport publishes `history_event_appended`, `live_event_upserted`, and
-  `live_event_removed` actions.
+- WebSocket transport publishes `history_event_appended`, `live_event_upserted`,
+  `live_event_removed`, and `action_execution_updated` actions.
 
 `WorkerEventPublisher.dispatch_event()` preserves the durable/live handoff order. For `Event`, the
 publisher broadcasts the durable history action first, then removes and broadcasts matching live
@@ -430,7 +438,7 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/execution_test.py src/azents/engine/events/filters_test.py src/azents/engine/events/engine_adapter_test.py`
 - `cd python/apps/azents && uv run pyright`
 - deterministic azents E2E CI for text/tool/UI projection behavior
-- deterministic action-based Git worktree lifecycle E2E coverage
+- deterministic action-based Git worktree lifecycle E2E coverage, including existing-session Register Project worktree actions and action retry/discard recovery
 - `cd testenv/azents/e2e && uv run pyright src/tests/azents/public/test_chat_input_buffer.py`
 - Failed-run retry recovery E2E: `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_agent_execution_persistence.py -q -k failed_run`
 - REST chat write targeted verification: `cd python/apps/azents && uv run pytest -q src/azents/api/public/chat/v1/chat_api_test.py src/azents/repos/chat_write_request/repository_test.py src/azents/services/chat/input_buffer_test.py`
@@ -497,6 +505,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-06** (spec_version 58) — Promoted existing-session Register Project worktree actions and action retry/discard mutation semantics.
 - **2026-07-05** (spec_version 57) — Added operation TurnAction execution projection updates during status/log changes.
 - **2026-07-04** (spec_version 54) — Clarified that the session runner drains pending initialization work before dispatch and may continue into run creation on the same wake-up once setup becomes ready.
 - **2026-07-04** (spec_version 52) — Added the session initialization gate before run creation.
