@@ -29,6 +29,7 @@ import {
 import { useTranslations } from "next-intl";
 import type {
   GitRefPreviewState,
+  NewSessionWorkspaceItemKind,
   NewSessionWorkspaceItemState,
   ProjectPickerPurpose,
   ProjectPresetState,
@@ -43,13 +44,22 @@ function iconSize(): string {
   return rem(16);
 }
 
+function isWorkspaceItemKind(
+  value: string | null,
+): value is NewSessionWorkspaceItemKind {
+  return value === "existing_project" || value === "git_worktree";
+}
+
 export interface NewSessionProjectSelectorProps {
   workspaceItems: NewSessionWorkspaceItemState[];
   activeWorktreeItemId: string | null;
   gitRefPreviewState: GitRefPreviewState;
   projectPresetState: ProjectPresetState;
   onAddPresetProject: (path: string) => void;
-  onAddWorktreeProject: (path: string) => void;
+  onSetWorkspaceItemKind: (
+    itemId: string,
+    kind: NewSessionWorkspaceItemKind,
+  ) => void;
   onActivateWorktreeItem: (itemId: string) => void;
   onSetWorktreeStartingRef: (itemId: string, ref: string | null) => void;
   onRemoveWorkspaceItem: (itemId: string) => void;
@@ -62,7 +72,7 @@ export function NewSessionProjectSelector({
   gitRefPreviewState,
   projectPresetState,
   onAddPresetProject,
-  onAddWorktreeProject,
+  onSetWorkspaceItemKind,
   onActivateWorktreeItem,
   onSetWorktreeStartingRef,
   onRemoveWorkspaceItem,
@@ -98,7 +108,6 @@ export function NewSessionProjectSelector({
             projectPresetState={projectPresetState}
             workspaceItems={workspaceItems}
             onAddPresetProject={onAddPresetProject}
-            onAddWorktreeProject={onAddWorktreeProject}
             onOpenProjectPicker={onOpenProjectPicker}
           />
         </Group>
@@ -112,8 +121,8 @@ export function NewSessionProjectSelector({
                 gitRefPreviewState={gitRefPreviewState}
                 item={item}
                 onActivateWorktreeItem={onActivateWorktreeItem}
-                onAddWorktreeProject={onAddWorktreeProject}
                 onRemoveWorkspaceItem={onRemoveWorkspaceItem}
+                onSetWorkspaceItemKind={onSetWorkspaceItemKind}
                 onSetWorktreeStartingRef={onSetWorktreeStartingRef}
               />
             ))}
@@ -133,7 +142,6 @@ interface AddWorkspaceMenuProps {
   workspaceItems: NewSessionWorkspaceItemState[];
   projectPresetState: ProjectPresetState;
   onAddPresetProject: (path: string) => void;
-  onAddWorktreeProject: (path: string) => void;
   onOpenProjectPicker: (purpose: ProjectPickerPurpose) => void;
 }
 
@@ -142,16 +150,12 @@ function AddWorkspaceMenu({
   workspaceItems,
   projectPresetState,
   onAddPresetProject,
-  onAddWorktreeProject,
   onOpenProjectPicker,
 }: AddWorkspaceMenuProps): React.ReactElement {
   const t = useTranslations("chat");
-  const selectedExistingPaths = workspaceItems
-    .filter((item) => item.type === "existing_project")
-    .map((item) => item.path);
-  const selectedWorktreePaths = workspaceItems
-    .filter((item) => item.type === "git_worktree")
-    .map((item) => item.sourceProjectPath);
+  const selectedWorkspacePaths = workspaceItems.map((item) =>
+    item.type === "existing_project" ? item.path : item.sourceProjectPath,
+  );
 
   return (
     <Menu position="top-end" shadow="md" width={rem(380)} withinPortal>
@@ -161,12 +165,12 @@ function AddWorkspaceMenu({
         </Button>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Label>{t("addExistingProject")}</Menu.Label>
+        <Menu.Label>{t("addRepositoryWorkspace")}</Menu.Label>
         <ScrollArea.Autosize mah={rem(220)} type="auto" offsetScrollbars>
           <ProjectPresetMenuItems
             presetPaths={presetPaths}
             projectPresetState={projectPresetState}
-            selectedPaths={selectedExistingPaths}
+            selectedPaths={selectedWorkspacePaths}
             onSelect={onAddPresetProject}
           />
         </ScrollArea.Autosize>
@@ -175,22 +179,6 @@ function AddWorkspaceMenu({
           onClick={() => onOpenProjectPicker("existing_project")}
         >
           {t("chooseFolder")}
-        </Menu.Item>
-        <Menu.Divider />
-        <Menu.Label>{t("addWorktreeFromProject")}</Menu.Label>
-        <ScrollArea.Autosize mah={rem(220)} type="auto" offsetScrollbars>
-          <ProjectPresetMenuItems
-            presetPaths={presetPaths}
-            projectPresetState={projectPresetState}
-            selectedPaths={selectedWorktreePaths}
-            onSelect={onAddWorktreeProject}
-          />
-        </ScrollArea.Autosize>
-        <Menu.Item
-          leftSection={<IconGitBranch size={iconSize()} />}
-          onClick={() => onOpenProjectPicker("git_worktree")}
-        >
-          {t("chooseWorktreeSourceFolder")}
         </Menu.Item>
       </Menu.Dropdown>
     </Menu>
@@ -201,7 +189,10 @@ interface WorkspaceItemRowProps {
   item: NewSessionWorkspaceItemState;
   activeWorktreeItemId: string | null;
   gitRefPreviewState: GitRefPreviewState;
-  onAddWorktreeProject: (path: string) => void;
+  onSetWorkspaceItemKind: (
+    itemId: string,
+    kind: NewSessionWorkspaceItemKind,
+  ) => void;
   onActivateWorktreeItem: (itemId: string) => void;
   onSetWorktreeStartingRef: (itemId: string, ref: string | null) => void;
   onRemoveWorkspaceItem: (itemId: string) => void;
@@ -211,7 +202,7 @@ function WorkspaceItemRow({
   item,
   activeWorktreeItemId,
   gitRefPreviewState,
-  onAddWorktreeProject,
+  onSetWorkspaceItemKind,
   onActivateWorktreeItem,
   onSetWorktreeStartingRef,
   onRemoveWorkspaceItem,
@@ -221,8 +212,8 @@ function WorkspaceItemRow({
       return (
         <ExistingProjectRow
           item={item}
-          onAddWorktreeProject={onAddWorktreeProject}
           onRemoveWorkspaceItem={onRemoveWorkspaceItem}
+          onSetWorkspaceItemKind={onSetWorkspaceItemKind}
         />
       );
     case "git_worktree":
@@ -233,21 +224,60 @@ function WorkspaceItemRow({
           item={item}
           onActivateWorktreeItem={onActivateWorktreeItem}
           onRemoveWorkspaceItem={onRemoveWorkspaceItem}
+          onSetWorkspaceItemKind={onSetWorkspaceItemKind}
           onSetWorktreeStartingRef={onSetWorktreeStartingRef}
         />
       );
   }
 }
 
+interface WorkspaceKindSelectProps {
+  value: NewSessionWorkspaceItemKind;
+  itemId: string;
+  onSetWorkspaceItemKind: (
+    itemId: string,
+    kind: NewSessionWorkspaceItemKind,
+  ) => void;
+}
+
+function WorkspaceKindSelect({
+  value,
+  itemId,
+  onSetWorkspaceItemKind,
+}: WorkspaceKindSelectProps): React.ReactElement {
+  const t = useTranslations("chat");
+  return (
+    <Select
+      allowDeselect={false}
+      aria-label={t("workspaceItemKindLabel")}
+      data={[
+        { value: "existing_project", label: t("workspaceKindRepository") },
+        { value: "git_worktree", label: t("workspaceKindNewWorktree") },
+      ]}
+      size="xs"
+      value={value}
+      w={{ base: rem(132), sm: rem(168) }}
+      onChange={(nextValue) => {
+        if (isWorkspaceItemKind(nextValue)) {
+          onSetWorkspaceItemKind(itemId, nextValue);
+        }
+      }}
+    />
+  );
+}
+
 interface ExistingProjectRowProps {
   item: Extract<NewSessionWorkspaceItemState, { type: "existing_project" }>;
-  onAddWorktreeProject: (path: string) => void;
+  onSetWorkspaceItemKind: (
+    itemId: string,
+    kind: NewSessionWorkspaceItemKind,
+  ) => void;
   onRemoveWorkspaceItem: (itemId: string) => void;
 }
 
 function ExistingProjectRow({
   item,
-  onAddWorktreeProject,
+  onSetWorkspaceItemKind,
   onRemoveWorkspaceItem,
 }: ExistingProjectRowProps): React.ReactElement {
   const t = useTranslations("chat");
@@ -258,24 +288,16 @@ function ExistingProjectRow({
           <IconFolder size={iconSize()} />
         </ThemeIcon>
         <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-          <Group gap="xs" wrap="nowrap">
-            <Text fw={600} size="sm" truncate>
-              {basename(item.path)}
-            </Text>
-            <Badge size="xs" variant="light">
-              {t("workspaceItemExisting")}
-            </Badge>
-          </Group>
+          <Text fw={600} size="sm" truncate>
+            {basename(item.path)}
+          </Text>
           <PathPopover path={item.path} />
         </Stack>
-        <Button
-          leftSection={<IconGitBranch size={iconSize()} />}
-          size="compact-xs"
-          variant="subtle"
-          onClick={() => onAddWorktreeProject(item.path)}
-        >
-          {t("addWorktree")}
-        </Button>
+        <WorkspaceKindSelect
+          itemId={item.id}
+          value={item.type}
+          onSetWorkspaceItemKind={onSetWorkspaceItemKind}
+        />
         <ActionIcon
           aria-label={t("removeWorkspaceItem")}
           color="red"
@@ -294,6 +316,10 @@ interface GitWorktreeRowProps {
   item: Extract<NewSessionWorkspaceItemState, { type: "git_worktree" }>;
   active: boolean;
   gitRefPreviewState: GitRefPreviewState;
+  onSetWorkspaceItemKind: (
+    itemId: string,
+    kind: NewSessionWorkspaceItemKind,
+  ) => void;
   onActivateWorktreeItem: (itemId: string) => void;
   onSetWorktreeStartingRef: (itemId: string, ref: string | null) => void;
   onRemoveWorkspaceItem: (itemId: string) => void;
@@ -303,6 +329,7 @@ function GitWorktreeRow({
   item,
   active,
   gitRefPreviewState,
+  onSetWorkspaceItemKind,
   onActivateWorktreeItem,
   onSetWorktreeStartingRef,
   onRemoveWorkspaceItem,
@@ -328,21 +355,21 @@ function GitWorktreeRow({
       onClick={() => onActivateWorktreeItem(item.id)}
     >
       <Stack gap="xs">
-        <Group gap="sm" wrap="nowrap" align="flex-start">
+        <Group gap="sm" wrap="nowrap" align="center">
           <ThemeIcon variant="light" color="grape" size="sm">
             <IconGitBranch size={iconSize()} />
           </ThemeIcon>
           <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-            <Group gap="xs" wrap="nowrap">
-              <Text fw={600} size="sm" truncate>
-                {basename(item.sourceProjectPath)}
-              </Text>
-              <Badge color="grape" size="xs" variant="light">
-                {t("workspaceItemWorktree")}
-              </Badge>
-            </Group>
+            <Text fw={600} size="sm" truncate>
+              {basename(item.sourceProjectPath)}
+            </Text>
             <PathPopover path={item.sourceProjectPath} />
           </Stack>
+          <WorkspaceKindSelect
+            itemId={item.id}
+            value={item.type}
+            onSetWorkspaceItemKind={onSetWorkspaceItemKind}
+          />
           <ActionIcon
             aria-label={t("removeWorkspaceItem")}
             color="red"

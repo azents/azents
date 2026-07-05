@@ -60,7 +60,7 @@ const meta = {
     gitRefPreviewState: { type: "IDLE" },
     projectPresetState: { type: "READY", presets },
     onAddPresetProject: () => {},
-    onAddWorktreeProject: () => {},
+    onSetWorkspaceItemKind: () => {},
     onActivateWorktreeItem: () => {},
     onSetWorktreeStartingRef: () => {},
     onRemoveWorkspaceItem: () => {},
