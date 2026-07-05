@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.project_browser_entry_capabilities_response import ProjectBrowserEntryCapabilitiesResponse
 from azentspublicclient.models.project_browser_entry_source_response import ProjectBrowserEntrySourceResponse
 from azentspublicclient.models.project_browser_entry_status_response import ProjectBrowserEntryStatusResponse
@@ -32,17 +32,28 @@ class ProjectBrowserEntryResponse(BaseModel):
     name: StrictStr = Field(description="Project root display name")
     path: StrictStr = Field(description="Agent Workspace absolute path")
     kind: StrictStr = Field(description="Entry kind")
+    repository_type: Optional[StrictStr]
     source: ProjectBrowserEntrySourceResponse = Field(description="Entry source")
     status: ProjectBrowserEntryStatusResponse = Field(description="Filesystem status projection")
     capabilities: ProjectBrowserEntryCapabilitiesResponse = Field(description="Backend-provided entry action policy")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "path", "kind", "source", "status", "capabilities"]
+    __properties: ClassVar[List[str]] = ["name", "path", "kind", "repository_type", "source", "status", "capabilities"]
 
     @field_validator('kind')
     def kind_validate_enum(cls, value):
         """Validates the enum"""
         if value not in set(['directory']):
             raise ValueError("must be one of enum values ('directory')")
+        return value
+
+    @field_validator('repository_type')
+    def repository_type_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        if value not in set(['git']):
+            raise ValueError("must be one of enum values ('git')")
         return value
 
     model_config = ConfigDict(
@@ -100,6 +111,11 @@ class ProjectBrowserEntryResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if repository_type (nullable) is None
+        # and model_fields_set contains the field
+        if self.repository_type is None and "repository_type" in self.model_fields_set:
+            _dict['repository_type'] = None
+
         return _dict
 
     @classmethod
@@ -115,6 +131,7 @@ class ProjectBrowserEntryResponse(BaseModel):
             "name": obj.get("name"),
             "path": obj.get("path"),
             "kind": obj.get("kind"),
+            "repository_type": obj.get("repository_type"),
             "source": ProjectBrowserEntrySourceResponse.from_dict(obj["source"]) if obj.get("source") is not None else None,
             "status": ProjectBrowserEntryStatusResponse.from_dict(obj["status"]) if obj.get("status") is not None else None,
             "capabilities": ProjectBrowserEntryCapabilitiesResponse.from_dict(obj["capabilities"]) if obj.get("capabilities") is not None else None

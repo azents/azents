@@ -161,6 +161,7 @@ const projectRootEntries: WorkspaceEntry[] = [
     size: null,
     mediaType: null,
     modifiedAt: null,
+    repositoryType: "git",
     capabilities: {
       open: true,
       removeProject: true,
@@ -183,6 +184,7 @@ const projectRootEntries: WorkspaceEntry[] = [
     size: null,
     mediaType: null,
     modifiedAt: null,
+    repositoryType: null,
     capabilities: {
       open: true,
       removeProject: true,

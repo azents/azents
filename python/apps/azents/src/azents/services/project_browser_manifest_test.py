@@ -8,7 +8,13 @@ from contextlib import asynccontextmanager
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentProjectCatalogStatus, LLMProvider, WorkspaceUserRole
+from azents.core.enums import (
+    AgentProjectCatalogStatus,
+    LLMProvider,
+    SessionGitWorktreeBranchCreatedBy,
+    SessionGitWorktreeStatus,
+    WorkspaceUserRole,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent import AgentRepository
@@ -16,6 +22,9 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.session_git_worktree import SessionGitWorktreeRepository
+from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
+from azents.repos.session_initialization import SessionInitializationRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
@@ -131,6 +140,7 @@ def _service(session: AsyncSession) -> ProjectBrowserManifestService:
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
         project_repository=SessionWorkspaceProjectRepository(),
+        worktree_repository=SessionGitWorktreeRepository(),
         catalog_repository=catalog_repository,
         workspace_user_repository=WorkspaceUserRepository(),
         catalog_service=AgentProjectCatalogService(
@@ -184,6 +194,7 @@ class TestProjectBrowserManifestService:
         assert [entry.path for entry in manifest.entries] == ["/workspace/agent/app"]
         entry = manifest.entries[0]
         assert entry.name == "app"
+        assert entry.repository_type is None
         assert entry.source.type == "session_project"
         assert entry.source.project_id == project.id
         assert entry.status.value == AgentProjectCatalogStatus.AVAILABLE
@@ -192,6 +203,58 @@ class TestProjectBrowserManifestService:
         assert entry.capabilities.filesystem_delete is False
         assert entry.capabilities.filesystem_move is False
         assert entry.capabilities.filesystem_rename is False
+
+    async def test_session_manifest_marks_git_worktree_projects(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Project roots linked to Git worktree allocations expose Git metadata."""
+        fixture = await _create_fixture(rdb_session, "pbm-git-worktree")
+        project = await SessionWorkspaceProjectRepository().create_project(
+            rdb_session,
+            SessionWorkspaceProjectCreate(
+                session_id=fixture.session_id,
+                path="/workspace/agent/.azents/worktrees/session-1/app",
+            ),
+        )
+        initialization = (
+            await SessionInitializationRepository().create_ready_noop_if_absent(
+                rdb_session,
+                session_id=fixture.session_id,
+                completed_at=datetime.datetime.now(datetime.UTC),
+            )
+        )
+        steps = await SessionInitializationRepository().list_steps(
+            rdb_session,
+            initialization_id=initialization.id,
+        )
+        await SessionGitWorktreeRepository().create(
+            rdb_session,
+            SessionGitWorktreeCreate(
+                id="0123456789abcdef0123456789abcdef",
+                session_id=fixture.session_id,
+                initialization_id=initialization.id,
+                step_id=steps[0].id,
+                session_workspace_project_id=project.id,
+                source_project_path="/workspace/agent/app",
+                starting_ref="main",
+                worktree_path="/workspace/agent/.azents/worktrees/session-1/app",
+                branch_name="azents/session-1-app",
+                branch_created_by=SessionGitWorktreeBranchCreatedBy.AZENTS,
+                status=SessionGitWorktreeStatus.READY,
+            ),
+        )
+
+        result = await _service(rdb_session).get_session_manifest(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            user_id=fixture.user_id,
+        )
+
+        assert isinstance(result, Success)
+        assert [entry.repository_type for entry in result.value.manifest.entries] == [
+            "git"
+        ]
 
     async def test_session_manifest_empty_projects_has_empty_state(
         self,
@@ -234,6 +297,7 @@ class TestProjectBrowserManifestService:
             "/workspace/agent/app"
         ]
         entry = result.value.manifest.entries[0]
+        assert entry.repository_type is None
         assert entry.source.type == "preview_project"
         assert entry.source.project_id is None
         assert entry.status.value == AgentProjectCatalogStatus.UNCHECKED

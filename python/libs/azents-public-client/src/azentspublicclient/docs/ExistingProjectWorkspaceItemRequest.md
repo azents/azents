@@ -6,8 +6,8 @@ Existing Project workspace item for a new AgentSession.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Workspace item type |
-**path** | **str** | Existing Project path |
+**type** | **str** | Workspace item type | 
+**path** | **str** | Existing Project path | 
 
 ## Example
 
@@ -27,3 +27,5 @@ existing_project_workspace_item_request_dict = existing_project_workspace_item_r
 existing_project_workspace_item_request_from_dict = ExistingProjectWorkspaceItemRequest.from_dict(existing_project_workspace_item_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

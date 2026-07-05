@@ -943,6 +943,11 @@ class ProjectBrowserEntryResponse(BaseModel):
     name: str = Field(description="Project root display name")
     path: str = Field(description="Agent Workspace absolute path")
     kind: Literal["directory"] = Field(description="Entry kind")
+    repository_type: Literal["git"] | None = Field(
+        description=(
+            "Repository type when the Project root is backed by a VCS repository"
+        ),
+    )
     source: ProjectBrowserEntrySourceResponse = Field(description="Entry source")
     status: ProjectBrowserEntryStatusResponse = Field(
         description="Filesystem status projection",
@@ -958,6 +963,7 @@ class ProjectBrowserEntryResponse(BaseModel):
             name=entry.name,
             path=entry.path,
             kind=entry.kind,
+            repository_type=entry.repository_type,
             source=ProjectBrowserEntrySourceResponse.from_domain(entry.source),
             status=ProjectBrowserEntryStatusResponse.from_domain(entry.status),
             capabilities=ProjectBrowserEntryCapabilitiesResponse.from_domain(

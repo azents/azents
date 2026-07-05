@@ -14274,6 +14274,19 @@
             "title": "Kind",
             "description": "Entry kind"
           },
+          "repository_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "git"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository Type",
+            "description": "Repository type when the Project root is backed by a VCS repository"
+          },
           "source": {
             "$ref": "#/components/schemas/ProjectBrowserEntrySourceResponse",
             "description": "Entry source"
@@ -14292,6 +14305,7 @@
           "name",
           "path",
           "kind",
+          "repository_type",
           "source",
           "status",
           "capabilities"

@@ -7,7 +7,7 @@ Existing Project default workspace item response.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** | Workspace item type | [optional] [default to 'existing_project']
-**path** | **str** | Existing Project path |
+**path** | **str** | Existing Project path | 
 
 ## Example
 
@@ -27,3 +27,5 @@ existing_project_workspace_item_response_dict = existing_project_workspace_item_
 existing_project_workspace_item_response_from_dict = ExistingProjectWorkspaceItemResponse.from_dict(existing_project_workspace_item_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

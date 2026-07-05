@@ -6,9 +6,9 @@ REST non-primary AgentSession create request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**workspace_items** | [**List[AgentSessionCreateRequestWorkspaceItemsInner]**](AgentSessionCreateRequestWorkspaceItemsInner.md) |  | [optional]
-**workspace_mode** | [**WorkspaceMode**](WorkspaceMode.md) |  | [optional]
-**project_paths** | **List[str]** |  | [optional]
+**workspace_items** | [**List[AgentSessionCreateRequestWorkspaceItemsInner]**](AgentSessionCreateRequestWorkspaceItemsInner.md) |  | [optional] 
+**workspace_mode** | [**WorkspaceMode**](WorkspaceMode.md) |  | [optional] 
+**project_paths** | **List[str]** |  | [optional] 
 
 ## Example
 

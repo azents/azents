@@ -39,6 +39,7 @@ export type WorkspaceEntry = {
   size: number | null;
   mediaType: string | null;
   modifiedAt: string | null;
+  repositoryType?: "git" | null;
   capabilities?: WorkspaceEntryCapabilities | null;
   status?: WorkspaceEntryStatus | null;
   source?: WorkspaceEntrySource;
@@ -148,6 +149,7 @@ export function mapWorkspaceEntry(
     size: entry.size ?? null,
     mediaType: entry.media_type ?? null,
     modifiedAt: entry.modified_at ?? null,
+    repositoryType: null,
     capabilities: null,
     status: null,
     source: { type: "workspace" },
@@ -174,6 +176,7 @@ export function mapProjectBrowserEntry(
     size: null,
     mediaType: null,
     modifiedAt: null,
+    repositoryType: entry.repository_type ?? null,
     capabilities: {
       open: entry.capabilities.open,
       removeProject: entry.capabilities.remove_project,

@@ -6,9 +6,9 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** | Workspace item type | [optional] [default to 'existing_project']
-**path** | **str** | Existing Project path |
-**source_project_path** | **str** | Source Project path |
-**starting_ref** | **str** |  | [optional]
+**path** | **str** | Existing Project path | 
+**source_project_path** | **str** | Source Project path | 
+**starting_ref** | **str** |  | [optional] 
 
 ## Example
 
@@ -28,3 +28,5 @@ agent_session_project_defaults_response_items_inner_dict = agent_session_project
 agent_session_project_defaults_response_items_inner_from_dict = AgentSessionProjectDefaultsResponseItemsInner.from_dict(agent_session_project_defaults_response_items_inner_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+
