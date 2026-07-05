@@ -388,6 +388,8 @@ WebSocket chat clients receive subscription and event actions:
 - `live_event_removed` when a projection is no longer current;
 - `input_actions_updated` when composer action definitions change, including Skill projection list changes;
 - `todo_state_changed` when the session-scoped TodoToolkit State changes;
+- `live_run_updated` when the authoritative running run projection changes, including failed-run retry state;
+- `live_run_cleared` when terminal run cleanup removes the current run projection;
 - `session_initialization_updated` when an initialization projection changes;
 - `session_initialization_event_appended` when a durable initialization event is appended.
 
@@ -397,6 +399,8 @@ Durable/live handoff follows these invariants:
   because the event arrived through the history action.
 - `live_event_removed` removes only the live projection. It must not remove a durable view model that
   has already been promoted from `history_event_appended`.
+- `live_run_updated` replaces the current `run` live-state snapshot atomically; `live_run_cleared`
+  clears only the live run snapshot and does not remove durable transcript events.
 - When a durable event has a matching live counterpart, the worker publishes the history
   append action before publishing the live removal action.
 - If the same semantic entity is present in both durable history and live projection, durable history
@@ -465,8 +469,9 @@ primary session and returns its `session_id`.
 to the path agent and is visible to the requester; session missing, agent/session mismatch, and access
 denied all return 404.
 `POST /chat/v1/sessions/{session_id}/messages` appends a user message input to an existing session.
-`POST /chat/v1/sessions/{session_id}/edit-message` and
-`POST /chat/v1/sessions/{session_id}/commands` are idle-only control boundaries. All REST write
+`POST /chat/v1/sessions/{session_id}/edit-message`,
+`POST /chat/v1/sessions/{session_id}/commands`, and
+`POST /chat/v1/sessions/{session_id}/retry-failed-run` are idle-only control boundaries. All REST write
 requests require `client_request_id`; accepted writes are recorded in `chat_write_requests` so
 retries with the same key return the same accepted target instead of creating duplicate side effects.
 REST write idempotency is scoped to `(session_id, user_id, client_request_id)`. The same
@@ -479,7 +484,11 @@ rewrite durable history state, clear pending input buffers, commit an
 `edited_user_message` input buffer, mark the session running through `InputBufferService`, and send a
 wake-up for the explicit path session. Command writes do not enter the input buffer; they store a
 single pending command on `agent_sessions`, mark the explicit path session running, and send a wake-up
-for that session. Signal delivery is not the persistence source of truth. REST write
+for that session. Failed-run retry writes target the latest visible failed-run `system_error`; they
+are rejected with `409 Conflict` if any newer visible durable event exists, if the session is running,
+or if pending input/command state exists. Accepted retry writes soft-revert the failed event and later
+visible events, mark the session running, send a normal wake-up, return accepted type
+`failed_run_retry`, and set `history_reload_required = true`. Signal delivery is not the persistence source of truth. REST write
 responses include `session_id`, `client_request_id`, an accepted target, an authoritative live
 snapshot, and `history_reload_required` for writes such as edit/command that require durable history
 reload.
@@ -561,4 +570,5 @@ Current verification:
   ownership from the spec, and defined the `InputBufferService` transaction boundary for running-state
   transitions and goal continuation promotion.
 - **2026-07-03** — v80. Reflected explicit Project path session creation and separated Agent Project catalog UI projection from session Project prompt ownership.
+- **2026-07-05** — v84. Added failed-run retry attempt history, live-run update/clear WebSocket actions, and manual failed-run retry write semantics.
 - **2026-06-13** — v54. Added session todo snapshot and `todo_state_changed` WebSocket event to Chat live state. Todo is side state stored in `toolkit_states`, not durable transcript/compaction state.

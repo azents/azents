@@ -30,11 +30,11 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-04 | 55 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-05 | 56 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-04 | 6 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-04 | 9 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-05 | 11 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-01 | 17 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-03 | 9 |

@@ -34,8 +34,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-04
-spec_version: 55
+last_verified_at: 2026-07-05
+spec_version: 56
 ---
 
 # Agent Execution Loop
@@ -91,9 +91,12 @@ tool activity uses `executing_tools` and `active_tool_calls`.
 
 `retry_state` is nullable durable JSON on `agent_runs`. When present, it records failed-run retry
 progress for a still-running run and includes the latest user-safe error message, failed attempt
-count, max retries, backoff seconds, `next_retry_at`, error type/source, and future retry
-classification fields. Terminal run transitions clear `retry_state`. `/live` exposes this as the
-optional `run.retry` projection so retry UI does not need durable transcript retry-attempt events.
+count, max retries, backoff seconds, `next_retry_at`, error type/source, retryability, failure code,
+and a bounded `attempts` list. Each attempt summary contains attempt number, user-safe message,
+error type/source, failed timestamp, retryability, failure code, truncation flag, backoff seconds,
+and the next retry timestamp. Terminal run transitions clear `retry_state`. `/live` exposes this as
+the optional `run.retry` projection so retry UI can restore the live retry card and attempt history
+without durable transcript retry-attempt events.
 
 Failed-run retry is owned by the worker run boundary, not by the event execution core. User-visible
 model/runtime errors that stop a run attempt propagate out of `AgentRunExecution` without appending a
@@ -122,11 +125,13 @@ message-processing errors also remain outside the failed-run scope unless they a
 concrete `RunExecutor` boundary.
 
 Failed-run terminal `system_error` events carry a user-safe `failure` payload with `kind =
-failed_run`. Frontend history/live mapping must preserve this metadata on the rendered error message.
-The error card should show a recovery summary derived only from that safe payload: finalization
-reason, failed attempt count, retry budget, retryability/non-retryable status, and optional
-`action_hint`. It must not render internal messages, stack traces, raw provider responses, or any
-observability-only diagnostics.
+failed_run`. The payload includes finalization reason, failed attempt count, retry budget, latest
+retryability/failure code, optional `action_hint`, and the same bounded user-safe attempt history
+shape used by `run.retry.attempts`. Frontend history/live mapping must preserve this metadata on the
+rendered error message. The terminal failed-run error card shows the safe error message inside the
+card, exposes the attempt history as expandable detail, and shows a manual retry action only when the
+failed-run error event is the latest visible durable event and the session is idle. It must not render
+internal messages, stack traces, raw provider responses, or any observability-only diagnostics.
 
 ## 3. Event Transcript
 
@@ -348,7 +353,14 @@ to start. Edit writes are
 idle-only: the REST transaction rewrites durable history state, clears pending input buffers,
 creates an `edited_user_message` input buffer, marks the session running, and sends a wake-up.
 Command writes are idle-only control actions: the REST transaction stores one pending command on
-`agent_sessions`, marks the session running, and sends a wake-up. `SessionRunner` reads the pending
+`agent_sessions`, marks the session running, and sends a wake-up. Manual failed-run retry uses
+`POST /chat/v1/sessions/{session_id}/retry-failed-run` with `agent_id`, `failed_event_id`, and
+`client_request_id`. It is accepted only when the target event is a visible failed-run
+`system_error`, the session is idle with no pending command or input buffer, and that event is the
+latest visible durable event. The accepted write type is `failed_run_retry`; it soft-reverts visible
+events from the failed event model-order boundary, clears pending buffers defensively, marks the
+session running, sends a normal wake-up, and requires history reload. It does not append a synthetic
+user message. `SessionRunner` reads the pending
 command from the session and passes it into `RunExecutor`, which prepares the same `RunRequest` and
 `RunContext` used by normal runs before invoking the registered command handler. Running sessions,
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
@@ -409,6 +421,7 @@ Primary checks:
 - deterministic azents E2E CI for text/tool/UI projection behavior
 - deterministic session initialization and Git worktree lifecycle E2E coverage
 - `cd testenv/azents/e2e && uv run pyright src/tests/azents/public/test_chat_input_buffer.py`
+- Failed-run retry recovery E2E: `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_agent_execution_persistence.py -q -k failed_run`
 - REST chat write targeted verification: `cd python/apps/azents && uv run pytest -q src/azents/api/public/chat/v1/chat_api_test.py src/azents/repos/chat_write_request/repository_test.py src/azents/services/chat/input_buffer_test.py`
 - REST chat write and preemptive stop E2E/browser blocker tracking: GitHub issues #4468 and #4469
 - static scan for removed `openai-agents`, `azents.engine.sdk`, `azents.runtime.llm`, and
@@ -472,5 +485,6 @@ updated by the user.
 - **2026-07-04** (spec_version 54) — Clarified that the session runner drains pending initialization work before dispatch and may continue into run creation on the same wake-up once setup becomes ready.
 - **2026-07-04** (spec_version 52) — Added the session initialization gate before run creation.
 - **2026-07-01** (spec_version 50) — Unified pending runtime commands into the `RunExecutor` run boundary.
+- **2026-07-05** (spec_version 56) — Promoted failed-run retry recovery state, attempt history, live-run WebSocket projection, terminal error-card metadata, and manual retry control behavior.
 - **2026-06-28** (spec_version 47) — Added failed-run retry state foundation, live retry projection contract, and Goal continuation gating by successful terminal run status.
 - **2026-06-28** (spec_version 46) — Promoted generic client tool result metadata and runtime process tool execution (`exec_command`/`write_stdin`) into the execution loop spec.

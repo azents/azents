@@ -1,6 +1,7 @@
 ---
 title: "Failed-run Retry Recovery UX"
 created: 2026-07-05
+implemented: 2026-07-05
 tags: [backend, frontend, api, chat, retry, ux]
 ---
 # Failed-run Retry Recovery UX
