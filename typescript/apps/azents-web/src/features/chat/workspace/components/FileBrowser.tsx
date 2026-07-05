@@ -473,7 +473,7 @@ function TreeNode({
               ff="monospace"
               title={displayPath}
               truncate
-              style={{ flex: "1 1 auto", minWidth: rem(24) }}
+              style={{ flex: "1 1 0", minWidth: 0 }}
             >
               {displayPath}
             </Text>
