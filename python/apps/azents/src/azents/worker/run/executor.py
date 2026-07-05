@@ -916,6 +916,7 @@ class RunExecutor:
                         previous_retry_state=current_retry_state,
                     )
                     current_retry_state = retry_state
+                    await publish_live_run(retry_state)
                     logger.exception(
                         "Internal error during engine run attempt",
                         extra={
