@@ -178,4 +178,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 346
+- Total documents: 345
