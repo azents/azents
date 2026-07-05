@@ -54,6 +54,24 @@ export const WithAttachment: Story = {
   },
 };
 
+export const WithSkillAction: Story = {
+  args: {
+    buffer: {
+      id: "buffer-4",
+      sessionId: "session-1",
+      content: "Review the current diff and commit required fixes.",
+      action: {
+        type: "skill",
+        skill_path: "/workspace/agent/app/.claude/skills/code-review/SKILL.md",
+      },
+      attachments: [],
+      metadata: { source: "web" },
+      createdAt: "2026-05-19T00:00:00Z",
+      status: "pending",
+    },
+  },
+};
+
 export const Deleting: Story = {
   args: {
     buffer: {
