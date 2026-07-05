@@ -16,8 +16,6 @@ import {
   IconChevronRight,
   IconClock,
   IconRefresh,
-  IconRepeat,
-  IconRepeatOff,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
@@ -27,8 +25,6 @@ import type {
   FailedRunAttemptSummary,
   FailedRunFailureMetadata,
 } from "../types";
-
-type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
 
 type RunRetryCardProps =
   | {
@@ -44,17 +40,6 @@ type RunRetryCardProps =
       isRetryPending: boolean;
       onRetry: () => void;
     };
-
-function formatAttemptCount(
-  failedAttemptCount: number,
-  maxRetries: number,
-  t: ChatTranslator,
-): string {
-  return t("failedRunRecovery.attempts", {
-    failedAttemptCount,
-    maxRetries,
-  });
-}
 
 function timestampMs(iso: string): number | null {
   const value = new Date(iso).getTime();
@@ -87,26 +72,6 @@ function useRetryCountdown(nextRetryAt: string | null): number | null {
     return null;
   }
   return Math.max(0, Math.ceil((target - now) / 1000));
-}
-
-function phaseLabel(phase: AgentRunPhase, t: ChatTranslator): string {
-  switch (phase) {
-    case "waiting_for_model":
-    case "streaming_model":
-      return t("failedRunRecovery.phaseModel");
-    case "preparing_input":
-      return t("failedRunRecovery.phasePreparing");
-    case "normalizing_output":
-    case "executing_tools":
-    case "appending_events":
-      return t("failedRunRecovery.phaseRecovering");
-    case "compacting":
-      return t("failedRunRecovery.phaseCompacting");
-    case "stopping":
-      return t("failedRunRecovery.phaseStopping");
-    case "idle":
-      return t("failedRunRecovery.phaseWaiting");
-  }
 }
 
 function formatFullDateTime(iso: string, locale: string): string {
@@ -197,11 +162,6 @@ function AttemptHistory({
                     <Badge size="xs" variant="light" color="gray">
                       {attempt.errorType}
                     </Badge>
-                    <Badge size="xs" variant="light" color="orange">
-                      {t("failedRunRecovery.retryInSeconds", {
-                        seconds: attempt.backoffSeconds,
-                      })}
-                    </Badge>
                   </Group>
                 </Stack>
               </Paper>
@@ -220,22 +180,7 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
     ? props.retry.attempts
     : (props.failure.attempts ?? []);
   const retry = isLive ? props.retry : null;
-  const failure = isLive ? null : props.failure;
-  const failedAttemptCount = isLive
-    ? props.retry.failedAttemptCount
-    : props.failure.failed_attempt_count;
-  const maxRetries = isLive
-    ? props.retry.maxRetries
-    : props.failure.max_retries;
   const countdown = useRetryCountdown(isLive ? props.retry.nextRetryAt : null);
-  const nonRetryable =
-    failure?.finalization_reason === "non_retryable" ||
-    failure?.retryability === "non_retryable";
-  const title = isLive
-    ? t("failedRunRecovery.liveTitle")
-    : nonRetryable
-      ? t("failedRunRecovery.nonRetryableTitle")
-      : t("failedRunRecovery.terminalTitle");
   const message = isLive ? retry?.lastErrorMessage : props.message;
 
   return (
@@ -249,46 +194,16 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
       >
         <Stack gap="sm">
           <Group gap="xs" align="flex-start" wrap="nowrap">
-            {nonRetryable ? (
-              <IconRepeatOff
-                aria-hidden="true"
-                size={20}
-                stroke={1.8}
-                color="var(--mantine-color-orange-6)"
-                style={{ flexShrink: 0 }}
-              />
-            ) : isLive ? (
-              <IconRepeat
-                aria-hidden="true"
-                size={20}
-                stroke={1.8}
-                color="var(--mantine-color-orange-6)"
-                style={{ flexShrink: 0 }}
-              />
-            ) : (
-              <IconAlertTriangle
-                aria-hidden="true"
-                size={20}
-                stroke={1.8}
-                color="var(--mantine-color-orange-6)"
-                style={{ flexShrink: 0 }}
-              />
-            )}
-            <Stack gap={rem(4)} style={{ minWidth: 0 }}>
-              <Group gap="xs" wrap="wrap">
-                <Text size="sm" fw={700}>
-                  {title}
-                </Text>
-                {isLive && (
-                  <Badge size="sm" variant="light" color="orange">
-                    {phaseLabel(props.phase, t)}
-                  </Badge>
-                )}
-              </Group>
-              <Text size="xs" c="dimmed">
-                {formatAttemptCount(failedAttemptCount, maxRetries, t)}
-              </Text>
-            </Stack>
+            <IconAlertTriangle
+              aria-hidden="true"
+              size={20}
+              stroke={1.8}
+              color="var(--mantine-color-orange-6)"
+              style={{ flexShrink: 0 }}
+            />
+            <Text size="sm" fw={700}>
+              {t("failedRunRecovery.errorTitle")}
+            </Text>
           </Group>
 
           {message && (
@@ -317,28 +232,16 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
             </Group>
           )}
 
-          {!isLive && failure?.action_hint && (
-            <Text size="xs" c="dimmed">
-              {failure.action_hint}
-            </Text>
-          )}
-
           <AttemptHistory attempts={attempts} />
 
-          {!isLive && (
-            <Group gap="xs" justify="space-between" wrap="wrap">
-              {!props.canRetry && (
-                <Text size="xs" c="dimmed">
-                  {t("failedRunRecovery.retryUnavailable")}
-                </Text>
-              )}
+          {!isLive && props.canRetry && (
+            <Group gap="xs" justify="flex-end" wrap="wrap">
               <Button
                 size="xs"
                 variant="light"
                 color="orange"
                 leftSection={<IconRefresh size={14} />}
                 loading={props.isRetryPending}
-                disabled={!props.canRetry}
                 onClick={props.onRetry}
               >
                 {t("failedRunRecovery.retryAction")}

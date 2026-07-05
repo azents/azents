@@ -1410,11 +1410,12 @@
     "noLocalBranches": "No local branches are available for this Project.",
     "chooseWorktreeSourceFolder": "Choose source folder…",
     "failedRunRecovery": {
+      "errorTitle": "エラー",
       "liveTitle": "失敗した実行を再試行中",
       "terminalTitle": "再試行後に実行が失敗しました",
       "nonRetryableTitle": "再試行せずに実行が失敗しました",
       "attempts": "失敗した試行: {failedAttemptCount} / {maxRetries}",
-      "history": "試行履歴 ({count})",
+      "history": "失敗した試行 ({count})",
       "attemptTitle": "試行 {attemptNumber}",
       "retryInSeconds": "バックオフ {seconds}秒",
       "nextRetryCountdown": "次の再試行まで {seconds}秒",

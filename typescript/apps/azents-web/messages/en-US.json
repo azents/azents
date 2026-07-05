@@ -1410,11 +1410,12 @@
     "noLocalBranches": "No local branches are available for this Project.",
     "chooseWorktreeSourceFolder": "Choose source folder…",
     "failedRunRecovery": {
+      "errorTitle": "Error",
       "liveTitle": "Retrying after a failed run",
       "terminalTitle": "Run failed after retrying",
       "nonRetryableTitle": "Run failed without retrying",
       "attempts": "Failed attempts: {failedAttemptCount} / {maxRetries}",
-      "history": "Attempt history ({count})",
+      "history": "Failed attempts ({count})",
       "attemptTitle": "Attempt {attemptNumber}",
       "retryInSeconds": "Backoff {seconds}s",
       "nextRetryCountdown": "Next retry in {seconds}s",
