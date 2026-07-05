@@ -22,13 +22,19 @@ import { useChatWebSocket } from "../hooks/useChatWebSocket";
 import type { UploadedFile } from "../hooks/useFileUpload";
 import type {
   AgentRunPhase,
+  AgentRunStatus,
   AuthorizationRequest,
   ChatAction,
   ChatEvent,
+  ChatLiveRunState,
   ChatMessage,
   ChatTimelineState,
   ChatViewState,
   ConnectionStatus,
+  FailedRunAttemptSummary,
+  FailedRunFailureMetadata,
+  FailedRunFinalizationReason,
+  FailedRunRetryability,
   FileAttachment,
   GoalStateSnapshot,
   InputActionDefinition,
@@ -76,6 +82,8 @@ export interface ChatSessionContainerOutput {
   isWritePending: boolean;
   /** whether to show model response waiting/streaming indicator */
   isModelResponsePending: boolean;
+  /** current live run snapshot, including retry recovery state */
+  liveRun: ChatLiveRunState | null;
   /** whether older messages exist */
   hasMore: boolean;
   /** older messages loading */
@@ -110,6 +118,8 @@ export interface ChatSessionContainerOutput {
     message: string,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
+  /** retry the latest terminal failed run */
+  onRetryFailedRun: (failedEventId: string) => Promise<boolean>;
   /** Context compaction whether in progress */
   isCompacting: boolean;
   /** whether commands are blocked during Run */
@@ -156,6 +166,22 @@ function stringField(
 ): string | null {
   const value = record[key];
   return typeof value === "string" ? value : null;
+}
+
+function numberField(
+  record: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = record[key];
+  return typeof value === "number" ? value : null;
+}
+
+function booleanField(
+  record: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  const value = record[key];
+  return typeof value === "boolean" ? value : null;
 }
 
 function chatActionFromValue(value: unknown): ChatAction | null {
@@ -232,6 +258,175 @@ function isModelRunPhase(phase: AgentRunPhase | null): boolean {
   return phase === "waiting_for_model" || phase === "streaming_model";
 }
 
+function agentRunStatusFromValue(value: unknown): AgentRunStatus | null {
+  switch (value) {
+    case "running":
+    case "completed":
+    case "stopped":
+    case "failed":
+    case "interrupted":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function failedRunFinalizationReasonFromValue(
+  value: unknown,
+): FailedRunFinalizationReason | null {
+  switch (value) {
+    case "retry_exhausted":
+    case "retry_stopped_by_user":
+    case "non_retryable":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function failedRunRetryabilityFromValue(
+  value: unknown,
+): FailedRunRetryability | null {
+  switch (value) {
+    case "unknown":
+    case "transient":
+    case "user_action_required":
+    case "non_retryable":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function failedRunAttemptFromRecord(
+  record: Record<string, unknown>,
+): FailedRunAttemptSummary | null {
+  const attemptNumber = numberField(record, "attempt_number");
+  const userMessage = stringField(record, "user_message");
+  const errorType = stringField(record, "error_type");
+  const source = stringField(record, "source");
+  const failedAt = stringField(record, "failed_at");
+  const backoffSeconds = numberField(record, "backoff_seconds");
+  const nextRetryAt = stringField(record, "next_retry_at");
+  const retryability = stringField(record, "retryability");
+  const truncated = booleanField(record, "truncated");
+  if (
+    attemptNumber === null ||
+    userMessage === null ||
+    errorType === null ||
+    source === null ||
+    failedAt === null ||
+    backoffSeconds === null ||
+    nextRetryAt === null ||
+    retryability === null ||
+    truncated === null
+  ) {
+    return null;
+  }
+  return {
+    attemptNumber,
+    userMessage,
+    errorType,
+    source,
+    failedAt,
+    backoffSeconds,
+    nextRetryAt,
+    retryability,
+    failureCode: stringField(record, "failure_code"),
+    truncated,
+  };
+}
+
+function failedRunAttemptsFromValue(value: unknown): FailedRunAttemptSummary[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+    const attempt = failedRunAttemptFromRecord(item);
+    return attempt === null ? [] : [attempt];
+  });
+}
+
+function failedRunFailureFromValue(
+  failure: unknown,
+): FailedRunFailureMetadata | null {
+  if (!isRecord(failure) || failure.kind !== "failed_run") {
+    return null;
+  }
+  const finalizationReason = failedRunFinalizationReasonFromValue(
+    failure.finalization_reason,
+  );
+  const failedAttemptCount = numberField(failure, "failed_attempt_count");
+  const maxRetries = numberField(failure, "max_retries");
+  if (
+    finalizationReason === null ||
+    failedAttemptCount === null ||
+    maxRetries === null
+  ) {
+    return null;
+  }
+  return {
+    kind: "failed_run",
+    finalization_reason: finalizationReason,
+    failed_attempt_count: failedAttemptCount,
+    max_retries: maxRetries,
+    last_error_type: stringField(failure, "last_error_type"),
+    retryability: failedRunRetryabilityFromValue(failure.retryability),
+    failure_code: stringField(failure, "failure_code"),
+    action_hint: stringField(failure, "action_hint"),
+    attempts: failedRunAttemptsFromValue(failure.attempts),
+  };
+}
+
+function liveRunRetryFromRecord(
+  record: Record<string, unknown>,
+): ChatLiveRunState["retry"] {
+  const status = stringField(record, "status");
+  const lastErrorMessage = stringField(record, "last_error_message");
+  const failedAttemptCount = numberField(record, "failed_attempt_count");
+  const maxRetries = numberField(record, "max_retries");
+  const backoffSeconds = numberField(record, "backoff_seconds");
+  const nextRetryAt = stringField(record, "next_retry_at");
+  if (
+    status === null ||
+    lastErrorMessage === null ||
+    failedAttemptCount === null ||
+    maxRetries === null ||
+    backoffSeconds === null ||
+    nextRetryAt === null
+  ) {
+    return null;
+  }
+  return {
+    status,
+    lastErrorMessage,
+    failedAttemptCount,
+    maxRetries,
+    backoffSeconds,
+    nextRetryAt,
+    attempts: failedRunAttemptsFromValue(record.attempts),
+  };
+}
+
+function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const runId = stringField(value, "run_id");
+  const phase = agentRunPhaseFromValue(value.phase);
+  const status = agentRunStatusFromValue(value.status);
+  if (runId === null || phase === null || status === null) {
+    return null;
+  }
+  const retry = isRecord(value.retry)
+    ? liveRunRetryFromRecord(value.retry)
+    : null;
+  return { run_id: runId, phase, status, retry };
+}
+
 function usageNumberField(
   usage: Record<string, unknown>,
   key: string,
@@ -271,15 +466,15 @@ function latestTokenUsage(messages: ChatMessage[]): TokenUsageSummary | null {
   return null;
 }
 
-function liveRunPhaseFromResponse(live: unknown): AgentRunPhase | null {
+function liveRunFromResponse(live: unknown): ChatLiveRunState | null {
   if (!isRecord(live)) {
     return null;
   }
-  const run = live.run;
-  if (!isRecord(run) || stringField(run, "status") !== "running") {
-    return null;
-  }
-  return agentRunPhaseFromValue(run.phase);
+  return chatLiveRunStateFromValue(live.run);
+}
+
+function liveRunPhase(liveRun: ChatLiveRunState | null): AgentRunPhase | null {
+  return liveRun?.status === "running" ? liveRun.phase : null;
 }
 
 function sessionRunStateFromResponse(live: unknown): SessionRunState {
@@ -394,30 +589,22 @@ function eventMetadata(event: ChatEventResponse): Record<string, string> {
   };
 }
 
-function failedRunMetadata(failure: unknown): Record<string, string> | null {
-  if (!isRecord(failure) || failure.kind !== "failed_run") {
-    return null;
-  }
-
-  const failedAttemptCount = failure.failed_attempt_count;
-  const maxRetries = failure.max_retries;
-  if (
-    typeof failedAttemptCount !== "number" ||
-    typeof maxRetries !== "number"
-  ) {
+function failedRunMetadataRecord(
+  failure: FailedRunFailureMetadata | null,
+): Record<string, string> | null {
+  if (failure === null) {
     return null;
   }
 
   return {
     failed_run_kind: "failed_run",
-    failed_run_finalization_reason:
-      stringField(failure, "finalization_reason") ?? "",
-    failed_run_failed_attempt_count: String(failedAttemptCount),
-    failed_run_max_retries: String(maxRetries),
-    failed_run_last_error_type: stringField(failure, "last_error_type") ?? "",
-    failed_run_retryability: stringField(failure, "retryability") ?? "",
-    failed_run_failure_code: stringField(failure, "failure_code") ?? "",
-    failed_run_action_hint: stringField(failure, "action_hint") ?? "",
+    failed_run_finalization_reason: failure.finalization_reason,
+    failed_run_failed_attempt_count: String(failure.failed_attempt_count),
+    failed_run_max_retries: String(failure.max_retries),
+    failed_run_last_error_type: failure.last_error_type ?? "",
+    failed_run_retryability: failure.retryability ?? "",
+    failed_run_failure_code: failure.failure_code ?? "",
+    failed_run_action_hint: failure.action_hint ?? "",
   };
 }
 
@@ -758,7 +945,8 @@ function mapEvents(
         ];
       }
       case "system_error": {
-        const failureMetadata = failedRunMetadata(payload.failure);
+        const failedRunFailure = failedRunFailureFromValue(payload.failure);
+        const failureMetadata = failedRunMetadataRecord(failedRunFailure);
         return [
           ...messages,
           {
@@ -771,6 +959,7 @@ function mapEvents(
               ...eventMetadata(event),
               ...(failureMetadata ?? {}),
             },
+            failedRunFailure,
           },
         ];
       }
@@ -957,6 +1146,7 @@ interface PartialHistoryState {
 interface ManagedLiveState {
   partialHistory: PartialHistoryState;
   pendingInputBuffers: PendingInputBuffer[];
+  liveRun: ChatLiveRunState | null;
   liveRunPhase: AgentRunPhase | null;
   sessionRunState: SessionRunState;
   isResponsePending: boolean;
@@ -1005,6 +1195,7 @@ function emptyManagedLiveState(): ManagedLiveState {
   return {
     partialHistory: emptyPartialHistoryState(),
     pendingInputBuffers: [],
+    liveRun: null,
     liveRunPhase: null,
     sessionRunState: "idle",
     isResponsePending: false,
@@ -1114,16 +1305,19 @@ function replaceLiveStateFromSnapshot(
     const buffer = mapInputBufferLiveEvent(event);
     return buffer === null ? [] : [buffer];
   });
-  const liveRunPhase = liveRunPhaseFromResponse(live);
+  const liveRun = liveRunFromResponse(live);
+  const currentLiveRunPhase = liveRunPhase(liveRun);
   return {
     ...emptyManagedLiveState(),
     partialHistory: partialHistoryWithGoalContinuations,
     pendingInputBuffers,
-    liveRunPhase,
+    liveRun,
+    liveRunPhase: currentLiveRunPhase,
     sessionRunState: sessionRunStateFromResponse(live),
-    isResponsePending: liveRunPhase !== null || partialHistory.order.length > 0,
-    isModelResponsePending: isModelRunPhase(liveRunPhase),
-    isCompacting: liveRunPhase === "compacting",
+    isResponsePending:
+      currentLiveRunPhase !== null || partialHistory.order.length > 0,
+    isModelResponsePending: isModelRunPhase(currentLiveRunPhase),
+    isCompacting: currentLiveRunPhase === "compacting",
     todo: live.todo ?? emptyTodoState(),
     goal: normalizeGoalState(live.goal),
     initialization: live.initialization ?? null,
@@ -1344,6 +1538,7 @@ export function useChatSessionContainer(
   );
   const pendingInputBuffers = managedLiveState.pendingInputBuffers;
   const initialization = managedLiveState.initialization;
+  const liveRun = managedLiveState.liveRun;
   const isResponsePending = managedLiveState.isResponsePending;
   const isModelResponsePending = managedLiveState.isModelResponsePending;
   const sessionRunState = managedLiveState.sessionRunState;
@@ -1398,6 +1593,10 @@ export function useChatSessionContainer(
       const markRunActive = (phase: AgentRunPhase | null): void => {
         setManagedLiveState((prev) => ({
           ...prev,
+          liveRun:
+            prev.liveRun === null || phase === null
+              ? prev.liveRun
+              : { ...prev.liveRun, phase, status: "running" },
           liveRunPhase: phase,
           sessionRunState: "running",
           isResponsePending: true,
@@ -1414,6 +1613,7 @@ export function useChatSessionContainer(
       const markRunInactive = (): void => {
         setManagedLiveState((prev) => ({
           ...prev,
+          liveRun: null,
           liveRunPhase: null,
           sessionRunState: "idle",
           isResponsePending: false,
@@ -1471,6 +1671,31 @@ export function useChatSessionContainer(
             (buffer) => buffer.id !== event.event_id,
           ),
         }));
+        return;
+      }
+
+      if ("type" in event && event.type === "live_run_updated") {
+        const nextLiveRun = chatLiveRunStateFromValue(event.run);
+        if (nextLiveRun === null) {
+          return;
+        }
+        const nextLiveRunPhase = liveRunPhase(nextLiveRun);
+        setManagedLiveState((prev) => ({
+          ...prev,
+          liveRun: nextLiveRun,
+          liveRunPhase: nextLiveRunPhase,
+          sessionRunState:
+            nextLiveRun.status === "running" ? "running" : prev.sessionRunState,
+          isResponsePending:
+            nextLiveRunPhase !== null || prev.partialHistory.order.length > 0,
+          isModelResponsePending: isModelRunPhase(nextLiveRunPhase),
+          isCompacting: nextLiveRunPhase === "compacting",
+        }));
+        return;
+      }
+
+      if ("type" in event && event.type === "live_run_cleared") {
+        markRunInactive();
         return;
       }
 
@@ -1927,6 +2152,7 @@ export function useChatSessionContainer(
 
   const sendInputMutation = trpc.chat.sendInput.useMutation();
   const editMessageMutation = trpc.chat.editMessage.useMutation();
+  const retryFailedRunMutation = trpc.chat.retryFailedRun.useMutation();
   const stopSessionRunMutation = trpc.chat.stopSessionRun.useMutation();
   const deleteInputBufferMutation = trpc.chat.deleteInputBuffer.useMutation();
   const updateSessionGoalMutation = trpc.chat.updateSessionGoal.useMutation();
@@ -2075,6 +2301,32 @@ export function useChatSessionContainer(
     ],
   );
 
+  const onRetryFailedRun = useCallback(
+    (failedEventId: string): Promise<boolean> => {
+      const writeKey = JSON.stringify({
+        type: "failed_run_retry",
+        sessionId,
+        failedEventId,
+      });
+      const clientRequestId = clientRequestIdForWrite(writeKey);
+      return runWriteMutation(writeKey, clientRequestId, () =>
+        retryFailedRunMutation.mutateAsync({
+          sessionId,
+          agentId: agent.id,
+          failedEventId,
+          clientRequestId,
+        }),
+      );
+    },
+    [
+      agent.id,
+      clientRequestIdForWrite,
+      retryFailedRunMutation,
+      runWriteMutation,
+      sessionId,
+    ],
+  );
+
   const onStopRequest = useCallback(() => {
     if (stopSessionRunMutation.isPending) {
       return;
@@ -2105,7 +2357,8 @@ export function useChatSessionContainer(
               );
               const hasVisibleRunActivity =
                 prev.partialHistory.order.length > 0 ||
-                prev.liveRunPhase !== null;
+                prev.liveRunPhase !== null ||
+                prev.liveRun !== null;
               return {
                 ...prev,
                 pendingInputBuffers: nextBuffers,
@@ -2226,6 +2479,7 @@ export function useChatSessionContainer(
     isResponsePending,
     isWritePending,
     isModelResponsePending,
+    liveRun,
     hasMore,
     isLoadingMore,
     isLoadingNewer,
@@ -2239,6 +2493,7 @@ export function useChatSessionContainer(
     onLoadNewer,
     onResetToLatest,
     onSubmitMessageEdit,
+    onRetryFailedRun,
     isCompacting,
     wasCommandBlocked: wasRestCommandBlocked,
     isStopAvailable,

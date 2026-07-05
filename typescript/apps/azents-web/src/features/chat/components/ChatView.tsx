@@ -52,12 +52,14 @@ import { InitializationTimelineCard } from "./InitializationTimelineCard";
 import { MessageBubble } from "./MessageBubble";
 import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
+import { RunRetryCard } from "./RunRetryCard";
 import { SubagentBlock } from "./SubagentBlock";
 import { SubagentDetailModal } from "./SubagentDetailModal";
 import { TurnDivider } from "./TurnDivider";
 import type {
   AuthorizationRequest,
   ChatAction,
+  ChatLiveRunState,
   ChatMessage,
   ChatTimelineState,
   ChatViewState,
@@ -175,6 +177,24 @@ function isVisibleMessageAnchor(message: ChatMessage): boolean {
   );
 }
 
+function latestVisibleMessageId(messages: ChatMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message && isVisibleMessageAnchor(message)) {
+      return message.id;
+    }
+  }
+  return null;
+}
+
+function hasLiveRetry(
+  liveRun: ChatLiveRunState | null,
+): liveRun is ChatLiveRunState & {
+  retry: NonNullable<ChatLiveRunState["retry"]>;
+} {
+  return liveRun?.retry !== null && typeof liveRun?.retry !== "undefined";
+}
+
 /** latest compaction summary position returns.. */
 function getLatestCompactionIndex(messages: ChatMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -190,10 +210,12 @@ function getTimelineItemIds(
   messages: ChatMessage[],
   pendingInputBuffers: PendingInputBuffer[],
   initialization: SessionInitializationResponse | null,
+  liveRun: ChatLiveRunState | null,
 ): string[] {
   return [
     ...messages.map((message) => `message:${message.id}`),
     ...pendingInputBuffers.map((buffer) => `pending:${buffer.id}`),
+    ...(hasLiveRetry(liveRun) ? [`live-run-retry:${liveRun.run_id}`] : []),
     ...(initialization === null
       ? []
       : [`initialization:${initialization.id}:${initialization.status}`]),
@@ -235,6 +257,8 @@ interface ChatViewProps {
   isResponsePending: boolean;
   isWritePending: boolean;
   isModelResponsePending: boolean;
+  /** current live run snapshot with retry recovery state */
+  liveRun: ChatLiveRunState | null;
   /** current workspace handle */
   handle: string;
   onSendInput: (
@@ -270,6 +294,8 @@ interface ChatViewProps {
     message: string,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
+  /** retry the latest terminal failed run */
+  onRetryFailedRun: (failedEventId: string) => Promise<boolean>;
   /** Context compaction whether in progress */
   isCompacting: boolean;
   /** whether commands are blocked during Run */
@@ -316,6 +342,7 @@ export function ChatView({
   isResponsePending,
   isWritePending,
   isModelResponsePending,
+  liveRun,
   onSendInput,
   onDeletePendingInputBuffer,
   onClearGoal,
@@ -329,6 +356,7 @@ export function ChatView({
   onLoadNewer,
   onResetToLatest,
   onSubmitMessageEdit,
+  onRetryFailedRun,
   isCompacting,
   wasCommandBlocked,
   isStopAvailable,
@@ -409,9 +437,19 @@ export function ChatView({
     initialization !== null &&
     (initialization.status !== "ready" ||
       initialization.steps.some((step) => step.status === "failed"));
+  const latestVisibleId = useMemo(
+    () => latestVisibleMessageId(messages),
+    [messages],
+  );
+  const liveRetryRun =
+    chatTimelineState.type === "LATEST_FOLLOWING" && hasLiveRetry(liveRun)
+      ? liveRun
+      : null;
+  const liveRetryVisible = liveRetryRun !== null;
   const hasTimelineItems =
     messages.length > 0 ||
     pendingInputBuffers.length > 0 ||
+    liveRetryVisible ||
     shouldShowInitializationCard;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
@@ -604,13 +642,19 @@ export function ChatView({
       viewport.scrollTop = saved.scrollTop + diff;
       savedScrollRef.current = null;
       prevMessageIdsRef.current = new Set(
-        getTimelineItemIds(messages, pendingInputBuffers, initialization),
+        getTimelineItemIds(
+          messages,
+          pendingInputBuffers,
+          initialization,
+          liveRun,
+        ),
       );
     }
   }, [
     messages,
     pendingInputBuffers,
     initialization,
+    liveRun,
     isLoadingMore,
     markProgrammaticScroll,
   ]);
@@ -623,6 +667,7 @@ export function ChatView({
       !isInitialScrollRef.current ||
       (messages.length === 0 &&
         pendingInputBuffers.length === 0 &&
+        !liveRetryVisible &&
         !shouldShowInitializationCard) ||
       savedScrollRef.current
     ) {
@@ -654,7 +699,12 @@ export function ChatView({
     }
     isInitialScrollRef.current = false;
     prevMessageIdsRef.current = new Set(
-      getTimelineItemIds(messages, pendingInputBuffers, initialization),
+      getTimelineItemIds(
+        messages,
+        pendingInputBuffers,
+        initialization,
+        liveRun,
+      ),
     );
 
     // text after next frame pagination enable (sectext scroll insidetext waiting)
@@ -665,6 +715,8 @@ export function ChatView({
     messages,
     pendingInputBuffers,
     initialization,
+    liveRun,
+    liveRetryVisible,
     shouldShowInitializationCard,
     markProgrammaticScroll,
     pinToBottom,
@@ -708,6 +760,7 @@ export function ChatView({
       chatViewState.type === "LOADING_HISTORY" &&
       messages.length === 0 &&
       pendingInputBuffers.length === 0 &&
+      !liveRetryVisible &&
       !shouldShowInitializationCard
     ) {
       isInitialScrollRef.current = true;
@@ -720,6 +773,7 @@ export function ChatView({
     chatViewState.type,
     messages.length,
     pendingInputBuffers.length,
+    liveRetryVisible,
     shouldShowInitializationCard,
   ]);
 
@@ -738,6 +792,7 @@ export function ChatView({
       messages,
       pendingInputBuffers,
       initialization,
+      liveRun,
     );
     const hasNewMessage = timelineItemIds.some((id) => !prevIds.has(id));
 
@@ -758,7 +813,13 @@ export function ChatView({
     } else {
       setShowNewMessageChip(true);
     }
-  }, [messages, pendingInputBuffers, initialization, schedulePinToBottom]);
+  }, [
+    messages,
+    pendingInputBuffers,
+    initialization,
+    liveRun,
+    schedulePinToBottom,
+  ]);
 
   // integration scroll handler: bottom detection + new message chip release + older messages  withtext + mobile header hide/display
   useEffect(() => {
@@ -1048,6 +1109,21 @@ export function ChatView({
                       </Fragment>
                     );
                   }
+                  const failedRunRetryAction = msg.failedRunFailure
+                    ? {
+                        canRetry:
+                          chatTimelineState.type === "LATEST_FOLLOWING" &&
+                          msg.id === latestVisibleId &&
+                          !isResponsePending &&
+                          !isWritePending &&
+                          !isStopAvailable &&
+                          pendingInputBuffers.length === 0,
+                        isPending: isWritePending,
+                        onRetry: () => {
+                          void onRetryFailedRun(msg.id);
+                        },
+                      }
+                    : null;
                   return (
                     <Fragment key={msg.id}>
                       <MessageBubble
@@ -1055,6 +1131,7 @@ export function ChatView({
                         dimmed={dimmedByEdit}
                         editable={editableUserMessage}
                         onEdit={() => handleStartEdit(msg)}
+                        failedRunRetryAction={failedRunRetryAction}
                       />
                       <TurnDivider usage={boundaryControls.usage} />
                     </Fragment>
@@ -1068,7 +1145,18 @@ export function ChatView({
                     onAuthorized={() => onAuthorizationComplete(req.toolkitId)}
                   />
                 ))}
+                {liveRetryRun !== null && (
+                  <>
+                    <RunRetryCard
+                      variant="live"
+                      retry={liveRetryRun.retry}
+                      phase={liveRetryRun.phase}
+                    />
+                    {isModelResponsePending && <AgentRunIndicator />}
+                  </>
+                )}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
+                  !liveRetryVisible &&
                   isModelResponsePending &&
                   shouldShowPendingIndicator(messages) && <AgentRunIndicator />}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&

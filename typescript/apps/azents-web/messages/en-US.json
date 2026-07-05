@@ -1404,7 +1404,26 @@
     "localBranchesOnly": "Only local branches are shown for worktree creation.",
     "loadingLocalBranches": "Loading local branches…",
     "noLocalBranches": "No local branches are available for this Project.",
-    "chooseWorktreeSourceFolder": "Choose source folder…"
+    "chooseWorktreeSourceFolder": "Choose source folder…",
+    "failedRunRecovery": {
+      "liveTitle": "Retrying after a failed run",
+      "terminalTitle": "Run failed after retrying",
+      "nonRetryableTitle": "Run failed without retrying",
+      "attempts": "Failed attempts: {failedAttemptCount} / {maxRetries}",
+      "history": "Attempt history ({count})",
+      "attemptTitle": "Attempt {attemptNumber}",
+      "retryInSeconds": "Backoff {seconds}s",
+      "nextRetryCountdown": "Next retry in {seconds}s",
+      "retryingNow": "Retrying now",
+      "phaseWaiting": "Waiting to retry",
+      "phasePreparing": "Preparing retry",
+      "phaseModel": "Calling model",
+      "phaseRecovering": "Recovering output",
+      "phaseCompacting": "Compacting context",
+      "phaseStopping": "Stopping",
+      "retryAction": "Retry run",
+      "retryUnavailable": "Retry is available only for the latest failed run while the session is idle."
+    }
   },
   "oauth": {
     "title": "Authorization",

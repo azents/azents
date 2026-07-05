@@ -1404,7 +1404,26 @@
     "localBranchesOnly": "Only local branches are shown for worktree creation.",
     "loadingLocalBranches": "Loading local branches…",
     "noLocalBranches": "No local branches are available for this Project.",
-    "chooseWorktreeSourceFolder": "Choose source folder…"
+    "chooseWorktreeSourceFolder": "Choose source folder…",
+    "failedRunRecovery": {
+      "liveTitle": "Nouvelle tentative après un échec d’exécution",
+      "terminalTitle": "Exécution échouée après les nouvelles tentatives",
+      "nonRetryableTitle": "Exécution échouée sans nouvelle tentative",
+      "attempts": "Tentatives échouées : {failedAttemptCount} / {maxRetries}",
+      "history": "Historique des tentatives ({count})",
+      "attemptTitle": "Tentative {attemptNumber}",
+      "retryInSeconds": "Attente {seconds} s",
+      "nextRetryCountdown": "Prochaine tentative dans {seconds} s",
+      "retryingNow": "Nouvelle tentative en cours",
+      "phaseWaiting": "En attente de nouvelle tentative",
+      "phasePreparing": "Préparation de la nouvelle tentative",
+      "phaseModel": "Appel du modèle",
+      "phaseRecovering": "Récupération de la sortie",
+      "phaseCompacting": "Compression du contexte",
+      "phaseStopping": "Arrêt en cours",
+      "retryAction": "Relancer l’exécution",
+      "retryUnavailable": "La relance est disponible uniquement pour le dernier échec lorsque la session est inactive."
+    }
   },
   "oauth": {
     "title": "Autorisation",

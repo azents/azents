@@ -93,7 +93,36 @@ export const FailedRunErrorResponse = {
         failed_run_failure_code: "",
         failed_run_action_hint: "Check provider status or try again later.",
       },
+      failedRunFailure: {
+        kind: "failed_run",
+        finalization_reason: "retry_exhausted",
+        failed_attempt_count: 10,
+        max_retries: 10,
+        last_error_type: "RuntimeError",
+        retryability: "unknown",
+        failure_code: null,
+        action_hint: "Check provider status or try again later.",
+        attempts: [
+          {
+            attemptNumber: 10,
+            userMessage: "Runtime operation failed after provider timeout.",
+            errorType: "RuntimeError",
+            source: "runtime",
+            failedAt: "2026-05-01T10:00:00.000Z",
+            backoffSeconds: 30,
+            nextRetryAt: "2026-05-01T10:00:30.000Z",
+            retryability: "unknown",
+            failureCode: null,
+            truncated: false,
+          },
+        ],
+      },
     }),
+    failedRunRetryAction: {
+      canRetry: true,
+      isPending: false,
+      onRetry: () => {},
+    },
   },
 } satisfies Story;
 
