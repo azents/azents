@@ -62,6 +62,9 @@ class AgentWorkspaceAction:
     path: str
 
 
+AgentWorkspaceEntryRepositoryType = Literal["git"]
+
+
 @dataclasses.dataclass(frozen=True)
 class AgentWorkspaceEntry:
     """Agent Workspace directory entry."""
@@ -72,6 +75,7 @@ class AgentWorkspaceEntry:
     size: int | None
     media_type: str | None
     modified_at: datetime | None
+    repository_type: AgentWorkspaceEntryRepositoryType | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1127,9 +1131,44 @@ class AgentWorkspaceFileService:
         result = await self._runner_list_files(runtime, path)
         match result:
             case Success(entries):
-                return Success(_list_entries_from_runner(entries))
+                workspace_entries = _list_entries_from_runner(entries)
+                return await self._with_repository_metadata(runtime, workspace_entries)
             case Failure(error):
                 return Failure(error)
+            case _:
+                assert_never(result)
+
+    async def _with_repository_metadata(
+        self,
+        runtime: AgentRuntime,
+        entries: list[AgentWorkspaceEntry],
+    ) -> Success[list[AgentWorkspaceEntry]]:
+        """Attach best-effort repository metadata to directory entries."""
+        annotated: list[AgentWorkspaceEntry] = []
+        for entry in entries:
+            repository_type = await self._repository_type_for_entry(runtime, entry)
+            annotated.append(
+                dataclasses.replace(entry, repository_type=repository_type)
+            )
+        return Success(annotated)
+
+    async def _repository_type_for_entry(
+        self,
+        runtime: AgentRuntime,
+        entry: AgentWorkspaceEntry,
+    ) -> AgentWorkspaceEntryRepositoryType | None:
+        """Return repository type for a directory entry when it is known."""
+        if entry.kind != "directory":
+            return None
+        git_marker_path = PurePosixPath(entry.path) / ".git"
+        result = await self._stat_path(runtime, git_marker_path)
+        match result:
+            case Success(stat) if stat.kind in {"directory", "file"}:
+                return "git"
+            case Success():
+                return None
+            case Failure():
+                return None
             case _:
                 assert_never(result)
 
@@ -1324,6 +1363,7 @@ def _list_entries_from_runner(
                 size=item.size_bytes if item.type == "file" else None,
                 media_type=_guess_media_type(child) if item.type == "file" else None,
                 modified_at=_parse_runner_datetime(item.modified_at),
+                repository_type=None,
             )
         )
     return sorted(entries, key=lambda entry: (entry.kind != "directory", entry.name))

@@ -149,7 +149,7 @@ export function mapWorkspaceEntry(
     size: entry.size ?? null,
     mediaType: entry.media_type ?? null,
     modifiedAt: entry.modified_at ?? null,
-    repositoryType: null,
+    repositoryType: entry.repository_type ?? null,
     capabilities: null,
     status: null,
     source: { type: "workspace" },
