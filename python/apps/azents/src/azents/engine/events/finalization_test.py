@@ -122,6 +122,8 @@ async def test_failed_run_event_store_appends_terminal_failed_run() -> None:
     assert error_payload.failure is not None
     assert error_payload.failure.finalization_reason == "retry_exhausted"
     assert error_payload.failure.action_hint == "try again later"
+    assert len(error_payload.failure.attempts) == 1
+    assert error_payload.failure.attempts[0].user_message == "temporary failure"
     marker_payload = result.run_marker.payload
     assert isinstance(marker_payload, RunMarkerPayload)
     assert marker_payload.run_id == "run-001".rjust(32, "0")

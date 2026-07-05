@@ -119,6 +119,7 @@ __all__ = [
     "ChatEditMessageWriteRequest",
     "ChatEventPageResponse",
     "ChatEventResponse",
+    "ChatFailedRunRetryRequest",
     "ChatGPTOAuthConfig",
     "ChatGPTOAuthDeviceStartResponse",
     "ChatGPTOAuthDeviceStatusResponse",
@@ -126,6 +127,7 @@ __all__ = [
     "ChatGPTOAuthSessionStatus",
     "ChatInputWriteRequest",
     "ChatInputWriteRequestAction",
+    "ChatLiveRunRetryAttemptResponse",
     "ChatLiveRunRetryStateResponse",
     "ChatLiveRunStateResponse",
     "ChatSessionCreateMessageWriteRequest",
@@ -411,6 +413,7 @@ from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig as B
 from azentspublicclient.models.chat_edit_message_write_request import ChatEditMessageWriteRequest as ChatEditMessageWriteRequest
 from azentspublicclient.models.chat_event_page_response import ChatEventPageResponse as ChatEventPageResponse
 from azentspublicclient.models.chat_event_response import ChatEventResponse as ChatEventResponse
+from azentspublicclient.models.chat_failed_run_retry_request import ChatFailedRunRetryRequest as ChatFailedRunRetryRequest
 from azentspublicclient.models.chat_gpto_auth_config import ChatGPTOAuthConfig as ChatGPTOAuthConfig
 from azentspublicclient.models.chat_gpto_auth_device_start_response import ChatGPTOAuthDeviceStartResponse as ChatGPTOAuthDeviceStartResponse
 from azentspublicclient.models.chat_gpto_auth_device_status_response import ChatGPTOAuthDeviceStatusResponse as ChatGPTOAuthDeviceStatusResponse
@@ -418,6 +421,7 @@ from azentspublicclient.models.chat_gpto_auth_secrets import ChatGPTOAuthSecrets
 from azentspublicclient.models.chat_gpto_auth_session_status import ChatGPTOAuthSessionStatus as ChatGPTOAuthSessionStatus
 from azentspublicclient.models.chat_input_write_request import ChatInputWriteRequest as ChatInputWriteRequest
 from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction as ChatInputWriteRequestAction
+from azentspublicclient.models.chat_live_run_retry_attempt_response import ChatLiveRunRetryAttemptResponse as ChatLiveRunRetryAttemptResponse
 from azentspublicclient.models.chat_live_run_retry_state_response import ChatLiveRunRetryStateResponse as ChatLiveRunRetryStateResponse
 from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunStateResponse as ChatLiveRunStateResponse
 from azentspublicclient.models.chat_session_create_message_write_request import ChatSessionCreateMessageWriteRequest as ChatSessionCreateMessageWriteRequest
@@ -595,4 +599,3 @@ from azentspublicclient.models.workspace_user_list_response import WorkspaceUser
 from azentspublicclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
 from azentspublicclient.models.ws_ticket_response import WsTicketResponse as WsTicketResponse
-

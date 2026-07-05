@@ -98,6 +98,7 @@ azentspublicclient/docs/BuiltinToolConfig.md
 azentspublicclient/docs/ChatEditMessageWriteRequest.md
 azentspublicclient/docs/ChatEventPageResponse.md
 azentspublicclient/docs/ChatEventResponse.md
+azentspublicclient/docs/ChatFailedRunRetryRequest.md
 azentspublicclient/docs/ChatGPTOAuthConfig.md
 azentspublicclient/docs/ChatGPTOAuthDeviceStartResponse.md
 azentspublicclient/docs/ChatGPTOAuthDeviceStatusResponse.md
@@ -106,6 +107,7 @@ azentspublicclient/docs/ChatGPTOAuthSessionStatus.md
 azentspublicclient/docs/ChatGPTOAuthV1Api.md
 azentspublicclient/docs/ChatInputWriteRequest.md
 azentspublicclient/docs/ChatInputWriteRequestAction.md
+azentspublicclient/docs/ChatLiveRunRetryAttemptResponse.md
 azentspublicclient/docs/ChatLiveRunRetryStateResponse.md
 azentspublicclient/docs/ChatLiveRunStateResponse.md
 azentspublicclient/docs/ChatSessionCreateMessageWriteRequest.md
@@ -373,6 +375,7 @@ azentspublicclient/models/builtin_tool_config.py
 azentspublicclient/models/chat_edit_message_write_request.py
 azentspublicclient/models/chat_event_page_response.py
 azentspublicclient/models/chat_event_response.py
+azentspublicclient/models/chat_failed_run_retry_request.py
 azentspublicclient/models/chat_gpto_auth_config.py
 azentspublicclient/models/chat_gpto_auth_device_start_response.py
 azentspublicclient/models/chat_gpto_auth_device_status_response.py
@@ -380,6 +383,7 @@ azentspublicclient/models/chat_gpto_auth_secrets.py
 azentspublicclient/models/chat_gpto_auth_session_status.py
 azentspublicclient/models/chat_input_write_request.py
 azentspublicclient/models/chat_input_write_request_action.py
+azentspublicclient/models/chat_live_run_retry_attempt_response.py
 azentspublicclient/models/chat_live_run_retry_state_response.py
 azentspublicclient/models/chat_live_run_state_response.py
 azentspublicclient/models/chat_session_create_message_write_request.py
@@ -638,6 +642,7 @@ azentspublicclient/test/test_builtin_tool_config.py
 azentspublicclient/test/test_chat_edit_message_write_request.py
 azentspublicclient/test/test_chat_event_page_response.py
 azentspublicclient/test/test_chat_event_response.py
+azentspublicclient/test/test_chat_failed_run_retry_request.py
 azentspublicclient/test/test_chat_gpto_auth_config.py
 azentspublicclient/test/test_chat_gpto_auth_device_start_response.py
 azentspublicclient/test/test_chat_gpto_auth_device_status_response.py
@@ -646,6 +651,7 @@ azentspublicclient/test/test_chat_gpto_auth_session_status.py
 azentspublicclient/test/test_chat_gpto_auth_v1_api.py
 azentspublicclient/test/test_chat_input_write_request.py
 azentspublicclient/test/test_chat_input_write_request_action.py
+azentspublicclient/test/test_chat_live_run_retry_attempt_response.py
 azentspublicclient/test/test_chat_live_run_retry_state_response.py
 azentspublicclient/test/test_chat_live_run_state_response.py
 azentspublicclient/test/test_chat_session_create_message_write_request.py

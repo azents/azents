@@ -43,6 +43,7 @@ from azents.repos.agent_session.data import PendingSessionCommand
 from azents.repos.agent_subagent import AgentSubagentRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
+from azents.services.chat.data import ChatLiveRunState
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
@@ -191,6 +192,20 @@ class _LiveEventProjector:
     def __init__(self) -> None:
         self.flushed_session_ids: list[str] = []
         self.active_tool_calls: list[tuple[str, object]] = []
+        self.live_run_updates: list[tuple[str, ChatLiveRunState]] = []
+        self.live_run_cleared_session_ids: list[str] = []
+
+    async def publish_live_run_updated(
+        self,
+        session_id: str,
+        run: ChatLiveRunState,
+    ) -> None:
+        """Record live run update broadcasts."""
+        self.live_run_updates.append((session_id, run))
+
+    async def publish_live_run_cleared(self, session_id: str) -> None:
+        """Record live run clear broadcasts."""
+        self.live_run_cleared_session_ids.append(session_id)
 
     async def replace_active_tool_calls(
         self,
@@ -729,7 +744,11 @@ async def test_execute_clears_activity_after_run_complete(
     """RunComplete is the boundary that clears live run activity."""
     order: list[str] = []
     dispatched: list[PublishedEvent] = []
-    executor = _executor(_SessionLifecycle(order))
+    live_event_projector = _LiveEventProjector()
+    executor = _executor(
+        _SessionLifecycle(order),
+        live_event_projector=live_event_projector,
+    )
     message = SessionWakeUp(
         agent_id="agent-001",
         session_id="session-001",
@@ -806,6 +825,7 @@ async def test_execute_clears_activity_after_run_complete(
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
     assert any(isinstance(event, RunComplete) for event in dispatched)
     assert order == ["clear_session_activity"]
+    assert live_event_projector.live_run_cleared_session_ids == ["session-001"]
 
 
 def test_actionable_tail_ignores_completed_run_marker() -> None:
@@ -875,10 +895,12 @@ async def test_execute_retries_failed_run_without_durable_error(
     lifecycle = _SessionLifecycle()
     engine = _FlakyEngine()
     finalizer = _FailedRunFinalizer()
+    live_event_projector = _LiveEventProjector()
     executor = _executor(
         lifecycle,
         engine=cast(AgentEngineProtocol, engine),
         failed_run_finalizer=finalizer,
+        live_event_projector=live_event_projector,
     )
     dispatched: list[PublishedEvent] = []
 
@@ -946,6 +968,14 @@ async def test_execute_retries_failed_run_without_durable_error(
     assert retry_state is not None
     assert retry_state.failed_attempt_count == 1
     assert retry_state.last_user_message == "model temporarily unavailable"
+    retry_updates = [
+        run.retry
+        for _, run in live_event_projector.live_run_updates
+        if run.retry is not None
+    ]
+    assert len(retry_updates) == 1
+    assert retry_updates[0].last_error_message == "model temporarily unavailable"
+    assert retry_updates[0].attempts[0].user_message == "model temporarily unavailable"
     assert finalizer.inputs == []
     assert not any(
         isinstance(event, Event) and event.kind == EventKind.SYSTEM_ERROR

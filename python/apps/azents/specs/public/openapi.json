@@ -2634,6 +2634,64 @@
         }
       }
     },
+    "/chat/v1/sessions/{session_id}/retry-failed-run": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Retry Failed Run",
+        "description": "Accept a manual failed-run retry at the REST boundary.",
+        "operationId": "chat_v1_retry_failed_run",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatFailedRunRetryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatWriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/sessions/{session_id}/edit-message": {
       "post": {
         "tags": [
@@ -10717,6 +10775,35 @@
         "title": "ChatEventResponse",
         "description": "Event chat event response."
       },
+      "ChatFailedRunRetryRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "description": "Agent ID"
+          },
+          "failed_event_id": {
+            "type": "string",
+            "title": "Failed Event Id",
+            "description": "Terminal failed-run system_error event ID"
+          },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "description": "Client-generated idempotency key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "failed_event_id",
+          "client_request_id"
+        ],
+        "title": "ChatFailedRunRetryRequest",
+        "description": "REST failed-run retry request."
+      },
       "ChatGPTOAuthConfig": {
         "properties": {
           "type": {
@@ -11044,6 +11131,81 @@
         "title": "ChatInputWriteRequest",
         "description": "REST composer input write request."
       },
+      "ChatLiveRunRetryAttemptResponse": {
+        "properties": {
+          "attempt_number": {
+            "type": "integer",
+            "title": "Attempt Number",
+            "description": "Failed attempt number"
+          },
+          "user_message": {
+            "type": "string",
+            "title": "User Message",
+            "description": "User-safe failed attempt message"
+          },
+          "error_type": {
+            "type": "string",
+            "title": "Error Type",
+            "description": "Exception class or failure type"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Failure source boundary"
+          },
+          "failed_at": {
+            "type": "string",
+            "title": "Failed At",
+            "description": "Failure timestamp"
+          },
+          "backoff_seconds": {
+            "type": "integer",
+            "title": "Backoff Seconds",
+            "description": "Backoff duration after this attempt"
+          },
+          "next_retry_at": {
+            "type": "string",
+            "title": "Next Retry At",
+            "description": "Retry timestamp after this attempt"
+          },
+          "retryability": {
+            "type": "string",
+            "title": "Retryability",
+            "description": "Retryability classification"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code",
+            "description": "Failure code"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "Whether user_message was truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempt_number",
+          "user_message",
+          "error_type",
+          "source",
+          "failed_at",
+          "backoff_seconds",
+          "next_retry_at",
+          "retryability",
+          "truncated"
+        ],
+        "title": "ChatLiveRunRetryAttemptResponse",
+        "description": "User-safe failed-run retry attempt summary response."
+      },
       "ChatLiveRunRetryStateResponse": {
         "properties": {
           "status": {
@@ -11075,6 +11237,14 @@
             "type": "string",
             "title": "Next Retry At",
             "description": "Absolute next retry timestamp"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ChatLiveRunRetryAttemptResponse"
+            },
+            "type": "array",
+            "title": "Attempts",
+            "description": "User-safe retry attempt history"
           }
         },
         "type": "object",
@@ -11084,7 +11254,8 @@
           "failed_attempt_count",
           "max_retries",
           "backoff_seconds",
-          "next_retry_at"
+          "next_retry_at",
+          "attempts"
         ],
         "title": "ChatLiveRunRetryStateResponse",
         "description": "Current live failed-run retry state response."
@@ -11237,7 +11408,8 @@
             "enum": [
               "input_buffer",
               "edit_message",
-              "command"
+              "command",
+              "failed_run_retry"
             ],
             "title": "Type",
             "description": "Accepted target type"

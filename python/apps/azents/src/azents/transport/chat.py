@@ -7,7 +7,7 @@ so they share types from this module. Durable event transcript types use
 """
 
 import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +15,9 @@ from azents.engine.events.types import Attachment as EventAttachment
 from azents.engine.events.types import Event
 from azents.repos.session_initialization.data import SessionInitializationEvent
 from azents.services.session_initialization import SessionInitializationProjection
+
+if TYPE_CHECKING:
+    from azents.services.chat.data import ChatLiveRunState
 
 
 class ChatAttachmentSnapshot(BaseModel):
@@ -118,6 +121,56 @@ def chat_live_event_removed_dump(session_id: str, event_id: str) -> dict[str, ob
         "type": "live_event_removed",
         "session_id": session_id,
         "event_id": event_id,
+    }
+
+
+def chat_live_run_updated_dump(
+    session_id: str,
+    run: "ChatLiveRunState",
+) -> dict[str, object]:
+    """Convert live run snapshot to chat WS wire dict."""
+    retry = None
+    if run.retry is not None:
+        retry = {
+            "status": run.retry.status,
+            "last_error_message": run.retry.last_error_message,
+            "failed_attempt_count": run.retry.failed_attempt_count,
+            "max_retries": run.retry.max_retries,
+            "backoff_seconds": run.retry.backoff_seconds,
+            "next_retry_at": run.retry.next_retry_at,
+            "attempts": [
+                {
+                    "attempt_number": attempt.attempt_number,
+                    "user_message": attempt.user_message,
+                    "error_type": attempt.error_type,
+                    "source": attempt.source,
+                    "failed_at": attempt.failed_at,
+                    "backoff_seconds": attempt.backoff_seconds,
+                    "next_retry_at": attempt.next_retry_at,
+                    "retryability": attempt.retryability,
+                    "failure_code": attempt.failure_code,
+                    "truncated": attempt.truncated,
+                }
+                for attempt in run.retry.attempts
+            ],
+        }
+    return {
+        "type": "live_run_updated",
+        "session_id": session_id,
+        "run": {
+            "run_id": run.run_id,
+            "phase": run.phase.value,
+            "status": run.status.value,
+            "retry": retry,
+        },
+    }
+
+
+def chat_live_run_cleared_dump(session_id: str) -> dict[str, object]:
+    """Convert live run clear action to chat WS wire dict."""
+    return {
+        "type": "live_run_cleared",
+        "session_id": session_id,
     }
 
 

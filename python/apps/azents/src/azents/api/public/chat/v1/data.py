@@ -40,6 +40,7 @@ from azents.services.chat.context import (
     SessionContextSystemPromptFragment,
 )
 from azents.services.chat.data import (
+    ChatLiveRunRetryAttempt,
     ChatLiveRunRetryState,
     ChatLiveRunState,
     NewSessionDefaultExistingProjectWorkspaceItem,
@@ -346,12 +347,29 @@ class ChatCommandWriteRequest(BaseModel):
     command: str = Field(description="Command name, for example compact")
 
 
+class ChatFailedRunRetryRequest(BaseModel):
+    """REST failed-run retry request."""
+
+    agent_id: str = Field(description="Agent ID")
+    failed_event_id: str = Field(
+        description="Terminal failed-run system_error event ID"
+    )
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Client-generated idempotency key",
+    )
+
+
 class ChatWriteAcceptedResponse(BaseModel):
     """REST write accepted target."""
 
-    type: Literal["input_buffer", "edit_message", "command"] = Field(
-        description="Accepted target type"
-    )
+    type: Literal[
+        "input_buffer",
+        "edit_message",
+        "command",
+        "failed_run_retry",
+    ] = Field(description="Accepted target type")
     id: str = Field(description="Accepted target ID")
 
 
@@ -1737,6 +1755,37 @@ class ChatEventPageResponse(BaseModel):
     )
 
 
+class ChatLiveRunRetryAttemptResponse(BaseModel):
+    """User-safe failed-run retry attempt summary response."""
+
+    attempt_number: int = Field(description="Failed attempt number")
+    user_message: str = Field(description="User-safe failed attempt message")
+    error_type: str = Field(description="Exception class or failure type")
+    source: str = Field(description="Failure source boundary")
+    failed_at: str = Field(description="Failure timestamp")
+    backoff_seconds: int = Field(description="Backoff duration after this attempt")
+    next_retry_at: str = Field(description="Retry timestamp after this attempt")
+    retryability: str = Field(description="Retryability classification")
+    failure_code: str | None = Field(default=None, description="Failure code")
+    truncated: bool = Field(description="Whether user_message was truncated")
+
+    @classmethod
+    def from_domain(cls, attempt: ChatLiveRunRetryAttempt) -> Self:
+        """Convert from live run retry attempt domain model."""
+        return cls(
+            attempt_number=attempt.attempt_number,
+            user_message=attempt.user_message,
+            error_type=attempt.error_type,
+            source=attempt.source,
+            failed_at=attempt.failed_at,
+            backoff_seconds=attempt.backoff_seconds,
+            next_retry_at=attempt.next_retry_at,
+            retryability=attempt.retryability,
+            failure_code=attempt.failure_code,
+            truncated=attempt.truncated,
+        )
+
+
 class ChatLiveRunRetryStateResponse(BaseModel):
     """Current live failed-run retry state response."""
 
@@ -1746,6 +1795,9 @@ class ChatLiveRunRetryStateResponse(BaseModel):
     max_retries: int = Field(description="Maximum retry count")
     backoff_seconds: int = Field(description="Current backoff duration in seconds")
     next_retry_at: str = Field(description="Absolute next retry timestamp")
+    attempts: list[ChatLiveRunRetryAttemptResponse] = Field(
+        description="User-safe retry attempt history"
+    )
 
     @classmethod
     def from_domain(cls, retry: ChatLiveRunRetryState) -> Self:
@@ -1757,6 +1809,10 @@ class ChatLiveRunRetryStateResponse(BaseModel):
             max_retries=retry.max_retries,
             backoff_seconds=retry.backoff_seconds,
             next_retry_at=retry.next_retry_at,
+            attempts=[
+                ChatLiveRunRetryAttemptResponse.from_domain(attempt)
+                for attempt in retry.attempts
+            ],
         )
 
 

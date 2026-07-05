@@ -299,6 +299,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_retry_failed_run(self) -> None:
+        """Test case for chat_v1_retry_failed_run
+
+        Retry Failed Run
+        """
+        pass
+
     def test_chat_v1_retry_session_initialization(self) -> None:
         """Test case for chat_v1_retry_session_initialization
 

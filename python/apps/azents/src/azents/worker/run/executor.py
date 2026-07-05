@@ -100,6 +100,11 @@ from azents.repos.llm_provider_integration.deps import (
 )
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
+from azents.services.chat.data import (
+    ChatLiveRunRetryAttempt,
+    ChatLiveRunRetryState,
+    ChatLiveRunState,
+)
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
 from azents.services.model_file import ModelFileService
@@ -680,6 +685,21 @@ class RunExecutor:
         active_phase: AgentRunPhase | None = (
             AgentRunPhase.COMPACTING if command is not None else None
         )
+        current_retry_state: FailedRunRetryState | None = None
+
+        async def publish_live_run(
+            retry_state: FailedRunRetryState | None = None,
+        ) -> None:
+            """Publish the current live run snapshot to WebSocket clients."""
+            await self.live_event_projector.publish_live_run_updated(
+                message.session_id,
+                ChatLiveRunState(
+                    run_id=run_id,
+                    phase=active_phase or AgentRunPhase.IDLE,
+                    status=AgentRunStatus.RUNNING,
+                    retry=_chat_live_retry_state(retry_state),
+                ),
+            )
 
         async def refresh_session_activity() -> None:
             """Publish the current run phase and active tool calls to the broker."""
@@ -689,6 +709,7 @@ class RunExecutor:
                 phase=active_phase,
                 active_tool_calls=active_tool_calls,
             )
+            await publish_live_run(current_retry_state)
 
         await refresh_session_activity()
         await dispatch_event(
@@ -792,7 +813,10 @@ class RunExecutor:
                             attempt_number=attempt_number,
                             source=failed_attempt_source,
                         ),
+                        previous_retry_state=current_retry_state,
                     )
+                    current_retry_state = retry_state
+                    await publish_live_run(retry_state)
                     finalization_reason = _failed_run_finalization_reason(retry_state)
                     if finalization_reason is not None:
                         run_end_reason = "error"
@@ -846,7 +870,9 @@ class RunExecutor:
                             attempt_number=attempt_number,
                             occurred_at=datetime.datetime.now(datetime.UTC),
                         ),
+                        previous_retry_state=current_retry_state,
                     )
+                    current_retry_state = retry_state
                     logger.exception(
                         "Internal error during engine run attempt",
                         extra={
@@ -946,6 +972,9 @@ class RunExecutor:
                 )
             else:
                 await self.session_lifecycle.clear_session_activity(message.session_id)
+                await self.live_event_projector.publish_live_run_cleared(
+                    message.session_id
+                )
             if command is not None:
                 await self._clear_pending_command(
                     message.session_id, command_id=command.id
@@ -1005,6 +1034,7 @@ class RunExecutor:
         session_id: str,
         run_id: str,
         attempt: FailedRunAttempt,
+        previous_retry_state: FailedRunRetryState | None,
     ) -> FailedRunRetryState:
         """Persist retry state for a failed run attempt."""
         backoff_seconds = (
@@ -1020,6 +1050,7 @@ class RunExecutor:
             max_retries=_FAILED_RUN_MAX_RETRIES,
             backoff_seconds=backoff_seconds,
             next_retry_at=next_retry_at,
+            previous=previous_retry_state,
         )
         await self.session_lifecycle.update_agent_run_retry_state(
             session_id,
@@ -1221,6 +1252,37 @@ def has_actionable_tail(events: Sequence[Event]) -> bool:
         else events
     )
     return any(event.kind not in _NON_ACTIONABLE_TAIL_EVENT_KINDS for event in tail)
+
+
+def _chat_live_retry_state(
+    retry_state: FailedRunRetryState | None,
+) -> ChatLiveRunRetryState | None:
+    """Convert durable retry state to chat live transport state."""
+    if retry_state is None:
+        return None
+    return ChatLiveRunRetryState(
+        status=retry_state.status,
+        last_error_message=retry_state.last_user_message,
+        failed_attempt_count=retry_state.failed_attempt_count,
+        max_retries=retry_state.max_retries,
+        backoff_seconds=retry_state.backoff_seconds,
+        next_retry_at=retry_state.next_retry_at.isoformat(),
+        attempts=[
+            ChatLiveRunRetryAttempt(
+                attempt_number=attempt.attempt_number,
+                user_message=attempt.user_message,
+                error_type=attempt.error_type,
+                source=attempt.source,
+                failed_at=attempt.failed_at.isoformat(),
+                backoff_seconds=attempt.backoff_seconds,
+                next_retry_at=attempt.next_retry_at.isoformat(),
+                retryability=attempt.retryability,
+                failure_code=attempt.failure_code,
+                truncated=attempt.truncated,
+            )
+            for attempt in retry_state.attempts
+        ],
+    )
 
 
 def _failed_run_finalization_reason(
