@@ -24,6 +24,16 @@ function toPendingAttachment(uri: string): FileAttachment {
   };
 }
 
+function skillNameFromPath(skillPath: string): string {
+  const parts = skillPath.split("/").filter(Boolean);
+  const lastPart = parts.at(-1) ?? skillPath;
+  const skillName =
+    lastPart === "SKILL.md" && parts.length >= 2
+      ? (parts.at(-2) ?? lastPart)
+      : lastPart.replace(/\.md$/u, "");
+  return skillName || "skill";
+}
+
 function actionLabel(action: ChatAction): string {
   switch (action.type) {
     case "command":
@@ -31,7 +41,7 @@ function actionLabel(action: ChatAction): string {
     case "goal":
       return "/goal";
     case "skill":
-      return "/skill";
+      return `/${skillNameFromPath(action.skill_path)}`;
   }
 }
 
