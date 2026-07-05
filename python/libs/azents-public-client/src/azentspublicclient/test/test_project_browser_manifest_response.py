@@ -41,34 +41,35 @@ class TestProjectBrowserManifestResponse(unittest.TestCase):
                 active_mode = 'projects',
                 modes = [
                     azentspublicclient.models.project_browser_mode_response.ProjectBrowserModeResponse(
-                        id = 'projects', 
-                        label = '', 
-                        default = True, 
+                        id = 'projects',
+                        label = '',
+                        default = True,
                         root_path = '', )
                     ],
                 entries = [
                     azentspublicclient.models.project_browser_entry_response.ProjectBrowserEntryResponse(
-                        name = '', 
-                        path = '', 
-                        kind = 'directory', 
-                        repository_type = 'git', 
+                        name = '',
+                        path = '',
+                        kind = 'directory',
+                        repository_type = 'git',
                         source = azentspublicclient.models.project_browser_entry_source_response.ProjectBrowserEntrySourceResponse(
-                            type = 'session_project', 
-                            project_id = '', ), 
+                            type = 'session_project',
+                            project_id = '', ),
                         status = azentspublicclient.models.project_browser_entry_status_response.ProjectBrowserEntryStatusResponse(
-                            value = 'unchecked', 
-                            detail = '', 
-                            checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                            stale = True, ), 
+                            value = 'unchecked',
+                            detail = '',
+                            checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                            stale = True, ),
                         capabilities = azentspublicclient.models.project_browser_entry_capabilities_response.ProjectBrowserEntryCapabilitiesResponse(
-                            open = True, 
-                            remove_project = True, 
-                            filesystem_delete = True, 
-                            filesystem_move = True, 
+                            open = True,
+                            remove_project = True,
+                            delete_worktree = True,
+                            filesystem_delete = True,
+                            filesystem_move = True,
                             filesystem_rename = True, ), )
                     ],
                 empty_state = azentspublicclient.models.project_browser_empty_state_response.ProjectBrowserEmptyStateResponse(
-                    title = '', 
+                    title = '',
                     description = '', )
             )
         else:
@@ -78,30 +79,31 @@ class TestProjectBrowserManifestResponse(unittest.TestCase):
                 active_mode = 'projects',
                 modes = [
                     azentspublicclient.models.project_browser_mode_response.ProjectBrowserModeResponse(
-                        id = 'projects', 
-                        label = '', 
-                        default = True, 
+                        id = 'projects',
+                        label = '',
+                        default = True,
                         root_path = '', )
                     ],
                 entries = [
                     azentspublicclient.models.project_browser_entry_response.ProjectBrowserEntryResponse(
-                        name = '', 
-                        path = '', 
-                        kind = 'directory', 
-                        repository_type = 'git', 
+                        name = '',
+                        path = '',
+                        kind = 'directory',
+                        repository_type = 'git',
                         source = azentspublicclient.models.project_browser_entry_source_response.ProjectBrowserEntrySourceResponse(
-                            type = 'session_project', 
-                            project_id = '', ), 
+                            type = 'session_project',
+                            project_id = '', ),
                         status = azentspublicclient.models.project_browser_entry_status_response.ProjectBrowserEntryStatusResponse(
-                            value = 'unchecked', 
-                            detail = '', 
-                            checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                            stale = True, ), 
+                            value = 'unchecked',
+                            detail = '',
+                            checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                            stale = True, ),
                         capabilities = azentspublicclient.models.project_browser_entry_capabilities_response.ProjectBrowserEntryCapabilitiesResponse(
-                            open = True, 
-                            remove_project = True, 
-                            filesystem_delete = True, 
-                            filesystem_move = True, 
+                            open = True,
+                            remove_project = True,
+                            delete_worktree = True,
+                            filesystem_delete = True,
+                            filesystem_move = True,
                             filesystem_rename = True, ), )
                     ],
         )

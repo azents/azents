@@ -3405,6 +3405,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupSessionGitWorktreeRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -11876,6 +11886,28 @@
         "title": "ChatWriteSnapshotResponse",
         "description": "Authoritative live snapshot after REST write."
       },
+      "CleanupSessionGitWorktreeRequest": {
+        "properties": {
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id",
+            "description": "SessionWorkspaceProject ID linked to the owned worktree. Null keeps the session-level cleanup retry behavior."
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_id"
+        ],
+        "title": "CleanupSessionGitWorktreeRequest",
+        "description": "Request a cleanup target for an Azents-owned session Git worktree."
+      },
       "CommandAction": {
         "properties": {
           "type": {
@@ -14674,6 +14706,11 @@
             "title": "Remove Project",
             "description": "Whether the registry Project row can be removed"
           },
+          "delete_worktree": {
+            "type": "boolean",
+            "title": "Delete Worktree",
+            "description": "Whether an Azents-owned worktree cleanup can be requested"
+          },
           "filesystem_delete": {
             "type": "boolean",
             "title": "Filesystem Delete",
@@ -14694,6 +14731,7 @@
         "required": [
           "open",
           "remove_project",
+          "delete_worktree",
           "filesystem_delete",
           "filesystem_move",
           "filesystem_rename"

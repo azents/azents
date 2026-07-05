@@ -17,6 +17,7 @@ from azents.api.public.chat.v1 import (
     _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_new_session_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     archive_agent_session,
+    cleanup_session_git_worktree,
     create_team_agent_session,
     delete_input_buffer,
     get_agent_session,
@@ -38,6 +39,7 @@ from azents.api.public.chat.v1.data import (
     ChatInputWriteRequest,
     ChatMessageWriteRequest,
     ChatSessionCreateMessageWriteRequest,
+    CleanupSessionGitWorktreeRequest,
     GoalStatusUpdateRequest,
 )
 from azents.broker.types import (
@@ -105,6 +107,7 @@ from azents.services.chat_write import (
     AcceptedPendingCommand,
     AcceptedStopRequest,
 )
+from azents.services.session_git_worktree import GitWorktreeCleanupRequest
 from azents.services.session_initialization import (
     SessionInitializationDetail,
     SessionInitializationProjection,
@@ -901,7 +904,8 @@ class _RouteWorktreeCleanupService:
     """Session worktree cleanup service double for route tests."""
 
     def __init__(self) -> None:
-        self.cleanup_calls: list[tuple[str, str]] = []
+        self.cleanup_calls: list[tuple[str, str, str | None]] = []
+        self.manual_cleanup_calls: list[tuple[str, str, str, str | None]] = []
         self.initialization_calls: list[tuple[str, str]] = []
 
     async def run_git_worktree_initialization(
@@ -916,17 +920,32 @@ class _RouteWorktreeCleanupService:
         del on_event_appended, on_projection_updated
         self.initialization_calls.append((agent_id, session_id))
 
+    async def request_manual_cleanup(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        session_workspace_project_id: str | None,
+    ) -> Result[GitWorktreeCleanupRequest, object]:
+        """Record manual cleanup request."""
+        self.manual_cleanup_calls.append(
+            (agent_id, session_id, user_id, session_workspace_project_id)
+        )
+        return Success(GitWorktreeCleanupRequest(cleanup_requested=True))
+
     async def run_cleanup_for_session(
         self,
         *,
         agent_id: str,
         session_id: str,
+        session_workspace_project_id: str | None,
         on_event_appended: object | None = None,
         on_projection_updated: object | None = None,
     ) -> None:
         """Record cleanup execution."""
         del on_event_appended, on_projection_updated
-        self.cleanup_calls.append((agent_id, session_id))
+        self.cleanup_calls.append((agent_id, session_id, session_workspace_project_id))
 
 
 class TestAgentSessionRoutes:
@@ -1044,6 +1063,34 @@ class TestAgentSessionRoutes:
         assert response is None
         assert chat_service.agent_id == "agent-1"
         assert chat_service.session_id == "2123456789abcdef0123456789abcdef"
+
+    async def test_cleanup_session_git_worktree_targets_project_id(self) -> None:
+        """Cleanup route forwards the optional worktree Project target."""
+        service = _RouteWorktreeCleanupService()
+        background_tasks = BackgroundTasks()
+
+        response = await cleanup_session_git_worktree(
+            agent_id="1123456789abcdef0123456789abcdef",
+            session_id="2123456789abcdef0123456789abcdef",
+            request=CleanupSessionGitWorktreeRequest(
+                project_id="3123456789abcdef0123456789abcdef"
+            ),
+            background_tasks=background_tasks,
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            session_git_worktree_service=service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            broadcast=cast("object", None),  # pyright: ignore[reportArgumentType]  # Background task is not executed in this route unit test.
+        )
+
+        assert response is None
+        assert service.manual_cleanup_calls == [
+            (
+                "1123456789abcdef0123456789abcdef",
+                "2123456789abcdef0123456789abcdef",
+                "user-1",
+                "3123456789abcdef0123456789abcdef",
+            )
+        ]
+        assert len(background_tasks.tasks) == 1
 
     async def test_archive_primary_session_returns_conflict(self) -> None:
         """Team primary session archive attempts are blocked."""

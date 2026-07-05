@@ -1839,6 +1839,7 @@ class SessionGitWorktreeService:
         agent_id: str,
         session_id: str,
         user_id: str,
+        session_workspace_project_id: str | None,
     ) -> Result[GitWorktreeCleanupRequest, GitWorktreeCleanupRequestError]:
         """Validate access and request manual worktree cleanup retry."""
         async with self.session_manager() as session:
@@ -1863,6 +1864,15 @@ class SessionGitWorktreeService:
             )
             if not allocations:
                 return Failure(GitWorktreeCleanupNotFound())
+            if session_workspace_project_id is not None:
+                allocations = [
+                    allocation
+                    for allocation in allocations
+                    if allocation.session_workspace_project_id
+                    == session_workspace_project_id
+                ]
+                if not allocations:
+                    return Failure(GitWorktreeCleanupNotFound())
             cleanup_targets = [
                 allocation
                 for allocation in allocations
@@ -1894,6 +1904,7 @@ class SessionGitWorktreeService:
         *,
         agent_id: str,
         session_id: str,
+        session_workspace_project_id: str | None,
         on_event_appended: SessionInitializationEventCallback | None = None,
         on_projection_updated: SessionInitializationProjectionCallback | None = None,
     ) -> None:
@@ -1903,6 +1914,13 @@ class SessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
+        if session_workspace_project_id is not None:
+            allocations = [
+                allocation
+                for allocation in allocations
+                if allocation.session_workspace_project_id
+                == session_workspace_project_id
+            ]
         cleanup_targets = [
             allocation
             for allocation in allocations
@@ -1948,15 +1966,35 @@ class SessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
-            if any(
-                allocation.status is not SessionGitWorktreeStatus.CLEANED
-                for allocation in remaining
-            ):
-                return
+            if session_workspace_project_id is None:
+                if any(
+                    allocation.status is not SessionGitWorktreeStatus.CLEANED
+                    for allocation in remaining
+                ):
+                    return
+                next_status = SessionInitializationStatus.CLEANED
+            else:
+                cleanup_incomplete_statuses = {
+                    SessionGitWorktreeStatus.CLEANUP_PENDING,
+                    SessionGitWorktreeStatus.CLEANUP_FAILED,
+                }
+                if any(
+                    allocation.status in cleanup_incomplete_statuses
+                    for allocation in remaining
+                ):
+                    return
+                next_status = (
+                    SessionInitializationStatus.CLEANED
+                    if all(
+                        allocation.status is SessionGitWorktreeStatus.CLEANED
+                        for allocation in remaining
+                    )
+                    else SessionInitializationStatus.READY
+                )
             await self.session_initialization_repository.update_initialization_status(
                 session,
                 initialization_id=last_cleaned.initialization_id,
-                status=SessionInitializationStatus.CLEANED,
+                status=next_status,
                 failure_summary=None,
                 started_at=None,
                 completed_at=datetime.now(UTC),
@@ -1999,7 +2037,7 @@ class SessionGitWorktreeService:
                 runner_generation=runtime.runner_generation,
                 source_project_path=allocation.source_project_path,
                 worktree_path=allocation.worktree_path,
-                force=True,
+                force=False,
                 deadline_at=_git_operation_deadline(),
                 text_output_callback=None,
             )
@@ -2030,6 +2068,12 @@ class SessionGitWorktreeService:
                     cleanup_summary="Git worktree cleanup completed.",
                     cleaned_at=cleaned_at,
                 )
+                if allocation.session_workspace_project_id is not None:
+                    await self.session_workspace_project_repository.delete_project(
+                        session,
+                        allocation.session_workspace_project_id,
+                        session_id=allocation.session_id,
+                    )
             await self._append_event(
                 initialization_id=cleaned.initialization_id,
                 step_id=None,

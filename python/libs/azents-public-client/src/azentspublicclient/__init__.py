@@ -138,6 +138,7 @@ __all__ = [
     "ChatWriteAcceptedResponse",
     "ChatWriteResponse",
     "ChatWriteSnapshotResponse",
+    "CleanupSessionGitWorktreeRequest",
     "CommandAction",
     "CreateGitWorktreeAction",
     "CreateInvitationRequest",
@@ -431,6 +432,7 @@ from azentspublicclient.models.chat_stop_response import ChatStopResponse as Cha
 from azentspublicclient.models.chat_write_accepted_response import ChatWriteAcceptedResponse as ChatWriteAcceptedResponse
 from azentspublicclient.models.chat_write_response import ChatWriteResponse as ChatWriteResponse
 from azentspublicclient.models.chat_write_snapshot_response import ChatWriteSnapshotResponse as ChatWriteSnapshotResponse
+from azentspublicclient.models.cleanup_session_git_worktree_request import CleanupSessionGitWorktreeRequest as CleanupSessionGitWorktreeRequest
 from azentspublicclient.models.command_action import CommandAction as CommandAction
 from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction as CreateGitWorktreeAction
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest as CreateInvitationRequest

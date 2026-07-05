@@ -44,6 +44,7 @@ from azentspublicclient.models.chat_input_write_request import ChatInputWriteReq
 from azentspublicclient.models.chat_session_create_message_write_request import ChatSessionCreateMessageWriteRequest
 from azentspublicclient.models.chat_stop_response import ChatStopResponse
 from azentspublicclient.models.chat_write_response import ChatWriteResponse
+from azentspublicclient.models.cleanup_session_git_worktree_request import CleanupSessionGitWorktreeRequest
 from azentspublicclient.models.git_ref_preview_response import GitRefPreviewResponse
 from azentspublicclient.models.goal_state_response import GoalStateResponse
 from azentspublicclient.models.goal_status_update_request import GoalStatusUpdateRequest
@@ -1242,6 +1243,7 @@ class ChatV1Api:
         self,
         agent_id: StrictStr,
         session_id: StrictStr,
+        cleanup_session_git_worktree_request: CleanupSessionGitWorktreeRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1263,6 +1265,8 @@ class ChatV1Api:
         :type agent_id: str
         :param session_id: (required)
         :type session_id: str
+        :param cleanup_session_git_worktree_request: (required)
+        :type cleanup_session_git_worktree_request: CleanupSessionGitWorktreeRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1288,6 +1292,7 @@ class ChatV1Api:
         _param = self._chat_v1_cleanup_session_git_worktree_serialize(
             agent_id=agent_id,
             session_id=session_id,
+            cleanup_session_git_worktree_request=cleanup_session_git_worktree_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1314,6 +1319,7 @@ class ChatV1Api:
         self,
         agent_id: StrictStr,
         session_id: StrictStr,
+        cleanup_session_git_worktree_request: CleanupSessionGitWorktreeRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1335,6 +1341,8 @@ class ChatV1Api:
         :type agent_id: str
         :param session_id: (required)
         :type session_id: str
+        :param cleanup_session_git_worktree_request: (required)
+        :type cleanup_session_git_worktree_request: CleanupSessionGitWorktreeRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1360,6 +1368,7 @@ class ChatV1Api:
         _param = self._chat_v1_cleanup_session_git_worktree_serialize(
             agent_id=agent_id,
             session_id=session_id,
+            cleanup_session_git_worktree_request=cleanup_session_git_worktree_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1386,6 +1395,7 @@ class ChatV1Api:
         self,
         agent_id: StrictStr,
         session_id: StrictStr,
+        cleanup_session_git_worktree_request: CleanupSessionGitWorktreeRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1407,6 +1417,8 @@ class ChatV1Api:
         :type agent_id: str
         :param session_id: (required)
         :type session_id: str
+        :param cleanup_session_git_worktree_request: (required)
+        :type cleanup_session_git_worktree_request: CleanupSessionGitWorktreeRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1432,6 +1444,7 @@ class ChatV1Api:
         _param = self._chat_v1_cleanup_session_git_worktree_serialize(
             agent_id=agent_id,
             session_id=session_id,
+            cleanup_session_git_worktree_request=cleanup_session_git_worktree_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1453,6 +1466,7 @@ class ChatV1Api:
         self,
         agent_id,
         session_id,
+        cleanup_session_git_worktree_request,
         _request_auth,
         _content_type,
         _headers,
@@ -1482,6 +1496,8 @@ class ChatV1Api:
         # process the header parameters
         # process the form parameters
         # process the body parameter
+        if cleanup_session_git_worktree_request is not None:
+            _body_params = cleanup_session_git_worktree_request
 
 
         # set the HTTP header `Accept`
@@ -1492,6 +1508,19 @@ class ChatV1Api:
                 ]
             )
 
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
 
         # authentication setting
         _auth_settings: List[str] = [
@@ -2062,9 +2091,9 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if timezone is not None:
-            
+
             _query_params.append(('timezone', timezone))
-            
+
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -2663,9 +2692,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if timezone is not None:
-            
+
             _query_params.append(('timezone', timezone))
-            
+
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -4646,9 +4675,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if path is not None:
-            
+
             _query_params.append(('path', path))
-            
+
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -4922,7 +4951,7 @@ class ChatV1Api:
         if 'Accept' not in _header_params:
             _header_params['Accept'] = self.api_client.select_header_accept(
                 [
-                    'application/octet-stream', 
+                    'application/octet-stream',
                     'application/json'
                 ]
             )
@@ -5205,9 +5234,9 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if timezone is not None:
-            
+
             _query_params.append(('timezone', timezone))
-            
+
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -5795,9 +5824,9 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if limit is not None:
-            
+
             _query_params.append(('limit', limit))
-            
+
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -8769,17 +8798,17 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if limit is not None:
-            
+
             _query_params.append(('limit', limit))
-            
+
         if before is not None:
-            
+
             _query_params.append(('before', before))
-            
+
         if after is not None:
-            
+
             _query_params.append(('after', after))
-            
+
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -10142,9 +10171,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if source_project_path is not None:
-            
+
             _query_params.append(('source_project_path', source_project_path))
-            
+
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -10728,13 +10757,13 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if path is not None:
-            
+
             _query_params.append(('path', path))
-            
+
         if limit is not None:
-            
+
             _query_params.append(('limit', limit))
-            
+
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -12479,9 +12508,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if path is not None:
-            
+
             _query_params.append(('path', path))
-            
+
         # process the header parameters
         # process the form parameters
         # process the body parameter

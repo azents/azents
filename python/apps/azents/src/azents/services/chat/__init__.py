@@ -901,6 +901,7 @@ class ChatSessionService:
                 await worktree_service.run_cleanup_for_session(
                     agent_id=agent_session.agent_id,
                     session_id=session_id,
+                    session_workspace_project_id=None,
                 )
 
         # Delete DB record

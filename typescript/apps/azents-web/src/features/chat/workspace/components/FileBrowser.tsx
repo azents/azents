@@ -70,6 +70,7 @@ interface FileBrowserProps {
   onMovePath: (entry: WorkspaceEntry) => void;
   onDeletePath: (entry: WorkspaceEntry) => void;
   onRemoveProject: (entry: WorkspaceEntry) => void;
+  onDeleteWorktreeProject: (entry: WorkspaceEntry) => void;
   onRefresh: () => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
   onAddProject: () => void;
@@ -299,6 +300,7 @@ interface TreeNodeProps {
   onMovePath: (entry: WorkspaceEntry) => void;
   onDeletePath: (entry: WorkspaceEntry) => void;
   onRemoveProject: (entry: WorkspaceEntry) => void;
+  onDeleteWorktreeProject: (entry: WorkspaceEntry) => void;
 }
 
 function TreeNode({
@@ -319,6 +321,7 @@ function TreeNode({
   onMovePath,
   onDeletePath,
   onRemoveProject,
+  onDeleteWorktreeProject,
 }: TreeNodeProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
   const theme = useMantineTheme();
@@ -331,6 +334,7 @@ function TreeNode({
   const isDirectory = node.kind === "directory";
   const selectable = canSelect(node);
   const canRemoveProject = node.capabilities?.removeProject === true;
+  const canDeleteWorktree = node.capabilities?.deleteWorktree === true;
   const rowStyle = compact
     ? {
         minHeight: rem(28),
@@ -541,7 +545,9 @@ function TreeNode({
                 {t("move")}
               </Menu.Item>
             ) : null}
-            {canDelete(node) || canRemoveProject ? <Menu.Divider /> : null}
+            {canDelete(node) || canRemoveProject || canDeleteWorktree ? (
+              <Menu.Divider />
+            ) : null}
             {canRemoveProject ? (
               <Menu.Item
                 color="red"
@@ -549,6 +555,15 @@ function TreeNode({
                 onClick={() => onRemoveProject(node)}
               >
                 {t("removeProject")}
+              </Menu.Item>
+            ) : null}
+            {canDeleteWorktree ? (
+              <Menu.Item
+                color="red"
+                leftSection={<IconTrash size="0.875rem" />}
+                onClick={() => onDeleteWorktreeProject(node)}
+              >
+                {t("deleteWorktree")}
               </Menu.Item>
             ) : null}
             {canDelete(node) ? (
@@ -584,6 +599,7 @@ function TreeNode({
               onMovePath={onMovePath}
               onDeletePath={onDeletePath}
               onRemoveProject={onRemoveProject}
+              onDeleteWorktreeProject={onDeleteWorktreeProject}
             />
           ))
         : null}
@@ -617,6 +633,7 @@ export function FileBrowser({
   onMovePath,
   onDeletePath,
   onRemoveProject,
+  onDeleteWorktreeProject,
   onRefresh,
   onSetBrowserMode,
   onAddProject,
@@ -875,6 +892,7 @@ export function FileBrowser({
                   onMovePath={onMovePath}
                   onDeletePath={onDeletePath}
                   onRemoveProject={onRemoveProject}
+                  onDeleteWorktreeProject={onDeleteWorktreeProject}
                 />
               ))}
             </>

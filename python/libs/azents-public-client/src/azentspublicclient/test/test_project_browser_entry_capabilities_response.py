@@ -37,6 +37,7 @@ class TestProjectBrowserEntryCapabilitiesResponse(unittest.TestCase):
             return ProjectBrowserEntryCapabilitiesResponse(
                 open = True,
                 remove_project = True,
+                delete_worktree = True,
                 filesystem_delete = True,
                 filesystem_move = True,
                 filesystem_rename = True
@@ -45,6 +46,7 @@ class TestProjectBrowserEntryCapabilitiesResponse(unittest.TestCase):
             return ProjectBrowserEntryCapabilitiesResponse(
                 open = True,
                 remove_project = True,
+                delete_worktree = True,
                 filesystem_delete = True,
                 filesystem_move = True,
                 filesystem_rename = True,

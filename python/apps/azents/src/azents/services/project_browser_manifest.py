@@ -9,7 +9,11 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentProjectCatalogStatus, AgentSessionStatus
+from azents.core.enums import (
+    AgentProjectCatalogStatus,
+    AgentSessionStatus,
+    SessionGitWorktreeStatus,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -88,6 +92,7 @@ class ProjectBrowserEntryCapabilities:
 
     open: bool
     remove_project: bool
+    delete_worktree: bool
     filesystem_delete: bool
     filesystem_move: bool
     filesystem_rename: bool
@@ -216,6 +221,12 @@ class ProjectBrowserManifestService:
             for worktree in worktrees
             if worktree.session_workspace_project_id is not None
         }
+        deletable_worktree_project_ids = {
+            worktree.session_workspace_project_id
+            for worktree in worktrees
+            if worktree.session_workspace_project_id is not None
+            and worktree.status is not SessionGitWorktreeStatus.CLEANED
+        }
         git_project_paths = {worktree.worktree_path for worktree in worktrees}
         entries = [
             _entry_from_path(
@@ -226,6 +237,7 @@ class ProjectBrowserManifestService:
                 ),
                 catalog_entry=catalog_by_path.get(project.path),
                 remove_project=True,
+                delete_worktree=project.id in deletable_worktree_project_ids,
                 repository_type=_repository_type_for_project(
                     project_id=project.id,
                     project_path=project.path,
@@ -286,6 +298,7 @@ class ProjectBrowserManifestService:
                 ),
                 catalog_entry=catalog_by_path.get(path),
                 remove_project=False,
+                delete_worktree=False,
                 repository_type=None,
             )
             for path in normalized_paths
@@ -329,6 +342,7 @@ _PROJECT_MODES = [
 _PROJECT_ROOT_CAPABILITIES = ProjectBrowserEntryCapabilities(
     open=True,
     remove_project=True,
+    delete_worktree=False,
     filesystem_delete=False,
     filesystem_move=False,
     filesystem_rename=False,
@@ -338,6 +352,7 @@ _PROJECT_ROOT_CAPABILITIES = ProjectBrowserEntryCapabilities(
 _PREVIEW_PROJECT_ROOT_CAPABILITIES = ProjectBrowserEntryCapabilities(
     open=True,
     remove_project=False,
+    delete_worktree=False,
     filesystem_delete=False,
     filesystem_move=False,
     filesystem_rename=False,
@@ -390,6 +405,7 @@ def _entry_from_path(
     source: ProjectBrowserEntrySource,
     catalog_entry: AgentProjectCatalogEntry | None,
     remove_project: bool,
+    delete_worktree: bool,
     repository_type: ProjectBrowserEntryRepositoryType | None,
 ) -> ProjectBrowserEntry:
     """Build a Project root entry from path and stored status projection."""
@@ -402,7 +418,10 @@ def _entry_from_path(
         source=source,
         status=_status_from_catalog(catalog_entry),
         capabilities=(
-            _PROJECT_ROOT_CAPABILITIES
+            dataclasses.replace(
+                _PROJECT_ROOT_CAPABILITIES,
+                delete_worktree=delete_worktree,
+            )
             if remove_project
             else _PREVIEW_PROJECT_ROOT_CAPABILITIES
         ),

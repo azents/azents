@@ -6,11 +6,12 @@ Backend-provided Project root action policy response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**open** | **bool** | Whether the entry can be opened in the browser | 
-**remove_project** | **bool** | Whether the registry Project row can be removed | 
-**filesystem_delete** | **bool** | Whether filesystem delete is allowed for this entry | 
-**filesystem_move** | **bool** | Whether filesystem move is allowed for this entry | 
-**filesystem_rename** | **bool** | Whether filesystem rename is allowed for this entry | 
+**open** | **bool** | Whether the entry can be opened in the browser |
+**remove_project** | **bool** | Whether the registry Project row can be removed |
+**delete_worktree** | **bool** | Whether an Azents-owned worktree cleanup can be requested |
+**filesystem_delete** | **bool** | Whether filesystem delete is allowed for this entry |
+**filesystem_move** | **bool** | Whether filesystem move is allowed for this entry |
+**filesystem_rename** | **bool** | Whether filesystem rename is allowed for this entry |
 
 ## Example
 
