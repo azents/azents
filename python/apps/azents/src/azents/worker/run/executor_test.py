@@ -288,6 +288,32 @@ class _FlakyEngine(_Engine):
         return iterator()
 
 
+class _InternalFlakyEngine(_Engine):
+    """Engine that raises an internal error once and then completes."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(
+        self,
+        request: RunRequest,
+        context: object,
+        *,
+        poll_messages: object = None,
+        check_stop: object = None,
+    ) -> AsyncIterator[Emit]:
+        """Fail the first attempt with a generic exception and complete the second."""
+        del request, context, poll_messages, check_stop
+
+        async def iterator() -> AsyncIterator[Emit]:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("database temporarily unavailable")
+            yield ephemeral(RunComplete())
+
+        return iterator()
+
+
 class _AlwaysFailingEngine(_Engine):
     """Engine that always raises a user-visible model error."""
 
@@ -1056,6 +1082,81 @@ async def test_execute_retries_failed_run_without_durable_error(
         isinstance(event, Event) and event.kind == EventKind.SYSTEM_ERROR
         for event in dispatched
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_publishes_retry_state_after_internal_attempt_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Internal attempt failures publish live retry state before waiting."""
+    monkeypatch.setattr(run_executor_module, "_FAILED_RUN_RETRY_WAIT_POLL_SECONDS", 0)
+    lifecycle = _SessionLifecycle()
+    engine = _InternalFlakyEngine()
+    live_event_projector = _LiveEventProjector()
+    executor = _executor(
+        lifecycle,
+        engine=cast(AgentEngineProtocol, engine),
+        live_event_projector=live_event_projector,
+    )
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+
+    async def resolve_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return Success(
+            RunRequest(
+                session_id="session-001",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                model="gpt-test",
+                credential_kwargs={},
+                workspace_id="workspace-001",
+                agent_id="agent-001",
+            )
+        )
+
+    async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return []
+
+    async def resolve_subagent_tools_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return []
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
+    )
+    monkeypatch.setattr(
+        run_executor_module, "resolve_subagent_tools", resolve_subagent_tools_success
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert engine.calls == 2
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    retry_updates = [
+        run.retry
+        for _, run in live_event_projector.live_run_updates
+        if run.retry is not None
+    ]
+    assert len(retry_updates) == 1
+    assert retry_updates[0].last_error_message == "An internal error occurred."
+    assert retry_updates[0].attempts[0].error_type == "RuntimeError"
 
 
 @pytest.mark.asyncio
