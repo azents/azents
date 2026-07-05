@@ -47,6 +47,7 @@ from azents.services.chat.data import ChatLiveRunState
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
+from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_title import SessionTitleService
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.live.event_projector import LiveEventProjector
@@ -90,6 +91,8 @@ class _SessionLifecycle:
         self.activities: list[tuple[str, str, object]] = []
         self.cleared_session_ids: list[str] = []
         self.terminal_runs: list[tuple[str, AgentRunStatus]] = []
+        self.idle_session_ids: list[str] = []
+        self.wake_ups: list[SessionWakeUp] = []
 
     async def set_session_activity(
         self,
@@ -108,6 +111,15 @@ class _SessionLifecycle:
         self.cleared_session_ids.append(session_id)
         if self.order is not None:
             self.order.append("clear_session_activity")
+
+    async def mark_session_idle(self, session_id: str) -> bool:
+        """Record session idle transitions."""
+        self.idle_session_ids.append(session_id)
+        return True
+
+    async def send_session_wake_up(self, message: SessionWakeUp) -> None:
+        """Record follow-up wake-ups."""
+        self.wake_ups.append(message)
 
     async def mark_agent_run_terminal_if_running(
         self,
@@ -410,6 +422,7 @@ def _executor(
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
         input_buffer_service=cast(InputBufferService, object()),
+        session_git_worktree_service=cast(SessionGitWorktreeService, object()),
         session_title_service=cast(SessionTitleService, _SessionTitleService()),
         live_event_projector=cast(LiveEventProjector, live_event_projector),
         user_stop_finalizer=cast(UserStopFinalizer, object()),
@@ -540,6 +553,63 @@ async def test_execute_reports_resolve_failure(
     assert isinstance(error_event.payload, SystemErrorPayload)
     assert error_event.payload.content == "AgentNotFound(agent_id='agent-001')"
     assert isinstance(dispatched[1], RunComplete)
+
+
+@pytest.mark.asyncio
+async def test_execute_enqueues_follow_up_after_context_invalidating_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project-mutating actions stop before model dispatch and wake fresh context."""
+    lifecycle = _SessionLifecycle()
+    executor = _executor(session_lifecycle=lifecycle)
+    message = _message()
+
+    class PendingInputBufferService:
+        """InputBufferService double with pending follow-up work."""
+
+        async def has_pending_session_input_buffers(self, session_id: str) -> bool:
+            """Return pending follow-up work for the session."""
+            assert session_id == message.session_id
+            return True
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            user_messages=[],
+            has_actionable_work=False,
+            context_invalidated=True,
+        )
+
+    async def resolve_failure(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("resolve_invoke_input should not be called")
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        executor,
+        "input_buffer_service",
+        cast(InputBufferService, PendingInputBufferService()),
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input",
+        resolve_failure,
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        message,
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=cast(asyncio.Event, object()),
+        dispatch_event=dispatch_event,
+    )
+
+    assert result.no_actionable_work is True
+    assert lifecycle.wake_ups == [message]
 
 
 @pytest.mark.asyncio

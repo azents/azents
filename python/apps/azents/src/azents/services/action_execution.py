@@ -119,3 +119,31 @@ class ActionExecutionService:
                 action_execution_id=action_execution_id,
                 started_at=datetime.datetime.now(datetime.UTC),
             )
+
+    async def mark_completed(
+        self,
+        *,
+        action_execution_id: str,
+    ) -> ActionExecution:
+        """Mark an execution completed with the current UTC time."""
+        async with self.session_manager() as session:
+            return await self.action_execution_repository.mark_completed(
+                session,
+                action_execution_id=action_execution_id,
+                completed_at=datetime.datetime.now(datetime.UTC),
+            )
+
+    async def mark_failed(
+        self,
+        *,
+        action_execution_id: str,
+        failure_summary: str,
+    ) -> ActionExecution:
+        """Mark an execution failed with the current UTC time."""
+        async with self.session_manager() as session:
+            return await self.action_execution_repository.mark_failed(
+                session,
+                action_execution_id=action_execution_id,
+                failure_summary=failure_summary,
+                failed_at=datetime.datetime.now(datetime.UTC),
+            )

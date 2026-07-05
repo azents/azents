@@ -76,6 +76,23 @@ class SessionGitWorktreeRepository:
             return None
         return self._build(rdb)
 
+    async def get_by_action_execution_id(
+        self,
+        session: AsyncSession,
+        *,
+        action_execution_id: str,
+    ) -> SessionGitWorktree | None:
+        """Fetch one worktree allocation by action execution identity."""
+        result = await session.execute(
+            sa.select(RDBSessionGitWorktree).where(
+                RDBSessionGitWorktree.action_execution_id == action_execution_id,
+            )
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
     async def list_by_session_id(
         self,
         session: AsyncSession,

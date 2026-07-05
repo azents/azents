@@ -128,9 +128,10 @@ class _InputBufferService:
         session_id: str,
         model: str | None,
         limit: int | None = None,
+        include_action_messages: bool = True,
     ) -> PromotedInputBuffers:
         """Store flush call arguments and return specified result."""
-        del limit
+        del limit, include_action_messages
         self.calls.append((session_id, model))
         return self.promoted
 
@@ -1266,6 +1267,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
     )
 
     poll = executor.make_boundary_poll(
+        agent_id="agent-1",
         session_id="session-1",
         model="gpt-test",
         poll_fn=None,

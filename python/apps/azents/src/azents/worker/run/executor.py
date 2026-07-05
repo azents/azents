@@ -29,6 +29,10 @@ from azents.core.tools import (
     ToolkitStatus,
     TurnContext,
 )
+from azents.engine.events.action_messages import (
+    ActionMessagePayload,
+    CreateGitWorktreeAction,
+)
 from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_adapter import AgentEngineAdapter
 from azents.engine.events.engine_events import (
@@ -108,6 +112,7 @@ from azents.services.chat.data import (
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
 from azents.services.model_file import ModelFileService
+from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_title import SessionTitleService
 from azents.transport.chat import (
     chat_history_event_appended_dump,
@@ -163,6 +168,16 @@ class RunInputPollResult:
 
     user_messages: list[RunUserMessage]
     has_actionable_work: bool
+    context_invalidated: bool = False
+    action_blocked: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class OperationActionProcessResult:
+    """Result of processing promoted operation actions."""
+
+    context_invalidated: bool
+    blocked: bool
 
 
 def _runtime_hook_provider_refs(
@@ -230,6 +245,9 @@ class RunExecutor:
     ]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    session_git_worktree_service: Annotated[
+        SessionGitWorktreeService, Depends(SessionGitWorktreeService)
+    ]
     session_title_service: Annotated[SessionTitleService, Depends(SessionTitleService)]
     live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
     user_stop_finalizer: Annotated[UserStopFinalizer, Depends(UserStopFinalizer)]
@@ -285,10 +303,30 @@ class RunExecutor:
         command_handler: CommandHandler | None = None
         if command is None:
             initial_input = await self.poll_run_inputs(
+                agent_id=message.agent_id,
                 session_id=message.session_id,
                 model=None,
                 poll_fn=None,
+                process_actions=True,
             )
+            if initial_input.action_blocked:
+                await self.session_lifecycle.mark_session_idle(message.session_id)
+                await self.session_lifecycle.clear_session_activity(message.session_id)
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=False,
+                    no_actionable_work=False,
+                )
+            if initial_input.context_invalidated:
+                if await self.input_buffer_service.has_pending_session_input_buffers(
+                    message.session_id
+                ):
+                    await self.session_lifecycle.send_session_wake_up(message)
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=False,
+                    no_actionable_work=True,
+                )
             if not initial_input.has_actionable_work:
                 logger.info(
                     "Session wake-up ignored because no runtime input is pending",
@@ -775,6 +813,7 @@ class RunExecutor:
                 try:
                     if command_handler is None:
                         boundary_poll = self.make_boundary_poll(
+                            agent_id=message.agent_id,
                             session_id=message.session_id,
                             model=run_request.model,
                             poll_fn=poll_fn,
@@ -1132,6 +1171,7 @@ class RunExecutor:
     def make_boundary_poll(
         self,
         *,
+        agent_id: str,
         session_id: str,
         model: str | None,
         poll_fn: PollMessages | None,
@@ -1141,9 +1181,11 @@ class RunExecutor:
         async def poll() -> list[RunUserMessage]:
             return (
                 await self.poll_run_inputs(
+                    agent_id=agent_id,
                     session_id=session_id,
                     model=model,
                     poll_fn=poll_fn,
+                    process_actions=False,
                 )
             ).user_messages
 
@@ -1152,14 +1194,29 @@ class RunExecutor:
     async def poll_run_inputs(
         self,
         *,
+        agent_id: str,
         session_id: str,
         model: str | None,
         poll_fn: PollMessages | None,
+        process_actions: bool,
     ) -> RunInputPollResult:
         """Consume pending run inputs and report whether a wake-up has work."""
         promoted = await self._promote_input_buffers(
             session_id=session_id,
             model=model,
+            include_action_messages=process_actions,
+        )
+        action_result = (
+            await self._process_operation_actions(
+                agent_id=agent_id,
+                session_id=session_id,
+                events=promoted.events,
+            )
+            if process_actions
+            else OperationActionProcessResult(
+                context_invalidated=False,
+                blocked=False,
+            )
         )
         queued_events = await poll_fn() if poll_fn is not None else []
         user_messages = [*promoted.user_messages, *queued_events]
@@ -1169,6 +1226,49 @@ class RunExecutor:
         return RunInputPollResult(
             user_messages=user_messages,
             has_actionable_work=has_actionable_work,
+            context_invalidated=action_result.context_invalidated,
+            action_blocked=action_result.blocked,
+        )
+
+    async def _process_operation_actions(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        events: Sequence[Event],
+    ) -> OperationActionProcessResult:
+        """Execute promoted operation TurnActions before model dispatch."""
+        context_invalidated = False
+        for event in events:
+            if event.kind is not EventKind.ACTION_MESSAGE:
+                continue
+            payload = event.payload
+            if not isinstance(payload, ActionMessagePayload):
+                continue
+            action = payload.action
+            match action:
+                case CreateGitWorktreeAction():
+                    result = (
+                        await self.session_git_worktree_service.run_git_worktree_action(
+                            agent_id=agent_id,
+                            session_id=session_id,
+                            action_event_id=event.id,
+                            action=action,
+                        )
+                    )
+                    if not result.completed:
+                        return OperationActionProcessResult(
+                            context_invalidated=context_invalidated,
+                            blocked=True,
+                        )
+                    context_invalidated = (
+                        context_invalidated or result.context_invalidated
+                    )
+                case _:
+                    continue
+        return OperationActionProcessResult(
+            context_invalidated=context_invalidated,
+            blocked=False,
         )
 
     async def _promote_input_buffers(
@@ -1176,6 +1276,7 @@ class RunExecutor:
         *,
         session_id: str,
         model: str | None,
+        include_action_messages: bool,
     ) -> PromotedInputBuffers:
         """Promote input buffers and publish the matching live-state changes."""
         started_at = asyncio.get_running_loop().time()
@@ -1186,6 +1287,7 @@ class RunExecutor:
         promoted = await self.input_buffer_service.flush_session_input_buffers(
             session_id=session_id,
             model=model,
+            include_action_messages=include_action_messages,
         )
         logger.info(
             "Input buffer flush completed before model boundary",
