@@ -61,6 +61,18 @@ from .health import HealthServer
 from .input.background_result_injector import BackgroundTaskResultInjector
 
 _DEFAULT_HEALTH_PORT = 8012
+_DEFAULT_FAILED_RUN_MAX_RETRIES = 10
+_DEFAULT_FAILED_RUN_BASE_BACKOFF_SECONDS = 1
+_DEFAULT_FAILED_RUN_BACKOFF_MULTIPLIER = 2
+_DEFAULT_FAILED_RUN_MAX_BACKOFF_SECONDS = 60
+
+
+def _int_from_env(name: str, default: int) -> int:
+    """Read an integer environment variable."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return int(raw_value)
 
 
 def get_worker_id() -> str:
@@ -226,6 +238,22 @@ def get_worker_config(
         web_url=config.web_url,
         oauth_secret_key=config.credential_encryption.key,
         mcp_proxy_url=config.mcp_proxy_url,
+        failed_run_max_retries=_int_from_env(
+            "AZ_FAILED_RUN_MAX_RETRIES",
+            _DEFAULT_FAILED_RUN_MAX_RETRIES,
+        ),
+        failed_run_base_backoff_seconds=_int_from_env(
+            "AZ_FAILED_RUN_BASE_BACKOFF_SECONDS",
+            _DEFAULT_FAILED_RUN_BASE_BACKOFF_SECONDS,
+        ),
+        failed_run_backoff_multiplier=_int_from_env(
+            "AZ_FAILED_RUN_BACKOFF_MULTIPLIER",
+            _DEFAULT_FAILED_RUN_BACKOFF_MULTIPLIER,
+        ),
+        failed_run_max_backoff_seconds=_int_from_env(
+            "AZ_FAILED_RUN_MAX_BACKOFF_SECONDS",
+            _DEFAULT_FAILED_RUN_MAX_BACKOFF_SECONDS,
+        ),
     )
 
 

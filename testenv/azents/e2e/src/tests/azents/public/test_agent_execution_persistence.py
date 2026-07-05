@@ -50,6 +50,11 @@ _TOOL_PROMPT = "Start chat input buffer long tool"
 _TOOL_RESPONSE = "Chat input buffer long tool completed."
 _TOOL_NAME = "bufferqa__runtime_hook_qa_probe"
 _TOOL_CALL_ID = "call_chat_input_buffer_delay"
+_RETRY_ONCE = "Failed run retry once then succeed"
+_RETRY_ONCE_RESPONSE = "Failed run retry recovered after one attempt."
+_RETRY_MANUAL = "Failed run retry exhaust then manual recover"
+_RETRY_MANUAL_RESPONSE = "Manual failed-run retry recovered successfully."
+_RETRY_STALE = "Failed run retry stale conflict"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
@@ -316,6 +321,151 @@ def _list_history(
     return _json_object(response)
 
 
+def _list_live(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+) -> dict[str, object]:
+    """Fetch the REST live projection."""
+    response = requests.get(
+        f"{server_url}/chat/v1/sessions/{session_id}/live",
+        headers=_headers(token),
+        timeout=10,
+    )
+    response.raise_for_status()
+    return _json_object(response)
+
+
+def _history_events(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Validate and return raw REST history events."""
+    return _json_object_list_payload(payload.get("items"), label="REST history events")
+
+
+def _system_error_events(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Return raw REST history system_error events."""
+    return [
+        event
+        for event in _history_events(payload)
+        if event.get("kind") == "system_error"
+    ]
+
+
+def _failed_run_error_events(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Return raw REST history failed-run system_error events."""
+    failed_events: list[dict[str, object]] = []
+    for event in _system_error_events(payload):
+        event_payload = _json_object_payload(
+            event.get("payload"),
+            label="system_error payload",
+        )
+        failure_payload = event_payload.get("failure")
+        if failure_payload is None:
+            continue
+        failure = _json_object_payload(
+            failure_payload,
+            label="system_error failure",
+        )
+        if failure.get("kind") == "failed_run":
+            failed_events.append(event)
+    return failed_events
+
+
+def _retry_failed_run(
+    *,
+    public_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    failed_event_id: str,
+) -> dict[str, object]:
+    """Post a manual failed-run retry and return the response."""
+    response = requests.post(
+        f"{public_url}/chat/v1/sessions/{session_id}/retry-failed-run",
+        headers={**_headers(token), "Content-Type": "application/json"},
+        json={
+            "agent_id": agent_id,
+            "failed_event_id": failed_event_id,
+            "client_request_id": f"agent-execution-failed-retry-{unique()}",
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return _json_object(response)
+
+
+def _wait_for_live_retry(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    failed_attempt_count: int,
+    timeout: float = 20,
+) -> dict[str, object]:
+    """Wait until /live exposes a failed-run retry state."""
+    deadline = time.monotonic() + timeout
+    last_payload: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        payload = _list_live(
+            server_url=server_url,
+            token=token,
+            session_id=session_id,
+        )
+        last_payload = payload
+        run_payload = payload.get("run")
+        if run_payload is not None:
+            run = _json_object_payload(run_payload, label="live run")
+            retry_payload = run.get("retry")
+            if retry_payload is not None:
+                retry = _json_object_payload(retry_payload, label="live run retry")
+                observed_attempt_count = retry.get("failed_attempt_count")
+                if (
+                    isinstance(observed_attempt_count, int)
+                    and observed_attempt_count >= failed_attempt_count
+                ):
+                    return payload
+        time.sleep(0.1)
+    raise TimeoutError(f"live retry was not observed: {last_payload!r}")
+
+
+def _wait_for_failed_run_error(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    expected_attempts: int,
+    timeout: float = 30,
+) -> dict[str, object]:
+    """Wait until terminal failed-run system_error appears in history."""
+    deadline = time.monotonic() + timeout
+    last_payload: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        payload = _list_history(
+            server_url=server_url,
+            token=token,
+            session_id=session_id,
+        )
+        last_payload = payload
+        failed_events = _failed_run_error_events(payload)
+        if failed_events:
+            event_payload = _json_object_payload(
+                failed_events[-1].get("payload"),
+                label="failed-run payload",
+            )
+            failure = _json_object_payload(
+                event_payload.get("failure"),
+                label="failed-run failure",
+            )
+            attempts = _json_object_list_payload(
+                failure.get("attempts"),
+                label="failed-run attempts",
+            )
+            if len(attempts) == expected_attempts:
+                return payload
+        time.sleep(0.5)
+    raise TimeoutError(f"failed-run error was not observed: {last_payload!r}")
+
+
 def _message_item_from_event(event: dict[str, object]) -> dict[str, object]:
     """History event t t assertion t t message-like dict t t."""
     payload = _json_object_payload(event.get("payload"), label="history event payload")
@@ -514,6 +664,179 @@ class TestAgentExecutionPersistence:
         assert isinstance(turn_usages[-1].get("prompt_tokens"), int)
         assert isinstance(turn_usages[-1].get("completion_tokens"), int)
         assert isinstance(turn_usages[-1].get("raw"), dict)
+
+    def test_failed_run_retry_live_state_recovers_before_terminal_error(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Failed-run retry exposes live state before terminal recovery."""
+        del azents_engine_worker_container
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+
+        result = _run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_RETRY_ONCE,
+        )
+        live_payload = _wait_for_live_retry(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            failed_attempt_count=1,
+        )
+        run = _json_object_payload(live_payload.get("run"), label="live run")
+        retry = _json_object_payload(run.get("retry"), label="live run retry")
+        attempts = _json_object_list_payload(
+            retry.get("attempts"),
+            label="live retry attempts",
+        )
+        assert retry.get("status") == "waiting"
+        assert retry.get("failed_attempt_count") == 1
+        assert retry.get("max_retries") == 3
+        latest_error = attempts[-1].get("user_message")
+        assert isinstance(latest_error, str)
+        assert "Deterministic retry attempt 1 failed." in latest_error
+
+        during_retry = _list_history(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+        )
+        assert _failed_run_error_events(during_retry) == []
+
+        final_payload = _wait_for_rest_contents(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected=[_RETRY_ONCE, _RETRY_ONCE_RESPONSE],
+        )
+        assert _failed_run_error_events(final_payload) == []
+
+    def test_failed_run_manual_retry_soft_reverts_terminal_error(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Manual failed-run retry soft-reverts terminal error and restarts."""
+        del azents_engine_worker_container
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+
+        result = _run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_RETRY_MANUAL,
+        )
+        failed_payload = _wait_for_failed_run_error(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected_attempts=3,
+        )
+        failed_event = _failed_run_error_events(failed_payload)[-1]
+        failed_event_id = failed_event.get("id")
+        assert isinstance(failed_event_id, str)
+
+        retry_response = _retry_failed_run(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=result.session_id,
+            failed_event_id=failed_event_id,
+        )
+        accepted = _json_object_payload(
+            retry_response.get("accepted"),
+            label="retry accepted",
+        )
+        assert accepted.get("type") == "failed_run_retry"
+        assert retry_response.get("history_reload_required") is True
+
+        final_payload = _wait_for_rest_contents(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected=[_RETRY_MANUAL, _RETRY_MANUAL_RESPONSE],
+        )
+        assert _failed_run_error_events(final_payload) == []
+
+    def test_failed_run_manual_retry_rejects_stale_failed_card(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Manual failed-run retry rejects stale failed cards."""
+        del azents_engine_worker_container
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+
+        result = _run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_RETRY_STALE,
+        )
+        failed_payload = _wait_for_failed_run_error(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected_attempts=3,
+        )
+        failed_event = _failed_run_error_events(failed_payload)[-1]
+        failed_event_id = failed_event.get("id")
+        assert isinstance(failed_event_id, str)
+
+        _run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_HELLO,
+            session_id=result.session_id,
+        )
+        _wait_for_rest_contents(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected=[_HELLO, _HELLO_RESPONSE],
+        )
+
+        response = requests.post(
+            f"{azents_public_server_url}/chat/v1/sessions/"
+            f"{result.session_id}/retry-failed-run",
+            headers={**_headers(workspace.token), "Content-Type": "application/json"},
+            json={
+                "agent_id": agent_id,
+                "failed_event_id": failed_event_id,
+                "client_request_id": f"agent-execution-stale-retry-{unique()}",
+            },
+            timeout=10,
+        )
+        assert response.status_code == 409
 
     def test_tool_call_result_and_followup_response_survive_rest_reload(
         self,

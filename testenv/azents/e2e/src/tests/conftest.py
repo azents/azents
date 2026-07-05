@@ -357,6 +357,10 @@ def _configure_azents_server_container(
         .with_env("AZ_AGENT_HOME_SESSION_HIBERNATE_IDLE_SECONDS", "60")
         .with_env("AZ_AZENTS_SESSION_HIBERNATE_IDLE_SECONDS", "60")
         .with_env("AZ_AGENT_HOME_CLEANUP_INTERVAL_SECS", "1")
+        .with_env("AZ_FAILED_RUN_MAX_RETRIES", "3")
+        .with_env("AZ_FAILED_RUN_BASE_BACKOFF_SECONDS", "1")
+        .with_env("AZ_FAILED_RUN_BACKOFF_MULTIPLIER", "1")
+        .with_env("AZ_FAILED_RUN_MAX_BACKOFF_SECONDS", "1")
     )
 
 

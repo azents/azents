@@ -545,6 +545,140 @@
       "response": {
         "content": "Replace hook QA completed."
       }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry once then succeed",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic retry attempt 1 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry once then succeed",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "Failed run retry recovered after one attempt."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry exhaust then manual recover",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic retry attempt 1 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry exhaust then manual recover",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic retry attempt 2 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry exhaust then manual recover",
+        "hasToolResult": false,
+        "sequenceIndex": 2
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic retry attempt 3 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry exhaust then manual recover",
+        "hasToolResult": false,
+        "sequenceIndex": 3
+      },
+      "response": {
+        "content": "Manual failed-run retry recovered successfully."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry stale conflict",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic stale retry attempt 1 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry stale conflict",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic stale retry attempt 2 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry stale conflict",
+        "hasToolResult": false,
+        "sequenceIndex": 2
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic stale retry attempt 3 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
     }
   ]
 }

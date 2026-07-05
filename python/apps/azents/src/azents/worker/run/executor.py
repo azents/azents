@@ -145,10 +145,6 @@ from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 logger = logging.getLogger(__name__)
 _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
 _RUN_HEARTBEAT_INTERVAL_SECONDS = 30.0
-_FAILED_RUN_MAX_RETRIES = 10
-_FAILED_RUN_BASE_BACKOFF_SECONDS = 1
-_FAILED_RUN_BACKOFF_MULTIPLIER = 2
-_FAILED_RUN_MAX_BACKOFF_SECONDS = 60
 _FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
 _FAILED_RUN_NO_FIXTURE_MATCH_CODE = "no_fixture_match"
 _NON_ACTIONABLE_TAIL_EVENT_KINDS = {
@@ -1040,14 +1036,19 @@ class RunExecutor:
         backoff_seconds = (
             0
             if attempt.retryability == "non_retryable"
-            else _failed_run_backoff_seconds(attempt.attempt_number)
+            else _failed_run_backoff_seconds(
+                attempt.attempt_number,
+                base_seconds=self.worker_config.failed_run_base_backoff_seconds,
+                multiplier=self.worker_config.failed_run_backoff_multiplier,
+                max_seconds=self.worker_config.failed_run_max_backoff_seconds,
+            )
         )
         next_retry_at = attempt.occurred_at + datetime.timedelta(
             seconds=backoff_seconds
         )
         retry_state = FailedRunRetryState.from_attempt(
             attempt,
-            max_retries=_FAILED_RUN_MAX_RETRIES,
+            max_retries=self.worker_config.failed_run_max_retries,
             backoff_seconds=backoff_seconds,
             next_retry_at=next_retry_at,
             previous=previous_retry_state,
@@ -1296,9 +1297,13 @@ def _failed_run_finalization_reason(
     return None
 
 
-def _failed_run_backoff_seconds(attempt_number: int) -> int:
+def _failed_run_backoff_seconds(
+    attempt_number: int,
+    *,
+    base_seconds: int,
+    multiplier: int,
+    max_seconds: int,
+) -> int:
     """Return bounded exponential failed-run retry backoff."""
-    raw = _FAILED_RUN_BASE_BACKOFF_SECONDS * (
-        _FAILED_RUN_BACKOFF_MULTIPLIER ** (attempt_number - 1)
-    )
-    return min(_FAILED_RUN_MAX_BACKOFF_SECONDS, raw)
+    raw = base_seconds * (multiplier ** (attempt_number - 1))
+    return min(max_seconds, raw)
