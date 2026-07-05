@@ -15,7 +15,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-05
-spec_version: 12
+spec_version: 13
 ---
 
 # Chat Session Resync
@@ -74,6 +74,7 @@ sequenceDiagram
 | `todo_state_changed` | server → client | `todo` | session todo Toolkit State snapshot changed. |
 | `session_initialization_updated` | server → client | `session_id`, `initialization` | Session initialization status or step projection changed. |
 | `session_initialization_event_appended` | server → client | `session_id`, `event` | Durable initialization log event was appended. |
+| `action_execution_updated` | server → client | `session_id`, `action_execution` | Current operation TurnAction execution projection changed, including status and durable progress events. |
 
 Client does not query history/live REST baseline before `subscribed` ack. If health check ack timeout or socket close occurs, switch to ticket refresh/reconnect path.
 
@@ -268,6 +269,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 - REST baseline is applied as latest source only after session subscription ack.
 - REST `/live` does not return aggregate event list and returns live state taxonomy snapshot split into `partial_history`, `input_buffers`, `run`, `session_run_state`, `todo`, `initialization`, and `action_executions`.
 - `live_run_updated` and REST `/live.run` are the authoritative current run snapshot sources; clients replace the stored run snapshot rather than merging individual retry fields.
+- `action_execution_updated` and REST `/live.action_executions` are the authoritative current operation progress sources; clients upsert by execution id and render the progress next to the matching action-message or pending-buffer anchor.
 - REST write `snapshot` does not return aggregate `live_events` and returns live state taxonomy snapshot split into `partial_history_events`, `input_buffer_events`, `run`, `session_run_state`, `todo`, `initialization`, and `action_executions`.
 - Detached state does not synthesize live state below history window.
 - Entering detached state itself does not mean “new message” exists.
@@ -281,6 +283,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-05** — v13. Added action execution WebSocket projection updates and anchored operation-progress rendering semantics.
 - **2026-07-05** — v12. Added action execution projections to REST live/write snapshot resync behavior.
 - **2026-07-05** — v11. Added failed-run retry live card, terminal recovery card, and live-run update/clear resync behavior.
 - **2026-07-04** — v10. Removed existing-session Git worktree attachment from initialization resync behavior.

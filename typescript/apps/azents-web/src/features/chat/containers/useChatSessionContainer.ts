@@ -297,6 +297,10 @@ function isModelRunPhase(phase: AgentRunPhase | null): boolean {
   return phase === "waiting_for_model" || phase === "streaming_model";
 }
 
+function isUserBlockingRunPhase(phase: AgentRunPhase | null): boolean {
+  return phase !== null && phase !== "idle";
+}
+
 function agentRunStatusFromValue(value: unknown): AgentRunStatus | null {
   switch (value) {
     case "running":
@@ -1143,6 +1147,21 @@ function removePendingBuffersForEvent(
   return buffers.filter((buffer) => !pendingBufferMatchesEvent(buffer, event));
 }
 
+function upsertActionExecutionProjection(
+  actionExecutions: ActionExecutionProjection[],
+  actionExecution: ActionExecutionProjection,
+): ActionExecutionProjection[] {
+  const index = actionExecutions.findIndex(
+    (item) => item.execution.id === actionExecution.execution.id,
+  );
+  if (index === -1) {
+    return [...actionExecutions, actionExecution];
+  }
+  return actionExecutions.map((item, itemIndex) =>
+    itemIndex === index ? actionExecution : item,
+  );
+}
+
 function mapInputBufferLiveEvent(
   event: ChatEventResponse,
 ): PendingInputBuffer | null {
@@ -1369,7 +1388,8 @@ function replaceLiveStateFromSnapshot(
     liveRunPhase: currentLiveRunPhase,
     sessionRunState: sessionRunStateFromResponse(live),
     isResponsePending:
-      currentLiveRunPhase !== null || partialHistory.order.length > 0,
+      isUserBlockingRunPhase(currentLiveRunPhase) ||
+      partialHistory.order.length > 0,
     isModelResponsePending: isModelRunPhase(currentLiveRunPhase),
     isCompacting: currentLiveRunPhase === "compacting",
     todo: live.todo ?? emptyTodoState(),
@@ -1655,7 +1675,9 @@ export function useChatSessionContainer(
               : { ...prev.liveRun, phase, status: "running" },
           liveRunPhase: phase,
           sessionRunState: "running",
-          isResponsePending: true,
+          isResponsePending:
+            isUserBlockingRunPhase(phase) ||
+            prev.partialHistory.order.length > 0,
           isModelResponsePending: isModelRunPhase(phase),
           isCompacting: phase === "compacting",
         }));
@@ -1716,6 +1738,17 @@ export function useChatSessionContainer(
         return;
       }
 
+      if ("type" in event && event.type === "action_execution_updated") {
+        setManagedLiveState((prev) => ({
+          ...prev,
+          actionExecutions: upsertActionExecutionProjection(
+            prev.actionExecutions,
+            event.action_execution,
+          ),
+        }));
+        return;
+      }
+
       if ("type" in event && event.type === "live_event_removed") {
         setManagedLiveState((prev) => ({
           ...prev,
@@ -1743,7 +1776,8 @@ export function useChatSessionContainer(
           sessionRunState:
             nextLiveRun.status === "running" ? "running" : prev.sessionRunState,
           isResponsePending:
-            nextLiveRunPhase !== null || prev.partialHistory.order.length > 0,
+            isUserBlockingRunPhase(nextLiveRunPhase) ||
+            prev.partialHistory.order.length > 0,
           isModelResponsePending: isModelRunPhase(nextLiveRunPhase),
           isCompacting: nextLiveRunPhase === "compacting",
         }));
@@ -2561,7 +2595,7 @@ export function useChatSessionContainer(
   );
   const tokenUsage = useMemo(() => latestTokenUsage(messages), [messages]);
   const isCompacting = managedLiveState.isCompacting || isCompactingFromHistory;
-  const isStopAvailable = managedLiveState.liveRunPhase !== null;
+  const isStopAvailable = isUserBlockingRunPhase(managedLiveState.liveRunPhase);
   const isStopPending =
     stopSessionRunMutation.isPending || managedLiveState.isStopPending;
 

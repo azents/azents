@@ -26,6 +26,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_git_worktree import RDBSessionGitWorktree
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
+from azents.repos.action_execution.data import ActionExecutionProjection
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
@@ -48,6 +49,8 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.runtime.control_protocol.runner_operations import (
+    RuntimeFileDeleteResult,
+    RuntimeFileListResult,
     RuntimeGitCreateWorktreeResult,
     RuntimeGitDeleteBranchResult,
     RuntimeGitRefEntry,
@@ -237,6 +240,51 @@ class _RunnerOperations:
             branch_name=branch_name,
             final_cursor="cursor-branch",
         )
+
+    async def list_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        path: str,
+        recursive: bool = False,
+        exclude_patterns: list[str] | None = None,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileListResult:
+        """Record directory listing for parent cleanup."""
+        del deadline_at, exclude_patterns
+        self.calls.append(
+            {
+                "operation": "list_files",
+                "runtime_id": runtime_id,
+                "runner_generation": runner_generation,
+                "path": path,
+                "recursive": recursive,
+            }
+        )
+        return RuntimeFileListResult(entries=(), final_cursor="cursor-list")
+
+    async def delete_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        path: str,
+        recursive: bool,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileDeleteResult:
+        """Record empty parent directory deletion."""
+        del deadline_at
+        self.calls.append(
+            {
+                "operation": "delete_file",
+                "runtime_id": runtime_id,
+                "runner_generation": runner_generation,
+                "path": path,
+                "recursive": recursive,
+            }
+        )
+        return RuntimeFileDeleteResult(path=path, final_cursor="cursor-delete")
 
 
 class _CatalogRefreshService(AgentProjectCatalogService):
@@ -524,6 +572,12 @@ class TestSessionGitWorktreeService:
             )
         runner = _RunnerOperations()
         service = _service(rdb_session_manager, runner)
+        published_statuses: list[ActionExecutionStatus] = []
+
+        async def publish_projection(
+            projection: ActionExecutionProjection,
+        ) -> None:
+            published_statuses.append(projection.execution.status)
 
         assert isinstance(action_payload.action, CreateGitWorktreeAction)
         result = await service.run_git_worktree_action(
@@ -531,9 +585,11 @@ class TestSessionGitWorktreeService:
             session_id=agent_session.id,
             action_event_id=action_event.id,
             action=action_payload.action,
+            on_projection_updated=publish_projection,
         )
 
         assert result.completed is True
+        assert published_statuses[-1] is ActionExecutionStatus.COMPLETED
         assert result.context_invalidated is True
         async with rdb_session_manager() as session:
             allocations = await SessionGitWorktreeRepository().list_by_session_id(
@@ -1197,6 +1253,8 @@ class TestSessionGitWorktreeService:
             "create_git_worktree",
             "remove_git_worktree",
             "delete_git_branch",
+            "list_files",
+            "delete_file",
         ]
         remove_call = runner.calls[1]
         assert remove_call["force"] is True

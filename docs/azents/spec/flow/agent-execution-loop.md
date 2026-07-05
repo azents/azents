@@ -38,7 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-05
-spec_version: 56
+spec_version: 57
 ---
 
 # Agent Execution Loop
@@ -379,9 +379,9 @@ transcript `system_error`.
 
 Operation TurnActions are processed after input-buffer promotion and before model dispatch.
 `create_git_worktree` action execution is keyed by its durable `action_message` event, records durable
-progress in `action_executions`, creates the worktree through typed Runner Git operations, registers
-the created path as a session Project, refreshes catalog/Skill projection, and then invalidates the
-prepared context boundary. If later pending input remains after a Project-mutating action succeeds, the
+progress in `action_executions`, publishes action execution projection updates while status or log
+entries change, creates the worktree through typed Runner Git operations, registers the created path
+as a session Project, refreshes catalog/Skill projection, and then invalidates the prepared context boundary. If later pending input remains after a Project-mutating action succeeds, the
 runner sends a follow-up wake-up and stops the current processing boundary so the next pass rebuilds
 model/tool context from the updated Project registry. If an action fails, later pending input remains
 blocked until retry succeeds or discard marks the action `failed_final`.
@@ -497,6 +497,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-05** (spec_version 57) — Added operation TurnAction execution projection updates during status/log changes.
 - **2026-07-04** (spec_version 54) — Clarified that the session runner drains pending initialization work before dispatch and may continue into run creation on the same wake-up once setup becomes ready.
 - **2026-07-04** (spec_version 52) — Added the session initialization gate before run creation.
 - **2026-07-01** (spec_version 50) — Unified pending runtime commands into the `RunExecutor` run boundary.
