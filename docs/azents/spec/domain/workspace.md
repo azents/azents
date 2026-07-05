@@ -47,6 +47,9 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests
   - /chat/v1/agents/{agent_id}/project-presets
   - /chat/v1/agents/{agent_id}/session-project-defaults
@@ -54,8 +57,8 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-05
-spec_version: 31
+last_verified_at: 2026-07-06
+spec_version: 32
 ---
 
 # Workspace & Membership
@@ -198,14 +201,19 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - `GET /chat/v1/agents/{agent_id}/git-refs?source_project_path=...` previews branches, tags, default branch, and HEAD commit for a Git source Project through typed Runtime Runner Git operations. Runtime unavailable or Git semantic failures are surfaced as user-safe preview errors.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` registers an existing directory as Project for the selected AgentSession. Server validates user access, agent/session match, active Runtime directory existence, and Project path policy, then creates the session-owned registry row. This API does not modify filesystem.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/projects` returns registered Project list for the selected AgentSession. Public response exposes only `id`, `path`, `created_at`, `updated_at`.
-- `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest` returns a backend-owned Project browser manifest for the selected session. It derives Project root entries from `session_workspace_projects`, joins catalog status projection by Agent/path, and returns backend-provided capabilities. Project root entries allow registry removal when tied to a session Project and disallow filesystem delete, move, and rename. Entries linked to `session_git_worktrees` expose `repository_type: "git"` so clients can render Git-specific Project root metadata without probing the filesystem.
+- `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest` returns a backend-owned Project browser manifest for the selected session. It derives Project root entries from `session_workspace_projects`, joins catalog status projection by Agent/path, and returns backend-provided capabilities. Project root entries allow registry removal when tied to a session Project and disallow filesystem delete, move, and rename. Entries linked to `session_git_worktrees` expose `repository_type: "git"` so clients can render Git-specific Project root metadata without probing the filesystem. A non-cleaned Azents-owned worktree Project also exposes `delete_worktree: true`; ordinary Project registry rows and preview entries do not.
 - `POST /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview` accepts explicit `project_paths` before a session exists and returns the same Project browser entry model. Preview entries do not expose session registry removal because no session Project row exists yet, and they do not expose repository metadata.
 - Project browser manifest reads do not call runtime runner file stat/list operations before responding. Missing or unchecked catalog projection is represented as stored/unchecked status and may be refreshed by separate boundary-triggered sync work.
 - `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected session's registry row. Filesystem folder deletion is destructive and not included. Azents-owned worktree cleanup is a separate archive/delete lifecycle based on `session_git_worktrees` ownership metadata, not on the Project registry row alone.
+- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` requests destructive cleanup for Azents-owned worktree allocations. When `project_id` is supplied, cleanup is scoped to the allocation linked to that session Project; otherwise cleanup covers all non-cleaned allocations for the session. Cleanup validates session ownership, Azents worktree-root containment, branch name presence, and Azents-created branch ownership before calling Runner Git cleanup. Successful cleanup removes the Git worktree without force, deletes the Azents-created branch, removes the catalog entry, deletes the linked session Project row, and best-effort removes the empty session-scoped worktree parent directory.
 - Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, exact duplicate Project path per session forbidden. Nested Project paths are allowed.
 - Registration request is flow where Agent asks user approval to include a folder it created into the current session's Projects. Approve validates active Runtime path and creates registered Project in the selected AgentSession; reject does not create Project.
 
-New-session azents-web UI shows a compact additive workspace item list above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, lets users add repository folders to the list, and lets each selected folder switch between repository and new worktree modes from the row-level type selector. The runtime-backed folder picker can select the current folder so a Git repository directory itself can be added without relying on an existing preset. Worktree branch selection in this draft UI uses the Git ref preview endpoint but exposes only local branches by default; remote branches and tags are not shown in the base branch selector. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project browser root rows display the folder basename as the primary label and render the full absolute path as dimmed, truncated secondary text after the name. The secondary path truncates before the primary label; the primary label truncates only when it exceeds the available row width. Git-backed Project root rows use a Git folder icon; non-Git Project roots keep the normal folder icon. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
+New-session azents-web UI shows a compact additive workspace item list above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, lets users add repository folders to the list, and lets each selected folder switch between repository and new worktree modes from the row-level type selector. The runtime-backed folder picker can select the current folder so a Git repository directory itself can be added without relying on an existing preset. Worktree branch selection in this draft UI uses the Git ref preview endpoint but exposes only local branches by default; remote branches and tags are not shown in the base branch selector. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project browser root rows display the folder basename as the primary label and render the full absolute path as dimmed, truncated secondary text after the name. The secondary path truncates before the primary label; the primary label truncates only when it exceeds the available row width. Git-backed Project root rows use a Git folder icon; non-Git Project roots keep the normal folder icon.
+
+In an existing concrete session, Register Project supports two modes. `Existing directory` validates and registers an existing Agent Workspace directory through the session Project register API. `New worktree` is available from a Git source Project row, requires a starting ref from Git ref preview, and submits a durable `create_git_worktree` operation TurnAction with the current message/input boundary rather than appending session-initialization setup work. The operation creates a session-scoped Azents-owned worktree, registers the generated worktree path as a session Project, upserts the Agent Project Catalog, refreshes the Project/Skill projection, and lets the next run rebuild context after the Project registry changes. Failed worktree actions remain anchored to the action message and can be retried or discarded through action-execution mutation APIs.
+
+Git-backed Project root rows separate registry removal from destructive cleanup. `Remove from session` removes only the session Project row. `Delete worktree` is shown only when the backend manifest exposes `delete_worktree` for an Azents-owned non-cleaned allocation and routes to the Git worktree cleanup API. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
 
 ### Workspace Home / Membership UI
 
@@ -308,8 +316,10 @@ At least 7 rules — all actually verified in code:
 - `[project-browser-manifest-non-blocking]` — Project browser manifest reads return stored catalog projection and do not block on runner filesystem stat/list operations.
 - `[worktree-project-registration]` — Git worktree sessions register exactly the created worktree path as a session Project after the Runner confirms worktree creation.
 - `[worktree-action-gates-first-run]` — new-session Git worktree setup uses ordered operation TurnAction execution and gates the first run until blocking setup action execution completes or is explicitly discarded after failure.
+- `[existing-session-worktree-action]` — existing-session Register Project worktree creation is a durable `create_git_worktree` operation TurnAction, not session initialization work. It blocks later pending input until it succeeds, is retried, or is discarded.
 - `[worktree-cleanup-authority]` — destructive cleanup of an Azents-owned worktree requires a matching `session_git_worktrees` ownership row; Project registry rows or reserved-root paths are not sufficient authority.
-- `[project-root-action-policy]` — Project browser root entries expose backend capabilities; filesystem delete, move, and rename are disabled for Project roots, while registry removal is available only for existing session Project rows.
+- `[worktree-cleanup-non-force]` — manual worktree cleanup calls Runner Git worktree removal with `force=false`; local modifications or other Git safety failures leave cleanup failed for user intervention instead of deleting data.
+- `[project-root-action-policy]` — Project browser root entries expose backend capabilities; filesystem delete, move, and rename are disabled for Project roots, registry removal is available only for existing session Project rows, and destructive `delete_worktree` is available only for backend-identified Azents-owned worktree Projects.
 
 ## State Transitions
 
@@ -401,6 +411,9 @@ stateDiagram-v2
 | `chat_v1_list_agent_projects` | GET `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects` | agent/session workspace membership |
 | `chat_v1_register_agent_project` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` | `[project-existing-directory]` |
 | `chat_v1_delete_agent_project` | DELETE `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` | `[project-registry-only-delete]` |
+| `chat_v1_retry_action_execution` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry` | failed operation TurnAction only |
+| `chat_v1_discard_action_execution` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard` | failed operation TurnAction only |
+| `chat_v1_cleanup_session_git_worktree` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` | `[worktree-cleanup-authority]`, `[worktree-cleanup-non-force]` |
 
 ### Admin API
 
@@ -432,11 +445,12 @@ stateDiagram-v2
 - **Ownership Transfer** — 2-step operation transitioning OWNER → MANAGER / new OWNER → OWNER in single transaction.
 - **Mute** — state that stops JoinRequest notification. Returns to PENDING automatically on re-request.
 - **Agent Workspace Project** — Project boundary explicitly registered for an existing directory under AgentRuntime's Provider-reported Agent Workspace.
-- **Project browser manifest** — backend-owned read model for Project-first browser entries, status projection, and action capabilities.
+- **Project browser manifest** — backend-owned read model for Project-first browser entries, status projection, repository metadata, and action capabilities.
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
 
+- **2026-07-06** — v32. Promoted existing-session Register Project Git worktree action behavior, Project manifest repository/cleanup capabilities, action retry/discard APIs, and non-force worktree cleanup semantics.
 - **2026-07-05** — v31. Clarified that archive/delete cleanup removes an empty session-scoped reserved worktree parent directory after worktree removal.
 - **2026-07-04** — v25. Added Git worktree workspace mode, Git ref preview, worktree-created Project registration, catalog behavior, and cleanup authority semantics.
 

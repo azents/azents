@@ -14,8 +14,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/deps.py
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-05
-spec_version: 13
+last_verified_at: 2026-07-06
+spec_version: 14
 ---
 
 # Chat Session Resync
@@ -119,6 +119,8 @@ Response fields:
 | `action_executions` | current operation TurnAction execution projections, each with execution state and durable progress events. |
 
 `snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, `snapshot.initialization` is the current setup projection, and `snapshot.action_executions` is the current operation TurnAction projection list.
+
+Action-execution retry and discard mutation responses return the updated action execution projection immediately. When the mutation schedules more runner work, the backend also sends a normal broker wake-up, and subsequent progress is reconciled through the same `action_execution_updated` WebSocket action and `/live.action_executions` baseline. Clients must upsert the returned projection by execution id and then keep accepting newer projection updates from WebSocket or REST baseline reload.
 
 `GET /chat/v1/sessions/{session_id}/initialization` returns the durable initialization projection plus ordered setup events. Clients use it to recover the full setup log after reconnect or when the live card requests details. The endpoint is separate from durable chat history because initialization events are setup telemetry, not transcript events.
 
@@ -269,7 +271,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 - REST baseline is applied as latest source only after session subscription ack.
 - REST `/live` does not return aggregate event list and returns live state taxonomy snapshot split into `partial_history`, `input_buffers`, `run`, `session_run_state`, `todo`, `initialization`, and `action_executions`.
 - `live_run_updated` and REST `/live.run` are the authoritative current run snapshot sources; clients replace the stored run snapshot rather than merging individual retry fields.
-- `action_execution_updated` and REST `/live.action_executions` are the authoritative current operation progress sources; clients upsert by execution id and render the progress next to the matching action-message or pending-buffer anchor.
+- `action_execution_updated`, action-execution mutation responses, and REST `/live.action_executions` are the authoritative current operation progress sources; clients upsert by execution id and render the progress next to the matching action-message or pending-buffer anchor.
 - REST write `snapshot` does not return aggregate `live_events` and returns live state taxonomy snapshot split into `partial_history_events`, `input_buffer_events`, `run`, `session_run_state`, `todo`, `initialization`, and `action_executions`.
 - Detached state does not synthesize live state below history window.
 - Entering detached state itself does not mean “new message” exists.
@@ -283,6 +285,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-06** — v14. Added action-execution retry/discard mutation response reconciliation semantics.
 - **2026-07-05** — v13. Added action execution WebSocket projection updates and anchored operation-progress rendering semantics.
 - **2026-07-05** — v12. Added action execution projections to REST live/write snapshot resync behavior.
 - **2026-07-05** — v11. Added failed-run retry live card, terminal recovery card, and live-run update/clear resync behavior.
