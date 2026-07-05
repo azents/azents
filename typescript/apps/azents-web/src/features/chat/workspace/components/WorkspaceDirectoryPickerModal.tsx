@@ -17,13 +17,19 @@ import {
   Text,
   Tooltip,
 } from "@mantine/core";
-import { IconFolder, IconFolderPlus, IconRefresh } from "@tabler/icons-react";
+import {
+  IconBrandGit,
+  IconFolder,
+  IconFolderPlus,
+  IconRefresh,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import type { AgentWorkspaceResponse } from "@azents/public-client";
 
 export type ProjectDirectoryPickerEntry = {
   path: string;
   kind: "file" | "directory";
+  repositoryType?: "git" | null;
 };
 
 export type ProjectDirectoryPickerState =
@@ -44,7 +50,7 @@ export interface WorkspaceDirectoryPickerModalProps {
   state: ProjectDirectoryPickerState;
   onClose: () => void;
   onOpenDirectory: (path: string) => void;
-  onSelectDirectory: (path: string) => void;
+  onSelectDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefresh: () => void;
   onStartRuntime: () => void;
 }
@@ -162,6 +168,13 @@ export function WorkspaceDirectoryPickerModal({
     const directoryEntries = state.entries.filter(
       (entry) => entry.kind === "directory",
     );
+    const currentEntry: ProjectDirectoryPickerEntry = {
+      path: state.currentPath,
+      kind: "directory",
+      repositoryType:
+        directoryEntries.find((entry) => entry.path === state.currentPath)
+          ?.repositoryType ?? null,
+    };
     const workspaceRoot = workspace.manifest.root;
     const rawParent = parentPath(state.currentPath);
     const parent =
@@ -186,7 +199,7 @@ export function WorkspaceDirectoryPickerModal({
               leftSection={<IconFolderPlus size={rem(16)} />}
               size="xs"
               variant="light"
-              onClick={() => onSelectDirectory(state.currentPath)}
+              onClick={() => onSelectDirectory(currentEntry)}
             >
               {t("projectPickerSelectCurrent")}
             </Button>
@@ -242,7 +255,15 @@ export function WorkspaceDirectoryPickerModal({
                     style={{ flex: "1 1 auto", minWidth: 0 }}
                     wrap="nowrap"
                   >
-                    <IconFolder size={16} style={{ flex: "0 0 auto" }} />
+                    {entry.repositoryType === "git" ? (
+                      <IconBrandGit
+                        color="var(--mantine-color-grape-6)"
+                        size={16}
+                        style={{ flex: "0 0 auto" }}
+                      />
+                    ) : (
+                      <IconFolder size={16} style={{ flex: "0 0 auto" }} />
+                    )}
                     <Text fw={500} size="sm" truncate style={{ minWidth: 0 }}>
                       {basename(entry.path)}
                     </Text>
@@ -255,7 +276,7 @@ export function WorkspaceDirectoryPickerModal({
                       variant="light"
                       onClick={(event) => {
                         event.stopPropagation();
-                        onSelectDirectory(entry.path);
+                        onSelectDirectory(entry);
                       }}
                     >
                       <IconFolderPlus size={15} />

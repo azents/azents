@@ -5,6 +5,7 @@ import type {
   AgentWorkspaceManifestResponse,
   AgentWorkspaceResponse,
   AgentWorkspaceStatResponse,
+  GitRefEntryResponse,
   ProjectBrowserEntryResponse,
   ProjectBrowserManifestResponse,
   SessionWorkspaceProjectRegistrationRequestResponse,
@@ -96,6 +97,27 @@ export type WorkspaceFileState =
   | { type: "ERROR"; message: string }
   | { type: "LOADED"; file: WorkspaceFile };
 
+export type ProjectRegistrationMode = "existing_project" | "git_worktree";
+
+export type ProjectGitRefPreviewState =
+  | { type: "IDLE" }
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "READY"; refs: GitRefEntryResponse[] };
+
+export type ProjectRegistrationDialogState =
+  | { type: "CLOSED" }
+  | {
+      type: "OPEN";
+      path: string;
+      repositoryType: "git" | null;
+      mode: ProjectRegistrationMode;
+      startingRef: string | null;
+      gitRefPreview: ProjectGitRefPreviewState;
+      submitError: string | null;
+      isSubmitting: boolean;
+    };
+
 export type WorkspaceProjectPanelState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
@@ -103,7 +125,9 @@ export type WorkspaceProjectPanelState =
       type: "READY";
       projects: SessionWorkspaceProjectResponse[];
       registrationRequests: SessionWorkspaceProjectRegistrationRequestResponse[];
+      registrationDialog: ProjectRegistrationDialogState;
       isRegisteringProject: boolean;
+      isCreatingWorktree: boolean;
       registerProjectError: string | null;
       pendingApproveRequestId: string | null;
       pendingRejectRequestId: string | null;

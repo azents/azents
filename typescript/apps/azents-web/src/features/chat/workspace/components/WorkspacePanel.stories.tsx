@@ -4,6 +4,7 @@ import type {
   AgentWorkspaceServerState,
   WorkspaceEntry,
   WorkspacePanelState,
+  WorkspaceProjectPanelState,
 } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -202,6 +203,19 @@ const projectRootEntries: WorkspaceEntry[] = [
   },
 ];
 
+const readyProjectState: WorkspaceProjectPanelState = {
+  type: "READY",
+  projects: [],
+  registrationRequests: [],
+  registrationDialog: { type: "CLOSED" },
+  isRegisteringProject: false,
+  isCreatingWorktree: false,
+  registerProjectError: null,
+  pendingApproveRequestId: null,
+  pendingRejectRequestId: null,
+  pendingDeleteProjectId: null,
+};
+
 const projectsState: WorkspacePanelState = {
   ...readyState,
   manifest: {
@@ -300,6 +314,7 @@ const meta = {
     onBulkMovePaths: noop,
     onBulkDeletePaths: noop,
     getDownloadHref: (path: string): string => `/download?path=${path}`,
+    projectState: readyProjectState,
     projectPickerState: { type: "CLOSED" },
     isProjectPickerOpen: false,
     onOpenProjectPicker: noop,
@@ -308,6 +323,10 @@ const meta = {
     onSelectProjectPickerDirectory: noop,
     onRefreshProjectPicker: noop,
     onStartRuntimeForProjectPicker: noop,
+    onCloseProjectRegistration: noop,
+    onSetProjectRegistrationMode: noop,
+    onSetProjectRegistrationStartingRef: noop,
+    onSubmitProjectRegistration: noop,
     onRemoveProjectEntry: noop,
     onSetBrowserMode: noop,
   },
