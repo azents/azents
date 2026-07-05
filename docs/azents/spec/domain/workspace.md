@@ -58,7 +58,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-06
-spec_version: 32
+spec_version: 33
 ---
 
 # Workspace & Membership
@@ -211,7 +211,7 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 
 New-session azents-web UI shows a compact additive workspace item list above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, lets users add repository folders to the list, and lets each selected folder switch between repository and new worktree modes from the row-level type selector. The runtime-backed folder picker can select the current folder so a Git repository directory itself can be added without relying on an existing preset. Worktree branch selection in this draft UI uses the Git ref preview endpoint but exposes only local branches by default; remote branches and tags are not shown in the base branch selector. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project browser root rows display the folder basename as the primary label and render the full absolute path as dimmed, truncated secondary text after the name. The secondary path truncates before the primary label; the primary label truncates only when it exceeds the available row width. Git-backed Project root rows use a Git folder icon; non-Git Project roots keep the normal folder icon.
 
-In an existing concrete session, Register Project supports two modes. `Existing directory` validates and registers an existing Agent Workspace directory through the session Project register API. `New worktree` is available from a Git source Project row, requires a starting ref from Git ref preview, and submits a durable `create_git_worktree` operation TurnAction with the current message/input boundary rather than appending session-initialization setup work. The operation creates a session-scoped Azents-owned worktree, registers the generated worktree path as a session Project, upserts the Agent Project Catalog, refreshes the Project/Skill projection, and lets the next run rebuild context after the Project registry changes. Failed worktree actions remain anchored to the action message and can be retried or discarded through action-execution mutation APIs.
+In an existing concrete session, Register Project opens a runtime-backed Agent Workspace folder picker rooted at the Agent Workspace root. The picker reads Agent Workspace filesystem entries, not Project browser manifest entries or the already-registered Project set. Git repository folders render with a Git folder icon. Selecting a non-Git folder validates and registers it as an existing Agent Workspace directory through the session Project register API. Selecting a Git repository folder opens a registration mode dialog with `Existing directory` and `New worktree` choices. `New worktree` requires a starting ref from Git ref preview and submits a durable `create_git_worktree` operation TurnAction with the current message/input boundary rather than appending session-initialization setup work. The operation creates a session-scoped Azents-owned worktree, registers the generated worktree path as a session Project, upserts the Agent Project Catalog, refreshes the Project/Skill projection, and lets the next run rebuild context after the Project registry changes. Failed worktree actions remain anchored to the action message and can be retried or discarded through action-execution mutation APIs.
 
 Git-backed Project root rows separate registry removal from destructive cleanup. `Remove from session` removes only the session Project row. `Delete worktree` is shown only when the backend manifest exposes `delete_worktree` for an Azents-owned non-cleaned allocation and routes to the Git worktree cleanup API. Source upload/list/delete, bootstrap source type selection, and loaded/loading/failed state UI are not currently implemented.
 
@@ -450,6 +450,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-06** — v33. Clarified that existing-session Register Project uses an Agent Workspace folder picker, shows Git repository folders, and opens the registration mode dialog from Git folder selection.
 - **2026-07-06** — v32. Promoted existing-session Register Project Git worktree action behavior, Project manifest repository/cleanup capabilities, action retry/discard APIs, and non-force worktree cleanup semantics.
 - **2026-07-05** — v31. Clarified that archive/delete cleanup removes an empty session-scoped reserved worktree parent directory after worktree removal.
 - **2026-07-04** — v25. Added Git worktree workspace mode, Git ref preview, worktree-created Project registration, catalog behavior, and cleanup authority semantics.
