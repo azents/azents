@@ -22,7 +22,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-02 | 44 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-29 | 5 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-06 | 32 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-06 | 33 |
 
 _8 documents_
 
@@ -146,8 +146,9 @@ _14 documents_
 - [ADR-0092: Azents-Owned Git Worktree Ownership and Cleanup](adr/0092-azents-owned-git-worktree-ownership-and-cleanup.md)
 - [ADR-0093: New Session Mixed Workspace Selection](adr/0093-new-session-mixed-workspace-selection.md)
 - [ADR-0094: Model Session Operations as Turn Actions](adr/0094-action-as-operation-turn-actions.md)
+- [ADR-0095: Register Project Picker Worktree UI](adr/0095-register-project-picker-worktree-ui.md)
 
-_97 documents_
+_98 documents_
 
 ## Issues (Bug Tracking)
 
@@ -179,4 +180,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 349
+- Total documents: 350
