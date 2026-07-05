@@ -51,6 +51,7 @@ class TestProjectBrowserManifestResponse(unittest.TestCase):
                         name = '', 
                         path = '', 
                         kind = 'directory', 
+                        repository_type = 'git', 
                         source = azentspublicclient.models.project_browser_entry_source_response.ProjectBrowserEntrySourceResponse(
                             type = 'session_project', 
                             project_id = '', ), 
@@ -87,6 +88,7 @@ class TestProjectBrowserManifestResponse(unittest.TestCase):
                         name = '', 
                         path = '', 
                         kind = 'directory', 
+                        repository_type = 'git', 
                         source = azentspublicclient.models.project_browser_entry_source_response.ProjectBrowserEntrySourceResponse(
                             type = 'session_project', 
                             project_id = '', ), 

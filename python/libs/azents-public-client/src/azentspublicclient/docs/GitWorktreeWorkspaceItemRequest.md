@@ -6,9 +6,9 @@ Git worktree workspace item for a new AgentSession.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Workspace item type |
-**source_project_path** | **str** | Source Project path |
-**starting_ref** | **str** | Starting local Git branch ref |
+**type** | **str** | Workspace item type | 
+**source_project_path** | **str** | Source Project path | 
+**starting_ref** | **str** | Starting local Git branch ref | 
 
 ## Example
 
@@ -28,3 +28,5 @@ git_worktree_workspace_item_request_dict = git_worktree_workspace_item_request_i
 git_worktree_workspace_item_request_from_dict = GitWorktreeWorkspaceItemRequest.from_dict(git_worktree_workspace_item_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

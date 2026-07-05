@@ -20,6 +20,7 @@ import {
 import { useMediaQuery } from "@mantine/hooks";
 import {
   IconArrowRight,
+  IconBrandGit,
   IconChevronDown,
   IconChevronRight,
   IconChevronUp,
@@ -99,15 +100,26 @@ function getBasename(path: string): string {
   return trimmed.slice(trimmed.lastIndexOf("/") + 1) || trimmed;
 }
 
-function getEntryDisplayName(entry: WorkspaceEntry, depth: number): string {
-  if (
+function isProjectRootEntry(entry: WorkspaceEntry, depth: number): boolean {
+  return (
     depth === 0 &&
     (entry.source?.type === "session_project" ||
       entry.source?.type === "preview_project")
-  ) {
+  );
+}
+
+function getEntryDisplayName(entry: WorkspaceEntry, depth: number): string {
+  if (isProjectRootEntry(entry, depth)) {
     return getBasename(entry.path);
   }
   return entry.name;
+}
+
+function getEntryDisplayPath(
+  entry: WorkspaceEntry,
+  depth: number,
+): string | null {
+  return isProjectRootEntry(entry, depth) ? entry.path : null;
 }
 
 function getFileExtension(name: string): string {
@@ -115,7 +127,14 @@ function getFileExtension(name: string): string {
   return parts.length > 1 ? (parts.at(-1) ?? "").toLowerCase() : "";
 }
 
-function getFileIcon(entry: WorkspaceEntry, size: string): React.ReactElement {
+function getFileIcon(
+  entry: WorkspaceEntry,
+  size: string,
+  depth: number,
+): React.ReactElement {
+  if (isProjectRootEntry(entry, depth) && entry.repositoryType === "git") {
+    return <IconBrandGit size={size} />;
+  }
   if (entry.kind === "directory") {
     return <IconFolder size={size} />;
   }
@@ -240,6 +259,13 @@ function canSelect(entry: WorkspaceEntry): boolean {
   return canMove(entry) || canDelete(entry);
 }
 
+function getIconColor(entry: WorkspaceEntry, depth: number): string {
+  if (isProjectRootEntry(entry, depth) && entry.repositoryType === "git") {
+    return "orange";
+  }
+  return entry.kind === "directory" ? "blue" : "dimmed";
+}
+
 function getStatusColor(status: WorkspaceEntry["status"]): string {
   switch (status?.value) {
     case "available":
@@ -301,6 +327,7 @@ function TreeNode({
   const active = activePath === node.path;
   const checked = selectedPaths.has(node.path);
   const displayName = getEntryDisplayName(node, depth);
+  const displayPath = getEntryDisplayPath(node, depth);
   const isDirectory = node.kind === "directory";
   const selectable = canSelect(node);
   const canRemoveProject = node.capabilities?.removeProject === true;
@@ -416,24 +443,42 @@ function TreeNode({
           ) : null}
         </Box>
         <Box
-          c={isDirectory ? "blue" : "dimmed"}
+          c={getIconColor(node, depth)}
           style={{ display: "inline-flex", flexShrink: 0 }}
         >
-          {isDirectory && open ? (
+          {isDirectory && open && node.repositoryType !== "git" ? (
             <IconFolderOpen size={iconSize} />
           ) : (
-            getFileIcon(node, iconSize)
+            getFileIcon(node, iconSize, depth)
           )}
         </Box>
-        <Text
-          size={compact ? "xs" : "sm"}
-          fw={isDirectory ? 500 : 400}
-          title={getRelativePath(node.path, root)}
-          truncate
+        <Group
+          gap={rem(6)}
+          wrap="nowrap"
           style={{ flex: "1 1 auto", minWidth: 0 }}
         >
-          {displayName}
-        </Text>
+          <Text
+            size={compact ? "xs" : "sm"}
+            fw={isDirectory ? 500 : 400}
+            title={getRelativePath(node.path, root)}
+            truncate
+            style={{ flex: displayPath ? "0 1 auto" : "1 1 auto", minWidth: 0 }}
+          >
+            {displayName}
+          </Text>
+          {displayPath ? (
+            <Text
+              size={compact ? "xs" : "sm"}
+              c="dimmed"
+              ff="monospace"
+              title={displayPath}
+              truncate
+              style={{ flex: "1 1 auto", minWidth: rem(24) }}
+            >
+              {displayPath}
+            </Text>
+          ) : null}
+        </Group>
         {node.status && node.status.value !== "available" ? (
           <Badge
             size="xs"

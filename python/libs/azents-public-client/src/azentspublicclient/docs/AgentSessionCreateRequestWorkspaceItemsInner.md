@@ -5,10 +5,10 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Workspace item type |
-**path** | **str** | Existing Project path |
-**source_project_path** | **str** | Source Project path |
-**starting_ref** | **str** | Starting local Git branch ref |
+**type** | **str** | Workspace item type | 
+**path** | **str** | Existing Project path | 
+**source_project_path** | **str** | Source Project path | 
+**starting_ref** | **str** | Starting local Git branch ref | 
 
 ## Example
 
@@ -28,3 +28,5 @@ agent_session_create_request_workspace_items_inner_dict = agent_session_create_r
 agent_session_create_request_workspace_items_inner_from_dict = AgentSessionCreateRequestWorkspaceItemsInner.from_dict(agent_session_create_request_workspace_items_inner_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

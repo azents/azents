@@ -16,6 +16,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogEntry
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.agent_project_catalog import AgentProjectCatalogService
@@ -27,6 +28,7 @@ from azents.services.session_workspace_project import (
 _PROJECT_BROWSER_ROOT = "/workspace/agent"
 ProjectBrowserModeId = Literal["projects", "all_files"]
 ProjectBrowserEntrySourceType = Literal["session_project", "preview_project"]
+ProjectBrowserEntryRepositoryType = Literal["git"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -98,6 +100,7 @@ class ProjectBrowserEntry:
     name: str
     path: str
     kind: Literal["directory"]
+    repository_type: ProjectBrowserEntryRepositoryType | None
     source: ProjectBrowserEntrySource
     status: ProjectBrowserEntryStatus
     capabilities: ProjectBrowserEntryCapabilities
@@ -144,6 +147,10 @@ class ProjectBrowserManifestService:
     project_repository: Annotated[
         SessionWorkspaceProjectRepository,
         Depends(SessionWorkspaceProjectRepository),
+    ]
+    worktree_repository: Annotated[
+        SessionGitWorktreeRepository,
+        Depends(SessionGitWorktreeRepository),
     ]
     catalog_repository: Annotated[
         AgentProjectCatalogRepository,
@@ -193,6 +200,10 @@ class ProjectBrowserManifestService:
                 session,
                 session_id=session_id,
             )
+            worktrees = await self.worktree_repository.list_by_session_id(
+                session,
+                session_id=session_id,
+            )
             paths = [project.path for project in projects]
             catalog_entries = await self.catalog_repository.list_entries_by_paths(
                 session,
@@ -200,6 +211,12 @@ class ProjectBrowserManifestService:
                 paths=paths,
             )
         catalog_by_path = {entry.path: entry for entry in catalog_entries}
+        git_project_ids = {
+            worktree.session_workspace_project_id
+            for worktree in worktrees
+            if worktree.session_workspace_project_id is not None
+        }
+        git_project_paths = {worktree.worktree_path for worktree in worktrees}
         entries = [
             _entry_from_path(
                 path=project.path,
@@ -209,6 +226,12 @@ class ProjectBrowserManifestService:
                 ),
                 catalog_entry=catalog_by_path.get(project.path),
                 remove_project=True,
+                repository_type=_repository_type_for_project(
+                    project_id=project.id,
+                    project_path=project.path,
+                    git_project_ids=git_project_ids,
+                    git_project_paths=git_project_paths,
+                ),
             )
             for project in projects
         ]
@@ -263,6 +286,7 @@ class ProjectBrowserManifestService:
                 ),
                 catalog_entry=catalog_by_path.get(path),
                 remove_project=False,
+                repository_type=None,
             )
             for path in normalized_paths
         ]
@@ -347,12 +371,26 @@ def _manifest(
     )
 
 
+def _repository_type_for_project(
+    *,
+    project_id: str,
+    project_path: str,
+    git_project_ids: set[str],
+    git_project_paths: set[str],
+) -> ProjectBrowserEntryRepositoryType | None:
+    """Return repository metadata for known Azents-created worktree Projects."""
+    if project_id in git_project_ids or project_path in git_project_paths:
+        return "git"
+    return None
+
+
 def _entry_from_path(
     *,
     path: str,
     source: ProjectBrowserEntrySource,
     catalog_entry: AgentProjectCatalogEntry | None,
     remove_project: bool,
+    repository_type: ProjectBrowserEntryRepositoryType | None,
 ) -> ProjectBrowserEntry:
     """Build a Project root entry from path and stored status projection."""
     name = posixpath.basename(path.rstrip("/")) or path
@@ -360,6 +398,7 @@ def _entry_from_path(
         name=name,
         path=path,
         kind="directory",
+        repository_type=repository_type,
         source=source,
         status=_status_from_catalog(catalog_entry),
         capabilities=(

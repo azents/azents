@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **name** | **str** | Project root display name | 
 **path** | **str** | Agent Workspace absolute path | 
 **kind** | **str** | Entry kind | 
+**repository_type** | **str** |  | 
 **source** | [**ProjectBrowserEntrySourceResponse**](ProjectBrowserEntrySourceResponse.md) | Entry source | 
 **status** | [**ProjectBrowserEntryStatusResponse**](ProjectBrowserEntryStatusResponse.md) | Filesystem status projection | 
 **capabilities** | [**ProjectBrowserEntryCapabilitiesResponse**](ProjectBrowserEntryCapabilitiesResponse.md) | Backend-provided entry action policy | 

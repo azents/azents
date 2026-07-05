@@ -6,10 +6,10 @@ Legacy workspace mode for the created session
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Workspace mode type |
-**project_paths** | **List[str]** | Exact Project paths to register on the created session |
-**source_project_path** | **str** | Source Project path |
-**starting_ref** | **str** | Starting Git ref |
+**type** | **str** | Workspace mode type | 
+**project_paths** | **List[str]** | Exact Project paths to register on the created session | 
+**source_project_path** | **str** | Source Project path | 
+**starting_ref** | **str** | Starting Git ref | 
 
 ## Example
 
