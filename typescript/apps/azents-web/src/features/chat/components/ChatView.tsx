@@ -207,7 +207,79 @@ function getLatestCompactionIndex(messages: ChatMessage[]): number {
   return -1;
 }
 
-/** scroll textfor with durable message and pending buffer  text of timeline  with combines.. */
+function shouldRenderActionExecution(
+  actionExecution: ActionExecutionProjection,
+): boolean {
+  return (
+    actionExecution.execution.status !== "completed" ||
+    actionExecution.events.length > 0
+  );
+}
+
+function actionExecutionTimelineItemId(
+  actionExecution: ActionExecutionProjection,
+): string {
+  return `action:${actionExecution.execution.id}:${actionExecution.execution.status}`;
+}
+
+function groupActionExecutionsByAnchor(
+  actionExecutions: ActionExecutionProjection[],
+): Map<string, ActionExecutionProjection[]> {
+  const grouped = new Map<string, ActionExecutionProjection[]>();
+  for (const actionExecution of actionExecutions.filter(
+    shouldRenderActionExecution,
+  )) {
+    const anchorId = actionExecution.execution.action_event_id;
+    const existing = grouped.get(anchorId) ?? [];
+    grouped.set(anchorId, [...existing, actionExecution]);
+  }
+  return grouped;
+}
+
+function actionExecutionSortTime(
+  actionExecution: ActionExecutionProjection,
+): string {
+  const { execution } = actionExecution;
+  return (
+    execution.started_at ??
+    execution.completed_at ??
+    execution.failed_at ??
+    execution.failed_final_at ??
+    execution.updated_at
+  );
+}
+
+function unanchoredActionExecutions(
+  actionExecutions: ActionExecutionProjection[],
+  anchorIds: Set<string>,
+): ActionExecutionProjection[] {
+  return actionExecutions
+    .filter(shouldRenderActionExecution)
+    .filter(
+      (actionExecution) =>
+        !anchorIds.has(actionExecution.execution.action_event_id),
+    )
+    .sort((left, right) => {
+      const byTime = actionExecutionSortTime(left).localeCompare(
+        actionExecutionSortTime(right),
+      );
+      return byTime === 0
+        ? left.execution.id.localeCompare(right.execution.id)
+        : byTime;
+    });
+}
+
+function pushActionExecutionTimelineItemIds(
+  ids: string[],
+  groupedActionExecutions: Map<string, ActionExecutionProjection[]>,
+  anchorId: string,
+): void {
+  for (const actionExecution of groupedActionExecutions.get(anchorId) ?? []) {
+    ids.push(actionExecutionTimelineItemId(actionExecution));
+  }
+}
+
+/** Build scroll-tracking IDs in the same order as rendered timeline items. */
 function getTimelineItemIds(
   messages: ChatMessage[],
   pendingInputBuffers: PendingInputBuffer[],
@@ -215,18 +287,43 @@ function getTimelineItemIds(
   liveRun: ChatLiveRunState | null,
   actionExecutions: ActionExecutionProjection[],
 ): string[] {
-  return [
-    ...messages.map((message) => `message:${message.id}`),
-    ...pendingInputBuffers.map((buffer) => `pending:${buffer.id}`),
-    ...(hasLiveRetry(liveRun) ? [`live-run-retry:${liveRun.run_id}`] : []),
-    ...(initialization === null
-      ? []
-      : [`initialization:${initialization.id}:${initialization.status}`]),
-    ...actionExecutions.map(
-      (actionExecution) =>
-        `action:${actionExecution.execution.id}:${actionExecution.execution.status}`,
-    ),
-  ];
+  const groupedActionExecutions =
+    groupActionExecutionsByAnchor(actionExecutions);
+  const anchorIds = new Set<string>();
+  const ids: string[] = [];
+
+  for (const message of messages) {
+    ids.push(`message:${message.id}`);
+    anchorIds.add(message.id);
+    pushActionExecutionTimelineItemIds(
+      ids,
+      groupedActionExecutions,
+      message.id,
+    );
+  }
+
+  if (hasLiveRetry(liveRun)) {
+    ids.push(`live-run-retry:${liveRun.run_id}`);
+  }
+
+  for (const buffer of pendingInputBuffers) {
+    ids.push(`pending:${buffer.id}`);
+    anchorIds.add(buffer.id);
+    pushActionExecutionTimelineItemIds(ids, groupedActionExecutions, buffer.id);
+  }
+
+  for (const actionExecution of unanchoredActionExecutions(
+    actionExecutions,
+    anchorIds,
+  )) {
+    ids.push(actionExecutionTimelineItemId(actionExecution));
+  }
+
+  if (initialization !== null) {
+    ids.push(`initialization:${initialization.id}:${initialization.status}`);
+  }
+
+  return ids;
 }
 
 /** display message bar with after to text completion marker UI control with collects.. */
@@ -463,9 +560,23 @@ export function ChatView({
       : null;
   const liveRetryVisible = liveRetryRun !== null;
   const visibleActionExecutions = actionExecutions.filter(
-    (actionExecution) =>
-      actionExecution.execution.status !== "completed" ||
-      actionExecution.events.length > 0,
+    shouldRenderActionExecution,
+  );
+  const visibleActionExecutionsByAnchor = useMemo(
+    () => groupActionExecutionsByAnchor(actionExecutions),
+    [actionExecutions],
+  );
+  const timelineAnchorIds = useMemo(
+    () =>
+      new Set([
+        ...messages.map((message) => message.id),
+        ...pendingInputBuffers.map((buffer) => buffer.id),
+      ]),
+    [messages, pendingInputBuffers],
+  );
+  const fallbackActionExecutions = useMemo(
+    () => unanchoredActionExecutions(actionExecutions, timelineAnchorIds),
+    [actionExecutions, timelineAnchorIds],
   );
   const hasTimelineItems =
     messages.length > 0 ||
@@ -1165,6 +1276,16 @@ export function ChatView({
                         onEdit={() => handleStartEdit(msg)}
                         failedRunRetryAction={failedRunRetryAction}
                       />
+                      {visibleActionExecutionsByAnchor
+                        .get(msg.id)
+                        ?.map((actionExecution) => (
+                          <ActionExecutionTimelineCard
+                            key={actionExecution.execution.id}
+                            actionExecution={actionExecution}
+                            onRetry={onRetryActionExecution}
+                            onDiscard={onDiscardActionExecution}
+                          />
+                        ))}
                       <TurnDivider usage={boundaryControls.usage} />
                     </Fragment>
                   );
@@ -1194,19 +1315,30 @@ export function ChatView({
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   isCompacting && <CompactionIndicator />}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
-                  pendingInputBuffers.map((buffer) =>
-                    buffer.id.startsWith("optimistic:") ? (
-                      <OptimisticInputBubble key={buffer.id} buffer={buffer} />
-                    ) : (
-                      <PendingInputBufferBubble
-                        key={buffer.id}
-                        buffer={buffer}
-                        onDelete={onDeletePendingInputBuffer}
-                      />
-                    ),
-                  )}
+                  pendingInputBuffers.map((buffer) => (
+                    <Fragment key={buffer.id}>
+                      {buffer.id.startsWith("optimistic:") ? (
+                        <OptimisticInputBubble buffer={buffer} />
+                      ) : (
+                        <PendingInputBufferBubble
+                          buffer={buffer}
+                          onDelete={onDeletePendingInputBuffer}
+                        />
+                      )}
+                      {visibleActionExecutionsByAnchor
+                        .get(buffer.id)
+                        ?.map((actionExecution) => (
+                          <ActionExecutionTimelineCard
+                            key={actionExecution.execution.id}
+                            actionExecution={actionExecution}
+                            onRetry={onRetryActionExecution}
+                            onDiscard={onDiscardActionExecution}
+                          />
+                        ))}
+                    </Fragment>
+                  ))}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
-                  visibleActionExecutions.map((actionExecution) => (
+                  fallbackActionExecutions.map((actionExecution) => (
                     <ActionExecutionTimelineCard
                       key={actionExecution.execution.id}
                       actionExecution={actionExecution}

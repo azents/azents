@@ -1095,6 +1095,18 @@ function isInputBufferLiveEvent(event: ChatEventResponse): boolean {
   return isRecord(metadata) && metadata.live_projection === "input_buffer";
 }
 
+function isActionMessageInputBuffer(buffer: PendingInputBuffer): boolean {
+  return buffer.metadata.action === "true";
+}
+
+function hasModelPendingInputBuffers(buffers: PendingInputBuffer[]): boolean {
+  return buffers.some((buffer) => !isActionMessageInputBuffer(buffer));
+}
+
+function pendingInputBufferWaitsForModel(event: ChatEventResponse): boolean {
+  return event.kind !== "action_message";
+}
+
 function pendingBufferMatchesEvent(
   buffer: PendingInputBuffer,
   event: ChatEventResponse,
@@ -1755,7 +1767,9 @@ export function useChatSessionContainer(
               ),
               pending,
             ],
-            isResponsePending: true,
+            isResponsePending:
+              prev.isResponsePending ||
+              pendingInputBufferWaitsForModel(responseEvent),
           }));
           if (pending.sessionId !== sessionId) {
             void connectionInfoQuery.refetch();
@@ -2444,7 +2458,8 @@ export function useChatSessionContainer(
                 ...prev,
                 pendingInputBuffers: nextBuffers,
                 isResponsePending:
-                  nextBuffers.length > 0 || hasVisibleRunActivity,
+                  hasModelPendingInputBuffers(nextBuffers) ||
+                  hasVisibleRunActivity,
               };
             });
             void utils.chat.listSessionEvents.invalidate({ sessionId });
@@ -2546,7 +2561,7 @@ export function useChatSessionContainer(
   );
   const tokenUsage = useMemo(() => latestTokenUsage(messages), [messages]);
   const isCompacting = managedLiveState.isCompacting || isCompactingFromHistory;
-  const isStopAvailable = sessionRunState === "running";
+  const isStopAvailable = managedLiveState.liveRunPhase !== null;
   const isStopPending =
     stopSessionRunMutation.isPending || managedLiveState.isStopPending;
 

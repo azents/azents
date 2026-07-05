@@ -128,7 +128,8 @@ Response fields:
 - Renders REST history tail and REST live state together.
 - WS events are replayed on baseline, then applied in realtime.
 - Initialization updates are reconciled by the same baseline/replay ordering: `/live.initialization` provides the latest projection, and initialization event detail can be reloaded from the detail endpoint.
-- Can display pending input buffer, model response pending indicator, compaction indicator, todo preview, and action execution cards.
+- Can display pending input buffer, model response pending indicator, compaction indicator, todo preview, and compact action execution progress blocks. Action execution blocks render next to their durable action message or pending input buffer anchor; unanchored projections render after live input buffers as a recovery fallback.
+- Operation TurnAction execution is live progress, not model response pending state. It does not by itself replace the composer with a stop control or block new input.
 - When `run.retry` is present, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history; the normal model dots indicator remains below the card when the run phase is `waiting_for_model` or `streaming_model`.
 - Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
 - Follow is active only when scroll viewport is at bottom or in iOS bottom bounce area.
@@ -141,7 +142,7 @@ Response fields:
 ### DETACHED_HISTORY_BROWSING
 
 - Does not render live state. Todo preview is also treated as live state and hidden.
-- Hides pending input buffer and live-only indicators, including action execution cards.
+- Hides pending input buffer and live-only indicators, including action execution progress blocks.
 - WS event is not immediately rendered until latest tail reset.
 - “new message” chip is displayed only when actual latest-direction gap or buffered live event is confirmed, not by detached state itself.
 - Scrolling up fetches older history with `before` cursor.

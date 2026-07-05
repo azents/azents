@@ -304,6 +304,19 @@ export const WithLiveRunRetry = {
 export const WithActionExecutionFailure = {
   args: {
     ...baseArgs,
+    messages: [
+      createChatMessage({
+        id: "event-action-1",
+        role: "user",
+        content: "Create a feature worktree.",
+        action: {
+          type: "create_git_worktree",
+          source_project_path: "/workspace/agent/project",
+          starting_ref: "main",
+        },
+        createdAt: "2026-05-19T00:00:00Z",
+      }),
+    ],
     actionExecutions: [
       {
         execution: {

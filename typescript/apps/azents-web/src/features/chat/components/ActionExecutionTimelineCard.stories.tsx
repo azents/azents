@@ -85,3 +85,33 @@ export const CompletedWorktreeAction = {
     },
   },
 } satisfies Story;
+
+export const RunningWorktreeAction = {
+  args: {
+    actionExecution: {
+      execution: {
+        id: "action-execution-3",
+        action_event_id: "event-action-3",
+        action_type: "create_git_worktree",
+        status: "running",
+        attempt: 1,
+        failure_summary: null,
+        started_at: "2026-05-19T00:00:00Z",
+        completed_at: null,
+        updated_at: "2026-05-19T00:00:02Z",
+      },
+      events: [
+        {
+          id: "action-event-4",
+          action_execution_id: "action-execution-3",
+          sequence: 1,
+          kind: "command_started",
+          step_key: "create_worktree",
+          command_argv: ["git", "worktree", "add", "../project-feature"],
+          content: null,
+          created_at: "2026-05-19T00:00:00Z",
+        },
+      ],
+    },
+  },
+} satisfies Story;
