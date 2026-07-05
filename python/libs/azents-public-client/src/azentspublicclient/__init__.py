@@ -136,6 +136,7 @@ __all__ = [
     "ChatWriteResponse",
     "ChatWriteSnapshotResponse",
     "CommandAction",
+    "CreateGitWorktreeAction",
     "CreateInvitationRequest",
     "CreateJoinRequestRequest",
     "CreateWorkspaceRequest",
@@ -430,6 +431,7 @@ from azentspublicclient.models.chat_write_accepted_response import ChatWriteAcce
 from azentspublicclient.models.chat_write_response import ChatWriteResponse as ChatWriteResponse
 from azentspublicclient.models.chat_write_snapshot_response import ChatWriteSnapshotResponse as ChatWriteSnapshotResponse
 from azentspublicclient.models.command_action import CommandAction as CommandAction
+from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction as CreateGitWorktreeAction
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest as CreateInvitationRequest
 from azentspublicclient.models.create_join_request_request import CreateJoinRequestRequest as CreateJoinRequestRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest as CreateWorkspaceRequest

@@ -11088,12 +11088,16 @@
                   },
                   {
                     "$ref": "#/components/schemas/SkillAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateGitWorktreeAction"
                   }
                 ],
                 "discriminator": {
                   "propertyName": "type",
                   "mapping": {
                     "command": "#/components/schemas/CommandAction",
+                    "create_git_worktree": "#/components/schemas/CreateGitWorktreeAction",
                     "goal": "#/components/schemas/GoalAction",
                     "skill": "#/components/schemas/SkillAction"
                   }
@@ -11562,6 +11566,35 @@
         ],
         "title": "CommandAction",
         "description": "Idle-only prioritized command action."
+      },
+      "CreateGitWorktreeAction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "create_git_worktree",
+            "title": "Type",
+            "default": "create_git_worktree"
+          },
+          "source_project_path": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source Project Path",
+            "description": "Existing source Project path under the Agent Workspace"
+          },
+          "starting_ref": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Starting Ref",
+            "description": "Starting Git ref for the new worktree branch"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_project_path",
+          "starting_ref"
+        ],
+        "title": "CreateGitWorktreeAction",
+        "description": "Create an Azents-owned Git worktree and register it as a session Project."
       },
       "CreateInvitationRequest": {
         "properties": {
@@ -12473,6 +12506,9 @@
               },
               {
                 "$ref": "#/components/schemas/SkillAction"
+              },
+              {
+                "$ref": "#/components/schemas/CreateGitWorktreeAction"
               }
             ],
             "title": "Action",
@@ -12481,6 +12517,7 @@
               "propertyName": "type",
               "mapping": {
                 "command": "#/components/schemas/CommandAction",
+                "create_git_worktree": "#/components/schemas/CreateGitWorktreeAction",
                 "goal": "#/components/schemas/GoalAction",
                 "skill": "#/components/schemas/SkillAction"
               }

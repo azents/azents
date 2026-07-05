@@ -31,12 +31,28 @@ class SkillAction(BaseModel):
     skill_path: str = Field(min_length=1, description="Exact SKILL.md path")
 
 
+class CreateGitWorktreeAction(BaseModel):
+    """Create an Azents-owned Git worktree and register it as a session Project."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["create_git_worktree"] = "create_git_worktree"
+    source_project_path: str = Field(
+        min_length=1,
+        description="Existing source Project path under the Agent Workspace",
+    )
+    starting_ref: str = Field(
+        min_length=1,
+        description="Starting Git ref for the new worktree branch",
+    )
+
+
 ChatAction = Annotated[
-    CommandAction | GoalAction | SkillAction,
+    CommandAction | GoalAction | SkillAction | CreateGitWorktreeAction,
     Field(discriminator="type"),
 ]
 TurnAction = Annotated[
-    GoalAction | SkillAction,
+    GoalAction | SkillAction | CreateGitWorktreeAction,
     Field(discriminator="type"),
 ]
 

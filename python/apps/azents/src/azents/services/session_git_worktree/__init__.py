@@ -585,6 +585,7 @@ class SessionGitWorktreeService:
                 session_id=session_id,
                 initialization_id=initialization.id,
                 step_id=create_step.id,
+                action_execution_id=None,
                 session_workspace_project_id=None,
                 source_project_path=normalized_source_path,
                 starting_ref=starting_ref.strip(),
