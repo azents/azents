@@ -1014,6 +1014,19 @@
       "cleanupRetryUnavailable": "La relance du nettoyage n’est pas encore disponible.",
       "deletePendingInputs": "Supprimer les entrées en attente ({count})"
     },
+    "actionExecution": {
+      "title": "Action de worktree",
+      "attempt": "Tentative {attempt}",
+      "retry": "Réessayer",
+      "discard": "Ignorer",
+      "status": {
+        "pending": "En attente",
+        "running": "En cours",
+        "completed": "Terminé",
+        "failed": "Échec",
+        "failed_final": "Ignoré"
+      }
+    },
     "copy": "Copier",
     "copied": "Copié",
     "mermaidRendering": "Rendu du diagramme Mermaid…",

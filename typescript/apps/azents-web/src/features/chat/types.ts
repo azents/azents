@@ -1,6 +1,7 @@
 /** Chat feature status type */
 
 import type {
+  ActionExecutionProjectionResponse,
   AgentResponse,
   ChatEventResponse,
   InputActionDefinitionResponse,
@@ -110,7 +111,12 @@ export type UserContentPart = TextPart | FilePart;
 export type ChatAction =
   | { type: "command"; name: string }
   | { type: "goal" }
-  | { type: "skill"; skill_path: string };
+  | { type: "skill"; skill_path: string }
+  | {
+      type: "create_git_worktree";
+      source_project_path: string;
+      starting_ref: string;
+    };
 
 export interface ActionMessagePayload {
   action: ChatAction;
@@ -575,6 +581,8 @@ export type SessionInitializationDetailState =
       type: "READY";
       events: SessionInitializationEventResponse[];
     };
+
+export type ActionExecutionProjection = ActionExecutionProjectionResponse;
 
 export interface SubscriptionHealthCheckAckEvent {
   type: "subscription_health_check_ack";

@@ -3240,6 +3240,138 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Retry Action Execution",
+        "description": "Request retry for a failed operation TurnAction execution.",
+        "operationId": "chat_v1_retry_action_execution",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "action_execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Execution Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionExecutionMutationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Discard Action Execution",
+        "description": "Finalize a failed operation TurnAction execution as discarded.",
+        "operationId": "chat_v1_discard_action_execution",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "action_execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Execution Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionExecutionMutationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup": {
       "post": {
         "tags": [
@@ -8038,6 +8170,250 @@
         "title": "AcceptDeclineResponse",
         "description": "Invitation accept/reject response schema."
       },
+      "ActionExecutionEventResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Action execution event ID"
+          },
+          "action_execution_id": {
+            "type": "string",
+            "title": "Action Execution Id",
+            "description": "Action execution ID"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence",
+            "description": "Monotonic event sequence"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "Event kind"
+          },
+          "step_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Key",
+            "description": "Action-local step key"
+          },
+          "command_argv": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Argv",
+            "description": "Command argv"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "Event content"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code",
+            "description": "Command exit code"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "action_execution_id",
+          "sequence",
+          "kind",
+          "created_at"
+        ],
+        "title": "ActionExecutionEventResponse",
+        "description": "Action execution event response."
+      },
+      "ActionExecutionMutationResponse": {
+        "properties": {
+          "requested": {
+            "type": "boolean",
+            "title": "Requested",
+            "description": "Whether a state transition was requested"
+          },
+          "action_execution": {
+            "$ref": "#/components/schemas/ActionExecutionProjectionResponse",
+            "description": "Updated action execution projection"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requested",
+          "action_execution"
+        ],
+        "title": "ActionExecutionMutationResponse",
+        "description": "Action execution mutation response."
+      },
+      "ActionExecutionProjectionResponse": {
+        "properties": {
+          "execution": {
+            "$ref": "#/components/schemas/ActionExecutionResponse",
+            "description": "Action execution state"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ActionExecutionEventResponse"
+            },
+            "type": "array",
+            "title": "Events",
+            "description": "Action execution event list"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution",
+          "events"
+        ],
+        "title": "ActionExecutionProjectionResponse",
+        "description": "Action execution state plus durable progress events."
+      },
+      "ActionExecutionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Action execution ID"
+          },
+          "action_event_id": {
+            "type": "string",
+            "title": "Action Event Id",
+            "description": "Durable action_message event ID"
+          },
+          "action_type": {
+            "type": "string",
+            "title": "Action Type",
+            "description": "Action discriminator"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Execution status"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt",
+            "description": "Current attempt number"
+          },
+          "failure_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Summary",
+            "description": "Failure summary"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At",
+            "description": "Start time"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "Completion time"
+          },
+          "failed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At",
+            "description": "Failure time"
+          },
+          "failed_final_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed Final At",
+            "description": "Failed-final time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "action_event_id",
+          "action_type",
+          "status",
+          "attempt",
+          "updated_at"
+        ],
+        "title": "ActionExecutionResponse",
+        "description": "Action execution live projection response."
+      },
       "AgentAdminAddRequest": {
         "properties": {
           "workspace_user_id": {
@@ -11468,6 +11844,14 @@
               }
             ],
             "description": "Current session initialization projection"
+          },
+          "action_executions": {
+            "items": {
+              "$ref": "#/components/schemas/ActionExecutionProjectionResponse"
+            },
+            "type": "array",
+            "title": "Action Executions",
+            "description": "Current action execution projections"
           }
         },
         "type": "object",
@@ -12990,6 +13374,14 @@
               }
             ],
             "description": "Current session initialization projection"
+          },
+          "action_executions": {
+            "items": {
+              "$ref": "#/components/schemas/ActionExecutionProjectionResponse"
+            },
+            "type": "array",
+            "title": "Action Executions",
+            "description": "Current action execution projections"
           }
         },
         "type": "object",

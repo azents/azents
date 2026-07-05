@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Agent Runtime
@@ -129,6 +129,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_delete_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
 *ChatV1Api* | [**chat_v1_delete_input_buffer**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
 *ChatV1Api* | [**chat_v1_delete_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_session) | **DELETE** /chat/v1/sessions/{session_id} | Delete Session
+*ChatV1Api* | [**chat_v1_discard_action_execution**](azentspublicclient/docs/ChatV1Api.md#chat_v1_discard_action_execution) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard | Discard Action Execution
 *ChatV1Api* | [**chat_v1_download_agent_workspace_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_agent_workspace_file) | **GET** /chat/v1/agents/{agent_id}/workspace/download | Download Agent Workspace File
 *ChatV1Api* | [**chat_v1_download_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 *ChatV1Api* | [**chat_v1_edit_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
@@ -154,6 +155,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
 *ChatV1Api* | [**chat_v1_reject_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reject_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject | Reject Agent Project Registration Request
+*ChatV1Api* | [**chat_v1_retry_action_execution**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_action_execution) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry | Retry Action Execution
 *ChatV1Api* | [**chat_v1_retry_failed_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 *ChatV1Api* | [**chat_v1_retry_session_initialization**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_session_initialization) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/initialization/retry | Retry Session Initialization
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
@@ -231,6 +233,10 @@ Class | Method | HTTP request | Description
 
  - [AcceptDeclineResponse](azentspublicclient/docs/AcceptDeclineResponse.md)
  - [Action](azentspublicclient/docs/Action.md)
+ - [ActionExecutionEventResponse](azentspublicclient/docs/ActionExecutionEventResponse.md)
+ - [ActionExecutionMutationResponse](azentspublicclient/docs/ActionExecutionMutationResponse.md)
+ - [ActionExecutionProjectionResponse](azentspublicclient/docs/ActionExecutionProjectionResponse.md)
+ - [ActionExecutionResponse](azentspublicclient/docs/ActionExecutionResponse.md)
  - [AgentAdminAddRequest](azentspublicclient/docs/AgentAdminAddRequest.md)
  - [AgentAdminListResponse](azentspublicclient/docs/AgentAdminListResponse.md)
  - [AgentAdminResponse](azentspublicclient/docs/AgentAdminResponse.md)
@@ -500,3 +506,7 @@ Authentication schemes defined for the API:
 
 
 ## Author
+
+
+
+

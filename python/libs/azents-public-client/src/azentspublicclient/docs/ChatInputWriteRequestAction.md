@@ -6,10 +6,10 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **type** | **str** |  | [optional] [default to 'command']
-**name** | **str** | Command name |
-**skill_path** | **str** | Exact SKILL.md path |
-**source_project_path** | **str** | Existing source Project path under the Agent Workspace |
-**starting_ref** | **str** | Starting Git ref for the new worktree branch |
+**name** | **str** | Command name | 
+**skill_path** | **str** | Exact SKILL.md path | 
+**source_project_path** | **str** | Existing source Project path under the Agent Workspace | 
+**starting_ref** | **str** | Starting Git ref for the new worktree branch | 
 
 ## Example
 

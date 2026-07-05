@@ -76,7 +76,20 @@ class TestLiveEventListResponse(unittest.TestCase):
                         failed_attempt_count = 56, 
                         max_retries = 56, 
                         backoff_seconds = 56, 
-                        next_retry_at = '', ), ),
+                        next_retry_at = '', 
+                        attempts = [
+                            azentspublicclient.models.chat_live_run_retry_attempt_response.ChatLiveRunRetryAttemptResponse(
+                                attempt_number = 56, 
+                                user_message = '', 
+                                error_type = '', 
+                                source = '', 
+                                failed_at = '', 
+                                backoff_seconds = 56, 
+                                next_retry_at = '', 
+                                retryability = '', 
+                                failure_code = '', 
+                                truncated = True, )
+                            ], ), ),
                 session_run_state = 'idle',
                 todo = azentspublicclient.models.todo_state_response.TodoStateResponse(
                     items = [
@@ -122,7 +135,36 @@ class TestLiveEventListResponse(unittest.TestCase):
                             failed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
-                        ], )
+                        ], ),
+                action_executions = [
+                    azentspublicclient.models.action_execution_projection_response.ActionExecutionProjectionResponse(
+                        execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
+                            id = '', 
+                            action_event_id = '', 
+                            action_type = '', 
+                            status = '', 
+                            attempt = 56, 
+                            failure_summary = '', 
+                            started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                            completed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                            failed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                            failed_final_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                            updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
+                        events = [
+                            azentspublicclient.models.action_execution_event_response.ActionExecutionEventResponse(
+                                id = '', 
+                                action_execution_id = '', 
+                                sequence = 56, 
+                                kind = '', 
+                                step_key = '', 
+                                command_argv = [
+                                    ''
+                                    ], 
+                                content = '', 
+                                exit_code = 56, 
+                                created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                            ], )
+                    ]
             )
         else:
             return LiveEventListResponse(

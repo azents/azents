@@ -24,6 +24,7 @@ from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
+from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
@@ -117,6 +118,10 @@ class ChatSessionService:
         Depends(AgentProjectDefaultRepository),
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    action_execution_repository: Annotated[
+        ActionExecutionRepository,
+        Depends(ActionExecutionRepository),
+    ]
     event_transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ]
@@ -773,6 +778,12 @@ class ChatSessionService:
                 session,
                 session_id=session_id,
             )
+            action_executions = (
+                await self.action_execution_repository.list_projections_by_session_id(
+                    session,
+                    session_id=session_id,
+                )
+            )
             return Success(
                 ChatLiveStateSnapshot(
                     partial_history_events=partial_history_events,
@@ -813,6 +824,7 @@ class ChatSessionService:
                     todo=todo,
                     goal=goal,
                     initialization=initialization,
+                    action_executions=action_executions,
                 )
             )
 

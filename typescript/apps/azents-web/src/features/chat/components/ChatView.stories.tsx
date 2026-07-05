@@ -233,6 +233,9 @@ const baseArgs = {
   onLoadInitializationDetails: noop,
   onRetryInitialization: noop,
   onRetryInitializationCleanup: noop,
+  actionExecutions: [],
+  onRetryActionExecution: noop,
+  onDiscardActionExecution: noop,
   onDeletePendingInitializationInputs: noop,
   workspacePanel,
   goal: { objective: null, status: null },
@@ -295,6 +298,50 @@ export const WithLiveRunRetry = {
       },
     },
     isModelResponsePending: true,
+  },
+} satisfies Story;
+
+export const WithActionExecutionFailure = {
+  args: {
+    ...baseArgs,
+    actionExecutions: [
+      {
+        execution: {
+          id: "action-execution-1",
+          action_event_id: "event-action-1",
+          action_type: "create_git_worktree",
+          status: "failed",
+          attempt: 1,
+          failure_summary:
+            "Git worktree creation failed because the branch already exists.",
+          started_at: "2026-05-19T00:00:00Z",
+          completed_at: "2026-05-19T00:00:05Z",
+          updated_at: "2026-05-19T00:00:05Z",
+        },
+        events: [
+          {
+            id: "action-event-1",
+            action_execution_id: "action-execution-1",
+            sequence: 1,
+            kind: "command_started",
+            step_key: "create_worktree",
+            command_argv: ["git", "worktree", "add", "../project-feature"],
+            content: null,
+            created_at: "2026-05-19T00:00:00Z",
+          },
+          {
+            id: "action-event-2",
+            action_execution_id: "action-execution-1",
+            sequence: 2,
+            kind: "command_failed",
+            step_key: "create_worktree",
+            command_argv: null,
+            content: "fatal: 'project-feature' is already checked out",
+            created_at: "2026-05-19T00:00:05Z",
+          },
+        ],
+      },
+    ],
   },
 } satisfies Story;
 

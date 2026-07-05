@@ -35,6 +35,7 @@ from azents.repos.action_execution.data import (
     ActionExecutionCreate,
     ActionExecutionEvent,
     ActionExecutionEventCreate,
+    ActionExecutionProjection,
 )
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -259,6 +260,44 @@ class GitWorktreeActionExecutionResult:
 
     completed: bool
     context_invalidated: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class GitWorktreeActionExecutionRequest:
+    """User-requested action execution state transition result."""
+
+    requested: bool
+    projection: ActionExecutionProjection
+
+
+@dataclasses.dataclass(frozen=True)
+class GitWorktreeActionExecutionSessionNotFound:
+    """Session for action execution request was not found."""
+
+
+@dataclasses.dataclass(frozen=True)
+class GitWorktreeActionExecutionAccessDenied:
+    """Requester cannot mutate this action execution."""
+
+
+@dataclasses.dataclass(frozen=True)
+class GitWorktreeActionExecutionNotFound:
+    """Action execution was not found in the session."""
+
+
+@dataclasses.dataclass(frozen=True)
+class GitWorktreeActionExecutionUnavailable:
+    """Action execution cannot transition from its current state."""
+
+    reason: str
+
+
+GitWorktreeActionExecutionRequestError = (
+    GitWorktreeActionExecutionSessionNotFound
+    | GitWorktreeActionExecutionAccessDenied
+    | GitWorktreeActionExecutionNotFound
+    | GitWorktreeActionExecutionUnavailable
+)
 
 
 @dataclasses.dataclass
@@ -1449,6 +1488,191 @@ class SessionGitWorktreeService:
             failed_at=None,
         )
         return GitWorktreeCleanupRequest(cleanup_requested=True)
+
+    async def list_action_execution_projections(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> list[ActionExecutionProjection]:
+        """List durable action execution projections for a session."""
+        return await self.action_execution_repository.list_projections_by_session_id(
+            session,
+            session_id=session_id,
+        )
+
+    async def request_action_execution_retry(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        action_execution_id: str,
+        user_id: str,
+    ) -> Result[
+        GitWorktreeActionExecutionRequest,
+        GitWorktreeActionExecutionRequestError,
+    ]:
+        """Validate access and reset a failed action execution for retry."""
+        async with self.session_manager() as session:
+            access_error = await self._action_execution_access_error(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
+            )
+            if access_error is not None:
+                return Failure(access_error)
+            execution = await self.action_execution_repository.get_by_id(
+                session,
+                action_execution_id=action_execution_id,
+            )
+            if execution is None or execution.session_id != session_id:
+                return Failure(GitWorktreeActionExecutionNotFound())
+            if execution.status is not ActionExecutionStatus.FAILED:
+                return Failure(
+                    GitWorktreeActionExecutionUnavailable(
+                        reason="Only failed action executions can be retried."
+                    )
+                )
+            execution = await self.action_execution_repository.mark_pending_for_retry(
+                session,
+                action_execution_id=action_execution_id,
+            )
+            await self.action_execution_repository.append_event(
+                session,
+                ActionExecutionEventCreate(
+                    action_execution_id=execution.id,
+                    session_id=session_id,
+                    kind=ActionExecutionEventKind.RETRY_REQUESTED,
+                    step_key=None,
+                    command_argv=None,
+                    content="Git worktree action retry was scheduled.",
+                    exit_code=None,
+                ),
+            )
+            allocation = (
+                await self.session_git_worktree_repository.get_by_action_execution_id(
+                    session,
+                    action_execution_id=execution.id,
+                )
+            )
+            if (
+                allocation is not None
+                and allocation.status is not SessionGitWorktreeStatus.READY
+            ):
+                await self.session_git_worktree_repository.mark_pending_for_retry(
+                    session,
+                    worktree_id=allocation.id,
+                )
+            get_projection = (
+                self.action_execution_repository.get_projection_by_action_event_id
+            )
+            projection = await get_projection(
+                session,
+                action_event_id=execution.action_event_id,
+            )
+            if projection is None:
+                raise RuntimeError("ActionExecution projection is missing")
+            return Success(
+                GitWorktreeActionExecutionRequest(
+                    requested=True,
+                    projection=projection,
+                )
+            )
+
+    async def request_action_execution_discard(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        action_execution_id: str,
+        user_id: str,
+    ) -> Result[
+        GitWorktreeActionExecutionRequest,
+        GitWorktreeActionExecutionRequestError,
+    ]:
+        """Validate access and finalize a failed action execution as discarded."""
+        async with self.session_manager() as session:
+            access_error = await self._action_execution_access_error(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
+            )
+            if access_error is not None:
+                return Failure(access_error)
+            execution = await self.action_execution_repository.get_by_id(
+                session,
+                action_execution_id=action_execution_id,
+            )
+            if execution is None or execution.session_id != session_id:
+                return Failure(GitWorktreeActionExecutionNotFound())
+            if execution.status is not ActionExecutionStatus.FAILED:
+                return Failure(
+                    GitWorktreeActionExecutionUnavailable(
+                        reason="Only failed action executions can be discarded."
+                    )
+                )
+            execution = await self.action_execution_repository.mark_failed_final(
+                session,
+                action_execution_id=action_execution_id,
+                failed_final_at=datetime.now(UTC),
+            )
+            await self.action_execution_repository.append_event(
+                session,
+                ActionExecutionEventCreate(
+                    action_execution_id=execution.id,
+                    session_id=session_id,
+                    kind=ActionExecutionEventKind.FAILED_FINALIZED,
+                    step_key=None,
+                    command_argv=None,
+                    content="Git worktree action was discarded.",
+                    exit_code=None,
+                ),
+            )
+            get_projection = (
+                self.action_execution_repository.get_projection_by_action_event_id
+            )
+            projection = await get_projection(
+                session,
+                action_event_id=execution.action_event_id,
+            )
+            if projection is None:
+                raise RuntimeError("ActionExecution projection is missing")
+            return Success(
+                GitWorktreeActionExecutionRequest(
+                    requested=True,
+                    projection=projection,
+                )
+            )
+
+    async def _action_execution_access_error(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> (
+        GitWorktreeActionExecutionSessionNotFound
+        | GitWorktreeActionExecutionAccessDenied
+        | None
+    ):
+        """Return an access error for action execution mutation, if any."""
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            session_id,
+        )
+        if agent_session is None or agent_session.agent_id != agent_id:
+            return GitWorktreeActionExecutionSessionNotFound()
+        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
+            session,
+            workspace_id=agent_session.workspace_id,
+            user_id=user_id,
+        )
+        if workspace_user is None:
+            return GitWorktreeActionExecutionAccessDenied()
+        return None
 
     async def request_initialization_retry(
         self,

@@ -45,6 +45,10 @@ __all__ = [
     "ApiException",
     "AcceptDeclineResponse",
     "Action",
+    "ActionExecutionEventResponse",
+    "ActionExecutionMutationResponse",
+    "ActionExecutionProjectionResponse",
+    "ActionExecutionResponse",
     "AgentAdminAddRequest",
     "AgentAdminListResponse",
     "AgentAdminResponse",
@@ -334,6 +338,10 @@ from azentspublicclient.exceptions import ApiException as ApiException
 # import models into sdk package
 from azentspublicclient.models.accept_decline_response import AcceptDeclineResponse as AcceptDeclineResponse
 from azentspublicclient.models.action import Action as Action
+from azentspublicclient.models.action_execution_event_response import ActionExecutionEventResponse as ActionExecutionEventResponse
+from azentspublicclient.models.action_execution_mutation_response import ActionExecutionMutationResponse as ActionExecutionMutationResponse
+from azentspublicclient.models.action_execution_projection_response import ActionExecutionProjectionResponse as ActionExecutionProjectionResponse
+from azentspublicclient.models.action_execution_response import ActionExecutionResponse as ActionExecutionResponse
 from azentspublicclient.models.agent_admin_add_request import AgentAdminAddRequest as AgentAdminAddRequest
 from azentspublicclient.models.agent_admin_list_response import AgentAdminListResponse as AgentAdminListResponse
 from azentspublicclient.models.agent_admin_response import AgentAdminResponse as AgentAdminResponse
@@ -589,3 +597,4 @@ from azentspublicclient.models.workspace_user_list_response import WorkspaceUser
 from azentspublicclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
 from azentspublicclient.models.ws_ticket_response import WsTicketResponse as WsTicketResponse
+

@@ -6,8 +6,8 @@ REST write accepted target.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** | Accepted target type |
-**id** | **str** | Accepted target ID |
+**type** | **str** | Accepted target type | 
+**id** | **str** | Accepted target ID | 
 
 ## Example
 
@@ -27,3 +27,5 @@ chat_write_accepted_response_dict = chat_write_accepted_response_instance.to_dic
 chat_write_accepted_response_from_dict = ChatWriteAcceptedResponse.from_dict(chat_write_accepted_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

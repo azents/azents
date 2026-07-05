@@ -6,8 +6,8 @@ REST non-primary AgentSession create request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**existing_project_paths** | **List[str]** | Existing Project paths to register on the created session |
-**setup_actions** | [**List[CreateGitWorktreeAction]**](CreateGitWorktreeAction.md) | Ordered setup actions to enqueue for the created session |
+**existing_project_paths** | **List[str]** | Existing Project paths to register on the created session | 
+**setup_actions** | [**List[CreateGitWorktreeAction]**](CreateGitWorktreeAction.md) | Ordered setup actions to enqueue for the created session | 
 
 ## Example
 

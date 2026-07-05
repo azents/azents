@@ -255,6 +255,18 @@ function fallbackActionDefinition(action: ChatAction): InputActionDefinition {
         attachments: { policy: "unsupported" },
         availability_hint: null,
       };
+    case "create_git_worktree":
+      return {
+        id: `create_git_worktree:${action.source_project_path}:${action.starting_ref}`,
+        keyword: "worktree",
+        label: "Create worktree",
+        description: "",
+        action,
+        category: "turn",
+        message: { policy: "optional", placeholder: null, max_length: null },
+        attachments: { policy: "unsupported" },
+        availability_hint: null,
+      };
   }
 }
 

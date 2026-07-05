@@ -124,6 +124,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_discard_action_execution(self) -> None:
+        """Test case for chat_v1_discard_action_execution
+
+        Discard Action Execution
+        """
+        pass
+
     def test_chat_v1_download_agent_workspace_file(self) -> None:
         """Test case for chat_v1_download_agent_workspace_file
 
@@ -296,6 +303,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_reject_agent_project_registration_request
 
         Reject Agent Project Registration Request
+        """
+        pass
+
+    def test_chat_v1_retry_action_execution(self) -> None:
+        """Test case for chat_v1_retry_action_execution
+
+        Retry Action Execution
         """
         pass
 

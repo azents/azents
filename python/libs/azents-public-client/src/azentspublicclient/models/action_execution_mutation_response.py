@@ -17,21 +17,20 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, ClassVar, Dict, List
-from typing_extensions import Annotated
+from azentspublicclient.models.action_execution_projection_response import ActionExecutionProjectionResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ChatFailedRunRetryRequest(BaseModel):
+class ActionExecutionMutationResponse(BaseModel):
     """
-    REST failed-run retry request.
+    Action execution mutation response.
     """ # noqa: E501
-    agent_id: StrictStr = Field(description="Agent ID")
-    failed_event_id: StrictStr = Field(description="Terminal failed-run system_error event ID")
-    client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
+    requested: StrictBool = Field(description="Whether a state transition was requested")
+    action_execution: ActionExecutionProjectionResponse = Field(description="Updated action execution projection")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_id", "failed_event_id", "client_request_id"]
+    __properties: ClassVar[List[str]] = ["requested", "action_execution"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -51,7 +50,7 @@ class ChatFailedRunRetryRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ChatFailedRunRetryRequest from a JSON string"""
+        """Create an instance of ActionExecutionMutationResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -74,6 +73,9 @@ class ChatFailedRunRetryRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of action_execution
+        if self.action_execution:
+            _dict['action_execution'] = self.action_execution.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -83,7 +85,7 @@ class ChatFailedRunRetryRequest(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ChatFailedRunRetryRequest from a dict"""
+        """Create an instance of ActionExecutionMutationResponse from a dict"""
         if obj is None:
             return None
 
@@ -91,9 +93,8 @@ class ChatFailedRunRetryRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "agent_id": obj.get("agent_id"),
-            "failed_event_id": obj.get("failed_event_id"),
-            "client_request_id": obj.get("client_request_id")
+            "requested": obj.get("requested"),
+            "action_execution": ActionExecutionProjectionResponse.from_dict(obj["action_execution"]) if obj.get("action_execution") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

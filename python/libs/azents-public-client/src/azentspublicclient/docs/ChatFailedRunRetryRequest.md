@@ -6,9 +6,9 @@ REST failed-run retry request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**agent_id** | **str** | Agent ID |
-**failed_event_id** | **str** | Terminal failed-run system_error event ID |
-**client_request_id** | **str** | Client-generated idempotency key |
+**agent_id** | **str** | Agent ID | 
+**failed_event_id** | **str** | Terminal failed-run system_error event ID | 
+**client_request_id** | **str** | Client-generated idempotency key | 
 
 ## Example
 
@@ -28,3 +28,5 @@ chat_failed_run_retry_request_dict = chat_failed_run_retry_request_instance.to_d
 chat_failed_run_retry_request_from_dict = ChatFailedRunRetryRequest.from_dict(chat_failed_run_retry_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -6,13 +6,13 @@ Current live failed-run retry state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**status** | **str** | Current retry status |
-**last_error_message** | **str** | Latest user-safe error message |
-**failed_attempt_count** | **int** | Failed attempt count |
-**max_retries** | **int** | Maximum retry count |
-**backoff_seconds** | **int** | Current backoff duration in seconds |
-**next_retry_at** | **str** | Absolute next retry timestamp |
-**attempts** | [**List[ChatLiveRunRetryAttemptResponse]**](ChatLiveRunRetryAttemptResponse.md) | User-safe retry attempt history |
+**status** | **str** | Current retry status | 
+**last_error_message** | **str** | Latest user-safe error message | 
+**failed_attempt_count** | **int** | Failed attempt count | 
+**max_retries** | **int** | Maximum retry count | 
+**backoff_seconds** | **int** | Current backoff duration in seconds | 
+**next_retry_at** | **str** | Absolute next retry timestamp | 
+**attempts** | [**List[ChatLiveRunRetryAttemptResponse]**](ChatLiveRunRetryAttemptResponse.md) | User-safe retry attempt history | 
 
 ## Example
 
@@ -32,3 +32,5 @@ chat_live_run_retry_state_response_dict = chat_live_run_retry_state_response_ins
 chat_live_run_retry_state_response_from_dict = ChatLiveRunRetryStateResponse.from_dict(chat_live_run_retry_state_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+
