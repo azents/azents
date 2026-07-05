@@ -16,7 +16,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
 )
-from azents.engine.events.action_messages import ChatAction
+from azents.engine.events.action_messages import ChatAction, CreateGitWorktreeAction
 from azents.engine.events.types import Event
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
@@ -194,48 +194,6 @@ class ChatMessageWriteRequest(BaseModel):
     )
 
 
-class ExistingProjectsWorkspaceModeRequest(BaseModel):
-    """Existing Project path mode for a new AgentSession."""
-
-    type: Literal["existing_projects"] = Field(description="Workspace mode type")
-    project_paths: list[str] = Field(
-        description="Exact Project paths to register on the created session",
-    )
-
-
-class GitWorktreeWorkspaceModeRequest(BaseModel):
-    """Git worktree mode for a new AgentSession."""
-
-    type: Literal["git_worktree"] = Field(description="Workspace mode type")
-    source_project_path: str = Field(description="Source Project path")
-    starting_ref: str = Field(description="Starting Git ref")
-
-
-AgentSessionWorkspaceModeRequest = (
-    ExistingProjectsWorkspaceModeRequest | GitWorktreeWorkspaceModeRequest
-)
-
-
-class ExistingProjectWorkspaceItemRequest(BaseModel):
-    """Existing Project workspace item for a new AgentSession."""
-
-    type: Literal["existing_project"] = Field(description="Workspace item type")
-    path: str = Field(description="Existing Project path")
-
-
-class GitWorktreeWorkspaceItemRequest(BaseModel):
-    """Git worktree workspace item for a new AgentSession."""
-
-    type: Literal["git_worktree"] = Field(description="Workspace item type")
-    source_project_path: str = Field(description="Source Project path")
-    starting_ref: str = Field(description="Starting local Git branch ref")
-
-
-AgentSessionWorkspaceItemRequest = (
-    ExistingProjectWorkspaceItemRequest | GitWorktreeWorkspaceItemRequest
-)
-
-
 class ChatSessionCreateMessageWriteRequest(BaseModel):
     """REST first message write request for a draft AgentSession."""
 
@@ -245,17 +203,11 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         description="Client-generated idempotency key",
     )
     message: str = Field(description="Message content")
-    workspace_items: list[AgentSessionWorkspaceItemRequest] | None = Field(
-        default=None,
-        description="Ordered workspace items for the created session",
+    existing_project_paths: list[str] = Field(
+        description="Existing Project paths to register on the created session",
     )
-    workspace_mode: AgentSessionWorkspaceModeRequest | None = Field(
-        default=None,
-        description="Legacy workspace mode for the created session",
-    )
-    project_paths: list[str] | None = Field(
-        default=None,
-        description="Exact Project paths to register on the created session",
+    setup_actions: list[CreateGitWorktreeAction] = Field(
+        description="Ordered setup actions to enqueue before the first message",
     )
     attachments: list[str] | None = Field(
         default=None,
@@ -266,17 +218,11 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
 class AgentSessionCreateRequest(BaseModel):
     """REST non-primary AgentSession create request."""
 
-    workspace_items: list[AgentSessionWorkspaceItemRequest] | None = Field(
-        default=None,
-        description="Ordered workspace items for the created session",
+    existing_project_paths: list[str] = Field(
+        description="Existing Project paths to register on the created session",
     )
-    workspace_mode: AgentSessionWorkspaceModeRequest | None = Field(
-        default=None,
-        description="Legacy workspace mode for the created session",
-    )
-    project_paths: list[str] | None = Field(
-        default=None,
-        description="Exact Project paths to register on the created session",
+    setup_actions: list[CreateGitWorktreeAction] = Field(
+        description="Ordered setup actions to enqueue for the created session",
     )
 
 

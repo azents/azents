@@ -135,8 +135,6 @@ from azents.services.project_browser_manifest import (
     ProjectBrowserSessionNotFound,
 )
 from azents.services.session_git_worktree import (
-    ExistingProjectWorkspaceItem,
-    ExplicitProjectsWorkspaceMode,
     GitRefPreviewAccessDenied,
     GitRefPreviewAgentNotFound,
     GitRefPreviewRuntimeUnavailable,
@@ -147,10 +145,7 @@ from azents.services.session_git_worktree import (
     GitWorktreeInitializationRetryNotFound,
     GitWorktreeInitializationRetrySessionNotFound,
     GitWorktreeInitializationRetryUnavailable,
-    GitWorktreeWorkspaceItem,
-    GitWorktreeWorkspaceMode,
     SessionGitWorktreeService,
-    WorkspaceItemsWorkspaceMode,
 )
 from azents.services.session_initialization import SessionInitializationProjection
 from azents.services.session_storage import guess_media_type
@@ -215,11 +210,7 @@ from .data import (
     ChatWriteAcceptedResponse,
     ChatWriteResponse,
     ChatWriteSnapshotResponse,
-    ExistingProjectsWorkspaceModeRequest,
-    ExistingProjectWorkspaceItemRequest,
     GitRefPreviewResponse,
-    GitWorktreeWorkspaceItemRequest,
-    GitWorktreeWorkspaceModeRequest,
     GoalStateResponse,
     GoalStatusUpdateRequest,
     GoalUpdateRequest,
@@ -970,81 +961,6 @@ async def create_team_agent_session_message(
     )
 
 
-def _workspace_mode_from_request(
-    request: ExistingProjectsWorkspaceModeRequest
-    | GitWorktreeWorkspaceModeRequest
-    | None,
-    *,
-    workspace_items: list[
-        ExistingProjectWorkspaceItemRequest | GitWorktreeWorkspaceItemRequest
-    ]
-    | None,
-    project_paths: list[str] | None,
-) -> (
-    WorkspaceItemsWorkspaceMode
-    | ExplicitProjectsWorkspaceMode
-    | GitWorktreeWorkspaceMode
-):
-    """Convert REST workspace selection request to service input."""
-    if workspace_items is not None:
-        return WorkspaceItemsWorkspaceMode(
-            items=[_workspace_item_from_request(item) for item in workspace_items]
-        )
-    if request is None:
-        if project_paths is None:
-            raise HTTPException(status_code=400, detail="workspace_items is required.")
-        return ExplicitProjectsWorkspaceMode(project_paths=project_paths)
-    match request:
-        case ExistingProjectsWorkspaceModeRequest(project_paths=project_paths):
-            return ExplicitProjectsWorkspaceMode(project_paths=project_paths)
-        case GitWorktreeWorkspaceModeRequest(
-            source_project_path=source_project_path,
-            starting_ref=starting_ref,
-        ):
-            return GitWorktreeWorkspaceMode(
-                source_project_path=source_project_path,
-                starting_ref=starting_ref,
-            )
-        case _:
-            assert_never(request)
-
-
-def _workspace_mode_has_worktree(
-    workspace_mode: WorkspaceItemsWorkspaceMode
-    | ExplicitProjectsWorkspaceMode
-    | GitWorktreeWorkspaceMode,
-) -> bool:
-    """Return whether a workspace mode contains a Worktree item."""
-    match workspace_mode:
-        case GitWorktreeWorkspaceMode():
-            return True
-        case WorkspaceItemsWorkspaceMode(items=items):
-            return any(isinstance(item, GitWorktreeWorkspaceItem) for item in items)
-        case ExplicitProjectsWorkspaceMode():
-            return False
-        case _:
-            assert_never(workspace_mode)
-
-
-def _workspace_item_from_request(
-    request: ExistingProjectWorkspaceItemRequest | GitWorktreeWorkspaceItemRequest,
-) -> ExistingProjectWorkspaceItem | GitWorktreeWorkspaceItem:
-    """Convert one REST workspace item to service input."""
-    match request:
-        case ExistingProjectWorkspaceItemRequest(path=path):
-            return ExistingProjectWorkspaceItem(path=path)
-        case GitWorktreeWorkspaceItemRequest(
-            source_project_path=source_project_path,
-            starting_ref=starting_ref,
-        ):
-            return GitWorktreeWorkspaceItem(
-                source_project_path=source_project_path,
-                starting_ref=starting_ref,
-            )
-        case _:
-            assert_never(request)
-
-
 async def _write_new_session_message_via_rest(
     chat_service: ChatSessionService,
     agent_session_input_service: AgentSessionInputService,
@@ -1065,17 +981,13 @@ async def _write_new_session_message_via_rest(
         attachments=request.attachments or [],
         file_parts=[],
     )
-    workspace_mode = _workspace_mode_from_request(
-        request.workspace_mode,
-        workspace_items=request.workspace_items,
-        project_paths=request.project_paths,
-    )
     input_result = (
         await agent_session_input_service.create_team_session_with_buffered_input(
             agent_id=agent_id,
             message=message,
             user_id=user_id,
-            workspace_mode=workspace_mode,
+            existing_project_paths=request.existing_project_paths,
+            setup_actions=request.setup_actions,
             client_request_id=request.client_request_id,
         )
     )
@@ -1689,19 +1601,15 @@ async def create_team_agent_session(
     broker: Annotated[SessionBroker, Depends(get_broker)],
 ) -> AgentSessionResponse:
     """Create a non-primary team AgentSession for an Agent."""
-    workspace_mode = _workspace_mode_from_request(
-        request.workspace_mode,
-        workspace_items=request.workspace_items,
-        project_paths=request.project_paths,
-    )
     result = await chat_service.create_team_session(
         agent_id=agent_id,
         user_id=current_user.user_id,
-        workspace_mode=workspace_mode,
+        existing_project_paths=request.existing_project_paths,
+        setup_actions=request.setup_actions,
     )
     match result:
         case Success(session):
-            if _workspace_mode_has_worktree(workspace_mode):
+            if request.setup_actions:
                 await broker.send_message(
                     SessionWakeUp(
                         agent_id=agent_id,

@@ -60,29 +60,11 @@ const inputActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("skill"), skill_path: z.string().min(1) }),
 ]);
 
-const newSessionWorkspaceModeSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("existing_projects"),
-    project_paths: z.array(z.string().min(1)),
-  }),
-  z.object({
-    type: z.literal("git_worktree"),
-    source_project_path: z.string().min(1),
-    starting_ref: z.string().min(1),
-  }),
-]);
-
-const newSessionWorkspaceItemSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("existing_project"),
-    path: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("git_worktree"),
-    source_project_path: z.string().min(1),
-    starting_ref: z.string().min(1),
-  }),
-]);
+const setupActionSchema = z.object({
+  type: z.literal("create_git_worktree"),
+  source_project_path: z.string().min(1),
+  starting_ref: z.string().min(1),
+});
 
 export const chatRouter = router({
   getAgentSession: publicProcedure
@@ -130,9 +112,8 @@ export const chatRouter = router({
     .input(
       z.object({
         agentId: z.string().min(1),
-        projectPaths: z.array(z.string().min(1)).optional(),
-        workspaceItems: z.array(newSessionWorkspaceItemSchema).optional(),
-        workspaceMode: newSessionWorkspaceModeSchema.optional(),
+        existingProjectPaths: z.array(z.string().min(1)),
+        setupActions: z.array(setupActionSchema),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -141,9 +122,8 @@ export const chatRouter = router({
           client: ctx.apiClient,
           path: { agent_id: input.agentId },
           body: {
-            project_paths: input.projectPaths,
-            workspace_items: input.workspaceItems,
-            workspace_mode: input.workspaceMode,
+            existing_project_paths: input.existingProjectPaths,
+            setup_actions: input.setupActions,
           },
           throwOnError: true,
         });
@@ -165,9 +145,8 @@ export const chatRouter = router({
         clientRequestId: z.string().min(1).max(64),
         message: z.string().min(1),
         attachments: z.array(z.string().min(1)).optional(),
-        projectPaths: z.array(z.string().min(1)).optional(),
-        workspaceItems: z.array(newSessionWorkspaceItemSchema).optional(),
-        workspaceMode: newSessionWorkspaceModeSchema.optional(),
+        existingProjectPaths: z.array(z.string().min(1)),
+        setupActions: z.array(setupActionSchema),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -178,9 +157,8 @@ export const chatRouter = router({
           body: {
             client_request_id: input.clientRequestId,
             message: input.message,
-            project_paths: input.projectPaths,
-            workspace_items: input.workspaceItems,
-            workspace_mode: input.workspaceMode,
+            existing_project_paths: input.existingProjectPaths,
+            setup_actions: input.setupActions,
             attachments: input.attachments,
           },
           throwOnError: true,

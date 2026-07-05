@@ -192,11 +192,12 @@ class TestChatSessionTeamSessions:
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
-            project_paths=[
+            existing_project_paths=[
                 "/workspace/agent/project-a",
                 "/workspace/agent/project-a/nested",
                 "/workspace/agent/project-a",
             ],
+            setup_actions=[],
         )
 
         assert isinstance(create_result, Success)
@@ -271,7 +272,8 @@ class TestChatSessionTeamSessions:
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
-            project_paths=["/workspace/agent/project-a"],
+            existing_project_paths=["/workspace/agent/project-a"],
+            setup_actions=[],
         )
         assert isinstance(create_result, Success)
 
@@ -290,7 +292,8 @@ class TestChatSessionTeamSessions:
         empty_create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
-            project_paths=[],
+            existing_project_paths=[],
+            setup_actions=[],
         )
         assert isinstance(empty_create_result, Success)
 
@@ -309,10 +312,11 @@ class TestChatSessionTeamSessions:
         replace_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
-            project_paths=[
+            existing_project_paths=[
                 "/workspace/agent/project-b",
                 "/workspace/agent/project-c",
             ],
+            setup_actions=[],
         )
         assert isinstance(replace_result, Success)
 
@@ -589,7 +593,8 @@ class TestChatSessionTeamSessions:
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
-            project_paths=[],
+            existing_project_paths=[],
+            setup_actions=[],
         )
         assert isinstance(create_result, Success)
 
@@ -637,12 +642,14 @@ class TestChatSessionTeamSessions:
         first_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
-            project_paths=[],
+            existing_project_paths=[],
+            setup_actions=[],
         )
         second_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
-            project_paths=[],
+            existing_project_paths=[],
+            setup_actions=[],
         )
         assert isinstance(first_result, Success)
         assert isinstance(second_result, Success)
@@ -758,7 +765,8 @@ class TestChatSessionTeamSessions:
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
-            project_paths=[],
+            existing_project_paths=[],
+            setup_actions=[],
         )
         assert isinstance(create_result, Success)
 
@@ -838,7 +846,8 @@ class TestChatSessionTeamSessions:
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
-            project_paths=[],
+            existing_project_paths=[],
+            setup_actions=[],
         )
         assert isinstance(create_result, Success)
         async with rdb_session_manager() as update_session:

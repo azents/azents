@@ -372,10 +372,11 @@ class TestAgentSessionInputService:
                 attachments=[],
             ),
             user_id=user_id,
-            project_paths=[
+            existing_project_paths=[
                 "/workspace/agent/project-a/nested",
                 "/workspace/agent/project-a/nested",
             ],
+            setup_actions=[],
             client_request_id="draft-client-1",
         )
 

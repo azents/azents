@@ -213,26 +213,30 @@ function dedupeWorkspaceItems(
   return result;
 }
 
-function toWorkspaceItemRequest(item: NewSessionWorkspaceItemState):
-  | {
-      type: "existing_project";
-      path: string;
+type NewSessionSetupActionRequest = {
+  type: "create_git_worktree";
+  source_project_path: string;
+  starting_ref: string;
+};
+
+function setupActionsFromWorkspaceItems(
+  items: NewSessionWorkspaceItemState[],
+): NewSessionSetupActionRequest[] {
+  const actions: NewSessionSetupActionRequest[] = [];
+  for (const item of items) {
+    switch (item.type) {
+      case "existing_project":
+        break;
+      case "git_worktree":
+        actions.push({
+          type: "create_git_worktree",
+          source_project_path: item.sourceProjectPath,
+          starting_ref: item.startingRef ?? "",
+        });
+        break;
     }
-  | {
-      type: "git_worktree";
-      source_project_path: string;
-      starting_ref: string;
-    } {
-  switch (item.type) {
-    case "existing_project":
-      return { type: "existing_project", path: item.path };
-    case "git_worktree":
-      return {
-        type: "git_worktree",
-        source_project_path: item.sourceProjectPath,
-        starting_ref: item.startingRef ?? "",
-      };
   }
+  return actions;
 }
 
 export function useAgentDraftChatContainer(
@@ -478,7 +482,8 @@ export function useAgentDraftChatContainer(
           clientRequestId: crypto.randomUUID(),
           message,
           attachments: attachmentUris,
-          workspaceItems: workspaceItems.map(toWorkspaceItemRequest),
+          existingProjectPaths: selectedProjectPaths,
+          setupActions: setupActionsFromWorkspaceItems(workspaceItems),
         });
         await Promise.all([
           utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
@@ -501,6 +506,7 @@ export function useAgentDraftChatContainer(
       handle,
       router,
       utils.chat.listAgentProjectPresets,
+      selectedProjectPaths,
       utils.chat.listAgentSessions,
       workspaceItems,
       writeInFlight,

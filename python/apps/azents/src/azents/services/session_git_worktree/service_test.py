@@ -61,11 +61,7 @@ from azents.services.agent_session_input import AgentSessionInputService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
-from azents.services.session_git_worktree import (
-    ExplicitProjectsWorkspaceMode,
-    GitWorktreeWorkspaceMode,
-    SessionGitWorktreeService,
-)
+from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_initialization import SessionInitializationService
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -385,7 +381,8 @@ def _input_service(
     session_manager: SessionManager[AsyncSession],
     worktree_service: SessionGitWorktreeService,
 ) -> AgentSessionInputService:
-    """Build AgentSessionInputService with worktree support."""
+    """Build AgentSessionInputService for setup action enqueue tests."""
+    del worktree_service
     return AgentSessionInputService(
         agent_repository=AgentRepository(),
         agent_project_preset_repository=AgentProjectPresetRepository(),
@@ -408,8 +405,44 @@ def _input_service(
             session_manager=session_manager,
         ),
         session_manager=session_manager,
-        session_git_worktree_service=worktree_service,
     )
+
+
+async def _execute_first_setup_action(
+    rdb_session_manager: SessionManager[AsyncSession],
+    worktree_service: SessionGitWorktreeService,
+    *,
+    agent_id: str,
+    session_id: str,
+) -> str:
+    """Promote and execute the first pending setup action."""
+    promoted = await InputBufferService(
+        session_manager=rdb_session_manager,
+        input_buffer_repository=InputBufferRepository(),
+        exchange_file_service=_ExchangeFileService(),
+        model_file_service=_ModelFileService(),
+        agent_session_repository=AgentSessionRepository(),
+        event_transcript_repository=EventTranscriptRepository(),
+    ).flush_session_input_buffers(
+        session_id=session_id,
+        model=None,
+        limit=1,
+        include_action_messages=True,
+    )
+    assert len(promoted.events) == 1
+    event = promoted.events[0]
+    assert event.kind is EventKind.ACTION_MESSAGE
+    payload = event.payload
+    assert isinstance(payload, ActionMessagePayload)
+    action = payload.action
+    assert isinstance(action, CreateGitWorktreeAction)
+    await worktree_service.run_git_worktree_action(
+        agent_id=agent_id,
+        session_id=session_id,
+        action_event_id=event.id,
+        action=action,
+    )
+    return event.id
 
 
 async def _create_ready_worktree_session(
@@ -433,15 +466,20 @@ async def _create_ready_worktree_session(
             attachments=[],
         ),
         user_id=user_id,
-        workspace_mode=GitWorktreeWorkspaceMode(
-            source_project_path="/workspace/agent/repo",
-            starting_ref="main",
-        ),
+        existing_project_paths=[],
+        setup_actions=[
+            CreateGitWorktreeAction(
+                source_project_path="/workspace/agent/repo",
+                starting_ref="main",
+            )
+        ],
         client_request_id=f"worktree-{slug}",
     )
     assert isinstance(result, Success)
     session_id = result.value.agent_session.id
-    await worktree_service.run_git_worktree_initialization(
+    await _execute_first_setup_action(
+        rdb_session_manager,
+        worktree_service,
         agent_id=agent_id,
         session_id=session_id,
     )
@@ -579,10 +617,13 @@ class TestSessionGitWorktreeService:
                 attachments=[],
             ),
             user_id=user_id,
-            workspace_mode=GitWorktreeWorkspaceMode(
-                source_project_path="/workspace/agent/repo",
-                starting_ref="main",
-            ),
+            existing_project_paths=[],
+            setup_actions=[
+                CreateGitWorktreeAction(
+                    source_project_path="/workspace/agent/repo",
+                    starting_ref="main",
+                )
+            ],
             client_request_id="worktree-ready",
         )
 
@@ -597,7 +638,9 @@ class TestSessionGitWorktreeService:
             )
         assert projects_before_initialization == []
 
-        await worktree_service.run_git_worktree_initialization(
+        await _execute_first_setup_action(
+            rdb_session_manager,
+            worktree_service,
             agent_id=agent_id,
             session_id=created.id,
         )
@@ -650,29 +693,36 @@ class TestSessionGitWorktreeService:
                 attachments=[],
             ),
             user_id=user_id,
-            workspace_mode=GitWorktreeWorkspaceMode(
-                source_project_path="/workspace/agent/repo",
-                starting_ref="missing",
-            ),
+            existing_project_paths=[],
+            setup_actions=[
+                CreateGitWorktreeAction(
+                    source_project_path="/workspace/agent/repo",
+                    starting_ref="missing",
+                )
+            ],
             client_request_id="worktree-invalid",
         )
 
         assert isinstance(result, Success)
-        await worktree_service.run_git_worktree_initialization(
+        action_event_id = await _execute_first_setup_action(
+            rdb_session_manager,
+            worktree_service,
             agent_id=agent_id,
             session_id=result.value.agent_session.id,
         )
         async with rdb_session_manager() as session:
-            initialization = await SessionInitializationRepository().get_by_session_id(
-                session,
-                session_id=result.value.agent_session.id,
+            projection = (
+                await ActionExecutionRepository().get_projection_by_action_event_id(
+                    session,
+                    action_event_id=action_event_id,
+                )
             )
             buffers = await InputBufferRepository().list_by_session_id(
                 session,
                 result.value.agent_session.id,
             )
-        assert initialization is not None
-        assert initialization.status is SessionInitializationStatus.FAILED
+        assert projection is not None
+        assert projection.execution.status is ActionExecutionStatus.FAILED
         assert [buffer.content for buffer in buffers] == ["start invalid"]
 
     async def test_branch_collision_suffixes_final_branch(
@@ -696,15 +746,20 @@ class TestSessionGitWorktreeService:
                 attachments=[],
             ),
             user_id=user_id,
-            workspace_mode=GitWorktreeWorkspaceMode(
-                source_project_path="/workspace/agent/repo",
-                starting_ref="main",
-            ),
+            existing_project_paths=[],
+            setup_actions=[
+                CreateGitWorktreeAction(
+                    source_project_path="/workspace/agent/repo",
+                    starting_ref="main",
+                )
+            ],
             client_request_id="worktree-branch",
         )
 
         assert isinstance(result, Success)
-        await worktree_service.run_git_worktree_initialization(
+        await _execute_first_setup_action(
+            rdb_session_manager,
+            worktree_service,
             agent_id=agent_id,
             session_id=result.value.agent_session.id,
         )
@@ -736,15 +791,20 @@ class TestSessionGitWorktreeService:
                 attachments=[],
             ),
             user_id=user_id,
-            workspace_mode=GitWorktreeWorkspaceMode(
-                source_project_path="/workspace/agent/repo",
-                starting_ref="main",
-            ),
+            existing_project_paths=[],
+            setup_actions=[
+                CreateGitWorktreeAction(
+                    source_project_path="/workspace/agent/repo",
+                    starting_ref="main",
+                )
+            ],
             client_request_id="worktree-path",
         )
 
         assert isinstance(result, Success)
-        await worktree_service.run_git_worktree_initialization(
+        await _execute_first_setup_action(
+            rdb_session_manager,
+            worktree_service,
             agent_id=agent_id,
             session_id=result.value.agent_session.id,
         )
@@ -780,25 +840,32 @@ class TestSessionGitWorktreeService:
                 attachments=[],
             ),
             user_id=user_id,
-            workspace_mode=GitWorktreeWorkspaceMode(
-                source_project_path="/workspace/agent/repo",
-                starting_ref="main",
-            ),
+            existing_project_paths=[],
+            setup_actions=[
+                CreateGitWorktreeAction(
+                    source_project_path="/workspace/agent/repo",
+                    starting_ref="main",
+                )
+            ],
             client_request_id="worktree-catalog",
         )
 
         assert isinstance(result, Success)
-        await worktree_service.run_git_worktree_initialization(
+        action_event_id = await _execute_first_setup_action(
+            rdb_session_manager,
+            worktree_service,
             agent_id=agent_id,
             session_id=result.value.agent_session.id,
         )
         async with rdb_session_manager() as session:
-            initialization = await SessionInitializationRepository().get_by_session_id(
-                session,
-                session_id=result.value.agent_session.id,
+            projection = (
+                await ActionExecutionRepository().get_projection_by_action_event_id(
+                    session,
+                    action_event_id=action_event_id,
+                )
             )
-        assert initialization is not None
-        assert initialization.status is SessionInitializationStatus.FAILED
+        assert projection is not None
+        assert projection.execution.status is ActionExecutionStatus.FAILED
 
     async def test_status_refresh_warning_does_not_block_ready(
         self,
@@ -825,30 +892,33 @@ class TestSessionGitWorktreeService:
                 attachments=[],
             ),
             user_id=user_id,
-            workspace_mode=GitWorktreeWorkspaceMode(
-                source_project_path="/workspace/agent/repo",
-                starting_ref="main",
-            ),
+            existing_project_paths=[],
+            setup_actions=[
+                CreateGitWorktreeAction(
+                    source_project_path="/workspace/agent/repo",
+                    starting_ref="main",
+                )
+            ],
             client_request_id="worktree-warning",
         )
 
         assert isinstance(result, Success)
-        await worktree_service.run_git_worktree_initialization(
+        action_event_id = await _execute_first_setup_action(
+            rdb_session_manager,
+            worktree_service,
             agent_id=agent_id,
             session_id=result.value.agent_session.id,
         )
         async with rdb_session_manager() as session:
-            initialization = await SessionInitializationRepository().get_by_session_id(
-                session,
-                session_id=result.value.agent_session.id,
+            projection = (
+                await ActionExecutionRepository().get_projection_by_action_event_id(
+                    session,
+                    action_event_id=action_event_id,
+                )
             )
-            assert initialization is not None
-            steps = await SessionInitializationRepository().list_steps(
-                session,
-                initialization_id=initialization.id,
-            )
-        assert initialization.status is SessionInitializationStatus.READY
-        assert steps[-1].status is SessionInitializationStepStatus.FAILED
+        assert projection is not None
+        assert projection.execution.status is ActionExecutionStatus.COMPLETED
+        assert any(event.kind.value == "warning" for event in projection.events)
 
     async def test_archive_cleanup_request_only_marks_pending(
         self,
@@ -1105,9 +1175,8 @@ class TestSessionGitWorktreeService:
                 attachments=[],
             ),
             user_id=user_id,
-            workspace_mode=ExplicitProjectsWorkspaceMode(
-                project_paths=["/workspace/agent/app"]
-            ),
+            existing_project_paths=["/workspace/agent/app"],
+            setup_actions=[],
             client_request_id="explicit-project",
         )
 
