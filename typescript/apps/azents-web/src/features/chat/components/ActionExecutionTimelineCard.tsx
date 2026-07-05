@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  Badge,
-  Button,
-  Code,
-  Group,
-  Paper,
-  rem,
-  Stack,
-  Text,
-} from "@mantine/core";
+import { Badge, Box, Button, Group, rem, Stack, Text } from "@mantine/core";
 import { IconAlertCircle, IconCheck, IconLoader2 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import type { ActionExecutionProjection } from "../types";
@@ -82,27 +73,32 @@ export function ActionExecutionTimelineCard({
   const t = useTranslations("chat.actionExecution");
   const { execution, events } = actionExecution;
   const failed = execution.status === "failed";
+  const color = statusColor(execution.status);
   const visibleEvents = events.slice(-4);
 
   return (
-    <Paper withBorder radius="sm" px="sm" py={rem(6)} my={rem(4)}>
+    <Box
+      my={rem(3)}
+      pl="sm"
+      py={rem(5)}
+      style={{
+        borderLeft: `${rem(2)} solid var(--mantine-color-${color}-6)`,
+      }}
+    >
       <Stack gap={rem(4)}>
         <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
           <Group gap="xs" miw={0} wrap="nowrap">
-            <Text size="sm" fw={600} truncate>
+            <Text size="xs" fw={700} c="dimmed" truncate>
               {t("title")}
             </Text>
             <Badge
-              size="sm"
-              color={statusColor(execution.status)}
+              size="xs"
+              color={color}
               variant="light"
               leftSection={statusIcon(execution.status)}
             >
               {statusLabel(execution.status, t)}
             </Badge>
-            <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
-              {t("attempt", { attempt: execution.attempt })}
-            </Text>
           </Group>
           {failed && (
             <Group gap={rem(4)} wrap="nowrap">
@@ -148,9 +144,22 @@ export function ActionExecutionTimelineCard({
                     )}
                   </Group>
                   {event.command_argv && event.command_argv.length > 0 && (
-                    <Code block fz="xs" px="xs" py={rem(3)}>
+                    <Text
+                      component="code"
+                      size="xs"
+                      c="dimmed"
+                      px={rem(4)}
+                      py={rem(1)}
+                      truncate
+                      style={{
+                        display: "block",
+                        borderRadius: rem(4),
+                        background: "var(--mantine-color-default-hover)",
+                        fontFamily: "var(--mantine-font-family-monospace)",
+                      }}
+                    >
                       {event.command_argv.join(" ")}
-                    </Code>
+                    </Text>
                   )}
                   {event.content && (
                     <Text
@@ -167,6 +176,6 @@ export function ActionExecutionTimelineCard({
           </Stack>
         )}
       </Stack>
-    </Paper>
+    </Box>
   );
 }

@@ -584,6 +584,12 @@ export type SessionInitializationDetailState =
 
 export type ActionExecutionProjection = ActionExecutionProjectionResponse;
 
+export interface ActionExecutionUpdatedEvent {
+  type: "action_execution_updated";
+  session_id: string;
+  action_execution: ActionExecutionProjection;
+}
+
 export interface SubscriptionHealthCheckAckEvent {
   type: "subscription_health_check_ack";
   session_id: string;
@@ -653,6 +659,7 @@ export type ChatEvent =
   | InputActionsUpdatedEvent
   | SessionInitializationUpdatedEvent
   | SessionInitializationEventAppendedEvent
+  | ActionExecutionUpdatedEvent
   | SubscriptionHealthCheckAckEvent
   | LiveRunUpdatedEvent
   | LiveRunClearedEvent

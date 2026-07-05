@@ -55,7 +55,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-05
-spec_version: 30
+spec_version: 31
 ---
 
 # Workspace & Membership
@@ -283,7 +283,7 @@ A Git worktree-created Project is an Agent Workspace Project whose directory is 
 
 A non-primary session can own a Git worktree allocation created by a `create_git_worktree` setup action. The action is stored as an ordered `action_message` input before the first user message, and the action execution blocks later model input until the worktree path is created and registered as the session Project.
 
-Each created worktree is prompt-eligible only through its session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Archive/delete cleanup iterates every non-cleaned `SessionGitWorktree` allocation owned by the session, removes each worktree, removes each Azents-created branch, deletes catalog entries for the worktree paths, and marks allocations cleaned. Cleanup failure leaves the archive successful and records a cleanup summary for manual retry.
+Each created worktree is prompt-eligible only through its session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Archive/delete cleanup iterates every non-cleaned `SessionGitWorktree` allocation owned by the session, removes each worktree, removes each Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog entries for the worktree paths, and marks allocations cleaned. Cleanup failure leaves the archive successful and records a cleanup summary for manual retry.
 
 ## Business Rules
 
@@ -437,6 +437,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-05** — v31. Clarified that archive/delete cleanup removes an empty session-scoped reserved worktree parent directory after worktree removal.
 - **2026-07-04** — v25. Added Git worktree workspace mode, Git ref preview, worktree-created Project registration, catalog behavior, and cleanup authority semantics.
 
 - **2026-04-20 (spec_version=1)** — Initial Living Spec. Domain spec documented according to azents Living Spec system P7 ([#2792](https://github.com/azents/azents/issues/2792)).

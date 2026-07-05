@@ -169,6 +169,9 @@ SessionInitializationEventCallback = Callable[
 SessionInitializationProjectionCallback = Callable[
     [SessionInitializationProjection], Awaitable[None]
 ]
+ActionExecutionProjectionCallback = Callable[
+    [ActionExecutionProjection], Awaitable[None]
+]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -890,6 +893,7 @@ class SessionGitWorktreeService:
         session_id: str,
         action_event_id: str,
         action: CreateGitWorktreeAction,
+        on_projection_updated: ActionExecutionProjectionCallback | None = None,
     ) -> GitWorktreeActionExecutionResult:
         """Execute one create_git_worktree TurnAction by action event identity."""
         async with self.session_manager() as session:
@@ -904,6 +908,10 @@ class SessionGitWorktreeService:
                     attempt=1,
                 ),
             )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
         if execution.status is ActionExecutionStatus.COMPLETED:
             return GitWorktreeActionExecutionResult(
                 completed=True,
@@ -927,6 +935,7 @@ class SessionGitWorktreeService:
                 execution=execution,
                 allocation=None,
                 reason=str(exc),
+                on_projection_updated=on_projection_updated,
             )
             return GitWorktreeActionExecutionResult(
                 completed=False,
@@ -962,6 +971,10 @@ class SessionGitWorktreeService:
                 source_project_path=normalized_source_path,
                 starting_ref=action.starting_ref.strip(),
             )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
         await self._append_action_execution_event(
             execution=execution,
             kind=ActionExecutionEventKind.STEP_STARTED,
@@ -969,6 +982,7 @@ class SessionGitWorktreeService:
             command_argv=None,
             content="Starting Git worktree action.",
             exit_code=None,
+            on_projection_updated=on_projection_updated,
         )
 
         runtime = await self._get_runtime(agent_id=agent_id)
@@ -977,6 +991,7 @@ class SessionGitWorktreeService:
                 execution=execution,
                 allocation=allocation,
                 reason="Runtime runner is not ready.",
+                on_projection_updated=on_projection_updated,
             )
             return GitWorktreeActionExecutionResult(
                 completed=False,
@@ -987,6 +1002,7 @@ class SessionGitWorktreeService:
                 execution=execution,
                 allocation=allocation,
                 reason="Runtime runner operations are unavailable.",
+                on_projection_updated=on_projection_updated,
             )
             return GitWorktreeActionExecutionResult(
                 completed=False,
@@ -997,6 +1013,7 @@ class SessionGitWorktreeService:
             runtime=runtime,
             execution=execution,
             allocation=allocation,
+            on_projection_updated=on_projection_updated,
         )
         if create_result is None:
             return GitWorktreeActionExecutionResult(
@@ -1008,6 +1025,7 @@ class SessionGitWorktreeService:
             execution=execution,
             allocation=allocation,
             worktree_path=create_result.worktree_path,
+            on_projection_updated=on_projection_updated,
         ):
             return GitWorktreeActionExecutionResult(
                 completed=False,
@@ -1018,6 +1036,7 @@ class SessionGitWorktreeService:
             execution=execution,
             allocation=allocation,
             worktree_path=create_result.worktree_path,
+            on_projection_updated=on_projection_updated,
         ):
             return GitWorktreeActionExecutionResult(
                 completed=False,
@@ -1027,6 +1046,7 @@ class SessionGitWorktreeService:
             agent_id=agent_id,
             execution=execution,
             path=create_result.worktree_path,
+            on_projection_updated=on_projection_updated,
         )
         await self._sync_skill_projection_for_project_change(
             agent_id=agent_id,
@@ -1039,6 +1059,7 @@ class SessionGitWorktreeService:
             command_argv=None,
             content="Git worktree action completed.",
             exit_code=0,
+            on_projection_updated=on_projection_updated,
         )
         async with self.session_manager() as session:
             await self.action_execution_repository.mark_completed(
@@ -1046,6 +1067,10 @@ class SessionGitWorktreeService:
                 action_execution_id=execution.id,
                 completed_at=datetime.now(UTC),
             )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
         return GitWorktreeActionExecutionResult(
             completed=True,
             context_invalidated=True,
@@ -1121,6 +1146,7 @@ class SessionGitWorktreeService:
         runtime: AgentRuntime,
         execution: ActionExecution,
         allocation: SessionGitWorktree,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
     ) -> _CreateWorktreeSuccess | None:
         """Run create_git_worktree for an action execution."""
         runner_operations = self.runner_operations
@@ -1151,6 +1177,7 @@ class SessionGitWorktreeService:
                 command_argv=command_argv,
                 content="Starting Git worktree creation.",
                 exit_code=None,
+                on_projection_updated=on_projection_updated,
             )
             async with self.session_manager() as session:
                 await self.session_git_worktree_repository.mark_creating(
@@ -1168,6 +1195,7 @@ class SessionGitWorktreeService:
                     deadline_at=_git_operation_deadline(),
                     text_output_callback=self._action_text_callback(
                         execution=execution,
+                        on_projection_updated=on_projection_updated,
                     ),
                 )
             except RuntimeRunnerOperationFailedError as exc:
@@ -1182,6 +1210,7 @@ class SessionGitWorktreeService:
                     execution=execution,
                     allocation=current,
                     reason=str(exc),
+                    on_projection_updated=on_projection_updated,
                 )
                 return None
             except (
@@ -1192,6 +1221,7 @@ class SessionGitWorktreeService:
                     execution=execution,
                     allocation=current,
                     reason="Runtime runner is not ready.",
+                    on_projection_updated=on_projection_updated,
                 )
                 return None
             await self._append_action_execution_event(
@@ -1201,6 +1231,7 @@ class SessionGitWorktreeService:
                 command_argv=None,
                 content="Git worktree creation completed.",
                 exit_code=0,
+                on_projection_updated=on_projection_updated,
             )
             async with self.session_manager() as session:
                 await self.session_git_worktree_repository.mark_ready(
@@ -1220,6 +1251,7 @@ class SessionGitWorktreeService:
             execution=execution,
             allocation=current,
             reason="Could not allocate a unique Git worktree path and branch.",
+            on_projection_updated=on_projection_updated,
         )
         return None
 
@@ -1230,6 +1262,7 @@ class SessionGitWorktreeService:
         execution: ActionExecution,
         allocation: SessionGitWorktree,
         worktree_path: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
     ) -> bool:
         """Register the action-created worktree as a session Project."""
         del agent_id
@@ -1240,6 +1273,7 @@ class SessionGitWorktreeService:
             command_argv=None,
             content="Starting register_project.",
             exit_code=None,
+            on_projection_updated=on_projection_updated,
         )
         try:
             async with self.session_manager() as session:
@@ -1253,6 +1287,7 @@ class SessionGitWorktreeService:
                 execution=execution,
                 allocation=allocation,
                 reason=str(exc) or type(exc).__name__,
+                on_projection_updated=on_projection_updated,
             )
             return False
         return True
@@ -1264,6 +1299,7 @@ class SessionGitWorktreeService:
         execution: ActionExecution,
         allocation: SessionGitWorktree,
         worktree_path: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
     ) -> bool:
         """Upsert catalog state for the action-created Project."""
         await self._append_action_execution_event(
@@ -1273,6 +1309,7 @@ class SessionGitWorktreeService:
             command_argv=None,
             content="Starting upsert_catalog.",
             exit_code=None,
+            on_projection_updated=on_projection_updated,
         )
         try:
             async with self.session_manager() as session:
@@ -1286,6 +1323,7 @@ class SessionGitWorktreeService:
                 execution=execution,
                 allocation=allocation,
                 reason=str(exc) or type(exc).__name__,
+                on_projection_updated=on_projection_updated,
             )
             return False
         return True
@@ -1296,6 +1334,7 @@ class SessionGitWorktreeService:
         agent_id: str,
         execution: ActionExecution,
         path: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
     ) -> None:
         """Refresh catalog status and record a warning on non-blocking failure."""
         await self._append_action_execution_event(
@@ -1305,6 +1344,7 @@ class SessionGitWorktreeService:
             command_argv=None,
             content="Starting refresh_project_status.",
             exit_code=None,
+            on_projection_updated=on_projection_updated,
         )
         try:
             result = await self.agent_project_catalog_service.refresh_project_status(
@@ -1319,6 +1359,7 @@ class SessionGitWorktreeService:
                 command_argv=None,
                 content=str(exc) or type(exc).__name__,
                 exit_code=None,
+                on_projection_updated=on_projection_updated,
             )
             return
         match result:
@@ -1332,6 +1373,7 @@ class SessionGitWorktreeService:
                     command_argv=None,
                     content=entry.status_detail or f"Project status is {entry.status}.",
                     exit_code=None,
+                    on_projection_updated=on_projection_updated,
                 )
             case Failure(error):
                 match error:
@@ -1343,6 +1385,7 @@ class SessionGitWorktreeService:
                             command_argv=None,
                             content=error.reason,
                             exit_code=None,
+                            on_projection_updated=on_projection_updated,
                         )
                     case _:
                         assert_never(error)
@@ -1353,6 +1396,7 @@ class SessionGitWorktreeService:
         self,
         *,
         execution: ActionExecution,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
     ) -> RuntimeOperationTextCallback:
         """Create a callback that persists streamed action stdout/stderr."""
 
@@ -1369,6 +1413,7 @@ class SessionGitWorktreeService:
                 command_argv=None,
                 content=delta.text,
                 exit_code=None,
+                on_projection_updated=on_projection_updated,
             )
 
         return callback
@@ -1382,10 +1427,11 @@ class SessionGitWorktreeService:
         command_argv: list[str] | None,
         content: str | None,
         exit_code: int | None,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
     ) -> ActionExecutionEvent:
         """Append one action execution event in a short transaction."""
         async with self.session_manager() as session:
-            return await self.action_execution_repository.append_event(
+            event = await self.action_execution_repository.append_event(
                 session,
                 ActionExecutionEventCreate(
                     action_execution_id=execution.id,
@@ -1397,6 +1443,30 @@ class SessionGitWorktreeService:
                     exit_code=exit_code,
                 ),
             )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
+        return event
+
+    async def _publish_action_execution_projection(
+        self,
+        *,
+        execution: ActionExecution,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+    ) -> None:
+        """Publish the current action execution projection when requested."""
+        if on_projection_updated is None:
+            return
+        async with self.session_manager() as session:
+            repository = self.action_execution_repository
+            projection = await repository.get_projection_by_action_event_id(
+                session,
+                action_event_id=execution.action_event_id,
+            )
+            if projection is None:
+                raise RuntimeError("ActionExecution projection is missing")
+        await on_projection_updated(projection)
 
     async def _mark_action_execution_failed(
         self,
@@ -1404,6 +1474,7 @@ class SessionGitWorktreeService:
         execution: ActionExecution,
         allocation: SessionGitWorktree | None,
         reason: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
     ) -> None:
         """Persist action execution and allocation failure state."""
         failed_at = datetime.now(UTC)
@@ -1414,6 +1485,7 @@ class SessionGitWorktreeService:
             command_argv=None,
             content=reason,
             exit_code=None,
+            on_projection_updated=on_projection_updated,
         )
         async with self.session_manager() as session:
             if allocation is not None:
@@ -1429,6 +1501,10 @@ class SessionGitWorktreeService:
                 failure_summary=reason,
                 failed_at=failed_at,
             )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
 
     async def _sync_skill_projection_for_project_change(
         self,
@@ -1936,6 +2012,11 @@ class SessionGitWorktreeService:
                     deadline_at=_git_operation_deadline(),
                     text_output_callback=None,
                 )
+            await self._cleanup_empty_session_worktree_parent(
+                runtime=runtime,
+                allocation=allocation,
+                on_event_appended=on_event_appended,
+            )
             cleaned_at = datetime.now(UTC)
             async with self.session_manager() as session:
                 await self.agent_project_catalog_repository.delete_entry_by_path(
@@ -1976,6 +2057,66 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
             )
             return None
+
+    async def _cleanup_empty_session_worktree_parent(
+        self,
+        *,
+        runtime: AgentRuntime,
+        allocation: SessionGitWorktree,
+        on_event_appended: SessionInitializationEventCallback | None,
+    ) -> None:
+        """Delete the session worktree directory after its last child is removed."""
+        runner_operations = self.runner_operations
+        if runner_operations is None:
+            raise RuntimeError("Runtime runner operations are unavailable")
+        parent_path = _session_worktree_parent_path(allocation.worktree_path)
+        if parent_path is None:
+            return
+        try:
+            listed = await runner_operations.list_files(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                path=parent_path,
+                recursive=False,
+                deadline_at=_git_operation_deadline(),
+            )
+            if listed.entries:
+                return
+            await runner_operations.delete_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                path=parent_path,
+                recursive=False,
+                deadline_at=_git_operation_deadline(),
+            )
+            await self._append_event(
+                initialization_id=allocation.initialization_id,
+                step_id=None,
+                session_id=allocation.session_id,
+                kind=SessionInitializationEventKind.INFO,
+                command_argv=None,
+                content="Empty session worktree directory cleanup completed.",
+                exit_code=0,
+                on_event_appended=on_event_appended,
+            )
+        except (
+            RuntimeRunnerOperationFailedError,
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ) as exc:
+            await self._append_event(
+                initialization_id=allocation.initialization_id,
+                step_id=None,
+                session_id=allocation.session_id,
+                kind=SessionInitializationEventKind.WARNING,
+                command_argv=None,
+                content=(
+                    "Empty session worktree directory cleanup skipped: "
+                    f"{str(exc) or type(exc).__name__}"
+                ),
+                exit_code=None,
+                on_event_appended=on_event_appended,
+            )
 
     async def _mark_cleanup_targets_failed(
         self,
@@ -2817,6 +2958,17 @@ def _handle_from_worktree_path(worktree_path: str) -> str:
     """Recover the session handle from an allocated worktree path."""
     relative = PurePosixPath(worktree_path).relative_to(_WORKTREE_ROOT)
     return relative.parts[0]
+
+
+def _session_worktree_parent_path(worktree_path: str) -> str | None:
+    """Return the session-scoped worktree parent directory for an allocated path."""
+    try:
+        relative = PurePosixPath(worktree_path).relative_to(_WORKTREE_ROOT)
+    except ValueError:
+        return None
+    if len(relative.parts) < 2:
+        return None
+    return (_WORKTREE_ROOT / relative.parts[0]).as_posix()
 
 
 def _cleanup_ownership_error(

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from azents.engine.events.types import Attachment as EventAttachment
 from azents.engine.events.types import Event
+from azents.repos.action_execution.data import ActionExecutionProjection
 from azents.repos.session_initialization.data import SessionInitializationEvent
 from azents.services.session_initialization import SessionInitializationProjection
 
@@ -171,6 +172,17 @@ def chat_live_run_cleared_dump(session_id: str) -> dict[str, object]:
     return {
         "type": "live_run_cleared",
         "session_id": session_id,
+    }
+
+
+def chat_action_execution_updated_dump(
+    projection: ActionExecutionProjection,
+) -> dict[str, object]:
+    """Convert action execution projection update to chat WS wire dict."""
+    return {
+        "type": "action_execution_updated",
+        "session_id": projection.execution.session_id,
+        "action_execution": projection.model_dump(mode="json"),
     }
 
 
