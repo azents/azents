@@ -3,12 +3,12 @@
 import {
   Badge,
   Button,
-  Card,
   Code,
   Group,
+  Paper,
+  rem,
   Stack,
   Text,
-  Timeline,
 } from "@mantine/core";
 import { IconAlertCircle, IconCheck, IconLoader2 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
@@ -70,6 +70,10 @@ function statusLabel(
   }
 }
 
+function exitCodeLabel(exitCode?: number | null): string | null {
+  return typeof exitCode === "number" ? `exit ${exitCode}` : null;
+}
+
 export function ActionExecutionTimelineCard({
   actionExecution,
   onRetry,
@@ -78,38 +82,39 @@ export function ActionExecutionTimelineCard({
   const t = useTranslations("chat.actionExecution");
   const { execution, events } = actionExecution;
   const failed = execution.status === "failed";
-  const visibleEvents = events.slice(-8);
+  const visibleEvents = events.slice(-4);
 
   return (
-    <Card withBorder radius="md" p="md" my="sm">
-      <Stack gap="sm">
-        <Group justify="space-between" align="flex-start" gap="sm">
-          <Stack gap={2}>
-            <Group gap="xs">
-              <Text fw={600}>{t("title")}</Text>
-              <Badge
-                color={statusColor(execution.status)}
-                variant="light"
-                leftSection={statusIcon(execution.status)}
-              >
-                {statusLabel(execution.status, t)}
-              </Badge>
-            </Group>
-            <Text size="sm" c="dimmed">
+    <Paper withBorder radius="sm" px="sm" py={rem(6)} my={rem(4)}>
+      <Stack gap={rem(4)}>
+        <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
+          <Group gap="xs" miw={0} wrap="nowrap">
+            <Text size="sm" fw={600} truncate>
+              {t("title")}
+            </Text>
+            <Badge
+              size="sm"
+              color={statusColor(execution.status)}
+              variant="light"
+              leftSection={statusIcon(execution.status)}
+            >
+              {statusLabel(execution.status, t)}
+            </Badge>
+            <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
               {t("attempt", { attempt: execution.attempt })}
             </Text>
-          </Stack>
+          </Group>
           {failed && (
-            <Group gap="xs">
+            <Group gap={rem(4)} wrap="nowrap">
               <Button
-                size="xs"
+                size="compact-xs"
                 variant="light"
                 onClick={() => onRetry(execution.id)}
               >
                 {t("retry")}
               </Button>
               <Button
-                size="xs"
+                size="compact-xs"
                 color="gray"
                 variant="subtle"
                 onClick={() => onDiscard(execution.id)}
@@ -121,35 +126,47 @@ export function ActionExecutionTimelineCard({
         </Group>
 
         {execution.failure_summary && (
-          <Text size="sm" c="red">
+          <Text size="xs" c="red" style={{ whiteSpace: "pre-wrap" }}>
             {execution.failure_summary}
           </Text>
         )}
 
         {visibleEvents.length > 0 && (
-          <Timeline
-            active={visibleEvents.length - 1}
-            bulletSize={18}
-            lineWidth={1}
-          >
-            {visibleEvents.map((event) => (
-              <Timeline.Item
-                key={event.id}
-                title={eventLabel(event.kind, event.step_key)}
-              >
-                {event.command_argv && event.command_argv.length > 0 && (
-                  <Code block>{event.command_argv.join(" ")}</Code>
-                )}
-                {event.content && (
-                  <Text size="sm" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
-                    {event.content}
-                  </Text>
-                )}
-              </Timeline.Item>
-            ))}
-          </Timeline>
+          <Stack gap={rem(3)}>
+            {visibleEvents.map((event) => {
+              const exitCode = exitCodeLabel(event.exit_code);
+              return (
+                <Stack key={event.id} gap={rem(2)}>
+                  <Group gap={rem(4)} wrap="nowrap" align="baseline">
+                    <Text size="xs" c="dimmed" fw={500} truncate>
+                      {eventLabel(event.kind, event.step_key)}
+                    </Text>
+                    {exitCode !== null && (
+                      <Text size="xs" c="dimmed">
+                        {exitCode}
+                      </Text>
+                    )}
+                  </Group>
+                  {event.command_argv && event.command_argv.length > 0 && (
+                    <Code block fz="xs" px="xs" py={rem(3)}>
+                      {event.command_argv.join(" ")}
+                    </Code>
+                  )}
+                  {event.content && (
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      style={{ whiteSpace: "pre-wrap" }}
+                    >
+                      {event.content}
+                    </Text>
+                  )}
+                </Stack>
+              );
+            })}
+          </Stack>
         )}
       </Stack>
-    </Card>
+    </Paper>
   );
 }
