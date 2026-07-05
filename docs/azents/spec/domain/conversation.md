@@ -87,8 +87,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-04
-spec_version: 83
+last_verified_at: 2026-07-05
+spec_version: 84
 ---
 
 # Conversation & Events
@@ -174,8 +174,9 @@ session list in the Agent rail and navigate selected sessions through
 `/w/{handle}/agents/{agent_id}/sessions/new`, which is a draft route and must not create an
 `AgentSession` row. The draft route renders the Agent top bar plus the chat input surface, but it does
 not render session-scoped Projects or Context tabs. The draft composer shows a compact additive
-workspace selector where existing Projects and new worktree items are added to one list; the worktree
-base branch picker shows local branches only. On first-message success, azents-web replaces the draft
+workspace selector where repository folders are added to one list and each selected folder can switch
+between repository and new worktree modes from the row-level type selector; the worktree base branch
+picker shows local branches only. On first-message success, azents-web replaces the draft
 URL with the created session URL and invalidates the Agent session list cache.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`

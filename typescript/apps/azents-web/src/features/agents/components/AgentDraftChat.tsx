@@ -32,7 +32,7 @@ export function AgentDraftChat(
     projectPickerState,
     isProjectPickerOpen,
     onAddPresetProject,
-    onAddWorktreeProject,
+    onSetWorkspaceItemKind,
     onActivateWorktreeItem,
     onSetWorktreeStartingRef,
     onRemoveWorkspaceItem,
@@ -121,8 +121,8 @@ export function AgentDraftChat(
             workspaceItems={workspaceItems}
             onActivateWorktreeItem={onActivateWorktreeItem}
             onAddPresetProject={onAddPresetProject}
-            onAddWorktreeProject={onAddWorktreeProject}
             onOpenProjectPicker={onOpenProjectPicker}
+            onSetWorkspaceItemKind={onSetWorkspaceItemKind}
             onRemoveWorkspaceItem={onRemoveWorkspaceItem}
             onSetWorktreeStartingRef={onSetWorktreeStartingRef}
           />

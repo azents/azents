@@ -11,6 +11,7 @@ import {
   Loader,
   Modal,
   Paper,
+  rem,
   ScrollArea,
   Stack,
   Text,
@@ -180,6 +181,15 @@ export function WorkspaceDirectoryPickerModal({
             </Text>
           </Stack>
           <Group gap="xs">
+            <Button
+              disabled={state.currentPath === workspaceRoot}
+              leftSection={<IconFolderPlus size={rem(16)} />}
+              size="xs"
+              variant="light"
+              onClick={() => onSelectDirectory(state.currentPath)}
+            >
+              {t("projectPickerSelectCurrent")}
+            </Button>
             <Tooltip label={t("workspacePanel.refresh")}>
               <ActionIcon
                 aria-label={t("workspacePanel.refresh")}

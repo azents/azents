@@ -38,6 +38,8 @@ export type NewSessionWorkspaceItemState =
       startingRef: string | null;
     };
 
+export type NewSessionWorkspaceItemKind = NewSessionWorkspaceItemState["type"];
+
 export type ProjectPickerPurpose = "existing_project" | "git_worktree";
 
 export type GitRefPreviewState =
@@ -60,6 +62,10 @@ export interface AgentDraftChatContainerOutput {
   isProjectPickerOpen: boolean;
   onAddPresetProject: (path: string) => void;
   onAddWorktreeProject: (path: string) => void;
+  onSetWorkspaceItemKind: (
+    itemId: string,
+    kind: NewSessionWorkspaceItemKind,
+  ) => void;
   onActivateWorktreeItem: (itemId: string) => void;
   onSetWorktreeStartingRef: (itemId: string, ref: string | null) => void;
   onRemoveWorkspaceItem: (itemId: string) => void;
@@ -379,6 +385,45 @@ export function useAgentDraftChatContainer(
     setActiveWorktreeItemId(item.id);
   }, []);
 
+  const onSetWorkspaceItemKind = useCallback(
+    (itemId: string, kind: NewSessionWorkspaceItemKind): void => {
+      defaultsAppliedRef.current = true;
+      setWorkspaceItems((previous) =>
+        previous.map((item) => {
+          if (item.id !== itemId) {
+            return item;
+          }
+          if (kind === "existing_project") {
+            if (item.type === "existing_project") {
+              return item;
+            }
+            return {
+              id: item.id,
+              type: "existing_project",
+              path: item.sourceProjectPath,
+            };
+          }
+          if (item.type === "git_worktree") {
+            return item;
+          }
+          return {
+            id: item.id,
+            type: "git_worktree",
+            sourceProjectPath: item.path,
+            startingRef: null,
+          };
+        }),
+      );
+      setActiveWorktreeItemId((current) => {
+        if (kind === "git_worktree") {
+          return itemId;
+        }
+        return current === itemId ? null : current;
+      });
+    },
+    [],
+  );
+
   const onActivateWorktreeItem = useCallback((itemId: string): void => {
     setActiveWorktreeItemId(itemId);
   }, []);
@@ -565,6 +610,7 @@ export function useAgentDraftChatContainer(
     isProjectPickerOpen: projectPickerOpen,
     onAddPresetProject,
     onAddWorktreeProject,
+    onSetWorkspaceItemKind,
     onActivateWorktreeItem,
     onSetWorktreeStartingRef,
     onRemoveWorkspaceItem,
