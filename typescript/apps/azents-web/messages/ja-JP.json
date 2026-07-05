@@ -1014,6 +1014,19 @@
       "cleanupRetryUnavailable": "クリーンアップの再試行はまだ利用できません。",
       "deletePendingInputs": "保留中の入力を削除 ({count})"
     },
+    "actionExecution": {
+      "title": "Worktree アクション",
+      "attempt": "試行 {attempt}",
+      "retry": "再試行",
+      "discard": "破棄",
+      "status": {
+        "pending": "保留中",
+        "running": "実行中",
+        "completed": "完了",
+        "failed": "失敗",
+        "failed_final": "破棄済み"
+      }
+    },
     "copy": "コピー",
     "copied": "コピー済み",
     "mermaidRendering": "Mermaid 図をレンダリング中…",

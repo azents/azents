@@ -194,6 +194,25 @@ class ActionExecutionRepository:
         )
         return ActionExecutionProjection(execution=execution, events=events)
 
+    async def list_projections_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> list[ActionExecutionProjection]:
+        """List action execution projections for a session in creation order."""
+        executions = await self.list_by_session_id(session, session_id=session_id)
+        return [
+            ActionExecutionProjection(
+                execution=execution,
+                events=await self.list_events(
+                    session,
+                    action_execution_id=execution.id,
+                ),
+            )
+            for execution in executions
+        ]
+
     async def mark_running(
         self,
         session: AsyncSession,

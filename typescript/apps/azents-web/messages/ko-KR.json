@@ -1014,6 +1014,19 @@
       "cleanupRetryUnavailable": "아직 정리 재시도를 사용할 수 없습니다.",
       "deletePendingInputs": "대기 입력 삭제 ({count})"
     },
+    "actionExecution": {
+      "title": "Worktree 작업",
+      "attempt": "시도 {attempt}",
+      "retry": "다시 시도",
+      "discard": "건너뛰기",
+      "status": {
+        "pending": "대기 중",
+        "running": "실행 중",
+        "completed": "완료됨",
+        "failed": "실패",
+        "failed_final": "건너뜀"
+      }
+    },
     "copy": "복사",
     "copied": "복사됨",
     "mermaidRendering": "Mermaid 다이어그램 렌더링 중…",

@@ -19,7 +19,12 @@ from azents.broker.types import (
     SessionBroker,
     SessionWakeUp,
 )
-from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.enums import (
+    ActionExecutionStatus,
+    AgentRunPhase,
+    AgentRunStatus,
+    EventKind,
+)
 from azents.core.tools import (
     SessionType,
     Toolkit,
@@ -112,7 +117,10 @@ from azents.services.chat.data import (
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
 from azents.services.model_file import ModelFileService
-from azents.services.session_git_worktree import SessionGitWorktreeService
+from azents.services.session_git_worktree import (
+    GitWorktreeActionExecutionResult,
+    SessionGitWorktreeService,
+)
 from azents.services.session_title import SessionTitleService
 from azents.transport.chat import (
     chat_history_event_appended_dump,
@@ -1237,39 +1245,97 @@ class RunExecutor:
         session_id: str,
         events: Sequence[Event],
     ) -> OperationActionProcessResult:
-        """Execute promoted operation TurnActions before model dispatch."""
+        """Execute operation TurnActions before model dispatch."""
         context_invalidated = False
+        processed_action_event_ids: set[str] = set()
         for event in events:
             if event.kind is not EventKind.ACTION_MESSAGE:
                 continue
-            payload = event.payload
-            if not isinstance(payload, ActionMessagePayload):
-                continue
-            action = payload.action
-            match action:
-                case CreateGitWorktreeAction():
-                    result = (
-                        await self.session_git_worktree_service.run_git_worktree_action(
-                            agent_id=agent_id,
-                            session_id=session_id,
-                            action_event_id=event.id,
-                            action=action,
-                        )
+            result = await self._process_operation_action_event(
+                agent_id=agent_id,
+                session_id=session_id,
+                event=event,
+            )
+            processed_action_event_ids.add(event.id)
+            if not result.completed:
+                return OperationActionProcessResult(
+                    context_invalidated=context_invalidated,
+                    blocked=True,
+                )
+            context_invalidated = context_invalidated or result.context_invalidated
+
+        async with self.session_manager() as session:
+            list_projections = (
+                self.session_git_worktree_service.list_action_execution_projections
+            )
+            projections = await list_projections(
+                session,
+                session_id=session_id,
+            )
+            pending_action_event_ids = [
+                projection.execution.action_event_id
+                for projection in projections
+                if projection.execution.status is ActionExecutionStatus.PENDING
+                and projection.execution.action_event_id
+                not in processed_action_event_ids
+            ]
+            retry_events = [
+                event
+                for action_event_id in pending_action_event_ids
+                if (
+                    event := await self.event_transcript_repository.get_by_id(
+                        session,
+                        event_id=action_event_id,
                     )
-                    if not result.completed:
-                        return OperationActionProcessResult(
-                            context_invalidated=context_invalidated,
-                            blocked=True,
-                        )
-                    context_invalidated = (
-                        context_invalidated or result.context_invalidated
-                    )
-                case _:
-                    continue
+                )
+                is not None
+            ]
+
+        for event in retry_events:
+            result = await self._process_operation_action_event(
+                agent_id=agent_id,
+                session_id=session_id,
+                event=event,
+            )
+            if not result.completed:
+                return OperationActionProcessResult(
+                    context_invalidated=context_invalidated,
+                    blocked=True,
+                )
+            context_invalidated = context_invalidated or result.context_invalidated
         return OperationActionProcessResult(
             context_invalidated=context_invalidated,
             blocked=False,
         )
+
+    async def _process_operation_action_event(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        event: Event,
+    ) -> GitWorktreeActionExecutionResult:
+        """Execute one operation action event."""
+        payload = event.payload
+        if not isinstance(payload, ActionMessagePayload):
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        action = payload.action
+        match action:
+            case CreateGitWorktreeAction():
+                return await self.session_git_worktree_service.run_git_worktree_action(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    action_event_id=event.id,
+                    action=action,
+                )
+            case _:
+                return GitWorktreeActionExecutionResult(
+                    completed=True,
+                    context_invalidated=False,
+                )
 
     async def _promote_input_buffers(
         self,

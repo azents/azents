@@ -1014,6 +1014,19 @@
       "cleanupRetryUnavailable": "Cleanup retry is not available yet.",
       "deletePendingInputs": "Delete pending inputs ({count})"
     },
+    "actionExecution": {
+      "title": "Worktree action",
+      "attempt": "Attempt {attempt}",
+      "retry": "Retry",
+      "discard": "Discard",
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "failed_final": "Discarded"
+      }
+    },
     "copy": "Copy",
     "copied": "Copied",
     "mermaidRendering": "Rendering Mermaid diagram…",

@@ -42,6 +42,8 @@ function actionLabel(action: ChatAction): string {
       return "/goal";
     case "skill":
       return `/${skillNameFromPath(action.skill_path)}`;
+    case "create_git_worktree":
+      return `/worktree ${action.starting_ref}`;
   }
 }
 

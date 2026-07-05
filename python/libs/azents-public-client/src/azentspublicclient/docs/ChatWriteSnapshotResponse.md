@@ -13,6 +13,7 @@ Name | Type | Description | Notes
 **todo** | [**TodoStateResponse**](TodoStateResponse.md) |  | [optional] 
 **goal** | [**GoalStateResponse**](GoalStateResponse.md) |  | [optional] 
 **initialization** | [**SessionInitializationResponse**](SessionInitializationResponse.md) |  | [optional] 
+**action_executions** | [**List[ActionExecutionProjectionResponse]**](ActionExecutionProjectionResponse.md) | Current action execution projections | [optional] 
 
 ## Example
 

@@ -42,8 +42,8 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
                     ],
                 setup_actions = [
                     azentspublicclient.models.create_git_worktree_action.CreateGitWorktreeAction(
-                        type = 'create_git_worktree',
-                        source_project_path = '0',
+                        type = 'create_git_worktree', 
+                        source_project_path = '0', 
                         starting_ref = '0', )
                     ],
                 attachments = [
@@ -59,8 +59,8 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
                     ],
                 setup_actions = [
                     azentspublicclient.models.create_git_worktree_action.CreateGitWorktreeAction(
-                        type = 'create_git_worktree',
-                        source_project_path = '0',
+                        type = 'create_git_worktree', 
+                        source_project_path = '0', 
                         starting_ref = '0', )
                     ],
         )

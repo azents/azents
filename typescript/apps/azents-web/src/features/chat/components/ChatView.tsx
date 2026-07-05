@@ -43,6 +43,7 @@ import {
 } from "react";
 import { type UploadedFile, useFileUpload } from "../hooks/useFileUpload";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
+import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
@@ -57,6 +58,7 @@ import { SubagentBlock } from "./SubagentBlock";
 import { SubagentDetailModal } from "./SubagentDetailModal";
 import { TurnDivider } from "./TurnDivider";
 import type {
+  ActionExecutionProjection,
   AuthorizationRequest,
   ChatAction,
   ChatLiveRunState,
@@ -211,6 +213,7 @@ function getTimelineItemIds(
   pendingInputBuffers: PendingInputBuffer[],
   initialization: SessionInitializationResponse | null,
   liveRun: ChatLiveRunState | null,
+  actionExecutions: ActionExecutionProjection[],
 ): string[] {
   return [
     ...messages.map((message) => `message:${message.id}`),
@@ -219,6 +222,10 @@ function getTimelineItemIds(
     ...(initialization === null
       ? []
       : [`initialization:${initialization.id}:${initialization.status}`]),
+    ...actionExecutions.map(
+      (actionExecution) =>
+        `action:${actionExecution.execution.id}:${actionExecution.execution.status}`,
+    ),
   ];
 }
 
@@ -314,6 +321,8 @@ interface ChatViewProps {
   onAuthorizationComplete: (toolkitId: string) => void;
   /** current session initialization projection */
   initialization: SessionInitializationResponse | null;
+  /** current operation TurnAction execution projections */
+  actionExecutions: ActionExecutionProjection[];
   /** durable initialization event detail state */
   initializationDetailState: SessionInitializationDetailState;
   /** load durable initialization details */
@@ -322,6 +331,10 @@ interface ChatViewProps {
   onRetryInitialization: () => void;
   /** retry Git worktree cleanup */
   onRetryInitializationCleanup: () => void;
+  /** retry a failed action execution */
+  onRetryActionExecution: (actionExecutionId: string) => void;
+  /** discard a failed action execution */
+  onDiscardActionExecution: (actionExecutionId: string) => void;
   /** delete all pending inputs blocked behind initialization */
   onDeletePendingInitializationInputs: () => void;
   /** Workspace panel container output */
@@ -366,10 +379,13 @@ export function ChatView({
   authorizationRequests,
   onAuthorizationComplete,
   initialization,
+  actionExecutions,
   initializationDetailState,
   onLoadInitializationDetails,
   onRetryInitialization,
   onRetryInitializationCleanup,
+  onRetryActionExecution,
+  onDiscardActionExecution,
   onDeletePendingInitializationInputs,
   workspacePanel,
   goal,
@@ -446,10 +462,16 @@ export function ChatView({
       ? liveRun
       : null;
   const liveRetryVisible = liveRetryRun !== null;
+  const visibleActionExecutions = actionExecutions.filter(
+    (actionExecution) =>
+      actionExecution.execution.status !== "completed" ||
+      actionExecution.events.length > 0,
+  );
   const hasTimelineItems =
     messages.length > 0 ||
     pendingInputBuffers.length > 0 ||
     liveRetryVisible ||
+    visibleActionExecutions.length > 0 ||
     shouldShowInitializationCard;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
@@ -647,6 +669,7 @@ export function ChatView({
           pendingInputBuffers,
           initialization,
           liveRun,
+          actionExecutions,
         ),
       );
     }
@@ -655,6 +678,7 @@ export function ChatView({
     pendingInputBuffers,
     initialization,
     liveRun,
+    actionExecutions,
     isLoadingMore,
     markProgrammaticScroll,
   ]);
@@ -668,6 +692,7 @@ export function ChatView({
       (messages.length === 0 &&
         pendingInputBuffers.length === 0 &&
         !liveRetryVisible &&
+        visibleActionExecutions.length === 0 &&
         !shouldShowInitializationCard) ||
       savedScrollRef.current
     ) {
@@ -704,6 +729,7 @@ export function ChatView({
         pendingInputBuffers,
         initialization,
         liveRun,
+        actionExecutions,
       ),
     );
 
@@ -717,6 +743,8 @@ export function ChatView({
     initialization,
     liveRun,
     liveRetryVisible,
+    actionExecutions,
+    visibleActionExecutions.length,
     shouldShowInitializationCard,
     markProgrammaticScroll,
     pinToBottom,
@@ -761,6 +789,7 @@ export function ChatView({
       messages.length === 0 &&
       pendingInputBuffers.length === 0 &&
       !liveRetryVisible &&
+      visibleActionExecutions.length === 0 &&
       !shouldShowInitializationCard
     ) {
       isInitialScrollRef.current = true;
@@ -774,6 +803,7 @@ export function ChatView({
     messages.length,
     pendingInputBuffers.length,
     liveRetryVisible,
+    visibleActionExecutions.length,
     shouldShowInitializationCard,
   ]);
 
@@ -793,6 +823,7 @@ export function ChatView({
       pendingInputBuffers,
       initialization,
       liveRun,
+      actionExecutions,
     );
     const hasNewMessage = timelineItemIds.some((id) => !prevIds.has(id));
 
@@ -818,6 +849,7 @@ export function ChatView({
     pendingInputBuffers,
     initialization,
     liveRun,
+    actionExecutions,
     schedulePinToBottom,
   ]);
 
@@ -1173,6 +1205,15 @@ export function ChatView({
                       />
                     ),
                   )}
+                {chatTimelineState.type === "LATEST_FOLLOWING" &&
+                  visibleActionExecutions.map((actionExecution) => (
+                    <ActionExecutionTimelineCard
+                      key={actionExecution.execution.id}
+                      actionExecution={actionExecution}
+                      onRetry={onRetryActionExecution}
+                      onDiscard={onDiscardActionExecution}
+                    />
+                  ))}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   shouldShowInitializationCard && (
                     <InitializationTimelineCard

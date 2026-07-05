@@ -225,6 +225,18 @@ class EventTranscriptRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        event_id: str,
+    ) -> Event | None:
+        """Fetch one event by ID."""
+        rdb = await session.get(RDBEvent, event_id)
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
     async def exists_in_session(
         self,
         session: AsyncSession,

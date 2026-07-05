@@ -17,21 +17,27 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
-from typing_extensions import Annotated
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ChatFailedRunRetryRequest(BaseModel):
+class ActionExecutionEventResponse(BaseModel):
     """
-    REST failed-run retry request.
+    Action execution event response.
     """ # noqa: E501
-    agent_id: StrictStr = Field(description="Agent ID")
-    failed_event_id: StrictStr = Field(description="Terminal failed-run system_error event ID")
-    client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
+    id: StrictStr = Field(description="Action execution event ID")
+    action_execution_id: StrictStr = Field(description="Action execution ID")
+    sequence: StrictInt = Field(description="Monotonic event sequence")
+    kind: StrictStr = Field(description="Event kind")
+    step_key: Optional[StrictStr] = None
+    command_argv: Optional[List[StrictStr]] = None
+    content: Optional[StrictStr] = None
+    exit_code: Optional[StrictInt] = None
+    created_at: datetime = Field(description="Created time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_id", "failed_event_id", "client_request_id"]
+    __properties: ClassVar[List[str]] = ["id", "action_execution_id", "sequence", "kind", "step_key", "command_argv", "content", "exit_code", "created_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -51,7 +57,7 @@ class ChatFailedRunRetryRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ChatFailedRunRetryRequest from a JSON string"""
+        """Create an instance of ActionExecutionEventResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -79,11 +85,31 @@ class ChatFailedRunRetryRequest(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if step_key (nullable) is None
+        # and model_fields_set contains the field
+        if self.step_key is None and "step_key" in self.model_fields_set:
+            _dict['step_key'] = None
+
+        # set to None if command_argv (nullable) is None
+        # and model_fields_set contains the field
+        if self.command_argv is None and "command_argv" in self.model_fields_set:
+            _dict['command_argv'] = None
+
+        # set to None if content (nullable) is None
+        # and model_fields_set contains the field
+        if self.content is None and "content" in self.model_fields_set:
+            _dict['content'] = None
+
+        # set to None if exit_code (nullable) is None
+        # and model_fields_set contains the field
+        if self.exit_code is None and "exit_code" in self.model_fields_set:
+            _dict['exit_code'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ChatFailedRunRetryRequest from a dict"""
+        """Create an instance of ActionExecutionEventResponse from a dict"""
         if obj is None:
             return None
 
@@ -91,9 +117,15 @@ class ChatFailedRunRetryRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "agent_id": obj.get("agent_id"),
-            "failed_event_id": obj.get("failed_event_id"),
-            "client_request_id": obj.get("client_request_id")
+            "id": obj.get("id"),
+            "action_execution_id": obj.get("action_execution_id"),
+            "sequence": obj.get("sequence"),
+            "kind": obj.get("kind"),
+            "step_key": obj.get("step_key"),
+            "command_argv": obj.get("command_argv"),
+            "content": obj.get("content"),
+            "exit_code": obj.get("exit_code"),
+            "created_at": obj.get("created_at")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

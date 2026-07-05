@@ -21,6 +21,7 @@ import {
 import { useChatWebSocket } from "../hooks/useChatWebSocket";
 import type { UploadedFile } from "../hooks/useFileUpload";
 import type {
+  ActionExecutionProjection,
   AgentRunPhase,
   AgentRunStatus,
   AuthorizationRequest,
@@ -53,6 +54,27 @@ import type {
 } from "@azents/public-client";
 
 export type SessionRunState = "idle" | "running";
+
+type WritableChatAction = Extract<
+  ChatAction,
+  { type: "command" } | { type: "goal" } | { type: "skill" }
+>;
+
+function writableChatAction(
+  action?: ChatAction | null,
+): WritableChatAction | null {
+  if (action == null) {
+    return null;
+  }
+  switch (action.type) {
+    case "command":
+    case "goal":
+    case "skill":
+      return action;
+    case "create_git_worktree":
+      return null;
+  }
+}
 
 interface ChatSessionContainerProps {
   /** URL-selected AgentSession ID */
@@ -138,6 +160,8 @@ export interface ChatSessionContainerOutput {
   onAuthorizationComplete: (toolkitId: string) => void;
   /** current session initialization projection */
   initialization: SessionInitializationResponse | null;
+  /** current operation TurnAction execution projections */
+  actionExecutions: ActionExecutionProjection[];
   /** durable initialization event detail state */
   initializationDetailState: SessionInitializationDetailState;
   /** load durable initialization details */
@@ -146,6 +170,10 @@ export interface ChatSessionContainerOutput {
   onRetryInitialization: () => void;
   /** retry Git worktree cleanup */
   onRetryInitializationCleanup: () => void;
+  /** retry a failed action execution */
+  onRetryActionExecution: (actionExecutionId: string) => void;
+  /** discard a failed action execution */
+  onDiscardActionExecution: (actionExecutionId: string) => void;
   /** delete all pending inputs blocked behind initialization */
   onDeletePendingInitializationInputs: () => void;
   /** latest turn usage */
@@ -204,6 +232,17 @@ function chatActionFromValue(value: unknown): ChatAction | null {
     typeof value.skill_path === "string"
   ) {
     return { type: "skill", skill_path: value.skill_path };
+  }
+  if (
+    value.type === "create_git_worktree" &&
+    typeof value.source_project_path === "string" &&
+    typeof value.starting_ref === "string"
+  ) {
+    return {
+      type: "create_git_worktree",
+      source_project_path: value.source_project_path,
+      starting_ref: value.starting_ref,
+    };
   }
   return null;
 }
@@ -1156,6 +1195,7 @@ interface ManagedLiveState {
   todo: TodoStateSnapshot;
   goal: GoalStateSnapshot;
   initialization: SessionInitializationResponse | null;
+  actionExecutions: ActionExecutionProjection[];
 }
 
 interface LiveTaxonomySnapshot {
@@ -1166,6 +1206,7 @@ interface LiveTaxonomySnapshot {
   todo?: TodoStateSnapshot | null;
   goal?: Partial<GoalStateSnapshot> | null;
   initialization?: SessionInitializationResponse | null;
+  action_executions?: ActionExecutionProjection[] | null;
 }
 
 function emptyPartialHistoryState(): PartialHistoryState {
@@ -1205,6 +1246,7 @@ function emptyManagedLiveState(): ManagedLiveState {
     todo: emptyTodoState(),
     goal: emptyGoalState(),
     initialization: null,
+    actionExecutions: [],
   };
 }
 
@@ -1321,6 +1363,7 @@ function replaceLiveStateFromSnapshot(
     todo: live.todo ?? emptyTodoState(),
     goal: normalizeGoalState(live.goal),
     initialization: live.initialization ?? null,
+    actionExecutions: live.action_executions ?? [],
   };
 }
 
@@ -1419,6 +1462,7 @@ function mapChatWriteSnapshot(response: ChatWriteResponse): ManagedLiveState {
     todo: response.snapshot.todo,
     goal: normalizeGoalState(response.snapshot.goal),
     initialization: response.snapshot.initialization,
+    action_executions: response.snapshot.action_executions,
   });
 }
 
@@ -2082,6 +2126,10 @@ export function useChatSessionContainer(
 
   const retryInitializationMutation =
     trpc.chat.retrySessionInitialization.useMutation();
+  const retryActionExecutionMutation =
+    trpc.chat.retryActionExecution.useMutation();
+  const discardActionExecutionMutation =
+    trpc.chat.discardActionExecution.useMutation();
   const cleanupWorktreeMutation =
     trpc.chat.cleanupSessionGitWorktree.useMutation();
 
@@ -2143,6 +2191,38 @@ export function useChatSessionContainer(
     refreshInitializationDetail,
     sessionId,
   ]);
+
+  const onRetryActionExecution = useCallback(
+    (actionExecutionId: string): void => {
+      if (retryActionExecutionMutation.isPending) {
+        return;
+      }
+      void retryActionExecutionMutation
+        .mutateAsync({
+          agentId: agent.id,
+          sessionId,
+          actionExecutionId,
+        })
+        .then(() => applyLatestSnapshot(sessionId));
+    },
+    [agent.id, applyLatestSnapshot, retryActionExecutionMutation, sessionId],
+  );
+
+  const onDiscardActionExecution = useCallback(
+    (actionExecutionId: string): void => {
+      if (discardActionExecutionMutation.isPending) {
+        return;
+      }
+      void discardActionExecutionMutation
+        .mutateAsync({
+          agentId: agent.id,
+          sessionId,
+          actionExecutionId,
+        })
+        .then(() => applyLatestSnapshot(sessionId));
+    },
+    [agent.id, applyLatestSnapshot, discardActionExecutionMutation, sessionId],
+  );
 
   const onAuthorizationComplete = useCallback((toolkitId: string) => {
     setAuthorizationRequests((prev) =>
@@ -2233,11 +2313,12 @@ export function useChatSessionContainer(
     ): Promise<boolean> => {
       setWasRestCommandBlocked(false);
       const attachmentUris = attachments?.map((attachment) => attachment.uri);
+      const writableAction = writableChatAction(action);
       const writeKey = JSON.stringify({
         type: "input",
         sessionId,
         message,
-        action: action ?? null,
+        action: writableAction ?? null,
         attachments: attachmentUris ?? [],
       });
       const clientRequestId = clientRequestIdForWrite(writeKey);
@@ -2247,7 +2328,7 @@ export function useChatSessionContainer(
           agentId: agent.id,
           clientRequestId,
           message,
-          action,
+          action: writableAction,
           attachments: attachmentUris,
         }),
       );
@@ -2506,10 +2587,13 @@ export function useChatSessionContainer(
     authorizationRequests,
     onAuthorizationComplete,
     initialization,
+    actionExecutions: managedLiveState.actionExecutions,
     initializationDetailState,
     onLoadInitializationDetails,
     onRetryInitialization,
     onRetryInitializationCleanup,
+    onRetryActionExecution,
+    onDiscardActionExecution,
     onDeletePendingInitializationInputs,
     tokenUsage,
     goal: managedLiveState.goal,
