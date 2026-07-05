@@ -283,6 +283,9 @@ class TestChatSessionInputBuffer:
         assert result.value.run.retry.next_retry_at == (
             run.retry_state.next_retry_at.isoformat() if run.retry_state else None
         )
+        assert len(result.value.run.retry.attempts) == 1
+        assert result.value.run.retry.attempts[0].attempt_number == 2
+        assert result.value.run.retry.attempts[0].user_message == "temporary failure"
         assert result.value.session_run_state == AgentSessionRunState.RUNNING
 
     async def test_flushed_input_buffer_remains_in_message_history(

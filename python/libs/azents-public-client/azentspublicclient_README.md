@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Get Agent Runtime
@@ -154,6 +154,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
 *ChatV1Api* | [**chat_v1_reject_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reject_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject | Reject Agent Project Registration Request
+*ChatV1Api* | [**chat_v1_retry_failed_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 *ChatV1Api* | [**chat_v1_retry_session_initialization**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_session_initialization) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/initialization/retry | Retry Session Initialization
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
 *ChatV1Api* | [**chat_v1_stop_session_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
@@ -304,6 +305,7 @@ Class | Method | HTTP request | Description
  - [ChatEditMessageWriteRequest](azentspublicclient/docs/ChatEditMessageWriteRequest.md)
  - [ChatEventPageResponse](azentspublicclient/docs/ChatEventPageResponse.md)
  - [ChatEventResponse](azentspublicclient/docs/ChatEventResponse.md)
+ - [ChatFailedRunRetryRequest](azentspublicclient/docs/ChatFailedRunRetryRequest.md)
  - [ChatGPTOAuthConfig](azentspublicclient/docs/ChatGPTOAuthConfig.md)
  - [ChatGPTOAuthDeviceStartResponse](azentspublicclient/docs/ChatGPTOAuthDeviceStartResponse.md)
  - [ChatGPTOAuthDeviceStatusResponse](azentspublicclient/docs/ChatGPTOAuthDeviceStatusResponse.md)
@@ -311,6 +313,7 @@ Class | Method | HTTP request | Description
  - [ChatGPTOAuthSessionStatus](azentspublicclient/docs/ChatGPTOAuthSessionStatus.md)
  - [ChatInputWriteRequest](azentspublicclient/docs/ChatInputWriteRequest.md)
  - [ChatInputWriteRequestAction](azentspublicclient/docs/ChatInputWriteRequestAction.md)
+ - [ChatLiveRunRetryAttemptResponse](azentspublicclient/docs/ChatLiveRunRetryAttemptResponse.md)
  - [ChatLiveRunRetryStateResponse](azentspublicclient/docs/ChatLiveRunRetryStateResponse.md)
  - [ChatLiveRunStateResponse](azentspublicclient/docs/ChatLiveRunStateResponse.md)
  - [ChatSessionCreateMessageWriteRequest](azentspublicclient/docs/ChatSessionCreateMessageWriteRequest.md)
@@ -502,7 +505,3 @@ Authentication schemes defined for the API:
 
 
 ## Author
-
-
-
-

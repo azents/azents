@@ -17,25 +17,21 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List
-from azentspublicclient.models.chat_live_run_retry_attempt_response import ChatLiveRunRetryAttemptResponse
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ChatLiveRunRetryStateResponse(BaseModel):
+class ChatFailedRunRetryRequest(BaseModel):
     """
-    Current live failed-run retry state response.
+    REST failed-run retry request.
     """ # noqa: E501
-    status: StrictStr = Field(description="Current retry status")
-    last_error_message: StrictStr = Field(description="Latest user-safe error message")
-    failed_attempt_count: StrictInt = Field(description="Failed attempt count")
-    max_retries: StrictInt = Field(description="Maximum retry count")
-    backoff_seconds: StrictInt = Field(description="Current backoff duration in seconds")
-    next_retry_at: StrictStr = Field(description="Absolute next retry timestamp")
-    attempts: List[ChatLiveRunRetryAttemptResponse] = Field(description="User-safe retry attempt history")
+    agent_id: StrictStr = Field(description="Agent ID")
+    failed_event_id: StrictStr = Field(description="Terminal failed-run system_error event ID")
+    client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["status", "last_error_message", "failed_attempt_count", "max_retries", "backoff_seconds", "next_retry_at", "attempts"]
+    __properties: ClassVar[List[str]] = ["agent_id", "failed_event_id", "client_request_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -55,7 +51,7 @@ class ChatLiveRunRetryStateResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ChatLiveRunRetryStateResponse from a JSON string"""
+        """Create an instance of ChatFailedRunRetryRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -78,13 +74,6 @@ class ChatLiveRunRetryStateResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in attempts (list)
-        _items = []
-        if self.attempts:
-            for _item_attempts in self.attempts:
-                if _item_attempts:
-                    _items.append(_item_attempts.to_dict())
-            _dict['attempts'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -94,7 +83,7 @@ class ChatLiveRunRetryStateResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ChatLiveRunRetryStateResponse from a dict"""
+        """Create an instance of ChatFailedRunRetryRequest from a dict"""
         if obj is None:
             return None
 
@@ -102,13 +91,9 @@ class ChatLiveRunRetryStateResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "status": obj.get("status"),
-            "last_error_message": obj.get("last_error_message"),
-            "failed_attempt_count": obj.get("failed_attempt_count"),
-            "max_retries": obj.get("max_retries"),
-            "backoff_seconds": obj.get("backoff_seconds"),
-            "next_retry_at": obj.get("next_retry_at"),
-            "attempts": [ChatLiveRunRetryAttemptResponse.from_dict(_item) for _item in obj["attempts"]] if obj.get("attempts") is not None else None
+            "agent_id": obj.get("agent_id"),
+            "failed_event_id": obj.get("failed_event_id"),
+            "client_request_id": obj.get("client_request_id")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

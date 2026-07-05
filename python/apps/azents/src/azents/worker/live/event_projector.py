@@ -15,10 +15,13 @@ from azents.engine.events.engine_events import (
     RunStopped,
 )
 from azents.engine.events.types import ActiveToolCall, Event
+from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.transport.chat import (
     chat_live_event_removed_dump,
     chat_live_event_upserted_dump,
+    chat_live_run_cleared_dump,
+    chat_live_run_updated_dump,
 )
 from azents.worker.deps import get_broadcast, get_live_event_store
 from azents.worker.live.partial_batcher import LivePartialBatcher, LivePartialFlush
@@ -124,6 +127,22 @@ class LiveEventProjector:
         await self._live_event_store.clear_session(session_id)
         for event in events:
             await self._publish_event_removed(session_id, event.id)
+
+    async def publish_live_run_updated(
+        self,
+        session_id: str,
+        run: ChatLiveRunState,
+    ) -> None:
+        """Broadcast current live run state."""
+        await self._broadcast.publish(
+            session_id, chat_live_run_updated_dump(session_id, run)
+        )
+
+    async def publish_live_run_cleared(self, session_id: str) -> None:
+        """Broadcast live run state removal."""
+        await self._broadcast.publish(
+            session_id, chat_live_run_cleared_dump(session_id)
+        )
 
     async def remove_event(self, session_id: str, event_id: str) -> None:
         """Remove event from Live event store and broadcast removal action."""

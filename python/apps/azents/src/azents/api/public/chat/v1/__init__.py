@@ -201,6 +201,7 @@ from .data import (
     ChatEditMessageWriteRequest,
     ChatEventPageResponse,
     ChatEventResponse,
+    ChatFailedRunRetryRequest,
     ChatInputWriteRequest,
     ChatLiveRunStateResponse,
     ChatMessageWriteRequest,
@@ -1164,6 +1165,65 @@ async def _write_edit_message_via_rest(
     )
 
 
+async def _write_failed_run_retry_via_rest(
+    chat_service: ChatSessionService,
+    chat_write_service: ChatWriteService,
+    broker: SessionBroker,
+    live_event_store: LiveEventStore,
+    request: ChatFailedRunRetryRequest,
+    *,
+    session_id: str,
+    user_id: str,
+) -> ChatWriteResponse:
+    """Handle manual failed-run retry as an idle-only control action."""
+    resolved_session_id = await _validate_rest_session(
+        chat_service,
+        session_id=session_id,
+        agent_id=request.agent_id,
+        user_id=user_id,
+    )
+    payload = request.model_dump(mode="json")
+    try:
+        accepted = await chat_write_service.create_idempotent_failed_run_retry(
+            agent_id=request.agent_id,
+            session_id=resolved_session_id,
+            user_id=user_id,
+            client_request_id=request.client_request_id,
+            failed_event_id=request.failed_event_id,
+            payload=payload,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if accepted.request.created:
+        await broker.send_message(
+            SessionWakeUp(
+                agent_id=request.agent_id,
+                session_id=resolved_session_id,
+                user_id=user_id,
+                additional_system_prompt=None,
+                interface=None,
+                workspace_id=None,
+                workspace_handle=None,
+            )
+        )
+    snapshot = await _build_chat_write_snapshot(
+        chat_service,
+        live_event_store,
+        session_id=resolved_session_id,
+        user_id=user_id,
+    )
+    return ChatWriteResponse(
+        session_id=resolved_session_id,
+        client_request_id=request.client_request_id,
+        accepted=ChatWriteAcceptedResponse(
+            type="failed_run_retry",
+            id=accepted.failed_event_id,
+        ),
+        snapshot=snapshot,
+        history_reload_required=True,
+    )
+
+
 async def _write_command_via_rest(
     chat_service: ChatSessionService,
     chat_write_service: ChatWriteService,
@@ -1359,6 +1419,29 @@ async def _write_input_via_rest(
             )
         case _:
             raise HTTPException(status_code=400, detail="This action is not supported.")
+
+
+@router.post("/sessions/{session_id}/retry-failed-run")
+async def retry_failed_run(
+    session_id: str,
+    request: ChatFailedRunRetryRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+    chat_write_service: Annotated[ChatWriteService, Depends()],
+    broker: Annotated[SessionBroker, Depends(get_broker)],
+    live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
+) -> ChatWriteResponse:
+    """Accept a manual failed-run retry at the REST boundary."""
+    _validate_session_id(session_id)
+    return await _write_failed_run_retry_via_rest(
+        chat_service,
+        chat_write_service,
+        broker,
+        live_event_store,
+        request,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
 
 
 @router.post("/sessions/{session_id}/edit-message")

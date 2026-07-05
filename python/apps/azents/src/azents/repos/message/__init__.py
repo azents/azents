@@ -43,6 +43,14 @@ from azents.transport.chat import ChatAttachmentSnapshot, chat_attachment_from_e
 
 from .data import ChatMessage
 
+_INVISIBLE_RETRY_ELIGIBILITY_ROLES = {
+    MessageRole.TURN_COMPLETE,
+    MessageRole.RUN_COMPLETE,
+    MessageRole.COMPACTION_STARTED,
+    MessageRole.SUBAGENT_END,
+    MessageRole.COMPACTION,
+}
+
 
 def _validate_payload(row: RDBEvent) -> EventPayload:
     """Validate Event row payload with model by kind."""
@@ -519,6 +527,29 @@ class MessageRepository:
         has_more = has_extra if after is None else False
         has_newer = has_extra if after is not None else False
         return [_to_event(row) for row in rows], has_more, has_newer
+
+    async def get_latest_retry_visible_event(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> RDBEvent | None:
+        """Fetch the newest durable event that is visible in retry eligibility."""
+        result = await session.execute(
+            sa.select(RDBEvent)
+            .where(
+                RDBEvent.session_id == session_id,
+                RDBEvent.reverted.is_(False),
+            )
+            .order_by(RDBEvent.model_order.desc())
+        )
+        for row in result.scalars():
+            message = event_to_chat_message(row)
+            if message is None or self._is_empty(message):
+                continue
+            if message.role in _INVISIBLE_RETRY_ELIGIBILITY_ROLES:
+                continue
+            return row
+        return None
 
     async def mark_reverted_from_model_order(
         self,

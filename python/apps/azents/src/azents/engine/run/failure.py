@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+_FAILED_RUN_ATTEMPT_MESSAGE_MAX_LENGTH = 2000
+
 FailedRunAttemptSource = Literal[
     "model",
     "engine",
@@ -47,6 +49,49 @@ class FailedRunAttempt(BaseModel):
     failure_code: str | None = Field(default=None)
 
 
+class FailedRunAttemptSummary(BaseModel):
+    """User-safe failed-run attempt summary for recovery UI."""
+
+    model_config = ConfigDict(frozen=True)
+
+    attempt_number: int = Field(ge=1)
+    user_message: str = Field(min_length=1)
+    error_type: str = Field(min_length=1)
+    source: FailedRunAttemptSource
+    failed_at: datetime.datetime
+    backoff_seconds: int = Field(ge=0)
+    next_retry_at: datetime.datetime
+    retryability: FailedRunRetryability = Field(default="unknown")
+    failure_code: str | None = Field(default=None)
+    truncated: bool = Field(default=False)
+
+    @classmethod
+    def from_attempt(
+        cls,
+        attempt: FailedRunAttempt,
+        *,
+        backoff_seconds: int,
+        next_retry_at: datetime.datetime,
+    ) -> "FailedRunAttemptSummary":
+        """Build a user-safe attempt summary from one failed attempt."""
+        user_message = attempt.user_message
+        truncated = len(user_message) > _FAILED_RUN_ATTEMPT_MESSAGE_MAX_LENGTH
+        if truncated:
+            user_message = user_message[:_FAILED_RUN_ATTEMPT_MESSAGE_MAX_LENGTH]
+        return cls(
+            attempt_number=attempt.attempt_number,
+            user_message=user_message,
+            error_type=attempt.error_type,
+            source=attempt.source,
+            failed_at=attempt.occurred_at,
+            backoff_seconds=backoff_seconds,
+            next_retry_at=next_retry_at,
+            retryability=attempt.retryability,
+            failure_code=attempt.failure_code,
+            truncated=truncated,
+        )
+
+
 class FailedRunRetryState(BaseModel):
     """Durable retry state stored on ``agent_runs.retry_state``."""
 
@@ -64,6 +109,7 @@ class FailedRunRetryState(BaseModel):
     next_retry_at: datetime.datetime
     retryability: FailedRunRetryability = Field(default="unknown")
     failure_code: str | None = Field(default=None)
+    attempts: list[FailedRunAttemptSummary] = Field(default_factory=list)
 
     @classmethod
     def from_attempt(
@@ -73,8 +119,16 @@ class FailedRunRetryState(BaseModel):
         max_retries: int,
         backoff_seconds: int,
         next_retry_at: datetime.datetime,
+        previous: "FailedRunRetryState | None" = None,
     ) -> "FailedRunRetryState":
         """Build retry state from one failed attempt."""
+        attempt_summary = FailedRunAttemptSummary.from_attempt(
+            attempt,
+            backoff_seconds=backoff_seconds,
+            next_retry_at=next_retry_at,
+        )
+        previous_attempts = [] if previous is None else list(previous.attempts)
+        attempts = [*previous_attempts, attempt_summary][-max_retries:]
         return cls(
             failed_attempt_count=attempt.attempt_number,
             max_retries=max_retries,
@@ -86,6 +140,7 @@ class FailedRunRetryState(BaseModel):
             next_retry_at=next_retry_at,
             retryability=attempt.retryability,
             failure_code=attempt.failure_code,
+            attempts=attempts,
         )
 
 
@@ -102,6 +157,7 @@ class FailedRunFailureMetadata(BaseModel):
     retryability: FailedRunRetryability = Field(default="unknown")
     failure_code: str | None = Field(default=None)
     action_hint: str | None = Field(default=None)
+    attempts: list[FailedRunAttemptSummary] = Field(default_factory=list)
 
     @classmethod
     def from_retry_state(
@@ -120,4 +176,5 @@ class FailedRunFailureMetadata(BaseModel):
             retryability=retry_state.retryability,
             failure_code=retry_state.failure_code,
             action_hint=action_hint,
+            attempts=list(retry_state.attempts),
         )

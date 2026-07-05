@@ -12,10 +12,19 @@ from azents.core.enums import (
     InputBufferKind,
     LLMProvider,
 )
-from azents.engine.events.types import UserMessagePayload
+from azents.engine.events.types import (
+    RunMarkerPayload,
+    SystemErrorPayload,
+    UserMessagePayload,
+)
+from azents.engine.run.failure import (
+    FailedRunAttempt,
+    FailedRunFailureMetadata,
+    FailedRunRetryState,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
-from azents.rdb.models.event import RDBEvent
+from azents.rdb.models.event import JSONValue, RDBEvent
 from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
@@ -120,6 +129,34 @@ class _ModelFileService(ModelFileService):
 
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
+
+
+def _failed_run_system_error_payload() -> dict[str, JSONValue]:
+    """Build a terminal failed-run system_error payload for tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    retry_state = FailedRunRetryState.from_attempt(
+        FailedRunAttempt(
+            user_message="temporary failure",
+            internal_message="RuntimeError('temporary failure')",
+            error_type="RuntimeError",
+            source="engine",
+            visibility="internal",
+            attempt_number=10,
+            occurred_at=now,
+        ),
+        max_retries=10,
+        backoff_seconds=60,
+        next_retry_at=now + datetime.timedelta(seconds=60),
+    )
+    return SystemErrorPayload(
+        content="temporary failure",
+        severity="error",
+        recoverable=True,
+        failure=FailedRunFailureMetadata.from_retry_state(
+            retry_state,
+            finalization_reason="retry_exhausted",
+        ),
+    ).model_dump(mode="json", exclude_none=True)
 
 
 class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
@@ -278,6 +315,162 @@ class TestChatWriteService:
             )
             assert session_after is not None
             assert session_after.run_state == AgentSessionRunState.RUNNING
+
+    async def test_failed_run_retry_reverts_latest_failed_error_and_marks_running(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Manual failed-run retry soft-reverts terminal failure output."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "chat-write-failed-run-retry",
+            )
+            user_id = await _create_user(
+                session,
+                "chat-write-failed-run-retry@example.com",
+            )
+            agent_id = await _create_agent(session, workspace_id, "failed-run-retry")
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            )
+            transcript_repo = EventTranscriptRepository()
+            user_event = await transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=agent_session.id,
+                    kind=EventKind.USER_MESSAGE,
+                    payload=UserMessagePayload(content="do the task").model_dump(
+                        mode="json"
+                    ),
+                ),
+            )
+            failed_event = await transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=agent_session.id,
+                    kind=EventKind.SYSTEM_ERROR,
+                    payload=_failed_run_system_error_payload(),
+                ),
+            )
+            marker = await transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=agent_session.id,
+                    kind=EventKind.RUN_MARKER,
+                    payload=RunMarkerPayload(
+                        run_id="run-1".rjust(32, "0"),
+                        status="failed",
+                        error="temporary failure",
+                    ).model_dump(mode="json", exclude_none=True),
+                ),
+            )
+
+        result = await _service(rdb_session_manager).create_idempotent_failed_run_retry(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            user_id=user_id,
+            client_request_id="retry-failed-run",
+            failed_event_id=failed_event.id,
+            payload={"failed_event_id": failed_event.id},
+        )
+
+        assert result.request.created is True
+        assert result.failed_event_id == failed_event.id
+        async with rdb_session_manager() as session:
+            rows = (
+                await session.execute(
+                    sa.select(RDBEvent).where(
+                        RDBEvent.id.in_([user_event.id, failed_event.id, marker.id])
+                    )
+                )
+            ).scalars()
+            reverted_by_id = {row.id: row.reverted for row in rows}
+            assert reverted_by_id == {
+                user_event.id: False,
+                failed_event.id: True,
+                marker.id: True,
+            }
+            session_after = await AgentSessionRepository().get_by_id(
+                session,
+                agent_session.id,
+            )
+            assert session_after is not None
+            assert session_after.run_state == AgentSessionRunState.RUNNING
+
+        repeated = await _service(
+            rdb_session_manager
+        ).create_idempotent_failed_run_retry(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            user_id=user_id,
+            client_request_id="retry-failed-run",
+            failed_event_id=failed_event.id,
+            payload={"failed_event_id": failed_event.id},
+        )
+
+        assert repeated.request.created is False
+        assert repeated.failed_event_id == failed_event.id
+
+    async def test_failed_run_retry_rejects_stale_failed_error(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Manual retry rejects a failed-run card that has newer visible history."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "chat-write-failed-run-stale",
+            )
+            user_id = await _create_user(
+                session,
+                "chat-write-failed-run-stale@example.com",
+            )
+            agent_id = await _create_agent(session, workspace_id, "failed-run-stale")
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            )
+            transcript_repo = EventTranscriptRepository()
+            failed_event = await transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=agent_session.id,
+                    kind=EventKind.SYSTEM_ERROR,
+                    payload=_failed_run_system_error_payload(),
+                ),
+            )
+            await transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=agent_session.id,
+                    kind=EventKind.USER_MESSAGE,
+                    payload=UserMessagePayload(content="newer context").model_dump(
+                        mode="json"
+                    ),
+                ),
+            )
+
+        try:
+            await _service(rdb_session_manager).create_idempotent_failed_run_retry(
+                agent_id=agent_id,
+                session_id=agent_session.id,
+                user_id=user_id,
+                client_request_id="retry-stale-failed-run",
+                failed_event_id=failed_event.id,
+                payload={"failed_event_id": failed_event.id},
+            )
+        except ValueError as exc:
+            assert str(exc) == "Failed-run error is no longer the latest visible event"
+        else:
+            raise AssertionError("Expected ValueError")
 
     async def test_idempotent_command_key_is_session_scoped(
         self,

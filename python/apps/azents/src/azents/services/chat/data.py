@@ -5,6 +5,7 @@ from typing import Literal
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
 from azents.engine.events.types import Event
+from azents.engine.run.failure import FailedRunAttemptSource, FailedRunRetryability
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
 from azents.engine.tools.todo import TodoStateSnapshot
 from azents.services.session_initialization import SessionInitializationProjection
@@ -24,6 +25,22 @@ class PaginatedEvents:
 
 
 @dataclasses.dataclass(frozen=True)
+class ChatLiveRunRetryAttempt:
+    """User-safe failed-run retry attempt summary."""
+
+    attempt_number: int
+    user_message: str
+    error_type: str
+    source: FailedRunAttemptSource
+    failed_at: str
+    backoff_seconds: int
+    next_retry_at: str
+    retryability: FailedRunRetryability
+    failure_code: str | None
+    truncated: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class ChatLiveRunRetryState:
     """Current live failed-run retry state."""
 
@@ -33,6 +50,7 @@ class ChatLiveRunRetryState:
     max_retries: int
     backoff_seconds: int
     next_retry_at: str
+    attempts: list[ChatLiveRunRetryAttempt]
 
 
 @dataclasses.dataclass(frozen=True)

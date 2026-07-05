@@ -40,7 +40,20 @@ class TestChatLiveRunRetryStateResponse(unittest.TestCase):
                 failed_attempt_count = 56,
                 max_retries = 56,
                 backoff_seconds = 56,
-                next_retry_at = ''
+                next_retry_at = '',
+                attempts = [
+                    azentspublicclient.models.chat_live_run_retry_attempt_response.ChatLiveRunRetryAttemptResponse(
+                        attempt_number = 56,
+                        user_message = '',
+                        error_type = '',
+                        source = '',
+                        failed_at = '',
+                        backoff_seconds = 56,
+                        next_retry_at = '',
+                        retryability = '',
+                        failure_code = '',
+                        truncated = True, )
+                    ]
             )
         else:
             return ChatLiveRunRetryStateResponse(
@@ -50,6 +63,19 @@ class TestChatLiveRunRetryStateResponse(unittest.TestCase):
                 max_retries = 56,
                 backoff_seconds = 56,
                 next_retry_at = '',
+                attempts = [
+                    azentspublicclient.models.chat_live_run_retry_attempt_response.ChatLiveRunRetryAttemptResponse(
+                        attempt_number = 56,
+                        user_message = '',
+                        error_type = '',
+                        source = '',
+                        failed_at = '',
+                        backoff_seconds = 56,
+                        next_retry_at = '',
+                        retryability = '',
+                        failure_code = '',
+                        truncated = True, )
+                    ],
         )
         """
 
