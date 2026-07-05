@@ -27,6 +27,15 @@ action_execution_status = postgresql.ENUM(
     "failed_final",
     name="action_execution_status",
 )
+action_execution_status_column = postgresql.ENUM(
+    "pending",
+    "running",
+    "completed",
+    "failed",
+    "failed_final",
+    name="action_execution_status",
+    create_type=False,
+)
 action_execution_event_kind = postgresql.ENUM(
     "info",
     "step_started",
@@ -40,6 +49,21 @@ action_execution_event_kind = postgresql.ENUM(
     "failed_finalized",
     "completed",
     name="action_execution_event_kind",
+)
+action_execution_event_kind_column = postgresql.ENUM(
+    "info",
+    "step_started",
+    "command_started",
+    "stdout",
+    "stderr",
+    "command_completed",
+    "warning",
+    "failed",
+    "retry_requested",
+    "failed_finalized",
+    "completed",
+    name="action_execution_event_kind",
+    create_type=False,
 )
 
 
@@ -56,7 +80,7 @@ def upgrade() -> None:
         sa.Column("action_type", sa.Text(), nullable=False),
         sa.Column(
             "status",
-            action_execution_status,
+            action_execution_status_column,
             server_default="pending",
             nullable=False,
         ),
@@ -109,7 +133,7 @@ def upgrade() -> None:
         sa.Column("action_execution_id", sa.String(length=32), nullable=False),
         sa.Column("session_id", sa.String(length=32), nullable=False),
         sa.Column("sequence", sa.Integer(), nullable=False),
-        sa.Column("kind", action_execution_event_kind, nullable=False),
+        sa.Column("kind", action_execution_event_kind_column, nullable=False),
         sa.Column("step_key", sa.Text(), nullable=True),
         sa.Column("command_argv", sa.ARRAY(sa.Text()), nullable=True),
         sa.Column("content", sa.Text(), nullable=True),
