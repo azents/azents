@@ -1,6 +1,9 @@
 """ChatSessionService InputBuffer tests."""
 
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import AsyncContextManager
 
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -158,6 +161,30 @@ class _ModelFileService(ModelFileService):
         """Bypass Base dataclass initialization."""
 
 
+class _CountingSessionManager:
+    """Session manager wrapper that records nested session contexts."""
+
+    def __init__(self, base: SessionManager[AsyncSession]) -> None:
+        """Create counting session manager."""
+        self._base = base
+        self.active = 0
+        self.max_active = 0
+
+    def __call__(self) -> AsyncContextManager[AsyncSession]:
+        """Create counted session context."""
+        return self._managed()
+
+    @asynccontextmanager
+    async def _managed(self) -> AsyncIterator[AsyncSession]:
+        async with self._base() as session:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            try:
+                yield session
+            finally:
+                self.active -= 1
+
+
 async def _create_session_with_buffer(
     session: AsyncSession,
     *,
@@ -214,6 +241,27 @@ class TestChatSessionInputBuffer:
         assert [event.id for event in result.value.input_buffer_events] == [buffer_id]
         assert result.value.partial_history_events == []
         assert result.value.session_run_state == AgentSessionRunState.IDLE
+
+    async def test_list_live_events_reuses_session_for_toolkit_state_loads(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Live event list does not open nested sessions for Goal/Todo state."""
+        async with rdb_session_manager() as session:
+            session_id, user_id, _ = await _create_session_with_buffer(
+                session,
+                handle="chat-live-toolkit-session-reuse",
+                slug="chat-live-toolkit-session-reuse",
+            )
+
+        counting_session_manager = _CountingSessionManager(rdb_session_manager)
+        result = await _service(counting_session_manager).list_live_events(
+            session_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(result, Success)
+        assert counting_session_manager.max_active == 1
 
     async def test_list_live_events_includes_running_run_state(
         self,
