@@ -40,7 +40,6 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
-from azents.repos.agent_subagent import AgentSubagentRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.chat.data import ChatLiveRunState
@@ -428,7 +427,6 @@ def _executor(
         toolkit_registry=cast(dict[str, ToolkitProvider[Any]], {}),
         agent_toolkit_repository=cast(AgentToolkitRepository, object()),
         toolkit_repository=cast(ToolkitRepository, object()),
-        agent_subagent_repository=cast(AgentSubagentRepository, object()),
         agent_runtime_repository=cast(AgentRuntimeRepository, object()),
         agent_session_repository=cast(
             AgentSessionRepository,
@@ -516,9 +514,6 @@ def _patch_successful_resolution(
     """Patch RunExecutor dependencies to resolve a basic run request."""
     monkeypatch.setattr(run_executor_module, "resolve_invoke_input", _resolve_success)
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
-    monkeypatch.setattr(
-        run_executor_module, "resolve_subagent_tools", _resolve_no_tools
-    )
 
 
 @pytest.mark.asyncio
@@ -883,10 +878,6 @@ async def test_execute_clears_activity_after_run_complete(
         del args, kwargs
         return []
 
-    async def resolve_subagent_tools_success(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        return []
-
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
@@ -897,11 +888,6 @@ async def test_execute_clears_activity_after_run_complete(
         run_executor_module,
         "resolve_agent_tools",
         resolve_agent_tools_success,
-    )
-    monkeypatch.setattr(
-        run_executor_module,
-        "resolve_subagent_tools",
-        resolve_subagent_tools_success,
     )
 
     async def dispatch_event(
@@ -1028,17 +1014,10 @@ async def test_execute_retries_failed_run_without_durable_error(
         del args, kwargs
         return []
 
-    async def resolve_subagent_tools_success(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        return []
-
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
-    )
-    monkeypatch.setattr(
-        run_executor_module, "resolve_subagent_tools", resolve_subagent_tools_success
     )
 
     async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
@@ -1122,17 +1101,10 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
         del args, kwargs
         return []
 
-    async def resolve_subagent_tools_success(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        return []
-
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
-    )
-    monkeypatch.setattr(
-        run_executor_module, "resolve_subagent_tools", resolve_subagent_tools_success
     )
 
     async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
@@ -1197,17 +1169,10 @@ async def test_execute_finalizes_when_failed_run_retry_is_stopped(
         del args, kwargs
         return []
 
-    async def resolve_subagent_tools_success(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        return []
-
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
-    )
-    monkeypatch.setattr(
-        run_executor_module, "resolve_subagent_tools", resolve_subagent_tools_success
     )
 
     async def check_stop() -> bool:
@@ -1278,17 +1243,10 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
         del args, kwargs
         return []
 
-    async def resolve_subagent_tools_success(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        return []
-
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
-    )
-    monkeypatch.setattr(
-        run_executor_module, "resolve_subagent_tools", resolve_subagent_tools_success
     )
 
     async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
@@ -1357,17 +1315,10 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
         del args, kwargs
         return []
 
-    async def resolve_subagent_tools_success(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        return []
-
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
-    )
-    monkeypatch.setattr(
-        run_executor_module, "resolve_subagent_tools", resolve_subagent_tools_success
     )
 
     async def dispatch_event(session_id: str, event: PublishedEvent) -> None:

@@ -35,7 +35,7 @@ def _native_artifact() -> NativeArtifact:
 
 
 def test_collect_event_result_reads_event_assistant_output() -> None:
-    """Collect Event assistant output as subagent return value."""
+    """Collect Event assistant output as assistant return value."""
     event = Event(
         id="0" * 32,
         session_id="session-1",

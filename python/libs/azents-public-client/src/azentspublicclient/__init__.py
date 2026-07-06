@@ -59,7 +59,6 @@ __all__ = [
     "AgentProjectPresetListResponse",
     "AgentProjectPresetResponse",
     "AgentResponse",
-    "AgentRole",
     "AgentRunPhase",
     "AgentRunStatus",
     "AgentRuntimeActionsResponse",
@@ -79,10 +78,6 @@ __all__ = [
     "AgentSessionStatus",
     "AgentSessionTitleSource",
     "AgentSessionTitleUpdateRequest",
-    "AgentSubagentCreateRequest",
-    "AgentSubagentListResponse",
-    "AgentSubagentResponse",
-    "AgentSubagentUpdateRequest",
     "AgentToolkitAttachRequest",
     "AgentToolkitListResponse",
     "AgentToolkitResponse",
@@ -269,7 +264,6 @@ __all__ = [
     "SetPasswordRequest",
     "SignupStatusResponse",
     "SkillAction",
-    "SubagentToolkitInheritMode",
     "TestConnectionRequest",
     "TestConnectionResponse",
     "TodoItemResponse",
@@ -349,7 +343,6 @@ from azentspublicclient.models.agent_model_selection_input import AgentModelSele
 from azentspublicclient.models.agent_project_preset_list_response import AgentProjectPresetListResponse as AgentProjectPresetListResponse
 from azentspublicclient.models.agent_project_preset_response import AgentProjectPresetResponse as AgentProjectPresetResponse
 from azentspublicclient.models.agent_response import AgentResponse as AgentResponse
-from azentspublicclient.models.agent_role import AgentRole as AgentRole
 from azentspublicclient.models.agent_run_phase import AgentRunPhase as AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus as AgentRunStatus
 from azentspublicclient.models.agent_runtime_actions_response import AgentRuntimeActionsResponse as AgentRuntimeActionsResponse
@@ -369,10 +362,6 @@ from azentspublicclient.models.agent_session_run_state import AgentSessionRunSta
 from azentspublicclient.models.agent_session_status import AgentSessionStatus as AgentSessionStatus
 from azentspublicclient.models.agent_session_title_source import AgentSessionTitleSource as AgentSessionTitleSource
 from azentspublicclient.models.agent_session_title_update_request import AgentSessionTitleUpdateRequest as AgentSessionTitleUpdateRequest
-from azentspublicclient.models.agent_subagent_create_request import AgentSubagentCreateRequest as AgentSubagentCreateRequest
-from azentspublicclient.models.agent_subagent_list_response import AgentSubagentListResponse as AgentSubagentListResponse
-from azentspublicclient.models.agent_subagent_response import AgentSubagentResponse as AgentSubagentResponse
-from azentspublicclient.models.agent_subagent_update_request import AgentSubagentUpdateRequest as AgentSubagentUpdateRequest
 from azentspublicclient.models.agent_toolkit_attach_request import AgentToolkitAttachRequest as AgentToolkitAttachRequest
 from azentspublicclient.models.agent_toolkit_list_response import AgentToolkitListResponse as AgentToolkitListResponse
 from azentspublicclient.models.agent_toolkit_response import AgentToolkitResponse as AgentToolkitResponse
@@ -559,7 +548,6 @@ from azentspublicclient.models.session_workspace_project_response import Session
 from azentspublicclient.models.set_password_request import SetPasswordRequest as SetPasswordRequest
 from azentspublicclient.models.signup_status_response import SignupStatusResponse as SignupStatusResponse
 from azentspublicclient.models.skill_action import SkillAction as SkillAction
-from azentspublicclient.models.subagent_toolkit_inherit_mode import SubagentToolkitInheritMode as SubagentToolkitInheritMode
 from azentspublicclient.models.test_connection_request import TestConnectionRequest as TestConnectionRequest
 from azentspublicclient.models.test_connection_response import TestConnectionResponse as TestConnectionResponse
 from azentspublicclient.models.todo_item_response import TodoItemResponse as TodoItemResponse

@@ -53,8 +53,6 @@ import { MessageBubble } from "./MessageBubble";
 import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
 import { RunRetryCard } from "./RunRetryCard";
-import { SubagentBlock } from "./SubagentBlock";
-import { SubagentDetailModal } from "./SubagentDetailModal";
 import { TurnDivider } from "./TurnDivider";
 import type {
   ActionExecutionProjection,
@@ -169,7 +167,6 @@ function isVisibleMessageAnchor(message: ChatMessage): boolean {
   return (
     !isBoundaryMessage(message) &&
     message.role !== "compaction_started" &&
-    message.role !== "subagent_end" &&
     message.role !== "compaction"
   );
 }
@@ -471,16 +468,10 @@ export function ChatView({
   todo,
 }: ChatViewProps): React.ReactElement {
   const t = useTranslations("chat");
-  // Subagent detail modal status
-  const [selectedSubagent, setSelectedSubagent] = useState<{
-    sessionId: string;
-    name: string;
-  } | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const isInitialScrollRef = useRef(true);
-
   // file upload
   const {
     pendingFiles,
@@ -1154,7 +1145,6 @@ export function ChatView({
                   }
                   if (
                     msg.role === "compaction_started" ||
-                    msg.role === "subagent_end" ||
                     isBoundaryMessage(msg)
                   ) {
                     return null;
@@ -1169,35 +1159,6 @@ export function ChatView({
                     msg.status !== "partial" &&
                     index > latestCompactionIndex &&
                     !isResponsePending;
-                  if (msg.role === "subagent_start") {
-                    const subSessionId =
-                      msg.metadata?.subagent_session_id ?? null;
-                    const subName = msg.metadata?.subagent_name ?? "Subagent";
-                    // subagent_end if absent not yet run during
-                    const endMsg = messages.find(
-                      (m) =>
-                        m.role === "subagent_end" &&
-                        m.metadata?.subagent_session_id === subSessionId,
-                    );
-                    const isRunning = !endMsg;
-                    return (
-                      <Fragment key={msg.id}>
-                        <SubagentBlock
-                          message={msg}
-                          isRunning={isRunning}
-                          resultText={endMsg?.content}
-                          onClick={() =>
-                            setSelectedSubagent(
-                              subSessionId
-                                ? { sessionId: subSessionId, name: subName }
-                                : null,
-                            )
-                          }
-                        />
-                        <TurnDivider usage={boundaryControls.usage} />
-                      </Fragment>
-                    );
-                  }
                   const failedRunRetryAction = msg.failedRunFailure
                     ? {
                         canRetry:
@@ -1361,24 +1322,6 @@ export function ChatView({
             </Box>
           </Box>
         </Box>
-
-        {/* Subagent detail modal */}
-        {selectedSubagent && (
-          <SubagentDetailModal
-            opened={true}
-            onClose={() => setSelectedSubagent(null)}
-            sessionId={selectedSubagent.sessionId}
-            subagentName={selectedSubagent.name}
-            isRunning={
-              !messages.some(
-                (m) =>
-                  m.role === "subagent_end" &&
-                  m.metadata?.subagent_session_id ===
-                    selectedSubagent.sessionId,
-              )
-            }
-          />
-        )}
       </Stack>
       <Box
         visibleFrom="lg"

@@ -35,7 +35,6 @@ azentspublicclient/docs/AgentModelSelectionInput.md
 azentspublicclient/docs/AgentProjectPresetListResponse.md
 azentspublicclient/docs/AgentProjectPresetResponse.md
 azentspublicclient/docs/AgentResponse.md
-azentspublicclient/docs/AgentRole.md
 azentspublicclient/docs/AgentRunPhase.md
 azentspublicclient/docs/AgentRunStatus.md
 azentspublicclient/docs/AgentRuntimeActionsResponse.md
@@ -56,10 +55,6 @@ azentspublicclient/docs/AgentSessionRunState.md
 azentspublicclient/docs/AgentSessionStatus.md
 azentspublicclient/docs/AgentSessionTitleSource.md
 azentspublicclient/docs/AgentSessionTitleUpdateRequest.md
-azentspublicclient/docs/AgentSubagentCreateRequest.md
-azentspublicclient/docs/AgentSubagentListResponse.md
-azentspublicclient/docs/AgentSubagentResponse.md
-azentspublicclient/docs/AgentSubagentUpdateRequest.md
 azentspublicclient/docs/AgentToolkitAttachRequest.md
 azentspublicclient/docs/AgentToolkitListResponse.md
 azentspublicclient/docs/AgentToolkitResponse.md
@@ -255,7 +250,6 @@ azentspublicclient/docs/SessionWorkspaceProjectResponse.md
 azentspublicclient/docs/SetPasswordRequest.md
 azentspublicclient/docs/SignupStatusResponse.md
 azentspublicclient/docs/SkillAction.md
-azentspublicclient/docs/SubagentToolkitInheritMode.md
 azentspublicclient/docs/TestConnectionRequest.md
 azentspublicclient/docs/TestConnectionResponse.md
 azentspublicclient/docs/TodoItemResponse.md
@@ -311,7 +305,6 @@ azentspublicclient/models/agent_model_selection_input.py
 azentspublicclient/models/agent_project_preset_list_response.py
 azentspublicclient/models/agent_project_preset_response.py
 azentspublicclient/models/agent_response.py
-azentspublicclient/models/agent_role.py
 azentspublicclient/models/agent_run_phase.py
 azentspublicclient/models/agent_run_status.py
 azentspublicclient/models/agent_runtime_actions_response.py
@@ -331,10 +324,6 @@ azentspublicclient/models/agent_session_run_state.py
 azentspublicclient/models/agent_session_status.py
 azentspublicclient/models/agent_session_title_source.py
 azentspublicclient/models/agent_session_title_update_request.py
-azentspublicclient/models/agent_subagent_create_request.py
-azentspublicclient/models/agent_subagent_list_response.py
-azentspublicclient/models/agent_subagent_response.py
-azentspublicclient/models/agent_subagent_update_request.py
 azentspublicclient/models/agent_toolkit_attach_request.py
 azentspublicclient/models/agent_toolkit_list_response.py
 azentspublicclient/models/agent_toolkit_response.py
@@ -521,7 +510,6 @@ azentspublicclient/models/session_workspace_project_response.py
 azentspublicclient/models/set_password_request.py
 azentspublicclient/models/signup_status_response.py
 azentspublicclient/models/skill_action.py
-azentspublicclient/models/subagent_toolkit_inherit_mode.py
 azentspublicclient/models/test_connection_request.py
 azentspublicclient/models/test_connection_response.py
 azentspublicclient/models/todo_item_response.py
@@ -571,7 +559,6 @@ azentspublicclient/test/test_agent_model_selection_input.py
 azentspublicclient/test/test_agent_project_preset_list_response.py
 azentspublicclient/test/test_agent_project_preset_response.py
 azentspublicclient/test/test_agent_response.py
-azentspublicclient/test/test_agent_role.py
 azentspublicclient/test/test_agent_run_phase.py
 azentspublicclient/test/test_agent_run_status.py
 azentspublicclient/test/test_agent_runtime_actions_response.py
@@ -592,10 +579,6 @@ azentspublicclient/test/test_agent_session_run_state.py
 azentspublicclient/test/test_agent_session_status.py
 azentspublicclient/test/test_agent_session_title_source.py
 azentspublicclient/test/test_agent_session_title_update_request.py
-azentspublicclient/test/test_agent_subagent_create_request.py
-azentspublicclient/test/test_agent_subagent_list_response.py
-azentspublicclient/test/test_agent_subagent_response.py
-azentspublicclient/test/test_agent_subagent_update_request.py
 azentspublicclient/test/test_agent_toolkit_attach_request.py
 azentspublicclient/test/test_agent_toolkit_list_response.py
 azentspublicclient/test/test_agent_toolkit_response.py
@@ -791,7 +774,6 @@ azentspublicclient/test/test_session_workspace_project_response.py
 azentspublicclient/test/test_set_password_request.py
 azentspublicclient/test/test_signup_status_response.py
 azentspublicclient/test/test_skill_action.py
-azentspublicclient/test/test_subagent_toolkit_inherit_mode.py
 azentspublicclient/test/test_test_connection_request.py
 azentspublicclient/test/test_test_connection_response.py
 azentspublicclient/test/test_todo_item_response.py

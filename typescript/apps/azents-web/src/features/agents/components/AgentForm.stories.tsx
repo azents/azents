@@ -98,12 +98,10 @@ const baseAgent: AgentResponse = {
   system_prompt: "Help the workspace team with engineering tasks.",
   enabled: true,
   type: "public",
-  role: "agent",
   runtime_provider_id: null,
   shell_enabled: true,
   memory_enabled: true,
   max_turns: null,
-  toolkit_inherit_mode: "none",
   avatar: null,
   created_at: "2026-05-14T00:00:00Z",
   updated_at: "2026-05-14T00:00:00Z",
@@ -151,19 +149,6 @@ export const NoModelsAvailable = {
     formState: { type: "CREATE" },
     providerOptions: [],
     modelOptions: [],
-  },
-} satisfies Story;
-
-export const Subagent = {
-  args: {
-    formState: {
-      type: "EDIT",
-      agent: {
-        ...baseAgent,
-        role: "subagent",
-        toolkit_inherit_mode: "all",
-      },
-    },
   },
 } satisfies Story;
 

@@ -39,13 +39,12 @@ class ToolkitBinding(NamedTuple):
     :param toolkit: Toolkit instance
     :param slug: Logging/toolkit_prompts label identifier; may be empty
     :param use_prefix: When True, apply ``{slug}__`` prefix to tool names.
-        Single-instance builtin toolkits (shell, subagent) use False;
+        Single-instance builtin toolkits use False;
         DB-registered MCP toolkits where the same user can connect multiple
         instances use True to prevent namespace collisions.
     :param toolkit_type: ``toolkit_type`` of DB-registered toolkit
         (``at.toolkit_type``). Builtin,
-        schedule, subagent, and other worker dynamic or auto-bound toolkits use
-        None. Used to filter web-only toolkits by type during subagent inherit.
+        schedule and other worker dynamic or auto-bound toolkits use None.
     """
 
     toolkit: Toolkit[Any]
@@ -107,19 +106,17 @@ class RunRequest:
     storage_session_id: str | None = None
     """session_id for file storage. None uses session_id.
 
-    Subagent must store events in its own session and files in parent session, so
-    parent_session_id is specified.
+    Alternate storage boundaries can specify a different session_id.
     """
     storage_agent_id: str | None = None
     """agent_id for file storage. None uses agent_id.
 
-    Subagent outputs must be exposed as parent session artifacts, so parent_agent_id
-    is specified.
+    Alternate storage boundaries can specify a different agent_id.
     """
     storage_path_prefix: str = ""
     """Path prefix prepended to file names during file storage.
 
-    Set as ``subagent-{session_id}/`` in subagent to distinguish files.
+    Used to distinguish files for alternate storage boundaries.
     """
 
     @property

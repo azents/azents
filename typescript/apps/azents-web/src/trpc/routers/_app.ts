@@ -4,7 +4,6 @@
  */
 import { router } from "../init";
 import { agentRouter } from "./agent";
-import { agentSubagentRouter } from "./agentSubagent";
 import { authRouter } from "./auth";
 import { chatRouter } from "./chat";
 import { invitationRouter } from "./invitation";
@@ -22,7 +21,6 @@ import { workspaceModelSettingsRouter } from "./workspace-model-settings";
 
 export const appRouter = router({
   agent: agentRouter,
-  agentSubagent: agentSubagentRouter,
   auth: authRouter,
   chat: chatRouter,
   invitation: invitationRouter,

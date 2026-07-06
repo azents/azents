@@ -30,7 +30,6 @@ import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
 const agentTypeEnum = z.enum(["public", "private"]);
-const agentRoleEnum = z.enum(["agent", "subagent"]);
 const memoryScopeEnum = z.enum(["agent", "user"]);
 
 const modelSelectionInputSchema = z
@@ -116,11 +115,9 @@ export const agentRouter = router({
         system_prompt: z.string().optional(),
         enabled: z.boolean().optional(),
         type: agentTypeEnum.optional(),
-        role: agentRoleEnum.optional(),
         shell_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
-        toolkit_inherit_mode: z.enum(["none", "all"]).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -138,11 +135,9 @@ export const agentRouter = router({
             system_prompt: input.system_prompt ?? null,
             enabled: input.enabled ?? true,
             type: input.type ?? "public",
-            role: input.role ?? "agent",
             shell_enabled: input.shell_enabled,
             memory_enabled: input.memory_enabled,
             max_turns: input.max_turns,
-            toolkit_inherit_mode: input.toolkit_inherit_mode,
           },
           throwOnError: true,
         });
@@ -171,11 +166,9 @@ export const agentRouter = router({
         system_prompt: z.string().nullable().optional(),
         enabled: z.boolean().optional(),
         type: agentTypeEnum.optional(),
-        role: agentRoleEnum.optional(),
         shell_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
-        toolkit_inherit_mode: z.enum(["none", "all"]).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -199,11 +192,9 @@ export const agentRouter = router({
             system_prompt: input.system_prompt,
             enabled: input.enabled,
             type: input.type,
-            role: input.role,
             shell_enabled: input.shell_enabled,
             memory_enabled: input.memory_enabled,
             max_turns: input.max_turns,
-            toolkit_inherit_mode: input.toolkit_inherit_mode,
           },
           throwOnError: true,
         });

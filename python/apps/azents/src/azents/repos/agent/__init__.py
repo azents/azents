@@ -9,7 +9,6 @@ from azents.core.agent import AgentModelSelection, ModelParameters
 from azents.core.enums import AgentType
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
-from azents.repos.agent_subagent.data import SubagentToolkitInheritMode
 from azents.services.uploads.schema import StoredImage
 
 from .data import (
@@ -50,12 +49,10 @@ class AgentRepository:
             system_prompt=create.system_prompt,
             enabled=create.enabled,
             type=create.type,
-            role=create.role,
             runtime_provider_id=create.runtime_provider_id,
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
             max_turns=create.max_turns,
-            toolkit_inherit_mode=create.toolkit_inherit_mode.value,
         )
         session.add(rdb_agent)
         await session.flush()
@@ -150,8 +147,6 @@ class AgentRepository:
             db_values["enabled"] = update["enabled"]
         if "type" in update:
             db_values["type"] = update["type"]
-        if "role" in update:
-            db_values["role"] = update["role"]
         if "runtime_provider_id" in update:
             db_values["runtime_provider_id"] = update["runtime_provider_id"]
         if "shell_enabled" in update:
@@ -160,8 +155,6 @@ class AgentRepository:
             db_values["memory_enabled"] = update["memory_enabled"]
         if "max_turns" in update:
             db_values["max_turns"] = update["max_turns"]
-        if "toolkit_inherit_mode" in update:
-            db_values["toolkit_inherit_mode"] = update["toolkit_inherit_mode"].value
 
         await session.execute(
             sa.update(RDBAgent).where(RDBAgent.id == agent_id).values(**db_values)
@@ -200,12 +193,10 @@ class AgentRepository:
             system_prompt=rdb.system_prompt,
             enabled=rdb.enabled,
             type=rdb.type,
-            role=rdb.role,
             runtime_provider_id=rdb.runtime_provider_id,
             shell_enabled=rdb.shell_enabled,
             memory_enabled=rdb.memory_enabled,
             max_turns=rdb.max_turns,
-            toolkit_inherit_mode=SubagentToolkitInheritMode(rdb.toolkit_inherit_mode),
             avatar=avatar,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,

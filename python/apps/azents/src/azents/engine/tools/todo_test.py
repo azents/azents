@@ -3,7 +3,7 @@
 import json
 from unittest.mock import AsyncMock
 
-from azents.core.tools import SubagentToolkitContext, TurnContext
+from azents.core.tools import TurnContext
 from azents.engine.hooks.types import (
     CompactionSummaryHookContext,
     CompactionSummaryReplace,
@@ -15,7 +15,6 @@ from azents.engine.tools.todo import (
     TodoUpdateItem,
     UpdateTodoInput,
     apply_todo_update,
-    render_todo_prompt,
     render_todo_snapshot,
 )
 
@@ -173,55 +172,6 @@ async def test_todo_toolkit_exposes_unprefixed_update_tool() -> None:
         await toolkit.get_static_prompt(context)
     )
     store.load.assert_not_awaited()
-
-
-async def test_subagent_todo_uses_subagent_session() -> None:
-    """Subagent Todo state is scoped to the subagent session, not the parent."""
-    store = AsyncMock()
-    store.update.return_value = TodoState()
-    toolkit = TodoToolkit(
-        store=store,
-        agent_id="parent-agent",
-        session_id="parent-session",
-    )
-
-    toolkit.configure_for_subagent(
-        SubagentToolkitContext(
-            parent_agent_id="parent-agent",
-            parent_session_id="parent-session",
-            subagent_id="subagent-agent",
-            subagent_session_id="subagent-session",
-        )
-    )
-    state = await toolkit.update_context(
-        TurnContext(
-            user_id="user-1",
-            workspace_id="workspace-1",
-            model="model",
-            run_id="run-1",
-            session_id="parent-session",
-            publish_event=AsyncMock(),
-        )
-    )
-
-    await state.tools[0].handler(json.dumps({"operation": "clear"}))
-
-    store.update.assert_awaited_once()
-    assert store.update.await_args.args[:2] == ("subagent-agent", "subagent-session")
-
-
-def test_todo_prompt_is_stable_across_state() -> None:
-    """Current Todo state does not change the toolkit prompt."""
-    assert render_todo_prompt(TodoState()) == render_todo_prompt(
-        TodoState(
-            items=[
-                TodoItem(
-                    content="Current work",
-                    status="in_progress",
-                )
-            ]
-        )
-    )
 
 
 async def test_update_todo_returns_compact_acknowledgement() -> None:

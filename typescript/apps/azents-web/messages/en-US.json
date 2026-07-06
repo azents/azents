@@ -464,7 +464,6 @@
       "modelPlaceholder": "Select a model",
       "modelSelectIntegrationFirst": "Select an LLM integration first",
       "inheritModelLabel": "Inherit model from parent",
-      "inheritModelDescription": "Use the calling parent agent's LLM provider and model. Model parameters (temperature, reasoning effort, etc.) still come from this subagent.",
       "inheritModelPlaceholder": "Using parent agent's model",
       "inheritModelBadge": "Inherits from parent",
       "inheritModelModelIdentifier": "parent's model",
@@ -507,21 +506,9 @@
       "compactionModelThresholdWarning": "The compaction model''s context window ({compactionMax} tokens) is smaller than the main model ({mainMax} tokens). Compaction will trigger based on the compaction model''s limit.",
       "roleLabel": "Role",
       "roleAgent": "Agent",
-      "roleAgentDescription": "Can use subagents to delegate tasks",
-      "roleSubagent": "Subagent",
-      "roleSubagentDescription": "Can be called by other agents as a tool",
-      "subagentsSection": "Subagents",
-      "addSubagent": "Add Subagent",
-      "noSubagentsAttached": "No subagents connected",
-      "subagentDescription": "Description",
-      "subagentDescriptionPlaceholder": "Describe when to use this subagent",
-      "selectSubagent": "Select a subagent",
-      "noSubagentsAvailable": "No subagents available",
-      "removeSubagent": "Remove",
+      "roleAgentDescription": "Runs sessions and owns tool access",
       "useParentToolkitsLabel": "Use parent's toolkits",
-      "useParentToolkitsDescription": "Inherit this parent agent's toolkits. The subagent's own toolkits are ignored for this call. Parent-only tools (memory, schedule, etc.) are excluded.",
       "shellEnabledLabel": "Enable Shell",
-      "shellEnabledDescription": "Allow this subagent to execute shell commands",
       "memoryEnabledLabel": "Enable Memory",
       "memoryEnabledDescription": "Allow this agent to save and recall persistent memories across conversations",
       "settingsHub": {
@@ -542,8 +529,8 @@
           "description": "Main model, lightweight model, token caps, reasoning, and turn limit"
         },
         "capabilities": {
-          "label": "Tools and subagents",
-          "description": "Shell access, built-in tools, toolkits, and subagent links"
+          "label": "Tools",
+          "description": "Shell access, built-in tools, and toolkits"
         },
         "memory": {
           "label": "Memory",
@@ -625,12 +612,10 @@
       },
       "roleFilter": {
         "agent": "Agents",
-        "subagent": "Subagents",
         "all": "All"
       },
       "emptyForFilter": {
         "agent": "No agents yet. Create one with the button above.",
-        "subagent": "No subagents yet. Set role to \"subagent\" when creating an agent.",
         "all": "No agents at all yet."
       },
       "changeModel": "Change model",
@@ -688,7 +673,8 @@
         "emptyTitle": "No memories found",
         "emptyDescription": "Create a memory or adjust the search filter.",
         "deleteConfirm": "Delete memory \"{name}\"? This cannot be undone."
-      }
+      },
+      "shellEnabledDescription": "Allow this agent to execute shell commands"
     },
     "toolkits": {
       "headline": "Toolkits",
@@ -911,48 +897,37 @@
     "home": {
       "eyebrow": "{handle} workspace",
       "title": "Your agent team",
-      "subtitle": "{members} people · {agents} agents · {subagents} subagents working together",
+      "subtitle": "{members} people · {agents} agents working together",
       "newAgent": "New agent",
       "filter": {
         "agents": "Agents",
-        "subagents": "Subagents",
         "all": "All"
       },
       "search": {
-        "agents": "Search agent name or role",
-        "subagents": "Search subagents"
+        "agents": "Search agent name or role"
       },
       "showDisabled": "Show {count} disabled",
       "stats": {
         "activeAgents": "Active agents",
         "totalAgents": "Agents",
         "recentSessions": "Recent chats",
-        "recentSessionsSubtitle": "Last 7 days",
-        "subagents": "Subagents"
+        "recentSessionsSubtitle": "Last 7 days"
       },
       "sections": {
         "agents": {
           "title": "Agents",
           "subtitle": "Independent agents you can talk to directly"
-        },
-        "subagents": {
-          "title": "Subagents",
-          "subtitle": "Specialists that other agents delegate to",
-          "notice": "Subagents can't be chatted with directly — a parent agent invokes them when needed."
         }
       },
       "empty": {
         "search": "No matches found",
         "agents": "No agents yet",
-        "agentsFiltered": "Toggle above to include disabled agents",
-        "subagents": "No subagents yet",
-        "subagentsFiltered": "Toggle above to include disabled subagents"
+        "agentsFiltered": "Toggle above to include disabled agents"
       },
       "card": {
         "enabled": "Active",
         "disabled": "Disabled",
         "noDescription": "No description",
-        "subagentBadge": "Subagent",
         "sessionsCount": "{count} chats"
       },
       "activityFeed": "Activity feed",
@@ -1304,15 +1279,6 @@
       "summary": "Previous conversation was summarized",
       "expand": "Show summary",
       "collapse": "Hide summary"
-    },
-    "subagent": {
-      "executing": "{name} is working…",
-      "executingMultiple": "{count} subagents working…",
-      "running": "Running…",
-      "completed": "Done",
-      "viewDetails": "View details",
-      "loadingHistory": "Loading subagent history…",
-      "noMessages": "No messages yet"
     },
     "runtime": {
       "preparing": "Preparing runtime…",

@@ -52,7 +52,7 @@ async def test_register_and_complete_invokes_on_complete() -> None:
         parent_session_id="session-1",
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
     assert registered.task_id == "t1"
 
@@ -62,7 +62,7 @@ async def test_register_and_complete_invokes_on_complete() -> None:
 
     assert len(completed) == 1
     assert completed[0].task_id == "t1"
-    assert completed[0].tool_name == "subagent"
+    assert completed[0].tool_name == "background_tool"
     # removed from registry after completion
     assert registry.list_for_session("session-1") == []
 
@@ -82,7 +82,7 @@ async def test_get_returns_running_task() -> None:
         parent_session_id="session-1",
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
     assert registry.get("t1") is not None
     assert registry.get("t1") is not None  # can be called multiple times
@@ -111,7 +111,7 @@ async def test_cancel_returns_true_and_cleans_up() -> None:
         parent_session_id="session-1",
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
     cancelled = await registry.cancel("t1")
     assert cancelled is True
@@ -149,7 +149,7 @@ async def test_cancel_all_for_session() -> None:
         parent_session_id="session-1",
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
     registry.register(
         task_id="t2",
@@ -157,7 +157,7 @@ async def test_cancel_all_for_session() -> None:
         parent_session_id="session-1",
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
     registry.register(
         task_id="t3",
@@ -165,7 +165,7 @@ async def test_cancel_all_for_session() -> None:
         parent_session_id="session-2",
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
 
     await registry.cancel_all_for_session("session-1")
@@ -203,7 +203,7 @@ async def test_cancel_all_waits_for_completion_cleanup() -> None:
         parent_session_id="session-1",
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
 
     await registry.cancel_all()
@@ -230,7 +230,7 @@ async def test_on_complete_called_even_when_future_failed() -> None:
         parent_session_id="session-1",
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
     # wait until future ends with exception
     with pytest.raises(RuntimeError, match="boom"):
@@ -256,7 +256,7 @@ async def test_on_complete_exception_does_not_leak_task_entry() -> None:
         parent_session_id="session-1",
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
     await future
     await _wait_for_completion(registry, "t1")

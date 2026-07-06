@@ -9,7 +9,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import ApiKeySecrets
-from azents.core.enums import AgentRole, AgentType, LLMProvider
+from azents.core.enums import AgentType, LLMProvider
 from azents.core.tools import SessionType, ToolkitContext
 from azents.engine.run.input import InputMessage, InvokeInput
 from azents.engine.tools.builtin import BuiltinToolkitProvider
@@ -19,7 +19,6 @@ from azents.engine.tools.claude_rules import (
     ClaudeRulesToolkitProvider,
 )
 from azents.repos.agent.data import Agent
-from azents.repos.agent_subagent.data import SubagentToolkitInheritMode
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.runtime.types import RuntimeDomainConfig
 from azents.testing.model_selection import make_test_model_selection
@@ -43,12 +42,10 @@ def _make_agent() -> Agent:
         system_prompt="You are helpful.",
         enabled=True,
         type=AgentType.PUBLIC,
-        role=AgentRole.AGENT,
         runtime_provider_id=None,
         shell_enabled=True,
         memory_enabled=True,
         max_turns=None,
-        toolkit_inherit_mode=SubagentToolkitInheritMode.ALL,
         avatar=None,
         created_at=_NOW,
         updated_at=_NOW,

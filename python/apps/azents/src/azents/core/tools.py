@@ -95,16 +95,6 @@ class ToolCallHookOutcome:
     error: str | None
 
 
-@dataclasses.dataclass(frozen=True)
-class SubagentToolkitContext:
-    """Context passed when configuring Toolkit for subagent execution."""
-
-    parent_agent_id: str
-    parent_session_id: str
-    subagent_id: str
-    subagent_session_id: str
-
-
 # ---------------------------------------------------------------------------
 # Tool definition enum, hardcoded in code and not stored in DB
 # ---------------------------------------------------------------------------
@@ -311,16 +301,6 @@ class Toolkit(ABC, Generic[ConfigT]):
         :param outcome: Tool execution result summary
         """
 
-    def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
-        """Adjust Toolkit instance for subagent execution context.
-
-        Default implementation does nothing. Toolkit-specific adjustments needed by
-        subagents, such as sharing parent runtime tool context or parent-scoped
-        prompt snapshot, are encapsulated by each Toolkit.
-
-        :param context: Subagent execution context
-        """
-
 
 @dataclasses.dataclass(frozen=True)
 class TestConnectionResult:
@@ -454,7 +434,7 @@ class ShellToolkitConfig(BaseModel):
 
     Bundles common Builtin/Runtime toolkit settings in one place.
     ``resolve_agent_tools()`` receives runtime_domain_config and builds this config,
-    so both subagent and parent must have domain explicitly injected from outside.
+    so runtime tools receive domain configuration explicitly.
     """
 
     agent_data_root: str = Field(

@@ -1,11 +1,6 @@
 "use client";
 
-/**
- * Home primary agent card — one cell in 3-col grid.
- *
- * Avatar + name + enabled state + provider + description (2-line clamp) + last modified time.
- * Busy pulse / owner / toolkit badges omitted first due to no current data.
- */
+/** Home primary agent card — one cell in 3-col grid. */
 
 import { Badge, Card, Group, Stack, Text } from "@mantine/core";
 import { IconClock } from "@tabler/icons-react";
@@ -17,7 +12,6 @@ import type { EnrichedAgent } from "../types";
 
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
 
-/** Relative time — uses justNow/minutesAgo/hoursAgo/daysAgo keys in chat namespace */
 function formatRelative(iso: string, t: ChatTranslator): string {
   const diff = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60_000);
@@ -49,9 +43,6 @@ export function AgentTeamCard({
 }: AgentTeamCardProps): React.ReactElement {
   const t = useTranslations("chat");
   const tHome = useTranslations("workspace.home.card");
-
-  const modelLabel = agent.modelSummary;
-
   const href = `/w/${handle}/agents/${agent.id}/sessions/new`;
 
   return (
@@ -73,7 +64,6 @@ export function AgentTeamCard({
         color: "inherit",
       }}
     >
-      {/* Header: avatar + name + status */}
       <Group align="flex-start" gap="sm" wrap="nowrap">
         <AgentAvatar
           name={agent.name}
@@ -94,13 +84,12 @@ export function AgentTeamCard({
               {agent.enabled ? tHome("enabled") : tHome("disabled")}
             </Badge>
             <Text size="xs" c="dimmed" truncate>
-              {modelLabel}
+              {agent.modelSummary}
             </Text>
           </Group>
         </Stack>
       </Group>
 
-      {/* Description */}
       <Text
         size="sm"
         className={styles.rowDescription}
@@ -110,17 +99,9 @@ export function AgentTeamCard({
         {agent.description || tHome("noDescription")}
       </Text>
 
-      {/* Role badge (subagent only, reserved) */}
-      {agent.role === "subagent" && (
-        <Badge size="xs" color="violet" variant="light">
-          {tHome("subagentBadge")}
-        </Badge>
-      )}
-
-      {/* Footer: last updated */}
-      <Group gap="xs" wrap="nowrap" pt="xs" className={styles.teamCardFooter}>
-        <IconClock size={12} />
-        <Text size="xs" c="dimmed" truncate>
+      <Group gap={6} mt="auto">
+        <IconClock size={14} />
+        <Text size="xs" c="dimmed">
           {formatRelative(agent.lastActiveAt, t)}
         </Text>
       </Group>

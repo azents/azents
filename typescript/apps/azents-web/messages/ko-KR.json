@@ -464,7 +464,6 @@
       "modelPlaceholder": "모델을 선택하세요",
       "modelSelectIntegrationFirst": "먼저 LLM 연동을 선택하세요",
       "inheritModelLabel": "상위 에이전트의 모델 상속",
-      "inheritModelDescription": "이 서브에이전트를 호출한 상위 에이전트의 LLM 연동과 모델을 사용합니다. 온도(temperature), reasoning 강도 등 모델 파라미터는 이 서브에이전트 값을 유지합니다.",
       "inheritModelPlaceholder": "상위 에이전트의 모델 사용",
       "inheritModelBadge": "상위 모델 상속",
       "inheritModelModelIdentifier": "상위 에이전트의 모델",
@@ -507,21 +506,9 @@
       "compactionModelThresholdWarning": "압축 모델의 context window({compactionMax} 토큰)가 메인 모델({mainMax} 토큰)보다 작아 압축 모델 기준으로 compaction이 발생합니다.",
       "roleLabel": "역할",
       "roleAgent": "에이전트",
-      "roleAgentDescription": "서브에이전트를 사용하여 작업을 위임할 수 있음",
-      "roleSubagent": "서브에이전트",
-      "roleSubagentDescription": "다른 에이전트가 도구로 호출할 수 있음",
-      "subagentsSection": "서브에이전트",
-      "addSubagent": "서브에이전트 추가",
-      "noSubagentsAttached": "연결된 서브에이전트가 없습니다",
-      "subagentDescription": "설명",
-      "subagentDescriptionPlaceholder": "이 서브에이전트를 언제 사용할지 설명하세요",
-      "selectSubagent": "서브에이전트 선택",
-      "noSubagentsAvailable": "사용 가능한 서브에이전트가 없습니다",
-      "removeSubagent": "삭제",
+      "roleAgentDescription": "세션을 실행하고 도구 접근을 소유합니다",
       "useParentToolkitsLabel": "상위 에이전트의 툴킷 사용",
-      "useParentToolkitsDescription": "이 상위 에이전트에 연결된 툴킷을 상속해서 사용합니다. 이 호출에서는 서브에이전트 자체에 연결된 툴킷은 무시되고, `memory`·`schedule` 등 상위 전용 도구는 제외됩니다.",
       "shellEnabledLabel": "Shell 사용",
-      "shellEnabledDescription": "이 서브에이전트가 Shell 명령어를 실행할 수 있도록 허용",
       "memoryEnabledLabel": "메모리 활성화",
       "memoryEnabledDescription": "대화 간 영속적인 메모리를 저장하고 활용할 수 있도록 허용",
       "settingsHub": {
@@ -542,8 +529,8 @@
           "description": "메인 모델, 경량 모델, 토큰 상한, 추론 설정, 최대 턴"
         },
         "capabilities": {
-          "label": "도구와 서브에이전트",
-          "description": "Shell 접근, 내장 도구, 툴킷, 서브에이전트 연결"
+          "label": "도구",
+          "description": "Shell 접근, 내장 도구, 툴킷"
         },
         "memory": {
           "label": "메모리",
@@ -625,12 +612,10 @@
       },
       "roleFilter": {
         "agent": "에이전트",
-        "subagent": "서브에이전트",
         "all": "전체"
       },
       "emptyForFilter": {
         "agent": "에이전트가 없습니다. 위 버튼으로 새로 만드세요.",
-        "subagent": "서브에이전트가 없습니다. 에이전트 생성 시 role 을 서브에이전트로 지정할 수 있습니다.",
         "all": "아직 아무 에이전트도 없습니다."
       },
       "changeModel": "모델 변경",
@@ -688,7 +673,8 @@
         "emptyTitle": "메모리가 없습니다",
         "emptyDescription": "메모리를 만들거나 검색 조건을 조정하세요.",
         "deleteConfirm": "메모리 \"{name}\"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다."
-      }
+      },
+      "shellEnabledDescription": "이 에이전트가 Shell 명령어를 실행할 수 있도록 허용"
     },
     "toolkits": {
       "headline": "툴킷",
@@ -911,48 +897,37 @@
     "home": {
       "eyebrow": "{handle} 워크스페이스",
       "title": "우리 팀 에이전트",
-      "subtitle": "사람 {members}명 · 에이전트 {agents}명 · 서브에이전트 {subagents}개가 함께 일하고 있어요",
+      "subtitle": "사람 {members}명 · 에이전트 {agents}명이 함께 일하고 있어요",
       "newAgent": "새 에이전트",
       "filter": {
         "agents": "에이전트",
-        "subagents": "서브에이전트",
         "all": "전체"
       },
       "search": {
-        "agents": "에이전트 이름 · 역할 검색",
-        "subagents": "서브에이전트 검색"
+        "agents": "에이전트 이름 · 역할 검색"
       },
       "showDisabled": "비활성 {count}개 보기",
       "stats": {
         "activeAgents": "활성 에이전트",
         "totalAgents": "에이전트",
         "recentSessions": "최근 대화",
-        "recentSessionsSubtitle": "지난 7일",
-        "subagents": "서브에이전트"
+        "recentSessionsSubtitle": "지난 7일"
       },
       "sections": {
         "agents": {
           "title": "에이전트",
           "subtitle": "팀에 직접 말을 걸 수 있는 독립 에이전트"
-        },
-        "subagents": {
-          "title": "서브에이전트",
-          "subtitle": "다른 에이전트가 위임해서 호출하는 전문 도구",
-          "notice": "서브에이전트는 직접 채팅할 수 없어요. 부모 에이전트가 필요할 때 호출합니다."
         }
       },
       "empty": {
         "search": "검색 결과가 없어요",
         "agents": "아직 에이전트가 없어요",
-        "agentsFiltered": "비활성을 포함하려면 상단 토글을 켜주세요",
-        "subagents": "아직 서브에이전트가 없어요",
-        "subagentsFiltered": "비활성을 포함하려면 상단 토글을 켜주세요"
+        "agentsFiltered": "비활성을 포함하려면 상단 토글을 켜주세요"
       },
       "card": {
         "enabled": "활성",
         "disabled": "비활성",
         "noDescription": "설명 없음",
-        "subagentBadge": "서브에이전트",
         "sessionsCount": "대화 {count}"
       },
       "activityFeed": "활동 피드",
@@ -1304,15 +1279,6 @@
       "summary": "이전 대화가 요약되었습니다",
       "expand": "요약 보기",
       "collapse": "요약 숨기기"
-    },
-    "subagent": {
-      "executing": "{name} 실행 중…",
-      "executingMultiple": "서브에이전트 {count}개 실행 중…",
-      "running": "실행 중…",
-      "completed": "완료",
-      "viewDetails": "상세 보기",
-      "loadingHistory": "서브에이전트 기록 불러오는 중…",
-      "noMessages": "아직 메시지가 없습니다"
     },
     "runtime": {
       "preparing": "Runtime 준비 중...",

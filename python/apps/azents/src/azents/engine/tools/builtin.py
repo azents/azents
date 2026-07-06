@@ -30,7 +30,6 @@ from azents.core.enums import (
 from azents.core.tools import (
     ResolveContext,
     ShellToolkitConfig,
-    SubagentToolkitContext,
     Toolkit,
     ToolkitProvider,
     ToolkitState,
@@ -391,14 +390,6 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         """
         self._session_id = session_id
 
-    def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
-        """Apply parent-scoped builtin state to subagent execution.
-
-        :param context: Subagent execution context
-        """
-        self.set_agent_id(context.parent_agent_id)
-        self.set_session_id(context.parent_session_id)
-
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return builtin tools independent of Runtime Runner."""
         config = self._config
@@ -469,10 +460,6 @@ class RuntimeEnvProvider(Protocol):
 class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     """Runtime Runner dependent shell/file tool execution instance."""
 
-    # Tool names to exclude from Subagent (DP4 C: Toolkit-defined).
-    #
-    SUBAGENT_EXCLUDED_TOOLS: frozenset[str] = frozenset()
-
     def __init__(
         self,
         config: ShellToolkitConfig,
@@ -531,8 +518,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     def set_runtime_agent_id(self, agent_id: str) -> None:
         """Specify separate agent_id for Runtime operation.
 
-        Used when Subagent shares parent runtime tool context.
-        shell/file tools find runtime by this ID.
+        Shell/file tools find runtime by this ID.
 
         :param agent_id: Agent ID for runtime operation (parent agent_id)
         """
@@ -549,7 +535,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     def set_runtime_session_id(self, session_id: str) -> None:
         """Specify separate session_id for Runtime operation.
 
-        When Subagent shares parent runtime tool context, pass parent session_id.
+        Use when runtime operations need a separate session identifier.
         """
         self._runtime_session_id = session_id
 
@@ -559,15 +545,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         :param names: Set of tool names to exclude (set or frozenset)
         """
         self._excluded_tools = names
-
-    def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
-        """Apply parent runtime tool context sharing rules to subagent execution.
-
-        :param context: Subagent execution context
-        """
-        self.set_runtime_agent_id(context.parent_agent_id)
-        self.set_runtime_session_id(context.parent_session_id)
-        self.set_excluded_tools(self.SUBAGENT_EXCLUDED_TOOLS)
 
     def get_runtime_domain_config(self) -> RuntimeDomainConfig:
         """Return Runtime domain settings.
@@ -669,7 +646,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 user_id=user_id or "",
             ),
         ]
-        # Filter tools requested to be excluded by Subagent, etc.
+        # Filter tools requested by the runtime context.
         if self._excluded_tools:
             tools = [t for t in tools if t.spec.name not in self._excluded_tools]
 

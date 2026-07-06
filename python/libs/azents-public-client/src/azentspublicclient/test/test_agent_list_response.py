@@ -52,12 +52,10 @@ class TestAgentListResponse(unittest.TestCase):
                         system_prompt = '', 
                         enabled = True, 
                         type = 'public', 
-                        role = 'agent', 
                         runtime_provider_id = '', 
                         shell_enabled = True, 
                         memory_enabled = True, 
                         max_turns = 56, 
-                        toolkit_inherit_mode = 'none', 
                         avatar = azentspublicclient.models.uploaded_image.UploadedImage(
                             filename = '', 
                             default = azentspublicclient.models.image_file.ImageFile(
@@ -95,12 +93,10 @@ class TestAgentListResponse(unittest.TestCase):
                         system_prompt = '', 
                         enabled = True, 
                         type = 'public', 
-                        role = 'agent', 
                         runtime_provider_id = '', 
                         shell_enabled = True, 
                         memory_enabled = True, 
                         max_turns = 56, 
-                        toolkit_inherit_mode = 'none', 
                         avatar = azentspublicclient.models.uploaded_image.UploadedImage(
                             filename = '', 
                             default = azentspublicclient.models.image_file.ImageFile(

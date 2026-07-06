@@ -464,7 +464,6 @@
       "modelPlaceholder": "モデルを選択してください",
       "modelSelectIntegrationFirst": "先にLLM連携を選択してください",
       "inheritModelLabel": "親エージェントのモデルを継承",
-      "inheritModelDescription": "このサブエージェントを呼び出した親エージェントのLLM連携とモデルを使用します。temperature や reasoning effort などのモデルパラメータはこのサブエージェントの値を維持します。",
       "inheritModelPlaceholder": "親エージェントのモデルを使用",
       "inheritModelBadge": "親のモデルを継承",
       "inheritModelModelIdentifier": "親エージェントのモデル",
@@ -507,21 +506,9 @@
       "compactionModelThresholdWarning": "圧縮モデルのコンテキストウィンドウ（{compactionMax}トークン）がメインモデル（{mainMax}トークン）より小さいため、圧縮モデルの上限に基づいてコンパクションが発生します。",
       "roleLabel": "ロール",
       "roleAgent": "エージェント",
-      "roleAgentDescription": "サブエージェントを使用してタスクを委任できます",
-      "roleSubagent": "サブエージェント",
-      "roleSubagentDescription": "他のエージェントからツールとして呼び出されます",
-      "subagentsSection": "サブエージェント",
-      "addSubagent": "サブエージェント追加",
-      "noSubagentsAttached": "接続されたサブエージェントはありません",
-      "subagentDescription": "説明",
-      "subagentDescriptionPlaceholder": "このサブエージェントの使用タイミングを説明してください",
-      "selectSubagent": "サブエージェントを選択",
-      "noSubagentsAvailable": "利用可能なサブエージェントはありません",
-      "removeSubagent": "削除",
+      "roleAgentDescription": "セッションを実行し、ツールアクセスを保持します",
       "useParentToolkitsLabel": "親エージェントのツールキットを使用",
-      "useParentToolkitsDescription": "この親エージェントに接続されているツールキットを継承して使用します。この呼び出しでは、サブエージェント自身に接続されたツールキットは無視され、`memory` や `schedule` などの親専用ツールは除外されます。",
       "shellEnabledLabel": "シェルを有効化",
-      "shellEnabledDescription": "このサブエージェントにシェルコマンドの実行を許可する",
       "memoryEnabledLabel": "メモリを有効化",
       "memoryEnabledDescription": "会話間で永続的なメモリの保存と活用を許可する",
       "settingsHub": {
@@ -542,8 +529,8 @@
           "description": "メインモデル、軽量モデル、トークン上限、推論、最大ターン"
         },
         "capabilities": {
-          "label": "Tools and subagents",
-          "description": "Shell access, built-in tools, toolkits, and subagent links"
+          "label": "ツール",
+          "description": "Shell アクセス、組み込みツール、ツールキット"
         },
         "memory": {
           "label": "Memory",
@@ -625,12 +612,10 @@
       },
       "roleFilter": {
         "agent": "エージェント",
-        "subagent": "サブエージェント",
         "all": "すべて"
       },
       "emptyForFilter": {
         "agent": "エージェントがありません。上のボタンから作成してください。",
-        "subagent": "サブエージェントがありません。エージェント作成時に role を subagent に指定できます。",
         "all": "エージェントがまだ一つもありません。"
       },
       "changeModel": "モデルを変更",
@@ -688,7 +673,8 @@
         "emptyTitle": "メモリが見つかりません",
         "emptyDescription": "メモリを作成するか、検索条件を調整してください。",
         "deleteConfirm": "メモリ「{name}」を削除しますか？この操作は元に戻せません。"
-      }
+      },
+      "shellEnabledDescription": "このエージェントにシェルコマンドの実行を許可する"
     },
     "toolkits": {
       "headline": "ツールキット",
@@ -911,48 +897,37 @@
     "home": {
       "eyebrow": "{handle} ワークスペース",
       "title": "チームのエージェント",
-      "subtitle": "{members}名 · エージェント {agents}名 · サブエージェント {subagents}名が一緒に働いています",
+      "subtitle": "{members}名 · エージェント {agents}名が一緒に働いています",
       "newAgent": "新規エージェント",
       "filter": {
         "agents": "エージェント",
-        "subagents": "サブエージェント",
         "all": "すべて"
       },
       "search": {
-        "agents": "エージェント名・役割で検索",
-        "subagents": "サブエージェントを検索"
+        "agents": "エージェント名・役割で検索"
       },
       "showDisabled": "無効 {count}件を表示",
       "stats": {
         "activeAgents": "アクティブ",
         "totalAgents": "エージェント",
         "recentSessions": "最近の会話",
-        "recentSessionsSubtitle": "過去7日間",
-        "subagents": "サブエージェント"
+        "recentSessionsSubtitle": "過去7日間"
       },
       "sections": {
         "agents": {
           "title": "エージェント",
           "subtitle": "直接話しかけられる独立エージェント"
-        },
-        "subagents": {
-          "title": "サブエージェント",
-          "subtitle": "他のエージェントが委任して呼び出す専門ツール",
-          "notice": "サブエージェントとは直接会話できません。親エージェントが必要時に呼び出します。"
         }
       },
       "empty": {
         "search": "検索結果がありません",
         "agents": "まだエージェントがありません",
-        "agentsFiltered": "無効も表示するには上のトグルを有効に",
-        "subagents": "まだサブエージェントがありません",
-        "subagentsFiltered": "無効も表示するには上のトグルを有効に"
+        "agentsFiltered": "無効も表示するには上のトグルを有効に"
       },
       "card": {
         "enabled": "アクティブ",
         "disabled": "無効",
         "noDescription": "説明なし",
-        "subagentBadge": "サブエージェント",
         "sessionsCount": "会話 {count}件"
       },
       "activityFeed": "活動フィード",
@@ -1304,15 +1279,6 @@
       "summary": "以前の会話が要約されました",
       "expand": "要約を表示",
       "collapse": "要約を非表示"
-    },
-    "subagent": {
-      "executing": "{name} 実行中…",
-      "executingMultiple": "サブエージェント{count}件実行中…",
-      "running": "実行中…",
-      "completed": "完了",
-      "viewDetails": "詳細を見る",
-      "loadingHistory": "サブエージェントの履歴を読み込み中…",
-      "noMessages": "まだメッセージがありません"
     },
     "runtime": {
       "preparing": "Runtime準備中…",

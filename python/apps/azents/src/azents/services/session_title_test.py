@@ -12,7 +12,6 @@ import azents.services.session_title as session_title_module
 from azents.core.agent import AgentModelSelection
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
-    AgentRole,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
@@ -261,7 +260,6 @@ class _AgentRepository:
             lightweight_model_selection=selection,
             enabled=True,
             type=AgentType.PUBLIC,
-            role=AgentRole.AGENT,
             created_at=now,
             updated_at=now,
         )

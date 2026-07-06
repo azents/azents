@@ -13,7 +13,6 @@ type Story = StoryObj<typeof meta>;
 const populatedStats: WorkspaceHomeStats = {
   totalAgents: 8,
   enabledAgents: 6,
-  subagentsCount: 12,
 };
 
 export const Populated = {
@@ -27,7 +26,6 @@ export const Empty = {
     stats: {
       totalAgents: 0,
       enabledAgents: 0,
-      subagentsCount: 0,
     },
   },
 } satisfies Story;

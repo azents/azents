@@ -10,7 +10,7 @@ from azents.core.builtin_tools import (
     WebSearchRule,
     validate_builtin_tools,
 )
-from azents.core.enums import AgentRole, LLMModelDeveloper, LLMProvider
+from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 
 
@@ -42,7 +42,6 @@ def _make_provider_model(
 
 def _make_context(
     *,
-    agent_role: AgentRole = AgentRole.SUBAGENT,
     shell_enabled: bool = False,
     has_toolkits: bool = False,
     supported_builtin_tools: list[str] | None = None,
@@ -54,7 +53,6 @@ def _make_context(
     if supported_builtin_tools is None:
         supported_builtin_tools = ["web_search"]
     return BuiltinToolValidationContext(
-        agent_role=agent_role,
         shell_enabled=shell_enabled,
         has_toolkits=has_toolkits,
         provider_model=_make_provider_model(
@@ -173,7 +171,6 @@ class TestWebSearchRule:
         ctx = _make_context(
             supported_builtin_tools=["web_search"],
             provider=LLMProvider.GOOGLE_GEMINI,
-            agent_role=AgentRole.SUBAGENT,
             shell_enabled=False,
             has_toolkits=False,
             model_developer=LLMModelDeveloper.GOOGLE,
@@ -207,7 +204,6 @@ class TestWebSearchRule:
         ctx = _make_context(
             supported_builtin_tools=["web_search"],
             provider=LLMProvider.OPENAI,
-            agent_role=AgentRole.AGENT,
             shell_enabled=True,
             has_toolkits=True,
         )
@@ -224,7 +220,6 @@ class TestWebSearchRule:
         ctx = _make_context(
             supported_builtin_tools=["web_search"],
             provider=LLMProvider.ANTHROPIC,
-            agent_role=AgentRole.AGENT,
             shell_enabled=True,
             has_toolkits=True,
         )
@@ -240,7 +235,6 @@ class TestWebSearchRule:
         ctx = _make_context(
             supported_builtin_tools=["web_search"],
             provider=LLMProvider.GOOGLE_GEMINI,
-            agent_role=AgentRole.AGENT,
             shell_enabled=True,
             has_toolkits=True,
             model_developer=LLMModelDeveloper.GOOGLE,
@@ -268,7 +262,6 @@ class TestWebSearchRule:
         ctx = _make_context(
             supported_builtin_tools=[],
             provider=LLMProvider.GOOGLE_GEMINI,
-            agent_role=AgentRole.AGENT,
             shell_enabled=True,
             has_toolkits=True,
             model_developer=LLMModelDeveloper.GOOGLE,
@@ -285,7 +278,6 @@ class TestWebSearchRule:
         ctx = _make_context(
             supported_builtin_tools=["web_search"],
             provider=LLMProvider.GOOGLE_VERTEX_AI,
-            agent_role=AgentRole.AGENT,
             model_developer=LLMModelDeveloper.GOOGLE,
         )
 
@@ -298,7 +290,6 @@ class TestWebSearchRule:
         ctx = _make_context(
             supported_builtin_tools=["web_search"],
             provider=LLMProvider.GOOGLE_VERTEX_AI,
-            agent_role=AgentRole.AGENT,
             model_developer=LLMModelDeveloper.ANTHROPIC,
         )
 
@@ -364,7 +355,6 @@ class TestImageGenerationRule:
         """No errors for valid setting on Gemini."""
         # Given: Gemini, only image_generation enabled, shell/reasoning disabled
         ctx = BuiltinToolValidationContext(
-            agent_role=AgentRole.SUBAGENT,
             shell_enabled=False,
             has_toolkits=False,
             provider_model=_make_provider_model(
@@ -386,7 +376,6 @@ class TestImageGenerationRule:
         """Error when Gemini has another builtin tool."""
         # Given: Gemini, image_generation + web_search
         ctx = BuiltinToolValidationContext(
-            agent_role=AgentRole.SUBAGENT,
             shell_enabled=False,
             has_toolkits=False,
             provider_model=_make_provider_model(
@@ -408,7 +397,6 @@ class TestImageGenerationRule:
         """Error when shell is enabled on Gemini."""
         # Given: Gemini, shell enabled
         ctx = BuiltinToolValidationContext(
-            agent_role=AgentRole.SUBAGENT,
             shell_enabled=True,
             has_toolkits=False,
             provider_model=_make_provider_model(
@@ -430,7 +418,6 @@ class TestImageGenerationRule:
         """Error when reasoning is enabled on Gemini."""
         # Given: Gemini, reasoning enabled
         ctx = BuiltinToolValidationContext(
-            agent_role=AgentRole.SUBAGENT,
             shell_enabled=False,
             has_toolkits=False,
             provider_model=_make_provider_model(
@@ -452,7 +439,6 @@ class TestImageGenerationRule:
         """Return all errors when multiple Gemini constraints are violated at once."""
         # Given: all Gemini constraints violated
         ctx = BuiltinToolValidationContext(
-            agent_role=AgentRole.SUBAGENT,
             shell_enabled=True,
             has_toolkits=False,
             provider_model=_make_provider_model(
@@ -474,7 +460,6 @@ class TestImageGenerationRule:
         """Gemini exclusivity constraints do not apply on OpenAI."""
         # Given: OpenAI, shell + reasoning, which would error on Gemini
         ctx = BuiltinToolValidationContext(
-            agent_role=AgentRole.AGENT,
             shell_enabled=True,
             has_toolkits=True,
             provider_model=_make_provider_model(

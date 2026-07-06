@@ -45,8 +45,6 @@ class EventKind(str, Enum):
     INTERRUPTED = 'interrupted'
     COMPACTION_MARKER = 'compaction_marker'
     COMPACTION_SUMMARY = 'compaction_summary'
-    SUBAGENT_START = 'subagent_start'
-    SUBAGENT_END = 'subagent_end'
     SYSTEM_REMINDER = 'system_reminder'
     SYSTEM_ERROR = 'system_error'
     UNKNOWN_ADAPTER_OUTPUT = 'unknown_adapter_output'

@@ -13,7 +13,6 @@ const agent: AgentResponse = {
   description:
     "Coordinates release checklists, CI failures, and follow-up PRs.",
   type: "private",
-  role: "agent",
   enabled: true,
   avatar: null,
   model_selection: null,
@@ -26,7 +25,6 @@ const agent: AgentResponse = {
   shell_enabled: true,
   memory_enabled: true,
   max_turns: null,
-  toolkit_inherit_mode: "none",
   created_at: "2026-06-25T08:00:00Z",
   updated_at: "2026-06-25T08:00:00Z",
 };

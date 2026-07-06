@@ -51,8 +51,6 @@ from azents.engine.tools.skill import SkillToolkit, SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkit, TodoToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_subagent import AgentSubagentRepository
-from azents.repos.agent_subagent.data import AgentSubagent
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
@@ -671,8 +669,7 @@ async def resolve_agent_tools(
     :param oauth_secret_key: OAuth HMAC signing key
     :param runtime_domain_config: Runtime domain allow/deny policy. Parent
         agent uses workspace/agent settings;
-        subagent passes parent value as-is. RuntimeToolkit receives this in
-        constructor and keeps it immutable.
+        runtime toolkits receive this in the constructor and keep it immutable.
     :param workspace_handle: Workspace handle for settings page URL construction
     :param builtin_toolkit_provider: Builtin toolkit provider (None disables builtin)
     :param claude_rules_toolkit_provider: Claude rules provider (None disables it)
@@ -687,7 +684,6 @@ async def resolve_agent_tools(
     agent_toolkits = await agent_toolkit_repository.list_by_agent(session, agent_id)
     # (provider, resolved, config, slug, prompt, use_prefix, toolkit_type)
     # toolkit_type is populated only for DB-registered toolkits; auto-binding is None
-    # so subagent inherit can apply web-only filter by type.
     pending: list[
         tuple[
             ToolkitProvider[Any],
@@ -764,7 +760,6 @@ async def resolve_agent_tools(
     # tools as separate toolkits.
     if builtin_toolkit_provider is not None:
         # runtime_domain_config is required: parent uses agent/workspace settings,
-        # subagent passes parent value as-is.
         builtin_config = BuiltinToolkitProvider.validate_config(
             {
                 "memory_enabled": memory_enabled,
@@ -1050,52 +1045,3 @@ async def resolve_agent_tools(
     ]
 
     return result
-
-
-async def resolve_subagent_tools(
-    agent_id: str,
-    *,
-    agent_subagent_repository: AgentSubagentRepository,
-    agent_repository: AgentRepository,
-    session: AsyncSession,
-) -> list[tuple[AgentSubagent, str]]:
-    """Resolve subagent list connected to Agent.
-
-    Return only enabled subagent junctions with each subagent name.
-
-    :param agent_id: Agent ID
-    :param agent_subagent_repository: AgentSubagent repository
-    :param agent_repository: Agent repository
-    :param session: DB session
-    :return: List of (AgentSubagent, subagent_name) tuples
-    """
-    junctions = await agent_subagent_repository.list_by_agent(session, agent_id)
-    results: list[tuple[AgentSubagent, str]] = []
-
-    for junction in junctions:
-        if not junction.enabled:
-            continue
-
-        agent = await agent_repository.get_by_id(session, junction.subagent_id)
-        if agent is None:
-            logger.warning(
-                "Subagent not found, skipping",
-                extra={
-                    "agent_id": agent_id,
-                    "subagent_id": junction.subagent_id,
-                },
-            )
-            continue
-        if not agent.enabled:
-            logger.warning(
-                "Subagent disabled, skipping",
-                extra={
-                    "agent_id": agent_id,
-                    "subagent_id": junction.subagent_id,
-                },
-            )
-            continue
-
-        results.append((junction, agent.name))
-
-    return results

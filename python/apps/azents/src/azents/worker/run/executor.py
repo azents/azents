@@ -27,12 +27,8 @@ from azents.core.enums import (
 )
 from azents.core.tools import (
     SessionType,
-    Toolkit,
     ToolkitContext,
     ToolkitProvider,
-    ToolkitState,
-    ToolkitStatus,
-    TurnContext,
 )
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
@@ -74,7 +70,6 @@ from azents.engine.run.input import InvokeInput
 from azents.engine.run.resolve import (
     resolve_agent_tools,
     resolve_invoke_input,
-    resolve_subagent_tools,
 )
 from azents.engine.run.types import CheckStop, PollMessages
 from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
@@ -86,14 +81,6 @@ from azents.engine.tools.deps import (
 )
 from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
-from azents.engine.tools.subagent import (
-    SubagentToolContext,
-    create_unified_subagent_tool,
-)
-from azents.engine.tools.task import (
-    BACKGROUND_TASK_TOOLKIT_SLUG,
-    BackgroundTaskToolkit,
-)
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -103,7 +90,6 @@ from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
-from azents.repos.agent_subagent import AgentSubagentRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
@@ -235,9 +221,6 @@ class RunExecutor:
         AgentToolkitRepository, Depends(AgentToolkitRepository)
     ]
     toolkit_repository: Annotated[ToolkitRepository, Depends(get_toolkit_repository)]
-    agent_subagent_repository: Annotated[
-        AgentSubagentRepository, Depends(AgentSubagentRepository)
-    ]
     agent_runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
     ]
@@ -524,102 +507,6 @@ class RunExecutor:
         boundary_started_at = now
 
         run_request = dataclasses.replace(run_request, toolkits=toolkits)
-
-        async with self.session_manager() as session:
-            subagent_junctions = await resolve_subagent_tools(
-                invoke_input.agent_id,
-                agent_subagent_repository=self.agent_subagent_repository,
-                agent_repository=self.agent_repository,
-                session=session,
-            )
-
-        now = loop.time()
-        logger.info(
-            "Run subagent tools resolved",
-            extra={
-                "session_id": message.session_id,
-                "agent_id": invoke_input.agent_id,
-                "run_id": run_id,
-                "workspace_id": run_request.workspace_id,
-                "model": run_request.model,
-                "subagent_tool_count": len(subagent_junctions),
-                "duration_seconds": round(now - boundary_started_at, 3),
-                "total_duration_seconds": round(now - preparation_started_at, 3),
-            },
-        )
-        boundary_started_at = now
-
-        if subagent_junctions:
-            subagent_ctx = SubagentToolContext(
-                engine=self.engine,
-                parent_session_id=message.session_id,
-                parent_agent_id=invoke_input.agent_id,
-                parent_runtime_domain_config=runtime_domain_config,
-                workspace_id=run_request.workspace_id,
-                user_id=message.user_id,
-                agent_repository=self.agent_repository,
-                integration_repository=self.integration_repository,
-                exchange_file_service=self.exchange_file_service,
-                model_file_service=self.model_file_service,
-                session_manager=self.session_manager,
-                toolkit_registry=self.toolkit_registry,
-                agent_toolkit_repository=self.agent_toolkit_repository,
-                toolkit_repository=self.toolkit_repository,
-                agent_runtime_repository=self.agent_runtime_repository,
-                agent_session_repository=self.agent_session_repository,
-                publish_event=publish_event,
-                broker=self.broker,
-                builtin_toolkit_provider=self.builtin_toolkit_provider,
-                claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
-                todo_toolkit_provider=self.todo_toolkit_provider,
-                goal_toolkit_provider=self.goal_toolkit_provider,
-                skill_toolkit_provider=self.skill_toolkit_provider,
-                web_url=self.worker_config.web_url,
-                oauth_secret_key=self.worker_config.oauth_secret_key,
-                mcp_proxy_url=self.worker_config.mcp_proxy_url,
-                session_type=SessionType.USER,
-                parent_run_id=run_id,
-                parent_check_stop=None,
-                shutdown_event=shutdown_event,
-            )
-
-            class _SubagentToolkit(Toolkit[Any]):
-                """Toolkit that builds subagent tools from the current turn context."""
-
-                async def update_context(self, context: TurnContext) -> ToolkitState:
-                    current_ctx = dataclasses.replace(
-                        subagent_ctx,
-                        user_id=context.user_id,
-                        publish_event=context.publish_event,
-                        parent_run_id=context.run_id,
-                        parent_check_stop=context.check_stop,
-                    )
-                    subagent_tool = create_unified_subagent_tool(
-                        subagent_junctions,
-                        current_ctx,
-                    )
-                    return ToolkitState(
-                        status=ToolkitStatus.ENABLED,
-                        tools=[subagent_tool],
-                    )
-
-            background_task_toolkit = BackgroundTaskToolkit(
-                registry=self.background_registry,
-                session_id=message.session_id,
-            )
-
-            run_request = dataclasses.replace(
-                run_request,
-                toolkits=[
-                    *run_request.toolkits,
-                    ToolkitBinding(_SubagentToolkit(), "subagent", False),
-                    ToolkitBinding(
-                        background_task_toolkit,
-                        BACKGROUND_TASK_TOOLKIT_SLUG,
-                        False,
-                    ),
-                ],
-            )
 
         if prepare_toolkits is not None:
             logger.info(

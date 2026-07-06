@@ -10,9 +10,8 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelectionInput
-from azents.core.enums import AgentRole, AgentType
+from azents.core.enums import AgentType
 from azents.repos.agent.data import Agent
-from azents.repos.agent_subagent.data import SubagentToolkitInheritMode
 from azents.testing.model_selection import make_test_model_selection
 
 from . import AgentService
@@ -35,12 +34,10 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         system_prompt=None,
         enabled=True,
         type=AgentType.PUBLIC,
-        role=AgentRole.AGENT,
         runtime_provider_id=None,
         shell_enabled=True,
         memory_enabled=True,
         max_turns=None,
-        toolkit_inherit_mode=SubagentToolkitInheritMode.ALL,
         avatar=None,
         created_at=_NOW,
         updated_at=_NOW,
@@ -51,7 +48,6 @@ def _make_service() -> AgentService:
     """Create AgentService with mock dependencies."""
     repository = AsyncMock()
     admin_repository = AsyncMock()
-    agent_subagent_repository = AsyncMock()
     workspace_model_settings_repository = AsyncMock()
     model_catalog_read_service = AsyncMock()
     workspace_user_repository = AsyncMock()
@@ -67,7 +63,6 @@ def _make_service() -> AgentService:
     return AgentService(
         repository=repository,
         admin_repository=admin_repository,
-        agent_subagent_repository=agent_subagent_repository,
         workspace_model_settings_repository=workspace_model_settings_repository,
         model_catalog_read_service=model_catalog_read_service,
         workspace_user_repository=workspace_user_repository,

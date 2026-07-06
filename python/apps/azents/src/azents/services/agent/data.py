@@ -12,9 +12,8 @@ from azents.core.agent import (
     AgentModelSelectionInput,
     ModelParameters,
 )
-from azents.core.enums import AgentRole, AgentType
+from azents.core.enums import AgentType
 from azents.repos.agent.data import Agent
-from azents.repos.agent_subagent.data import SubagentToolkitInheritMode
 from azents.services.uploads.schema import UploadedImage
 
 
@@ -33,12 +32,10 @@ class AgentOutput(BaseModel):
     system_prompt: str | None
     enabled: bool
     type: AgentType
-    role: AgentRole
     runtime_provider_id: str | None
     shell_enabled: bool
     memory_enabled: bool
     max_turns: int | None
-    toolkit_inherit_mode: SubagentToolkitInheritMode
     avatar: UploadedImage | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -68,12 +65,10 @@ class AgentOutput(BaseModel):
             system_prompt=data.system_prompt,
             enabled=data.enabled,
             type=data.type,
-            role=data.role,
             runtime_provider_id=data.runtime_provider_id,
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
             max_turns=data.max_turns,
-            toolkit_inherit_mode=data.toolkit_inherit_mode,
             avatar=avatar,
             created_at=data.created_at,
             updated_at=data.updated_at,
@@ -109,19 +104,12 @@ class AgentCreateInput(BaseModel):
     system_prompt: str | None = Field(default=None, description="System prompt")
     enabled: bool = Field(default=True, description="Enabled flag")
     type: AgentType = Field(default=AgentType.PUBLIC, description="Visibility scope")
-    role: AgentRole = Field(
-        default=AgentRole.AGENT, description="Role (agent/subagent)"
-    )
     runtime_provider_id: str | None = Field(
         default=None, description="Runtime Provider logical ID"
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
-    toolkit_inherit_mode: SubagentToolkitInheritMode = Field(
-        default=SubagentToolkitInheritMode.ALL,
-        description="Toolkit inherit mode (default 'all' — DP2 B)",
-    )
 
 
 class AgentUpdateInput(TypedDict, total=False):
@@ -149,17 +137,12 @@ class AgentUpdateInput(TypedDict, total=False):
     system_prompt: Annotated[str | None, Field(description="System prompt")]
     enabled: Annotated[bool, Field(description="Enabled flag")]
     type: Annotated[AgentType, Field(description="Visibility scope")]
-    role: Annotated[AgentRole, Field(description="Role (agent/subagent)")]
     runtime_provider_id: Annotated[
         str | None, Field(description="Runtime Provider logical ID")
     ]
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
     max_turns: Annotated[int | None, Field(description="Maximum agent turn count")]
-    toolkit_inherit_mode: Annotated[
-        SubagentToolkitInheritMode,
-        Field(description="Toolkit inherit mode"),
-    ]
 
 
 class AgentListOutput(BaseModel):

@@ -11,12 +11,6 @@ export type AgentListState =
       agents: AgentResponse[];
     };
 
-/** Agent list role filter.
- * - "agent": regular agent (default). Also shown in sidebar
- * - "subagent": child agent called by another agent
- * - "all": all */
-export type AgentRoleFilter = "agent" | "subagent" | "all";
-
 /** Agent form state (Full Page) */
 export type AgentFormState =
   | { type: "LOADING" }

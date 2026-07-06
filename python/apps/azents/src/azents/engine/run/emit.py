@@ -90,7 +90,7 @@ async def handle_engine_event(
     """Publish one engine event.
 
     Durable events are delivered by event runtime after transcript append.
-    Both worker and subagent use this function to apply the same publish logic.
+    Workers use this function to apply publish logic.
 
     :param item: Emit yielded by Engine
     :param publish: Event publish callback
@@ -105,7 +105,7 @@ def collect_event_result(
 ) -> None:
     """Collect result text/attachments from event.
 
-    Used to collect results returned from subagent to parent agent.
+    Used to collect assistant output from emitted events.
 
     :param ev: Event to handle
     :param texts: Accumulated result text list
@@ -121,7 +121,7 @@ def _collect_event_result(
     texts: list[str],
     attachments: list[RuntimeAttachment],
 ) -> None:
-    """Collect subagent return result from Event."""
+    """Collect assistant text result from Event."""
     payload = ev.payload
     if isinstance(payload, AssistantMessagePayload):
         _append_event_text(payload.content, texts)
