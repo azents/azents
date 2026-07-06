@@ -1174,6 +1174,15 @@ function actionExecutionResultFromEvent(
     : null;
 }
 
+function isCompletedGitWorktreeActionExecution(
+  actionExecution: ActionExecutionProjection,
+): boolean {
+  return (
+    actionExecution.execution.action_type === "create_git_worktree" &&
+    actionExecution.execution.status === "completed"
+  );
+}
+
 function actionExecutionResultsFromEvents(
   events: ChatEventResponse[],
 ): ActionExecutionProjection[] {
@@ -1734,13 +1743,27 @@ export function useChatSessionContainer(
       }
 
       if ("type" in event && event.type === "action_execution_updated") {
+        const actionExecution = event.action_execution;
         setManagedLiveState((prev) => ({
           ...prev,
           actionExecutions: upsertActionExecutionProjection(
             prev.actionExecutions,
-            event.action_execution,
+            actionExecution,
           ),
         }));
+        if (isCompletedGitWorktreeActionExecution(actionExecution)) {
+          void Promise.all([
+            utils.chat.listAgentProjects.invalidate({
+              agentId: agent.id,
+              sessionId,
+            }),
+            utils.chat.getSessionProjectBrowserManifest.invalidate({
+              agentId: agent.id,
+              sessionId,
+            }),
+            utils.chat.listInputActions.invalidate({ sessionId }),
+          ]);
+        }
         return;
       }
 
@@ -1943,7 +1966,14 @@ export function useChatSessionContainer(
           break;
       }
     },
-    [connectionInfoQuery, sessionId, utils.chat.listInputActions],
+    [
+      agent.id,
+      connectionInfoQuery,
+      sessionId,
+      utils.chat.getSessionProjectBrowserManifest,
+      utils.chat.listAgentProjects,
+      utils.chat.listInputActions,
+    ],
   );
 
   const {
