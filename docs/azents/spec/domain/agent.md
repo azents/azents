@@ -13,12 +13,10 @@ code_paths:
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/src/azents/rdb/models/agent_admin.py
-  - python/apps/azents/src/azents/rdb/models/agent_subagent.py
   - python/apps/azents/src/azents/rdb/models/llm_provider_integration.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/repos/agent/**
   - python/apps/azents/src/azents/repos/agent_admin/**
-  - python/apps/azents/src/azents/repos/agent_subagent/**
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/repos/workspace_model_settings/**
   - python/apps/azents/src/azents/services/agent/**
@@ -37,7 +35,6 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents
   - /agent/v1/workspaces/{handle}/agents/{agent_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/admins
-  - /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar
@@ -48,12 +45,12 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
 last_verified_at: 2026-07-06
-spec_version: 37
+spec_version: 38
 ---
 
 # Agent Domain Spec
 
-Agent is central execution unit of azents. Within Workspace, it bundles model selection snapshot, system prompt, model parameters, toolkit, and subagent links; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop.
+Agent is central execution unit of azents. Within Workspace, it bundles model selection snapshot, system prompt, model parameters, and toolkit access; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop.
 
 ## 1. Core Model
 
@@ -71,12 +68,10 @@ Agent is central execution unit of azents. Within Workspace, it bundles model se
 | `system_prompt` | Agent system prompt |
 | `enabled` | when false, runtime resolve blocks run start with `AgentDisabled` |
 | `type` | `public` or `private` |
-| `role` | `agent` or `subagent` |
 | `runtime_provider_id` | Runtime Provider logical id. If null, use server default provider policy |
 | `shell_enabled` | whether builtin shell toolkit is exposed |
 | `memory_enabled` | whether memory prompt/tool is exposed |
 | `max_turns` | run turn limit. null means unlimited |
-| `toolkit_inherit_mode` | subagent toolkit source. `all` means parent toolkit, `none` means subagent own toolkit |
 | `avatar` | Agent avatar stored image metadata |
 
 `model_selection` and `lightweight_model_selection` are `AgentModelSelection` JSONB snapshots and are not FK targets.
@@ -213,36 +208,25 @@ Runtime does not query workspace default or model listing. Workspace default act
 Agent create/update validates following with rules in `core/builtin_tools.py`.
 
 - snapshot capability must support that built-in tool.
-- `web_search` validates only capability regardless of provider/model developer-specific native activation method. Gemini `web_search` also does not require subagent, shell disabled, or no toolkit conditions.
+- `web_search` validates only capability regardless of provider/model developer-specific native activation method. Gemini `web_search` also does not require shell disabled or no toolkit conditions.
 - Each built-in tool owns additional constraints. For example: provider-specific combination limits of `image_generation`, `web_fetch`.
 - built-in tool requiring reasoning effort checks snapshot reasoning capability and effort level.
 
 Runtime passes only `BuiltinToolSpec(name, config)`. LiteLLM Responses lowerer sees `RunRequest.model_developer`, provider, model capability and lowers semantic hosted tool into native `tools`/`kwargs`; to protect stale snapshot/direct RunRequest, it performs capability validation once more.
 
-## 5. Subagent
-
-Subagent has same `model_selection` / `lightweight_model_selection` as normal Agent. There is no parent model runtime inheritance. If UX that follows parent model is needed, copy parent snapshot when creating/updating subagent.
-
-Toolkit inheritance remains.
-
-- `toolkit_inherit_mode=all`: expose only parent Agent's own toolkit to subagent run.
-- `toolkit_inherit_mode=none`: use subagent's own toolkit.
-
-Subagent tool uses active session of target subagent, but parent session storage and runtime file namespace sharing rules follow existing subagent runtime contract.
-
-## 6. Context Window / Compaction
+## 5. Context Window / Compaction
 
 `effective_context_window_tokens` in Agent response is calculated from the most restrictive value actually used by runtime among main model max input tokens, lightweight model max input tokens, and optional Agent `model_parameters.context_window_tokens`. The Agent context window cap is allowed to be larger than current model limits; in that case the current model limit still wins until the Agent model changes. `effective_auto_compaction_threshold_tokens` is 90% of effective context window.
 
 Automatic compaction runs with `lightweight_model_selection` snapshot.
 
-## 7. Memory / toolkit / avatar
+## 6. Memory / toolkit / avatar
 
 - Agent with `memory_enabled=false` does not expose memory prompt/tool.
 - Toolkit CRUD and runtime state follow `spec/domain/toolkit.md`.
 - Avatar is stored as stored image metadata through upload service image handler and resolved to public URL in Agent response.
 
-## 8. Removed Legacy
+## 7. Removed Legacy
 
 Following contracts do not exist in current system.
 
@@ -253,12 +237,14 @@ Following contracts do not exist in current system.
 - `agents.model_config_inherit_mode`
 - `agents.model_parameter_overrides`
 - runtime `ModelConfig` lookup / default parameter merge
+- subagent role, junction, API, and runtime delegation tool
 - subagent model runtime inheritance
 
-## 9. Change History
+## 8. Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-06 | 38 | Removed subagent role, junction, API, runtime delegation, and living spec surfaces |
 | 2026-07-06 | 37 | Renamed Agent output token cap to `max_output_tokens` and added Agent `context_window_tokens` effective context override |
 | 2026-07-02 | 36 | Added Agent Memory management routes and settings UI boundary |
 | 2026-06-18 | 35 | Corrected integration model listing fetch failure to propagate original exception instead of failure variant/5xx HTTPException |

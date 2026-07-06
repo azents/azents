@@ -316,8 +316,6 @@ Event kinds:
 - `interrupted`
 - `compaction_marker`
 - `compaction_summary`
-- `subagent_start`
-- `subagent_end`
 - `system_reminder`
 - `goal_continuation`
 - `goal_updated`
