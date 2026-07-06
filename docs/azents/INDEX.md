@@ -15,14 +15,14 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-06 | 37 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-06 | 38 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-06 | 86 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-02 | 2 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-02 | 44 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-06 | 45 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-06-29 | 5 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-06 | 33 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-06 | 34 |
 
 _8 documents_
 
@@ -41,11 +41,10 @@ _8 documents_
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-06 | 12 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-06 | 11 |
-| [Subagent Delegation Flow](spec/flow/subagent-delegation.md) | @Hardtack | 2026-07-01 | 13 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-06 | 12 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |
 
-_14 documents_
+_13 documents_
 
 ## Architecture Decision Records (ADR)
 
@@ -180,4 +179,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 351
+- Total documents: 350

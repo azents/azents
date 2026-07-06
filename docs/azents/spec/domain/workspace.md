@@ -58,7 +58,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-06
-spec_version: 33
+spec_version: 34
 ---
 
 # Workspace & Membership
@@ -217,7 +217,7 @@ Git-backed Project root rows separate registry removal from destructive cleanup.
 
 ### Workspace Home / Membership UI
 
-azents-web `/w/[handle]` home is an agent-centered entry point inside Workspace. Current UI shows Agent list and subagent rows, and sidebar renders workspace navigation and agent section together for workspace-scoped pages. `WorkspaceHome`, `WorkspaceSidebar`, `AgentSidebarSection`, `AgentTeamCard`, and `SubagentTeamRow` compose this IA. The `AgentTeam*` names are frontend IA names and do not represent a Workspace Team domain entity.
+azents-web `/w/[handle]` home is an agent-centered entry point inside Workspace. Current UI shows the Agent list, and sidebar renders workspace navigation and agent section together for workspace-scoped pages. `WorkspaceHome`, `WorkspaceSidebar`, `AgentSidebarSection`, and `AgentTeamCard` compose this IA. The `AgentTeam*` names are frontend IA names and do not represent a Workspace Team domain entity.
 
 Agent detail routes under `/w/[handle]/agents/[agentId]` use a separate Agent-focused shell. The outer `/w/[handle]` layout remains the membership/auth boundary, but visual layout is split by route groups: workspace pages use the workspace sidebar shell, while Agent detail pages use an Agent rail. The Agent rail contains workspace escape, linked Agent identity, session list, session creation, and global account/workspace actions. The linked Agent identity opens the independent Agent settings page under the same Agent-focused shell. Agent settings is an independent page and does not render session Chat/Projects/Context tabs. Concrete session routes under `/w/[handle]/agents/[agentId]/sessions/[sessionId]` own Chat/Projects/Context navigation through the session header. Mobile Agent detail pages keep a single-column content area and expose the rail through a drawer opened from the Agent settings or session header. The existing chat runtime/workspace panel remains a desktop right-side panel and a mobile secondary drawer for Runtime file browsing and settings only.
 

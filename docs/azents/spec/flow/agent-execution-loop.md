@@ -152,8 +152,6 @@ Durable event kinds:
 - `interrupted`
 - `compaction_marker`
 - `compaction_summary`
-- `subagent_start`
-- `subagent_end`
 - `system_reminder`
 - `goal_continuation`
 - `goal_updated`
@@ -270,7 +268,7 @@ iterate output through event helper APIs instead of assuming a single shape.
 Tool result output stored in event history remains the durable source of truth. Client tool result
 text has a global hard cap of 30,000 characters at the event tool execution boundary, regardless of
 which toolkit produced the result. For text over the cap, the runtime stores a truncation marker and
-the tail of the output. This cap applies after builtin, external, subagent, and custom toolkit handlers
+the tail of the output. This cap applies after builtin, external, and custom toolkit handlers
 return, so individual tool implementations do not own separate general-purpose output truncation.
 Normal model input lowering keeps old tool output content instead of replacing it with
 context-pressure placeholders.
@@ -300,7 +298,7 @@ fragments.
 `TurnContext` carries current run values such as `run_id`, `publish_event`, current
 actor `user_id`, model, and optional stop checker. Session-scoped toolkit instances
 must create run-sensitive handlers from this current turn context instead of retaining
-stale constructor state. Schedule and subagent tool handlers follow this rule.
+stale constructor state. Schedule and background task tool handlers follow this rule.
 
 If the run is stopped while tools are active, the loop records interrupted results for calls that
 did not produce a result. User-requested stop also appends an `interrupted` durable event before the
@@ -344,7 +342,7 @@ existing transcript remains append-only.
 
 ## 7. Entrypoints And Projection
 
-Production dependency injection returns `AgentEngineAdapter`. Worker, service, and subagent
+Production dependency injection returns `AgentEngineAdapter`. Worker and service
 entrypoints depend on `AgentEngineProtocol`, not SDK concrete adapters.
 
 Web chat user writes enter through REST commit endpoints. Message writes create or reuse an

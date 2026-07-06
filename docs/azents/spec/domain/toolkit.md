@@ -12,9 +12,6 @@ code_paths:
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/shell_environment/**
-  - python/apps/azents/src/azents/services/agent_subagent/**
-  - python/apps/azents/src/azents/repos/agent_subagent/**
-  - python/apps/azents/src/azents/rdb/models/agent_subagent.py
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/tools/**
@@ -33,8 +30,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-02
-spec_version: 44
+last_verified_at: 2026-07-06
+spec_version: 45
 ---
 
 # Toolkit
@@ -275,7 +272,6 @@ Activation and context:
 - `ClaudeRulesToolkitProvider` is auto-bound whenever runtime tools are enabled.
 - The Toolkit shares the runtime instruction context prepared for file-instruction loaders: Runtime `FileStorage`, sorted registered Projects, and runtime-scoped agent/session identity.
 - Prompt builds and toolkit startup must not start or touch Runtime solely to discover Claude rules.
-- Subagent runtime-tool contexts use the parent runtime agent/session identity for file operations and dedupe state, matching inherited runtime workspace ownership.
 
 Candidate roots:
 
@@ -328,33 +324,10 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `kubernetes` | depends on `clusters[].auth_type` — kubeconfig / token / EKS / GKE | kubeconfig secret |
 | `google_analytics` | service account / ADC | — |
 
-### Main-Only Toolkit
+### Runtime-Only Toolkit Boundary
 
-**Main-only toolkit** is a toolkit kept parent-agent-only so it is not exposed even if subagent inherits parent toolkit (§ "Toolkit Inherit"). Reasons include recursion prevention (`subagent` tool), context pollution prevention (`memory`), and role separation (`schedule`, background task).
+Shell, Goal, Todo, AGENTS.md, Claude Rules, schedule, and background-task behavior are runtime-owned capabilities rather than user-created `ToolkitConfig` rows unless explicitly represented in the ToolkitConfig API. Runtime-only toolkits are mounted by worker/runtime policy and are not inherited through `agent_toolkits` rows.
 
-Each Toolkit self-defines tools to exclude from subagent (DP4 C — [`design/subagent-inherit-2026-04-24.md` §DP4](../../design/subagent-inherit-2026-04-24.md)).
-
-- **`BuiltinToolkit.SUBAGENT_EXCLUDED_TOOLS`** — `frozenset({"shell_recreate_sandbox"})`. This tool can destroy parent sandbox and break parent execution if called by subagent accidentally. Applied to subagent-bound `BuiltinToolkit` with `set_excluded_tools(BuiltinToolkit.SUBAGENT_EXCLUDED_TOOLS)` ([`engine/tools/subagent.py`](../../../../python/apps/azents/src/azents/engine/tools/subagent.py), [`engine/tools/shell.py`](../../../../python/apps/azents/src/azents/engine/tools/shell.py)).
-- Built-in main-only tools (`memory`, `schedule`, `subagent`, `background_task`) are structurally blocked through other paths:
-  - memory prompt/tools are controlled by `Agent.memory_enabled=False` (subagent path forces `memory_enabled=False`).
-  - `schedule`, `subagent`, `background_task` toolkits are **dynamically injected by worker engine** and are not stored in `agent_toolkits` table. Subagent tool resolve path does not have this dynamic inject, so they are naturally not inherited.
-
-External constant lists (`MAIN_ONLY_TOOL_NAMES`, `MAIN_ONLY_TOOLKIT_TYPES`) were removed and changed so each Toolkit encapsulates its own exclusion (DP4 C). If a DB-registered MCP toolkit needs "main-only" later, extend that Toolkit with an attribute. Introducing DB column (`toolkit_configs.main_only`) is postponed as excessive for current requirements.
-
-### Toolkit Inherit (Subagent)
-
-Subagent can optionally inherit parent's DB-registered toolkits. Inherit is controlled at agent row level ([`rdb/models/agent_subagent.py`](../../../../python/apps/azents/src/azents/rdb/models/agent_subagent.py), [`repos/agent_subagent/data.py`](../../../../python/apps/azents/src/azents/repos/agent_subagent/data.py)).
-
-- **`agents.toolkit_inherit_mode`** column — enum `'all'` (default, DP2 B) / `'none'`. Controlled at Agent row level (DP1 A).
-- **`'all'` (default)** — When subagent is called, use parent's DB-registered toolkit **exclusively**. Subagent's own `agent_toolkits` are **completely ignored** (no merge). Runtime branch details: [`spec/flow/subagent-delegation.md` §4](../flow/subagent-delegation.md).
-- **`'none'`** — Subagent's own `agent_toolkits` junction is used as-is. Same as existing behavior (no regression). Existing subagents were opted out to `'none'` in migration.
-
-**Inherit target** — only DB-registered toolkits stored in `agent_toolkits` table. These are **not** inherited regardless of inherit mode:
-
-- **Auto-bound** — `BuiltinToolkit` (shell + file + grep, etc.; only memory part turned off for subagent with `memory_enabled` flag), `Schedule`, and session-scoped `TodoToolkit`. They are injected directly by worker engine rather than DB junction. For subagent calls, Todo is rebound to the subagent agent/session so delegated `update_todo` calls do not mutate the parent Todo list.
-- **Worker dynamic inject** — `subagent`, `background_task`, etc. Not intentionally injected into subagent tool resolve to prevent recursion (A → B → A).
-
-**Design rationale**: "general-purpose subagent — subagent inheriting tools used by parent as-is" use case from issue [#2967](https://github.com/azents/azents/issues/2967). See [`design/subagent-inherit.md` § DP6](../../design/subagent-inherit.md) for Exclusive (no merge) rationale.
 
 ## Business Rules
 
@@ -539,7 +512,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 Goal Toolkit is a session-scoped Toolkit State tool that is always auto-bound without user settings. State namespace/name is `goal/goal`; it stores `schema_version`, `objective`, `status`, `created_at`, `updated_at`. Supported statuses are `active`, `paused`, `blocked`, `complete`.
 
-Exposed tools are `get_goal`, `create_goal`, `update_goal`. `create_goal` fails if unfinished Goal already exists. `update_goal` only allows transitioning active Goal to `complete` or `blocked`. Subagent execution does not inherit parent session Goal.
+Exposed tools are `get_goal`, `create_goal`, `update_goal`. `create_goal` fails if unfinished Goal already exists. `update_goal` only allows transitioning active Goal to `complete` or `blocked`.
 
 Goal Toolkit registers `on_session_idle` runtime hook. If active Goal exists, it returns continuation input containing Goal objective. Dispatcher merges continuations from multiple providers in provider order and attaches provider slug/index metadata.
 
