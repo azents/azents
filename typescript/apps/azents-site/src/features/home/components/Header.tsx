@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ActionIcon,
   Anchor,
   Box,
   Button,
@@ -8,8 +9,9 @@ import {
   Group,
   rem,
   Text,
+  Tooltip,
 } from "@mantine/core";
-import { IconBook, IconBrandGithub } from "@tabler/icons-react";
+import { IconBrandGithub } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { AppLogo } from "@/shared/components/AppLogo";
 import { SITE_LINKS } from "@/shared/lib/links";
@@ -52,22 +54,23 @@ export function Header(): React.ReactElement {
               size="sm"
               target="_blank"
               variant="default"
+              visibleFrom="xs"
             >
-              <Text span visibleFrom="xs">
-                {t("github")}
-              </Text>
+              <Text span>{t("github")}</Text>
             </Button>
-            <Button
-              component="a"
-              href={SITE_LINKS.docs}
-              leftSection={<IconBook size={18} />}
-              radius="md"
-              size="sm"
-            >
-              <Text span visibleFrom="sm">
-                {t("docs")}
-              </Text>
-            </Button>
+            <Tooltip label={t("github")}>
+              <ActionIcon
+                component="a"
+                href={SITE_LINKS.github}
+                radius="md"
+                size="lg"
+                target="_blank"
+                variant="default"
+                hiddenFrom="xs"
+              >
+                <IconBrandGithub size={20} />
+              </ActionIcon>
+            </Tooltip>
           </Group>
         </Group>
       </Container>

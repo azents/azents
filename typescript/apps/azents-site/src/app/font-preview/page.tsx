@@ -15,9 +15,8 @@ import { useEffect, useState } from "react";
 
 const fontOptions = [
   {
-    name: "Geist Sans",
-    stack:
-      "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    name: "Inter Variable",
+    stack: "var(--font-azents-sans)",
     noteKey: "current",
   },
   {

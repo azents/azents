@@ -72,12 +72,10 @@ export const theme = createTheme({
     }
     return resolved;
   },
-  fontFamily:
-    "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  fontFamily: "var(--font-azents-sans)",
   headings: {
-    fontFamily:
-      "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    fontFamily: "var(--font-azents-sans)",
     fontWeight: "650",
   },
-  fontFamilyMonospace: "var(--font-geist-mono), 'Menlo', 'Consolas', monospace",
+  fontFamilyMonospace: "var(--font-azents-mono)",
 });
