@@ -14215,9 +14215,9 @@
             "title": "Temperature",
             "default": false
           },
-          "max_tokens": {
+          "max_output_tokens": {
             "type": "boolean",
-            "title": "Max Tokens",
+            "title": "Max Output Tokens",
             "default": false
           },
           "top_p": {
@@ -14256,7 +14256,7 @@
             "title": "Temperature",
             "description": "Generation temperature (0.0-2.0)"
           },
-          "max_tokens": {
+          "context_window_tokens": {
             "anyOf": [
               {
                 "type": "integer",
@@ -14266,8 +14266,21 @@
                 "type": "null"
               }
             ],
-            "title": "Max Tokens",
-            "description": "Maximum token count"
+            "title": "Context Window Tokens",
+            "description": "Agent-level context window cap for input budgeting"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens",
+            "description": "Maximum output token count"
           },
           "top_p": {
             "anyOf": [

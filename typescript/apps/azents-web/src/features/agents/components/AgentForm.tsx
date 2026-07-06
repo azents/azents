@@ -133,6 +133,8 @@ export function AgentForm({
       role: "agent",
       enabled: true,
       reasoning_effort: null,
+      context_window_tokens: null,
+      max_output_tokens: null,
       shell_enabled: true,
       memory_enabled: true,
       max_turns: null,
@@ -181,6 +183,9 @@ export function AgentForm({
         role: agent.role === "subagent" ? "subagent" : "agent",
         enabled: agent.enabled,
         reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
+        context_window_tokens:
+          agent.model_parameters?.context_window_tokens ?? null,
+        max_output_tokens: agent.model_parameters?.max_output_tokens ?? null,
         shell_enabled: agent.shell_enabled,
         memory_enabled: agent.memory_enabled,
         max_turns: agent.max_turns ?? null,
@@ -523,6 +528,46 @@ export function AgentForm({
               autosize
               key={form.key("system_prompt")}
               {...form.getInputProps("system_prompt")}
+            />
+          )}
+
+          {showModel && (
+            <NumberInput
+              label={t("contextWindowTokensLabel")}
+              description={t("contextWindowTokensDescription")}
+              placeholder={t("contextWindowTokensPlaceholder")}
+              min={1}
+              step={1}
+              allowDecimal={false}
+              allowNegative={false}
+              value={form.values.context_window_tokens ?? ""}
+              onChange={(value) => {
+                form.setFieldValue(
+                  "context_window_tokens",
+                  typeof value === "number" ? value : null,
+                );
+              }}
+              error={form.errors.context_window_tokens}
+            />
+          )}
+
+          {showModel && (
+            <NumberInput
+              label={t("maxOutputTokensLabel")}
+              description={t("maxOutputTokensDescription")}
+              placeholder={t("maxOutputTokensPlaceholder")}
+              min={1}
+              step={1}
+              allowDecimal={false}
+              allowNegative={false}
+              value={form.values.max_output_tokens ?? ""}
+              onChange={(value) => {
+                form.setFieldValue(
+                  "max_output_tokens",
+                  typeof value === "number" ? value : null,
+                );
+              }}
+              error={form.errors.max_output_tokens}
             />
           )}
 

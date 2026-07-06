@@ -470,6 +470,12 @@
       "inheritModelModelIdentifier": "parent's model",
       "systemPromptLabel": "System Prompt",
       "systemPromptPlaceholder": "Define the agent's role and behavior guidelines",
+      "contextWindowTokensLabel": "Context window cap",
+      "contextWindowTokensDescription": "Optional. Limit the model input budget used for this agent. The runtime uses the smallest value among this cap, the main model, and the lightweight model.",
+      "contextWindowTokensPlaceholder": "Use model limits",
+      "maxOutputTokensLabel": "Max output tokens",
+      "maxOutputTokensDescription": "Optional. Limit response generation length. Leave empty to use the provider default.",
+      "maxOutputTokensPlaceholder": "Provider default",
       "maxTurnsLabel": "Max turns",
       "maxTurnsDescription": "Optional. Stop the run after this many agent turns. Leave empty for unlimited turns.",
       "maxTurnsPlaceholder": "Unlimited",
@@ -533,7 +539,7 @@
         },
         "model": {
           "label": "Model",
-          "description": "Main model, lightweight model, reasoning, and turn limit"
+          "description": "Main model, lightweight model, token caps, reasoning, and turn limit"
         },
         "capabilities": {
           "label": "Tools and subagents",

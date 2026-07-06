@@ -29,6 +29,28 @@ class TestComputeEffectiveContextWindowTokens:
         assert result.effective_max_input_tokens == 272_000
         assert result.auto_compaction_threshold_tokens == 244_800
 
+    def test_uses_smaller_agent_context_window_cap(self) -> None:
+        """Use Agent context window cap when it is the smallest value."""
+        result = compute_effective_context_window_tokens(
+            main_max_input_tokens=1_000_000,
+            compaction_max_input_tokens=272_000,
+            context_window_tokens=128_000,
+        )
+
+        assert result.effective_max_input_tokens == 128_000
+        assert result.auto_compaction_threshold_tokens == 115_200
+
+    def test_allows_context_window_cap_larger_than_model_limit(self) -> None:
+        """Larger Agent cap is stored as intent but model limits still win."""
+        result = compute_effective_context_window_tokens(
+            main_max_input_tokens=128_000,
+            compaction_max_input_tokens=128_000,
+            context_window_tokens=200_000,
+        )
+
+        assert result.effective_max_input_tokens == 128_000
+        assert result.auto_compaction_threshold_tokens == 115_200
+
 
 class TestGetMaxInputTokens:
     """get_max_input_tokens tests."""

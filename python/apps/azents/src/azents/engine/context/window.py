@@ -17,6 +17,7 @@ class EffectiveContextWindow:
 
     main_max_input_tokens: int
     compaction_max_input_tokens: int | None
+    context_window_tokens: int | None
     effective_max_input_tokens: int
     auto_compaction_threshold_tokens: int
 
@@ -34,21 +35,24 @@ def compute_effective_context_window_tokens(
     *,
     main_max_input_tokens: int,
     compaction_max_input_tokens: int | None,
+    context_window_tokens: int | None = None,
 ) -> EffectiveContextWindow:
-    """Calculate effective context window considering both main and compaction models.
+    """Calculate effective context window considering model and Agent caps.
 
-    Runtime auto compaction uses the smaller of main model input limit and compaction
-    model input limit. API/UI also display the same basis through this function.
+    Runtime auto compaction uses the smallest value among the main model input
+    limit, compaction model input limit, and optional Agent context window cap.
+    API/UI also display the same basis through this function.
     """
-    effective_max_input_tokens = main_max_input_tokens
+    candidates = [main_max_input_tokens]
     if compaction_max_input_tokens is not None:
-        effective_max_input_tokens = min(
-            main_max_input_tokens,
-            compaction_max_input_tokens,
-        )
+        candidates.append(compaction_max_input_tokens)
+    if context_window_tokens is not None:
+        candidates.append(context_window_tokens)
+    effective_max_input_tokens = min(candidates)
     return EffectiveContextWindow(
         main_max_input_tokens=main_max_input_tokens,
         compaction_max_input_tokens=compaction_max_input_tokens,
+        context_window_tokens=context_window_tokens,
         effective_max_input_tokens=effective_max_input_tokens,
         auto_compaction_threshold_tokens=compute_auto_compaction_threshold_tokens(
             effective_max_input_tokens,

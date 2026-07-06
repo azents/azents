@@ -920,7 +920,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
-                max_tokens=123,
+                max_output_tokens=123,
                 max_input_tokens=64_000,
                 compaction_max_input_tokens=32_000,
             ),
@@ -968,11 +968,11 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_tokens: int,
+        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         """Replace summary model call."""
-        del provider, model, credential_kwargs, max_tokens, session_id
+        del provider, model, credential_kwargs, max_output_tokens, session_id
         captured_prompts["system_prompt"] = system_prompt
         captured_prompts["user_prompt"] = user_prompt
         return f"summary::{conversation_text}"
@@ -1041,12 +1041,12 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_tokens: int,
+        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         """Return compact summary."""
         del provider, model, credential_kwargs, system_prompt, user_prompt
-        del conversation_text, max_tokens, session_id
+        del conversation_text, max_output_tokens, session_id
         return "summary"
 
     adapter = _agent_engine_adapter(
@@ -1148,12 +1148,12 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_tokens: int,
+        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         """Capture summary input."""
         del provider, model, credential_kwargs, system_prompt, user_prompt
-        del max_tokens, session_id
+        del max_output_tokens, session_id
         captured["conversation_text"] = conversation_text
         return "summary"
 

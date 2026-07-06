@@ -15,7 +15,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-02 | 36 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-06 | 37 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-05 | 85 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-02 | 2 |
@@ -36,12 +36,12 @@ _8 documents_
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-06 | 14 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-01 | 17 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-06 | 18 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-03 | 9 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-05 | 11 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-03 | 10 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-06 | 11 |
 | [Subagent Delegation Flow](spec/flow/subagent-delegation.md) | @Hardtack | 2026-07-01 | 13 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |
 

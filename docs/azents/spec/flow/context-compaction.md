@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-01
-spec_version: 17
+last_verified_at: 2026-07-06
+spec_version: 18
 ---
 
 # Context Compaction
@@ -27,10 +27,12 @@ history. The event runtime uses append-only compaction.
 
 Automatic compaction effective context window is computed by
 `engine/context/window.py:compute_effective_context_window_tokens()`. The function takes the main model
-input window and the effective lightweight/compaction model input window and uses the smaller value as
-`effective_max_input_tokens`. Effective lightweight resolution uses the agent's stored `lightweight_model_selection`
-snapshot. Workspace default is copied into the Agent only at create/update time and is not read by
-runtime compaction. Automatic compaction threshold is then computed by
+input window, the effective lightweight/compaction model input window, and optional Agent
+`model_parameters.context_window_tokens`, then uses the smallest value as `effective_max_input_tokens`.
+The Agent context window cap is stored as intent and may be larger than current model limits; model
+limits still win until the Agent model changes. Effective lightweight resolution uses the agent's stored
+`lightweight_model_selection` snapshot. Workspace default is copied into the Agent only at create/update
+time and is not read by runtime compaction. Automatic compaction threshold is then computed by
 `compute_auto_compaction_threshold_tokens()` as `int(effective_max_input_tokens * 0.9)`. The event
 runtime and API-facing token usage UI use this shared backend calculation as the source of truth, so
 the displayed effective context window and percentage match the runtime trigger basis. The event

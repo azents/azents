@@ -1066,10 +1066,10 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
 
     async def summarize(
         old_events: Sequence[Event],
-        max_tokens: int,
+        max_output_tokens: int,
     ) -> str:
         """Return summary result."""
-        del old_events, max_tokens
+        del old_events, max_output_tokens
         return "summary"
 
     filter_ = EventAutoCompactionFilter(

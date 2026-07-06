@@ -47,8 +47,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-02
-spec_version: 36
+last_verified_at: 2026-07-06
+spec_version: 37
 ---
 
 # Agent Domain Spec
@@ -137,6 +137,8 @@ Create/update request receives only following model-related fields.
   "lightweight_model_selection": null,
   "model_parameters": {
     "temperature": 0.7,
+    "context_window_tokens": 128000,
+    "max_output_tokens": 8192,
     "reasoning_effort": "medium",
     "builtin_tools": []
   }
@@ -146,6 +148,8 @@ Create/update request receives only following model-related fields.
 - `model_selection` omitted/null: copy workspace default main snapshot into Agent.
 - `lightweight_model_selection` omitted/null: copy workspace default lightweight if exists; otherwise copy Agent main snapshot.
 - `model_parameters` is whole-object replace. Unknown keys are rejected.
+- `model_parameters.context_window_tokens` is an optional Agent-level input budget cap. It is stored as user intent even when larger than current model limits, and runtime/API effective context calculation clamps it with model limits.
+- `model_parameters.max_output_tokens` is an optional output generation cap. When omitted/null, runtime does not set provider `max_output_tokens` and provider/model defaults apply.
 - Response returns stored `model_selection`, `lightweight_model_selection`, `model_parameters`, effective context window value.
 
 ### 2.2 Workspace model settings
@@ -228,7 +232,7 @@ Subagent tool uses active session of target subagent, but parent session storage
 
 ## 6. Context Window / Compaction
 
-`effective_context_window_tokens` in Agent response is calculated from the more restrictive value actually used by runtime between main model max input tokens and lightweight model max input tokens. `effective_auto_compaction_threshold_tokens` is 90% of effective context window.
+`effective_context_window_tokens` in Agent response is calculated from the most restrictive value actually used by runtime among main model max input tokens, lightweight model max input tokens, and optional Agent `model_parameters.context_window_tokens`. The Agent context window cap is allowed to be larger than current model limits; in that case the current model limit still wins until the Agent model changes. `effective_auto_compaction_threshold_tokens` is 90% of effective context window.
 
 Automatic compaction runs with `lightweight_model_selection` snapshot.
 
@@ -255,6 +259,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-06 | 37 | Renamed Agent output token cap to `max_output_tokens` and added Agent `context_window_tokens` effective context override |
 | 2026-07-02 | 36 | Added Agent Memory management routes and settings UI boundary |
 | 2026-06-18 | 35 | Corrected integration model listing fetch failure to propagate original exception instead of failure variant/5xx HTTPException |
 | 2026-06-18 | 34 | Reflected static catalog cache removal and integration-scoped dynamic listing restoration |

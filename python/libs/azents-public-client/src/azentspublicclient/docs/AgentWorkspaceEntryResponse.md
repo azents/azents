@@ -6,13 +6,13 @@ Agent Workspace directory entry response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | File or directory name |
-**path** | **str** | Agent Workspace absolute path |
-**kind** | **str** | Entry kind |
-**size** | **int** |  | [optional]
-**media_type** | **str** |  | [optional]
-**modified_at** | **datetime** |  | [optional]
-**repository_type** | **str** |  | [optional]
+**name** | **str** | File or directory name | 
+**path** | **str** | Agent Workspace absolute path | 
+**kind** | **str** | Entry kind | 
+**size** | **int** |  | [optional] 
+**media_type** | **str** |  | [optional] 
+**modified_at** | **datetime** |  | [optional] 
+**repository_type** | **str** |  | [optional] 
 
 ## Example
 

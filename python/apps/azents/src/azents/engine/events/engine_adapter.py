@@ -364,7 +364,7 @@ class AgentEngineAdapter:
                 provider_id=request.provider,
                 credential_kwargs=request.credential_kwargs,
                 temperature=request.temperature,
-                max_tokens=request.max_tokens,
+                max_output_tokens=request.max_output_tokens,
                 top_p=request.top_p,
                 stop=request.stop,
                 reasoning_effort=request.reasoning_effort,
@@ -786,7 +786,7 @@ def _event_summary_generator(
             system_prompt=SUMMARY_SYSTEM_PROMPT,
             user_prompt=SUMMARY_USER_TEMPLATE,
             conversation_text=conversation_text,
-            max_tokens=summary_budget.max_output_tokens,
+            max_output_tokens=summary_budget.max_output_tokens,
             session_id=request.session_id,
         )
         return enforce_summary_char_budget(summary, summary_budget)

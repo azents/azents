@@ -470,6 +470,12 @@
       "inheritModelModelIdentifier": "modèle du parent",
       "systemPromptLabel": "Prompt système",
       "systemPromptPlaceholder": "Définissez le rôle et les directives de l'agent",
+      "contextWindowTokensLabel": "Limite de fenêtre de contexte",
+      "contextWindowTokensDescription": "Facultatif. Limite le budget d'entrée du modèle pour cet agent. Le runtime utilise la plus petite valeur entre cette limite, le modèle principal et le modèle léger.",
+      "contextWindowTokensPlaceholder": "Utiliser les limites du modèle",
+      "maxOutputTokensLabel": "Tokens de sortie max",
+      "maxOutputTokensDescription": "Facultatif. Limite la longueur de génération de la réponse. Laissez vide pour utiliser la valeur par défaut du fournisseur.",
+      "maxOutputTokensPlaceholder": "Valeur par défaut du fournisseur",
       "maxTurnsLabel": "Nombre maximal de tours",
       "maxTurnsDescription": "Facultatif. Arrête l'exécution après ce nombre de tours agent. Laissez vide pour un nombre illimité.",
       "maxTurnsPlaceholder": "Illimité",
@@ -533,7 +539,7 @@
         },
         "model": {
           "label": "Model",
-          "description": "Main model, lightweight model, reasoning, and turn limit"
+          "description": "Modèle principal, modèle léger, limites de tokens, raisonnement et limite de tours"
         },
         "capabilities": {
           "label": "Tools and subagents",

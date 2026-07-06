@@ -470,6 +470,12 @@
       "inheritModelModelIdentifier": "상위 에이전트의 모델",
       "systemPromptLabel": "시스템 프롬프트",
       "systemPromptPlaceholder": "에이전트의 역할과 행동 지침을 입력하세요",
+      "contextWindowTokensLabel": "컨텍스트 윈도우 상한",
+      "contextWindowTokensDescription": "선택 사항입니다. 이 Agent가 사용할 모델 입력 예산을 제한합니다. Runtime은 이 값, 메인 모델, 경량 모델 중 가장 작은 값을 사용합니다.",
+      "contextWindowTokensPlaceholder": "모델 제한 사용",
+      "maxOutputTokensLabel": "최대 출력 토큰",
+      "maxOutputTokensDescription": "선택 사항입니다. 응답 생성 길이를 제한합니다. 비워두면 제공자 기본값을 사용합니다.",
+      "maxOutputTokensPlaceholder": "제공자 기본값",
       "maxTurnsLabel": "최대 턴 수",
       "maxTurnsDescription": "선택 사항입니다. 지정한 agent 턴 수 이후 실행을 중단합니다. 비워두면 제한이 없습니다.",
       "maxTurnsPlaceholder": "무제한",
@@ -533,7 +539,7 @@
         },
         "model": {
           "label": "모델",
-          "description": "메인 모델, 경량 모델, 추론 설정, 최대 턴"
+          "description": "메인 모델, 경량 모델, 토큰 상한, 추론 설정, 최대 턴"
         },
         "capabilities": {
           "label": "도구와 서브에이전트",

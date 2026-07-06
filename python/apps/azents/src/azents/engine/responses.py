@@ -87,14 +87,14 @@ def responses_endpoint_kwargs(
 
 def responses_max_output_tokens(
     provider: LLMProvider,
-    max_tokens: int | None,
+    max_output_tokens: int | None,
 ) -> int | None:
     """Return output token limit supported by the target Responses endpoint."""
     if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         return None
-    if max_tokens is None or max_tokens <= 0:
+    if max_output_tokens is None or max_output_tokens <= 0:
         return None
-    return max_tokens
+    return max_output_tokens
 
 
 async def call_responses_model(

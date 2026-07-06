@@ -48,7 +48,8 @@ const builtinToolConfigSchema = z.object({
 const modelParametersSchema = z
   .object({
     temperature: z.number().min(0).max(2).nullable().optional(),
-    max_tokens: z.number().int().positive().nullable().optional(),
+    context_window_tokens: z.number().int().positive().nullable().optional(),
+    max_output_tokens: z.number().int().positive().nullable().optional(),
     top_p: z.number().min(0).max(1).nullable().optional(),
     top_k: z.number().int().positive().nullable().optional(),
     stop_sequences: z.array(z.string()).max(4).nullable().optional(),

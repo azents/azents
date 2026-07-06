@@ -93,7 +93,7 @@ class ModelParameterCapabilities(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     temperature: bool = False
-    max_tokens: bool = False
+    max_output_tokens: bool = False
     top_p: bool = False
     top_k: bool = False
     stop_sequences: bool = False
