@@ -66,7 +66,6 @@ export function ChatSessionView({
     agentId: agent.id,
     sessionId,
     autoRefreshVisible: isWorkspacePanelDocked || runtimeDrawerOpened,
-    actionExecutions: output.actionExecutions,
   });
   const effectiveContextWindowTokens =
     agent.effective_context_window_tokens ?? null;
