@@ -49,7 +49,6 @@ import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
 import { CompactionDivider } from "./CompactionDivider";
 import { CompactionIndicator } from "./CompactionIndicator";
-import { InitializationTimelineCard } from "./InitializationTimelineCard";
 import { MessageBubble } from "./MessageBubble";
 import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
@@ -68,14 +67,10 @@ import type {
   GoalStateSnapshot,
   InputActionDefinition,
   PendingInputBuffer,
-  SessionInitializationDetailState,
   TodoStateSnapshot,
 } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
-import type {
-  AgentResponse,
-  SessionInitializationResponse,
-} from "@azents/public-client";
+import type { AgentResponse } from "@azents/public-client";
 
 /** older messages load trigger scroll position (px) */
 const LOAD_MORE_THRESHOLD = 100;
@@ -222,6 +217,16 @@ function actionExecutionTimelineItemId(
   return `action:${actionExecution.execution.id}:${actionExecution.execution.status}`;
 }
 
+function shouldRenderUnanchoredActionExecution(
+  actionExecution: ActionExecutionProjection,
+): boolean {
+  return (
+    shouldRenderActionExecution(actionExecution) &&
+    actionExecution.execution.status !== "completed" &&
+    actionExecution.execution.status !== "failed_final"
+  );
+}
+
 function groupActionExecutionsByAnchor(
   actionExecutions: ActionExecutionProjection[],
 ): Map<string, ActionExecutionProjection[]> {
@@ -254,7 +259,7 @@ function unanchoredActionExecutions(
   anchorIds: Set<string>,
 ): ActionExecutionProjection[] {
   return actionExecutions
-    .filter(shouldRenderActionExecution)
+    .filter(shouldRenderUnanchoredActionExecution)
     .filter(
       (actionExecution) =>
         !anchorIds.has(actionExecution.execution.action_event_id),
@@ -283,7 +288,6 @@ function pushActionExecutionTimelineItemIds(
 function getTimelineItemIds(
   messages: ChatMessage[],
   pendingInputBuffers: PendingInputBuffer[],
-  initialization: SessionInitializationResponse | null,
   liveRun: ChatLiveRunState | null,
   actionExecutions: ActionExecutionProjection[],
 ): string[] {
@@ -317,10 +321,6 @@ function getTimelineItemIds(
     anchorIds,
   )) {
     ids.push(actionExecutionTimelineItemId(actionExecution));
-  }
-
-  if (initialization !== null) {
-    ids.push(`initialization:${initialization.id}:${initialization.status}`);
   }
 
   return ids;
@@ -416,24 +416,12 @@ interface ChatViewProps {
   authorizationRequests: AuthorizationRequest[];
   /** auth complete when remove corresponding request */
   onAuthorizationComplete: (toolkitId: string) => void;
-  /** current session initialization projection */
-  initialization: SessionInitializationResponse | null;
   /** current operation TurnAction execution projections */
   actionExecutions: ActionExecutionProjection[];
-  /** durable initialization event detail state */
-  initializationDetailState: SessionInitializationDetailState;
-  /** load durable initialization details */
-  onLoadInitializationDetails: () => void;
-  /** retry failed session initialization */
-  onRetryInitialization: () => void;
-  /** retry Git worktree cleanup */
-  onRetryInitializationCleanup: () => void;
   /** retry a failed action execution */
   onRetryActionExecution: (actionExecutionId: string) => void;
   /** discard a failed action execution */
   onDiscardActionExecution: (actionExecutionId: string) => void;
-  /** delete all pending inputs blocked behind initialization */
-  onDeletePendingInitializationInputs: () => void;
   /** Workspace panel container output */
   workspacePanel: WorkspacePanelContainerOutput;
   /** current session goal snapshot */
@@ -475,15 +463,9 @@ export function ChatView({
   inputActions,
   authorizationRequests,
   onAuthorizationComplete,
-  initialization,
   actionExecutions,
-  initializationDetailState,
-  onLoadInitializationDetails,
-  onRetryInitialization,
-  onRetryInitializationCleanup,
   onRetryActionExecution,
   onDiscardActionExecution,
-  onDeletePendingInitializationInputs,
   workspacePanel,
   goal,
   todo,
@@ -546,10 +528,6 @@ export function ChatView({
   const hasDetachedNewer =
     chatTimelineState.type === "DETACHED_HISTORY_BROWSING" &&
     chatTimelineState.hasNewer;
-  const shouldShowInitializationCard =
-    initialization !== null &&
-    (initialization.status !== "ready" ||
-      initialization.steps.some((step) => step.status === "failed"));
   const latestVisibleId = useMemo(
     () => latestVisibleMessageId(messages),
     [messages],
@@ -559,9 +537,6 @@ export function ChatView({
       ? liveRun
       : null;
   const liveRetryVisible = liveRetryRun !== null;
-  const visibleActionExecutions = actionExecutions.filter(
-    shouldRenderActionExecution,
-  );
   const visibleActionExecutionsByAnchor = useMemo(
     () => groupActionExecutionsByAnchor(actionExecutions),
     [actionExecutions],
@@ -582,8 +557,7 @@ export function ChatView({
     messages.length > 0 ||
     pendingInputBuffers.length > 0 ||
     liveRetryVisible ||
-    visibleActionExecutions.length > 0 ||
-    shouldShowInitializationCard;
+    fallbackActionExecutions.length > 0;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
       return null;
@@ -778,7 +752,6 @@ export function ChatView({
         getTimelineItemIds(
           messages,
           pendingInputBuffers,
-          initialization,
           liveRun,
           actionExecutions,
         ),
@@ -787,7 +760,6 @@ export function ChatView({
   }, [
     messages,
     pendingInputBuffers,
-    initialization,
     liveRun,
     actionExecutions,
     isLoadingMore,
@@ -800,11 +772,7 @@ export function ChatView({
   useLayoutEffect(() => {
     if (
       !isInitialScrollRef.current ||
-      (messages.length === 0 &&
-        pendingInputBuffers.length === 0 &&
-        !liveRetryVisible &&
-        visibleActionExecutions.length === 0 &&
-        !shouldShowInitializationCard) ||
+      !hasTimelineItems ||
       savedScrollRef.current
     ) {
       return;
@@ -838,7 +806,6 @@ export function ChatView({
       getTimelineItemIds(
         messages,
         pendingInputBuffers,
-        initialization,
         liveRun,
         actionExecutions,
       ),
@@ -851,12 +818,9 @@ export function ChatView({
   }, [
     messages,
     pendingInputBuffers,
-    initialization,
     liveRun,
-    liveRetryVisible,
     actionExecutions,
-    visibleActionExecutions.length,
-    shouldShowInitializationCard,
+    hasTimelineItems,
     markProgrammaticScroll,
     pinToBottom,
   ]);
@@ -895,28 +859,14 @@ export function ChatView({
 
   // First history load resets scroll; same-session reloads keep the current follow state.
   useEffect(() => {
-    if (
-      chatViewState.type === "LOADING_HISTORY" &&
-      messages.length === 0 &&
-      pendingInputBuffers.length === 0 &&
-      !liveRetryVisible &&
-      visibleActionExecutions.length === 0 &&
-      !shouldShowInitializationCard
-    ) {
+    if (chatViewState.type === "LOADING_HISTORY" && !hasTimelineItems) {
       isInitialScrollRef.current = true;
       isReadyForPaginationRef.current = false;
       isFollowingLatestRef.current = true;
       setShowNewMessageChip(false);
       prevMessageIdsRef.current = new Set();
     }
-  }, [
-    chatViewState.type,
-    messages.length,
-    pendingInputBuffers.length,
-    liveRetryVisible,
-    visibleActionExecutions.length,
-    shouldShowInitializationCard,
-  ]);
+  }, [chatViewState.type, hasTimelineItems]);
 
   // message/pending buffer change when conditional scroll (initial load except — useLayoutEffect in handle)
   // - new timeline item + follow active: smooth scroll
@@ -932,7 +882,6 @@ export function ChatView({
     const timelineItemIds = getTimelineItemIds(
       messages,
       pendingInputBuffers,
-      initialization,
       liveRun,
       actionExecutions,
     );
@@ -958,7 +907,6 @@ export function ChatView({
   }, [
     messages,
     pendingInputBuffers,
-    initialization,
     liveRun,
     actionExecutions,
     schedulePinToBottom,
@@ -1190,9 +1138,7 @@ export function ChatView({
                 <Loader size="sm" />
               </Center>
             )}
-            {messages.length === 0 &&
-            pendingInputBuffers.length === 0 &&
-            !isResponsePending ? (
+            {!hasTimelineItems && !isResponsePending ? (
               <Center py="xl">
                 <Text c="dimmed" size="sm">
                   {t("startConversation")}
@@ -1346,20 +1292,6 @@ export function ChatView({
                       onDiscard={onDiscardActionExecution}
                     />
                   ))}
-                {chatTimelineState.type === "LATEST_FOLLOWING" &&
-                  shouldShowInitializationCard && (
-                    <InitializationTimelineCard
-                      initialization={initialization}
-                      detailState={initializationDetailState}
-                      pendingInputCount={pendingInputBuffers.length}
-                      onLoadDetails={onLoadInitializationDetails}
-                      onRetryInitialization={onRetryInitialization}
-                      onRetryCleanup={onRetryInitializationCleanup}
-                      onDeletePendingInputs={
-                        onDeletePendingInitializationInputs
-                      }
-                    />
-                  )}
               </Stack>
             )}
           </Box>

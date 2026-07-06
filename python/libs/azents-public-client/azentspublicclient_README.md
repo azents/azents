@@ -137,7 +137,6 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 *ChatV1Api* | [**chat_v1_get_agent_session_project_defaults**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
-*ChatV1Api* | [**chat_v1_get_session_initialization**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_session_initialization) | **GET** /chat/v1/sessions/{session_id}/initialization | Get Session Initialization
 *ChatV1Api* | [**chat_v1_get_session_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_session_project_browser_manifest) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest | Get Session Project Browser Manifest
 *ChatV1Api* | [**chat_v1_get_team_primary_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_team_primary_agent_session) | **GET** /chat/v1/agents/{agent_id}/team-primary-session | Get Team Primary Agent Session
 *ChatV1Api* | [**chat_v1_issue_ws_ticket**](azentspublicclient/docs/ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
@@ -157,7 +156,6 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_reject_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reject_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject | Reject Agent Project Registration Request
 *ChatV1Api* | [**chat_v1_retry_action_execution**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_action_execution) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry | Retry Action Execution
 *ChatV1Api* | [**chat_v1_retry_failed_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
-*ChatV1Api* | [**chat_v1_retry_session_initialization**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_session_initialization) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/initialization/retry | Retry Session Initialization
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
 *ChatV1Api* | [**chat_v1_stop_session_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
 *ChatV1Api* | [**chat_v1_update_agent_session_title**](azentspublicclient/docs/ChatV1Api.md#chat_v1_update_agent_session_title) | **PATCH** /chat/v1/sessions/{session_id}/title | Update Agent Session Title
@@ -449,10 +447,6 @@ Class | Method | HTTP request | Description
  - [SessionContextStatsResponse](azentspublicclient/docs/SessionContextStatsResponse.md)
  - [SessionContextSystemPromptFragmentResponse](azentspublicclient/docs/SessionContextSystemPromptFragmentResponse.md)
  - [SessionContextSystemPromptResponse](azentspublicclient/docs/SessionContextSystemPromptResponse.md)
- - [SessionInitializationDetailResponse](azentspublicclient/docs/SessionInitializationDetailResponse.md)
- - [SessionInitializationEventResponse](azentspublicclient/docs/SessionInitializationEventResponse.md)
- - [SessionInitializationResponse](azentspublicclient/docs/SessionInitializationResponse.md)
- - [SessionInitializationStepResponse](azentspublicclient/docs/SessionInitializationStepResponse.md)
  - [SessionWorkspaceProjectListResponse](azentspublicclient/docs/SessionWorkspaceProjectListResponse.md)
  - [SessionWorkspaceProjectRegisterRequest](azentspublicclient/docs/SessionWorkspaceProjectRegisterRequest.md)
  - [SessionWorkspaceProjectRegistrationRequestListResponse](azentspublicclient/docs/SessionWorkspaceProjectRegistrationRequestListResponse.md)

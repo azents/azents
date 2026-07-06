@@ -40,7 +40,6 @@ import type {
   GoalStateSnapshot,
   InputActionDefinition,
   PendingInputBuffer,
-  SessionInitializationDetailState,
   TodoStateSnapshot,
   TokenUsageSummary,
   ToolResultStatus,
@@ -50,7 +49,6 @@ import type {
   ChatEventResponse,
   ChatWriteResponse,
   LiveEventListResponse,
-  SessionInitializationResponse,
 } from "@azents/public-client";
 
 export type SessionRunState = "idle" | "running";
@@ -158,24 +156,12 @@ export interface ChatSessionContainerOutput {
   authorizationRequests: AuthorizationRequest[];
   /** auth complete when remove corresponding request */
   onAuthorizationComplete: (toolkitId: string) => void;
-  /** current session initialization projection */
-  initialization: SessionInitializationResponse | null;
   /** current operation TurnAction execution projections */
   actionExecutions: ActionExecutionProjection[];
-  /** durable initialization event detail state */
-  initializationDetailState: SessionInitializationDetailState;
-  /** load durable initialization details */
-  onLoadInitializationDetails: () => void;
-  /** retry failed session initialization */
-  onRetryInitialization: () => void;
-  /** retry Git worktree cleanup */
-  onRetryInitializationCleanup: () => void;
   /** retry a failed action execution */
   onRetryActionExecution: (actionExecutionId: string) => void;
   /** discard a failed action execution */
   onDiscardActionExecution: (actionExecutionId: string) => void;
-  /** delete all pending inputs blocked behind initialization */
-  onDeletePendingInitializationInputs: () => void;
   /** latest turn usage */
   tokenUsage: TokenUsageSummary | null;
   /** current session goal snapshot */
@@ -1079,6 +1065,7 @@ function mapEvents(
           },
         ];
       }
+      case "action_execution_result":
       case "system_reminder":
       case "unknown_adapter_output": {
         return messages;
@@ -1162,6 +1149,58 @@ function upsertActionExecutionProjection(
   );
 }
 
+function isActionExecutionProjectionValue(
+  value: unknown,
+): value is ActionExecutionProjection {
+  if (!isRecord(value) || !isRecord(value.execution)) {
+    return false;
+  }
+  return (
+    typeof value.execution.id === "string" &&
+    typeof value.execution.action_event_id === "string" &&
+    typeof value.execution.status === "string" &&
+    Array.isArray(value.events)
+  );
+}
+
+function actionExecutionResultFromEvent(
+  event: ChatEventResponse,
+): ActionExecutionProjection | null {
+  if (event.kind !== "action_execution_result" || !isRecord(event.payload)) {
+    return null;
+  }
+  return isActionExecutionProjectionValue(event.payload.action_execution)
+    ? event.payload.action_execution
+    : null;
+}
+
+function isCompletedGitWorktreeActionExecution(
+  actionExecution: ActionExecutionProjection,
+): boolean {
+  return (
+    actionExecution.execution.action_type === "create_git_worktree" &&
+    actionExecution.execution.status === "completed"
+  );
+}
+
+function actionExecutionResultsFromEvents(
+  events: ChatEventResponse[],
+): ActionExecutionProjection[] {
+  return events.reduce<ActionExecutionProjection[]>((items, event) => {
+    const actionExecution = actionExecutionResultFromEvent(event);
+    return actionExecution === null
+      ? items
+      : upsertActionExecutionProjection(items, actionExecution);
+  }, []);
+}
+
+function mergeActionExecutionProjections(
+  durable: ActionExecutionProjection[],
+  live: ActionExecutionProjection[],
+): ActionExecutionProjection[] {
+  return live.reduce(upsertActionExecutionProjection, durable);
+}
+
 function mapInputBufferLiveEvent(
   event: ChatEventResponse,
 ): PendingInputBuffer | null {
@@ -1225,7 +1264,6 @@ interface ManagedLiveState {
   isStopPending: boolean;
   todo: TodoStateSnapshot;
   goal: GoalStateSnapshot;
-  initialization: SessionInitializationResponse | null;
   actionExecutions: ActionExecutionProjection[];
 }
 
@@ -1236,7 +1274,6 @@ interface LiveTaxonomySnapshot {
   session_run_state: LiveEventListResponse["session_run_state"];
   todo?: TodoStateSnapshot | null;
   goal?: Partial<GoalStateSnapshot> | null;
-  initialization?: SessionInitializationResponse | null;
   action_executions?: ActionExecutionProjection[] | null;
 }
 
@@ -1276,7 +1313,6 @@ function emptyManagedLiveState(): ManagedLiveState {
     isStopPending: false,
     todo: emptyTodoState(),
     goal: emptyGoalState(),
-    initialization: null,
     actionExecutions: [],
   };
 }
@@ -1394,7 +1430,6 @@ function replaceLiveStateFromSnapshot(
     isCompacting: currentLiveRunPhase === "compacting",
     todo: live.todo ?? emptyTodoState(),
     goal: normalizeGoalState(live.goal),
-    initialization: live.initialization ?? null,
     actionExecutions: live.action_executions ?? [],
   };
 }
@@ -1474,11 +1509,18 @@ function mapSessionEvents(data: {
   hasNewer: boolean;
   newestCursor: string | null;
 } {
+  const liveState = replaceLiveStateFromSnapshot(data.live);
   return {
     historyMessages: mapEvents(data.history.items, {
       renderIncompleteToolCalls: false,
     }),
-    liveState: replaceLiveStateFromSnapshot(data.live),
+    liveState: {
+      ...liveState,
+      actionExecutions: mergeActionExecutionProjections(
+        actionExecutionResultsFromEvents(data.history.items),
+        liveState.actionExecutions,
+      ),
+    },
     hasMore: data.history.has_more,
     hasNewer: data.history.has_newer ?? false,
     newestCursor: data.history.items.at(-1)?.id ?? null,
@@ -1493,7 +1535,6 @@ function mapChatWriteSnapshot(response: ChatWriteResponse): ManagedLiveState {
     session_run_state: response.snapshot.session_run_state,
     todo: response.snapshot.todo,
     goal: normalizeGoalState(response.snapshot.goal),
-    initialization: response.snapshot.initialization,
     action_executions: response.snapshot.action_executions,
   });
 }
@@ -1586,8 +1627,6 @@ export function useChatSessionContainer(
   const [managedLiveState, setManagedLiveState] = useState<ManagedLiveState>(
     () => emptyManagedLiveState(),
   );
-  const [initializationDetailState, setInitializationDetailState] =
-    useState<SessionInitializationDetailState>({ type: "IDLE" });
   const [isSubscribeReady, setIsSubscribeReady] = useState(false);
   const historyNewestCursorRef = useRef<string | null>(null);
   const writeInFlightRef = useRef(false);
@@ -1613,21 +1652,10 @@ export function useChatSessionContainer(
     [historyMessages, partialHistoryMessages],
   );
   const pendingInputBuffers = managedLiveState.pendingInputBuffers;
-  const initialization = managedLiveState.initialization;
   const liveRun = managedLiveState.liveRun;
   const isResponsePending = managedLiveState.isResponsePending;
   const isModelResponsePending = managedLiveState.isModelResponsePending;
   const sessionRunState = managedLiveState.sessionRunState;
-  const previousInitializationIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const initializationId = initialization?.id ?? null;
-    if (previousInitializationIdRef.current === initializationId) {
-      return;
-    }
-    previousInitializationIdRef.current = initializationId;
-    setInitializationDetailState({ type: "IDLE" });
-  }, [initialization?.id]);
 
   // WebSocket connection text (ticket + wsUrl)
   const connectionInfoQuery = trpc.chat.getConnectionInfo.useQuery();
@@ -1714,38 +1742,28 @@ export function useChatSessionContainer(
         return;
       }
 
-      if ("type" in event && event.type === "session_initialization_updated") {
-        setManagedLiveState((prev) => ({
-          ...prev,
-          initialization: event.initialization,
-        }));
-        return;
-      }
-
-      if (
-        "type" in event &&
-        event.type === "session_initialization_event_appended"
-      ) {
-        setInitializationDetailState((prev) => {
-          if (prev.type !== "READY") {
-            return prev;
-          }
-          if (prev.events.some((item) => item.id === event.event.id)) {
-            return prev;
-          }
-          return { type: "READY", events: [...prev.events, event.event] };
-        });
-        return;
-      }
-
       if ("type" in event && event.type === "action_execution_updated") {
+        const actionExecution = event.action_execution;
         setManagedLiveState((prev) => ({
           ...prev,
           actionExecutions: upsertActionExecutionProjection(
             prev.actionExecutions,
-            event.action_execution,
+            actionExecution,
           ),
         }));
+        if (isCompletedGitWorktreeActionExecution(actionExecution)) {
+          void Promise.all([
+            utils.chat.listAgentProjects.invalidate({
+              agentId: agent.id,
+              sessionId,
+            }),
+            utils.chat.getSessionProjectBrowserManifest.invalidate({
+              agentId: agent.id,
+              sessionId,
+            }),
+            utils.chat.listInputActions.invalidate({ sessionId }),
+          ]);
+        }
         return;
       }
 
@@ -1836,6 +1854,7 @@ export function useChatSessionContainer(
 
       if ("type" in event && event.type === "history_event_appended") {
         const responseEvent = event.event;
+        const actionExecution = actionExecutionResultFromEvent(responseEvent);
         setHistoryMessages((prev) =>
           mapEvents([responseEvent], {
             initialMessages: prev,
@@ -1852,6 +1871,13 @@ export function useChatSessionContainer(
             prev.pendingInputBuffers,
             responseEvent,
           ),
+          actionExecutions:
+            actionExecution === null
+              ? prev.actionExecutions
+              : upsertActionExecutionProjection(
+                  prev.actionExecutions,
+                  actionExecution,
+                ),
         }));
         if (responseEvent.kind === "run_marker") {
           markRunInactive();
@@ -1940,7 +1966,14 @@ export function useChatSessionContainer(
           break;
       }
     },
-    [connectionInfoQuery, sessionId, utils.chat.listInputActions],
+    [
+      agent.id,
+      connectionInfoQuery,
+      sessionId,
+      utils.chat.getSessionProjectBrowserManifest,
+      utils.chat.listAgentProjects,
+      utils.chat.listInputActions,
+    ],
   );
 
   const {
@@ -2098,6 +2131,16 @@ export function useChatSessionContainer(
         setHistoryMessages((prev) =>
           mergeMessagePages(prev, olderMessages, "prepend"),
         );
+        const olderActionExecutions = actionExecutionResultsFromEvents(
+          result.history.items,
+        );
+        setManagedLiveState((prev) => ({
+          ...prev,
+          actionExecutions: mergeActionExecutionProjections(
+            olderActionExecutions,
+            prev.actionExecutions,
+          ),
+        }));
         setHasMore(result.history.has_more);
         if (chatTimelineState.type === "LATEST_FOLLOWING") {
           setChatTimelineState({
@@ -2145,6 +2188,16 @@ export function useChatSessionContainer(
         setHistoryMessages((prev) =>
           mergeMessagePages(prev, newerMessages, "append"),
         );
+        const newerActionExecutions = actionExecutionResultsFromEvents(
+          result.history.items,
+        );
+        setManagedLiveState((prev) => ({
+          ...prev,
+          actionExecutions: mergeActionExecutionProjections(
+            prev.actionExecutions,
+            newerActionExecutions,
+          ),
+        }));
         const newestCursor = result.history.items.at(-1)?.id ?? null;
         const hasNewer = result.history.has_newer ?? false;
         if (hasNewer) {
@@ -2172,73 +2225,10 @@ export function useChatSessionContainer(
     void applyLatestSnapshot(sessionId);
   }, [applyLatestSnapshot, sessionId]);
 
-  const retryInitializationMutation =
-    trpc.chat.retrySessionInitialization.useMutation();
   const retryActionExecutionMutation =
     trpc.chat.retryActionExecution.useMutation();
   const discardActionExecutionMutation =
     trpc.chat.discardActionExecution.useMutation();
-  const cleanupWorktreeMutation =
-    trpc.chat.cleanupSessionGitWorktree.useMutation();
-
-  const onLoadInitializationDetails = useCallback((): void => {
-    setInitializationDetailState({ type: "LOADING" });
-    void utils.chat.getSessionInitialization
-      .fetch({ sessionId })
-      .then((detail) => {
-        setManagedLiveState((prev) => ({
-          ...prev,
-          initialization: detail.initialization,
-        }));
-        setInitializationDetailState({ type: "READY", events: detail.events });
-      })
-      .catch(() => {
-        setInitializationDetailState({
-          type: "ERROR",
-          message: "load_failed",
-        });
-      });
-  }, [sessionId, utils.chat.getSessionInitialization]);
-
-  const refreshInitializationDetail = useCallback((): void => {
-    void utils.chat.getSessionInitialization
-      .fetch({ sessionId })
-      .then((detail) => {
-        setManagedLiveState((prev) => ({
-          ...prev,
-          initialization: detail.initialization,
-        }));
-        setInitializationDetailState({ type: "READY", events: detail.events });
-      });
-  }, [sessionId, utils.chat.getSessionInitialization]);
-
-  const onRetryInitialization = useCallback((): void => {
-    if (retryInitializationMutation.isPending) {
-      return;
-    }
-    void retryInitializationMutation
-      .mutateAsync({ agentId: agent.id, sessionId })
-      .then(() => refreshInitializationDetail());
-  }, [
-    agent.id,
-    refreshInitializationDetail,
-    retryInitializationMutation,
-    sessionId,
-  ]);
-
-  const onRetryInitializationCleanup = useCallback((): void => {
-    if (cleanupWorktreeMutation.isPending) {
-      return;
-    }
-    void cleanupWorktreeMutation
-      .mutateAsync({ agentId: agent.id, sessionId, projectId: null })
-      .then(() => refreshInitializationDetail());
-  }, [
-    agent.id,
-    cleanupWorktreeMutation,
-    refreshInitializationDetail,
-    sessionId,
-  ]);
 
   const onRetryActionExecution = useCallback(
     (actionExecutionId: string): void => {
@@ -2514,12 +2504,6 @@ export function useChatSessionContainer(
     [deleteInputBufferMutation, sessionId, utils.chat.listSessionEvents],
   );
 
-  const onDeletePendingInitializationInputs = useCallback((): void => {
-    for (const buffer of pendingInputBuffers) {
-      onDeletePendingInputBuffer(buffer.id);
-    }
-  }, [onDeletePendingInputBuffer, pendingInputBuffers]);
-
   const onUpdateGoal = useCallback(
     async (objective: string): Promise<boolean> => {
       try {
@@ -2635,15 +2619,9 @@ export function useChatSessionContainer(
     }),
     authorizationRequests,
     onAuthorizationComplete,
-    initialization,
     actionExecutions: managedLiveState.actionExecutions,
-    initializationDetailState,
-    onLoadInitializationDetails,
-    onRetryInitialization,
-    onRetryInitializationCleanup,
     onRetryActionExecution,
     onDiscardActionExecution,
-    onDeletePendingInitializationInputs,
     tokenUsage,
     goal: managedLiveState.goal,
     todo: managedLiveState.todo,

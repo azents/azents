@@ -25,7 +25,6 @@ from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunStateResponse
 from azentspublicclient.models.goal_state_response import GoalStateResponse
 from azentspublicclient.models.partial_history_response import PartialHistoryResponse
-from azentspublicclient.models.session_initialization_response import SessionInitializationResponse
 from azentspublicclient.models.todo_state_response import TodoStateResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -40,10 +39,9 @@ class LiveEventListResponse(BaseModel):
     session_run_state: AgentSessionRunState = Field(description="Authoritative run_state for the current session")
     todo: Optional[TodoStateResponse] = None
     goal: Optional[GoalStateResponse] = None
-    initialization: Optional[SessionInitializationResponse] = None
     action_executions: Optional[List[ActionExecutionProjectionResponse]] = Field(default=None, description="Current action execution projections")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["partial_history", "input_buffers", "run", "session_run_state", "todo", "goal", "initialization", "action_executions"]
+    __properties: ClassVar[List[str]] = ["partial_history", "input_buffers", "run", "session_run_state", "todo", "goal", "action_executions"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -105,9 +103,6 @@ class LiveEventListResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of goal
         if self.goal:
             _dict['goal'] = self.goal.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of initialization
-        if self.initialization:
-            _dict['initialization'] = self.initialization.to_dict()
         # override the default output from pydantic by calling `to_dict()` of each item in action_executions (list)
         _items = []
         if self.action_executions:
@@ -135,11 +130,6 @@ class LiveEventListResponse(BaseModel):
         if self.goal is None and "goal" in self.model_fields_set:
             _dict['goal'] = None
 
-        # set to None if initialization (nullable) is None
-        # and model_fields_set contains the field
-        if self.initialization is None and "initialization" in self.model_fields_set:
-            _dict['initialization'] = None
-
         return _dict
 
     @classmethod
@@ -158,7 +148,6 @@ class LiveEventListResponse(BaseModel):
             "session_run_state": obj.get("session_run_state"),
             "todo": TodoStateResponse.from_dict(obj["todo"]) if obj.get("todo") is not None else None,
             "goal": GoalStateResponse.from_dict(obj["goal"]) if obj.get("goal") is not None else None,
-            "initialization": SessionInitializationResponse.from_dict(obj["initialization"]) if obj.get("initialization") is not None else None,
             "action_executions": [ActionExecutionProjectionResponse.from_dict(_item) for _item in obj["action_executions"]] if obj.get("action_executions") is not None else None
         })
         # store additional fields in additional_properties

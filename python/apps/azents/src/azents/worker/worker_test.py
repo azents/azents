@@ -5,7 +5,6 @@ import contextlib
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -51,12 +50,7 @@ from azents.engine.run.types import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session.data import PendingSessionCommand
-from azents.repos.session_initialization.data import SessionInitializationEvent
 from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
-from azents.services.session_initialization import (
-    SessionInitializationProjection,
-    SessionInitializationRunGate,
-)
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import RunExecutor
@@ -99,20 +93,6 @@ class _SessionRunnerEventPublisher:
     ) -> None:
         """Replace event publishing with Host dispatch records."""
         await self.host.dispatch_event(session_id, event)
-
-    async def dispatch_initialization_event(
-        self,
-        event: SessionInitializationEvent,
-    ) -> None:
-        """Record initialization event dispatches."""
-        self.host.initialization_events.append(event)
-
-    async def dispatch_initialization_projection(
-        self,
-        projection: SessionInitializationProjection,
-    ) -> None:
-        """Record initialization projection dispatches."""
-        self.host.initialization_projections.append(projection)
 
 
 class _InputBufferService:
@@ -397,21 +377,6 @@ class _UserStopFinalizer:
         )
 
 
-class _InitializationProcessor:
-    """Session initialization processor test double."""
-
-    def __init__(self, host: "_Host") -> None:
-        self.host = host
-
-    async def run_git_worktree_initialization(
-        self,
-        **kwargs: object,
-    ) -> None:
-        """Record initialization processing and apply the configured result gate."""
-        self.host.initialization_processor_calls.append(kwargs)
-        self.host.initialization_gate = self.host.initialization_gate_after_processing
-
-
 class _Host:
     """Host for SessionRunner tests."""
 
@@ -451,12 +416,6 @@ class _Host:
         self.commands: list[PendingSessionCommand] = []
         self.dispatched_events: list[tuple[str, PublishedEvent]] = []
         self.event_dispatched = asyncio.Event()
-        self.initialization_gate = SessionInitializationRunGate.READY
-        self.initialization_gate_after_processing = SessionInitializationRunGate.READY
-        self.initialization_processor_calls: list[dict[str, object]] = []
-        self.initialization_events: list[SessionInitializationEvent] = []
-        self.initialization_projections: list[SessionInitializationProjection] = []
-        self.blocked_initialization_gates: list[SessionInitializationRunGate] = []
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -577,22 +536,6 @@ class _Host:
         """Return stop intent existence specified by test."""
         return session_id in self.stop_request_session_ids
 
-    async def get_initialization_run_gate(self, session_id: str) -> SimpleNamespace:
-        """Return initialization gate specified by test."""
-        del session_id
-        return SimpleNamespace(gate=self.initialization_gate)
-
-    async def block_run_dispatch_for_initialization(
-        self,
-        session_id: str,
-        *,
-        gate: SessionInitializationRunGate,
-    ) -> None:
-        """Record initialization gate block and mimic lifecycle cleanup."""
-        self.blocked_initialization_gates.append(gate)
-        await self.mark_session_idle(session_id)
-        await self.clear_session_activity(session_id)
-
 
 async def _wait_for_owner_heartbeat(host: _Host) -> None:
     """Wait until owner heartbeat call is recorded in test host."""
@@ -622,7 +565,6 @@ def _make_session_runner(host: _Host) -> SessionRunner:
         user_stop_finalizer=cast(UserStopFinalizer, _UserStopFinalizer(host)),
         run_executor=cast(RunExecutor, _RunExecutor(host)),
         engine=cast(AgentEngineProtocol, host),
-        initialization_processor=_InitializationProcessor(host),
     )
 
 
@@ -865,78 +807,6 @@ async def test_no_actionable_wake_up_marks_session_idle_without_continuation() -
     assert host.processed_messages == [message]
     assert host.idle_session_ids == ["session-001"]
     assert host.idle_continuation_calls == []
-    assert host.lifecycle_events == [
-        "mark_session_idle",
-        "clear_session_activity",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_initialization_gate_blocks_run_dispatch_before_executor() -> None:
-    """Initialization gate leaves input pending and skips run executor."""
-    host = _Host()
-    host.initialization_gate = SessionInitializationRunGate.BLOCKED
-    host.pending_input_session_ids.add("session-001")
-    runner = _start_session_runner(host)
-
-    try:
-        runner.enqueue(_wake_up())
-        await _wait_until(lambda: bool(host.blocked_initialization_gates))
-    finally:
-        await runner.shutdown()
-
-    assert host.initialization_processor_calls == []
-    assert host.processed_messages == []
-    assert host.blocked_initialization_gates == [SessionInitializationRunGate.BLOCKED]
-    assert host.idle_session_ids == ["session-001"]
-    assert host.lifecycle_events == [
-        "mark_session_idle",
-        "clear_session_activity",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_initialization_waiting_runs_processor_before_dispatch() -> None:
-    """Waiting initialization is processed before the run executor starts."""
-    host = _Host()
-    host.initialization_gate = SessionInitializationRunGate.WAITING
-    host.initialization_gate_after_processing = SessionInitializationRunGate.READY
-    runner = _start_session_runner(host)
-    message = _wake_up()
-
-    try:
-        runner.enqueue(message)
-        await _wait_until(lambda: bool(host.processed_messages))
-    finally:
-        await runner.shutdown()
-
-    assert len(host.initialization_processor_calls) == 1
-    processor_call = host.initialization_processor_calls[0]
-    assert processor_call["agent_id"] == "agent-001"
-    assert processor_call["session_id"] == "session-001"
-    assert host.processed_messages == [message]
-    assert host.blocked_initialization_gates == []
-
-
-@pytest.mark.asyncio
-async def test_initialization_waiting_blocks_when_processor_does_not_ready() -> None:
-    """Still-blocked initialization does not dispatch a run after processing."""
-    host = _Host()
-    host.initialization_gate = SessionInitializationRunGate.WAITING
-    host.initialization_gate_after_processing = SessionInitializationRunGate.BLOCKED
-    host.pending_input_session_ids.add("session-001")
-    runner = _start_session_runner(host)
-
-    try:
-        runner.enqueue(_wake_up())
-        await _wait_until(lambda: bool(host.blocked_initialization_gates))
-    finally:
-        await runner.shutdown()
-
-    assert len(host.initialization_processor_calls) == 1
-    assert host.processed_messages == []
-    assert host.blocked_initialization_gates == [SessionInitializationRunGate.BLOCKED]
-    assert host.idle_session_ids == ["session-001"]
     assert host.lifecycle_events == [
         "mark_session_idle",
         "clear_session_activity",

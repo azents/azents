@@ -22,8 +22,6 @@ class SessionGitWorktreeRepository:
         """Create a worktree allocation row."""
         rdb = RDBSessionGitWorktree(
             session_id=create.session_id,
-            initialization_id=create.initialization_id,
-            step_id=create.step_id,
             action_execution_id=create.action_execution_id,
             session_workspace_project_id=create.session_workspace_project_id,
             source_project_path=create.source_project_path,
@@ -300,8 +298,6 @@ class SessionGitWorktreeRepository:
         return SessionGitWorktree(
             id=rdb.id,
             session_id=rdb.session_id,
-            initialization_id=rdb.initialization_id,
-            step_id=rdb.step_id,
             action_execution_id=rdb.action_execution_id,
             session_workspace_project_id=rdb.session_workspace_project_id,
             source_project_path=rdb.source_project_path,

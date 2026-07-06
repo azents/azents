@@ -15,7 +15,6 @@ import {
   type WorkspacePanelState,
   type WorkspaceProjectPanelState,
 } from "../types";
-import type { ActionExecutionProjection } from "../../types";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
@@ -29,7 +28,6 @@ interface UseWorkspacePanelContainerInput {
   agentId: string;
   sessionId: string;
   autoRefreshVisible: boolean;
-  actionExecutions: ActionExecutionProjection[];
 }
 
 export interface WorkspacePanelContainerOutput {
@@ -130,7 +128,6 @@ export function useWorkspacePanelContainer({
   agentId,
   sessionId,
   autoRefreshVisible,
-  actionExecutions,
 }: UseWorkspacePanelContainerInput): WorkspacePanelContainerOutput {
   const [currentDirectoryPath, setCurrentDirectoryPath] = useState<
     string | null
@@ -174,10 +171,6 @@ export function useWorkspacePanelContainer({
   const [registrationSubmitError, setRegistrationSubmitError] = useState<
     string | null
   >(null);
-  const [
-    lastCompletedWorktreeExecutionId,
-    setLastCompletedWorktreeExecutionId,
-  ] = useState<string | null>(null);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const autoRefreshKeyRef = useRef<string | null>(null);
 
@@ -195,7 +188,6 @@ export function useWorkspacePanelContainer({
     setRegistrationMode("existing_project");
     setRegistrationStartingRef(null);
     setRegistrationSubmitError(null);
-    setLastCompletedWorktreeExecutionId(null);
   }, [agentId, sessionId]);
 
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
@@ -585,41 +577,9 @@ export function useWorkspacePanelContainer({
             agentId,
             sessionId,
           }),
-          utils.chat.getSessionInitialization.invalidate({ sessionId }),
         ]);
       },
     });
-
-  useEffect(() => {
-    const completedWorktreeExecution = actionExecutions.find(
-      (actionExecution) =>
-        actionExecution.execution.action_type === "create_git_worktree" &&
-        actionExecution.execution.status === "completed" &&
-        actionExecution.execution.id !== lastCompletedWorktreeExecutionId,
-    );
-    if (!completedWorktreeExecution) {
-      return;
-    }
-    setLastCompletedWorktreeExecutionId(
-      completedWorktreeExecution.execution.id,
-    );
-    void Promise.all([
-      utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
-      utils.chat.getSessionProjectBrowserManifest.invalidate({
-        agentId,
-        sessionId,
-      }),
-      utils.chat.listInputActions.invalidate({ sessionId }),
-    ]);
-  }, [
-    actionExecutions,
-    agentId,
-    lastCompletedWorktreeExecutionId,
-    sessionId,
-    utils.chat.getSessionProjectBrowserManifest,
-    utils.chat.listAgentProjects,
-    utils.chat.listInputActions,
-  ]);
 
   const onStartRuntime = useCallback(
     () => startRuntimeMutation.mutate({ handle, agentId }),

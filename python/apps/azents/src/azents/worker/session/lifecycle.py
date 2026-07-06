@@ -19,11 +19,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.services.session_initialization import (
-    SessionInitializationRunGate,
-    SessionInitializationRunGateResult,
-    SessionInitializationService,
-)
 from azents.worker.deps import get_worker_broker
 
 logger = logging.getLogger(__name__)
@@ -42,9 +37,6 @@ class SessionLifecycleService:
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
-    session_initialization_service: Annotated[
-        SessionInitializationService, Depends(SessionInitializationService)
-    ]
 
     async def release_session_lock(self, session_id: str) -> None:
         """Release session lock."""
@@ -57,29 +49,6 @@ class SessionLifecycleService:
     async def send_session_wake_up(self, message: SessionWakeUp) -> None:
         """Send wake-up through the existing session broker path."""
         await self.broker.send_message(message)
-
-    async def get_initialization_run_gate(
-        self,
-        session_id: str,
-    ) -> SessionInitializationRunGateResult:
-        """Return whether initialization allows run dispatch."""
-        return await self.session_initialization_service.get_run_gate(
-            session_id=session_id,
-        )
-
-    async def block_run_dispatch_for_initialization(
-        self,
-        session_id: str,
-        *,
-        gate: SessionInitializationRunGate,
-    ) -> None:
-        """Leave input pending and clear running state for a blocked wake-up."""
-        logger.info(
-            "Session runner blocked run dispatch on initialization gate",
-            extra={"session_id": session_id, "initialization_gate": gate.value},
-        )
-        await self.mark_session_idle(session_id)
-        await self.clear_session_activity(session_id)
 
     async def set_session_activity(
         self,

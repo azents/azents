@@ -101,40 +101,6 @@ class TestChatWriteSnapshotResponse(unittest.TestCase):
                     status = 'active', 
                     created_at = '', 
                     updated_at = '', ),
-                initialization = azentspublicclient.models.session_initialization_response.SessionInitializationResponse(
-                    id = '', 
-                    status = '', 
-                    failure_summary = '', 
-                    retry_count = 56, 
-                    started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                    completed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                    failed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                    canceled_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                    cleaned_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                    updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                    steps = [
-                        azentspublicclient.models.session_initialization_step_response.SessionInitializationStepResponse(
-                            id = '', 
-                            sequence = 56, 
-                            step_key = '', 
-                            step_type = '', 
-                            status = '', 
-                            blocking = True, 
-                            retryable = True, 
-                            attempt = 56, 
-                            depends_on_step_keys = [
-                                ''
-                                ], 
-                            resource_descriptors = [
-                                null
-                                ], 
-                            failure_reason = '', 
-                            started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                            completed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                            failed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                            created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                            updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
-                        ], ),
                 action_executions = [
                     azentspublicclient.models.action_execution_projection_response.ActionExecutionProjectionResponse(
                         execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(

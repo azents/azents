@@ -180,13 +180,6 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
-    def test_chat_v1_get_session_initialization(self) -> None:
-        """Test case for chat_v1_get_session_initialization
-
-        Get Session Initialization
-        """
-        pass
-
     def test_chat_v1_get_session_project_browser_manifest(self) -> None:
         """Test case for chat_v1_get_session_project_browser_manifest
 
@@ -317,13 +310,6 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_retry_failed_run
 
         Retry Failed Run
-        """
-        pass
-
-    def test_chat_v1_retry_session_initialization(self) -> None:
-        """Test case for chat_v1_retry_session_initialization
-
-        Retry Session Initialization
         """
         pass
 

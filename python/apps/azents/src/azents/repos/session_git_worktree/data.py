@@ -15,8 +15,6 @@ class SessionGitWorktree(BaseModel):
 
     id: str = Field(description="Session Git worktree ID")
     session_id: str = Field(description="AgentSession ID")
-    initialization_id: str = Field(description="SessionInitialization ID")
-    step_id: str = Field(description="Create Git worktree initialization step ID")
     action_execution_id: str | None = Field(
         description="ActionExecution ID for operation-based worktree creation"
     )
@@ -46,8 +44,6 @@ class SessionGitWorktreeCreate(BaseModel):
 
     id: str = Field(description="Session Git worktree ID")
     session_id: str = Field(description="AgentSession ID")
-    initialization_id: str = Field(description="SessionInitialization ID")
-    step_id: str = Field(description="Create Git worktree initialization step ID")
     action_execution_id: str | None = Field(
         description="ActionExecution ID for operation-based worktree creation"
     )

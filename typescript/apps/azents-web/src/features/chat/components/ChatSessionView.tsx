@@ -66,7 +66,6 @@ export function ChatSessionView({
     agentId: agent.id,
     sessionId,
     autoRefreshVisible: isWorkspacePanelDocked || runtimeDrawerOpened,
-    actionExecutions: output.actionExecutions,
   });
   const effectiveContextWindowTokens =
     agent.effective_context_window_tokens ?? null;
@@ -127,17 +126,9 @@ export function ChatSessionView({
           inputActions={output.inputActions}
           authorizationRequests={output.authorizationRequests}
           onAuthorizationComplete={output.onAuthorizationComplete}
-          initialization={output.initialization}
           actionExecutions={output.actionExecutions}
-          initializationDetailState={output.initializationDetailState}
-          onLoadInitializationDetails={output.onLoadInitializationDetails}
-          onRetryInitialization={output.onRetryInitialization}
-          onRetryInitializationCleanup={output.onRetryInitializationCleanup}
           onRetryActionExecution={output.onRetryActionExecution}
           onDiscardActionExecution={output.onDiscardActionExecution}
-          onDeletePendingInitializationInputs={
-            output.onDeletePendingInitializationInputs
-          }
           workspacePanel={workspacePanel}
           goal={output.goal}
           todo={output.todo}
