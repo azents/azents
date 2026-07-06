@@ -1,0 +1,237 @@
+{
+  "metadata": {
+    "title": "Azents | Auto-héberger des agents managés",
+    "description": "Le control plane open source pour exécuter des agents managés dans votre cloud."
+  },
+  "nav": {
+    "architecture": "Architecture",
+    "roadmap": "Feuille de route",
+    "github": "GitHub",
+    "docs": "Docs",
+    "changeLanguage": "Changer de langue"
+  },
+  "hero": {
+    "eyebrow": "Agents managés auto-hébergés",
+    "headline": "Des managed agents dans votre cloud.",
+    "subheadline": "Azents est un open-source control plane pour exploiter des agent sessions et des Runtimes dans votre propre infrastructure.",
+    "supporting": "Exécutez près des repos, des files, des credentials et des internal systems.",
+    "discussion": "Voir les issues ouvertes",
+    "cta": {
+      "github": "Star sur GitHub",
+      "docs": "Lire les docs"
+    }
+  },
+  "architecture": {
+    "eyebrow": "architecture",
+    "title": "Un control plane pour l'infrastructure que vous possédez.",
+    "body": "Le moteur coordonne les sessions d'agents. Le runtime exécute le code, les outils et les opérations fichiers dans votre périmètre.",
+    "diagram": {
+      "label": "L'utilisateur et l'équipe se connectent à Azents Engine, qui coordonne le runtime dans votre cloud ou votre environnement sur site.",
+      "path": "azents/control-plane",
+      "split": "engine != runtime",
+      "team": {
+        "kind": "01 / entrée",
+        "title": "Utilisateur / Équipe",
+        "description": "Démarre des sessions durables sur de vrais espaces de travail."
+      },
+      "engine": {
+        "title": "Azents Engine",
+        "kind": "02 / control plane",
+        "description": "Gère les sessions, l'état, l'orchestration et le transfert."
+      },
+      "runtime": {
+        "kind": "03 / execution plane",
+        "title": "Runtime",
+        "description": "Exécute les outils et les opérations d'espace de travail dans votre infrastructure."
+      },
+      "signals": {
+        "sessionLog": {
+          "label": "journal de session",
+          "value": "événements durables + rejeu"
+        },
+        "handover": {
+          "label": "transfert",
+          "value": "les workers du moteur peuvent bouger"
+        },
+        "runtimeLease": {
+          "label": "bail runtime",
+          "value": "exécution limitée à l'espace de travail"
+        },
+        "boundary": {
+          "label": "périmètre de sécurité",
+          "value": "votre cloud / réseau privé / sur site"
+        }
+      }
+    },
+    "terms": {
+      "engine": {
+        "title": "Moteur",
+        "body": "Couche distribuée de session et d'orchestration."
+      },
+      "runtime": {
+        "title": "Runtime",
+        "body": "Environnement d'exécution pour le code, les fichiers et les outils."
+      },
+      "session": {
+        "title": "Session",
+        "body": "Contexte de travail durable pour les tâches d'agent longues."
+      },
+      "toolkit": {
+        "title": "Boîte à outils",
+        "body": "Accès contrôlé aux capacités privées."
+      }
+    }
+  },
+  "problem": {
+    "eyebrow": "remote runs",
+    "title": "Fermez le laptop. Le travail continue.",
+    "body": "Les tâches longues méritent un Runtime près du workspace, pas un terminal local fragile.",
+    "panelTitle": "Quand le remote run change tout",
+    "panelBody": "La session reste vivante, la progression reste visible, et le travail peut reprendre plus tard.",
+    "flow": {
+      "cloud": "laptop",
+      "systems": "workspace"
+    },
+    "items": {
+      "sessions": {
+        "title": "Travail sans coupure",
+        "body": "Le run continue même si l'onglet ou la session SSH disparaît."
+      },
+      "scaling": {
+        "title": "Près du workspace",
+        "body": "Exécutez près du repo, des files, du shell et du task state."
+      },
+      "failover": {
+        "title": "Reprise plus tard",
+        "body": "Revenez à la même session depuis une autre machine."
+      },
+      "observability": {
+        "title": "Progression visible",
+        "body": "Voyez command output, diffs et blockers au même endroit."
+      },
+      "permissions": {
+        "title": "Run d'équipe",
+        "body": "Le run reste attaché au workspace, pas au laptop d'un seul dev."
+      },
+      "state": {
+        "title": "Runtime adapté",
+        "body": "Donnez aux tâches lourdes le CPU, les tools et le temps nécessaires."
+      }
+    },
+    "footnote": "Remote run répond à comment l'agent continue. Reste à choisir où il s'exécute."
+  },
+  "selfHosted": {
+    "eyebrow": "your cloud",
+    "title": "Exploitez vos managed agents dans votre cloud.",
+    "body": "Placez les runtimes près des dépôts, credentials, APIs internes et journaux d'audit.",
+    "thesis": "Azents fournit le control plane self-hosted pour opérer des remote runs dans votre infrastructure.",
+    "keywords": {
+      "data": "Contrôle des données",
+      "security": "Périmètre de sécurité",
+      "internal": "Systèmes privés",
+      "regulatory": "Conformité",
+      "privateCloud": "Sur site / cloud privé"
+    }
+  },
+  "bootstrapping": {
+    "eyebrow": "auto-amorçage",
+    "title": "Azents utilise déjà son propre coding harness.",
+    "body": "Azents sert maintenant à développer Azents. Le coding harness gère les dépôts, les modifications, le shell, les PR, la CI, les retours de revue et la vérification.",
+    "capabilities": {
+      "repo": "lire le dépôt avant de le modifier",
+      "editing": "modifier les fichiers en gardant un diff de travail",
+      "shell": "exécuter des commandes dans des espaces de travail contrôlés",
+      "github": "ouvrir des PR et traiter les retours de revue",
+      "ci": "suivre la CI et isoler les échecs",
+      "review": "itérer entre implémentation et vérification"
+    }
+  },
+  "features": {
+    "eyebrow": "ce que vous obtenez",
+    "title": "Opérations d'agents managés, auto-hébergées.",
+    "body": "Pas une autre interface de chat. Une couche d'exploitation pour les agents qui travaillent près des vrais systèmes.",
+    "items": {
+      "sessions": {
+        "title": "Sessions gérées",
+        "body": "Contextes de travail longs avec historique durable."
+      },
+      "history": {
+        "title": "Historique des événements",
+        "body": "Événements d'exécution pour le rejeu, l'audit et l'inspection."
+      },
+      "separation": {
+        "title": "Séparation Engine / Runtime",
+        "body": "Mettre à l'échelle l'orchestration séparément de l'exécution dans l'espace de travail."
+      },
+      "permissions": {
+        "title": "Permissions des outils",
+        "body": "Contrôler ce qu'un agent peut lire, exécuter, appeler et modifier."
+      },
+      "providers": {
+        "title": "Fournisseurs de runtime",
+        "body": "Exécuter des environnements avec des fournisseurs orientés Docker et Kubernetes."
+      },
+      "harness": {
+        "title": "Coding harness",
+        "body": "Workflows de développement pour dépôts, PR et boucles CI."
+      },
+      "tools": {
+        "title": "Modèle auto-hébergé",
+        "body": "Conçu pour le cloud privé, le sur site et les environnements régulés."
+      }
+    }
+  },
+  "roadmap": {
+    "eyebrow": "construction publique",
+    "title": "Pour les équipes qui veulent garder leurs agents managés sous contrôle.",
+    "body": "Pour les platform engineers, les équipes infra, les builders de produits IA et les organisations auto-hébergées.",
+    "currentFocus": "Priorité actuelle",
+    "audience": {
+      "platform": "Platform engineers",
+      "devops": "Équipes infra / DevOps",
+      "builders": "Builders de produits IA",
+      "selfHosted": "Équipes auto-hébergées",
+      "sensitive": "Organisations avec données sensibles"
+    },
+    "items": {
+      "deployment": "Documentation de déploiement auto-hébergé",
+      "reliability": "Fiabilité du moteur et du runtime",
+      "providers": "Durcissement des fournisseurs de runtime",
+      "harness": "Maturité du harnais de code",
+      "observability": "Observabilité des agents",
+      "localLlm": "Support des LLM locaux",
+      "workflows": "Workflows agentiques plus larges"
+    }
+  },
+  "finalCta": {
+    "title": "Auto-hébergez vos agents managés.",
+    "body": "Exécutez les sessions d'agents, les runtimes et les outils là où votre travail existe déjà.",
+    "github": "Star sur GitHub",
+    "docs": "Lire les docs"
+  },
+  "footer": {
+    "tagline": "Azents est une infrastructure open source pour agents managés auto-hébergés.",
+    "github": "GitHub",
+    "discussion": "Issues"
+  },
+  "fontPreview": {
+    "notes": {
+      "current": "Actuel",
+      "native": "macOS / natif de la plateforme",
+      "warmer": "plus chaleureux, plus produit",
+      "neutral": "neutre et familier",
+      "fallback": "si installé, sinon police système",
+      "editorial": "contraste éditorial"
+    },
+    "sampleLabel": "échantillon de police",
+    "eyebrow": "Agents managés auto-hébergés",
+    "headline": "Exécutez vos agents managés dans votre cloud.",
+    "subheadline": "Azents est le control plane open source pour les sessions, les runtimes, les outils et l'état d'exécution des agents.",
+    "supporting": "Gardez le runtime près de votre code, de vos fichiers, de vos permissions et de vos systèmes privés.",
+    "rendered": "rendu :",
+    "pageEyebrow": "Aperçu des polices Azents",
+    "pageTitle": "Même texte, autre typographie.",
+    "pageBody": "Ces exemples utilisent des piles de polices locales ou système ; la ligne de rendu indique ce que le navigateur a réellement choisi.",
+    "checking": "vérification..."
+  }
+}

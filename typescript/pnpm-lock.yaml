@@ -55,7 +55,7 @@ importers:
         version: 5.0.12(@tanstack/react-query@5.100.10(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@refinedev/nextjs-router':
         specifier: ^7.0.4
-        version: 7.0.5(@refinedev/core@5.0.12(@tanstack/react-query@5.100.10(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@16.2.6(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+        version: 7.0.5(@refinedev/core@5.0.12(@tanstack/react-query@5.100.10(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@tabler/icons-react':
         specifier: ^3.31.0
         version: 3.44.0(react@19.2.6)
@@ -79,7 +79,7 @@ importers:
         version: 16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       next-auth:
         specifier: ^5.0.0-beta.30
-        version: 5.0.0-beta.31(next@16.2.6(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6)
+        version: 5.0.0-beta.31(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6)
       react:
         specifier: ^19.2.3
         version: 19.2.6
@@ -141,6 +141,88 @@ importers:
       postcss-simple-vars:
         specifier: ^7.0.1
         version: 7.0.1(postcss@8.5.14)
+      typescript:
+        specifier: ^6.0.0
+        version: 6.0.3
+      typescript-eslint:
+        specifier: ^8.49.0
+        version: 8.59.3(eslint@10.4.0(jiti@2.7.0))(typescript@6.0.3)
+
+  apps/azents-site:
+    dependencies:
+      '@mantine/core':
+        specifier: ^9.0.0
+        version: 9.2.0(@mantine/hooks@9.2.0(react@19.2.6))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      '@mantine/hooks':
+        specifier: ^9.0.0
+        version: 9.2.0(react@19.2.6)
+      '@mantine/modals':
+        specifier: ^9.0.0
+        version: 9.2.0(@mantine/core@9.2.0(@mantine/hooks@9.2.0(react@19.2.6))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(@mantine/hooks@9.2.0(react@19.2.6))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      '@tabler/icons-react':
+        specifier: ^3.36.1
+        version: 3.44.0(react@19.2.6)
+      geist:
+        specifier: ^1.7.0
+        version: 1.7.0(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))
+      next:
+        specifier: ^16.0.10
+        version: 16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      next-intl:
+        specifier: ^4.8.2
+        version: 4.12.0(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6)(typescript@6.0.3)
+      react:
+        specifier: ^19.2.3
+        version: 19.2.6
+      react-dom:
+        specifier: ^19.2.3
+        version: 19.2.6(react@19.2.6)
+    devDependencies:
+      '@eslint-community/eslint-plugin-eslint-comments':
+        specifier: ^4.5.0
+        version: 4.7.1(eslint@10.4.0(jiti@2.7.0))
+      '@next/eslint-plugin-next':
+        specifier: ^16.0.10
+        version: 16.2.6
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      '@types/react':
+        specifier: ^19.2.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.2.0
+        version: 19.2.3(@types/react@19.2.14)
+      eslint:
+        specifier: ^10.0.1
+        version: 10.4.0(jiti@2.7.0)
+      eslint-config-next:
+        specifier: ^16.0.10
+        version: 16.2.6(@typescript-eslint/parser@8.59.3(eslint@10.4.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.4.0(jiti@2.7.0))(typescript@6.0.3)
+      eslint-import-resolver-typescript:
+        specifier: ^4.4.4
+        version: 4.4.4(eslint-plugin-import@2.32.0)(eslint@10.4.0(jiti@2.7.0))
+      eslint-plugin-check-file:
+        specifier: ^3.3.1
+        version: 3.3.1(eslint@10.4.0(jiti@2.7.0))
+      eslint-plugin-import:
+        specifier: ^2.32.0
+        version: 2.32.0(@typescript-eslint/parser@8.59.3(eslint@10.4.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@4.4.4)(eslint@10.4.0(jiti@2.7.0))
+      eslint-plugin-perfectionist:
+        specifier: ^5.0.0
+        version: 5.9.0(eslint@10.4.0(jiti@2.7.0))(typescript@6.0.3)
+      eslint-plugin-react-hooks:
+        specifier: ^7.0.1
+        version: 7.1.1(eslint@10.4.0(jiti@2.7.0))
+      postcss:
+        specifier: ^8.5.4
+        version: 8.5.15
+      postcss-preset-mantine:
+        specifier: ^1.17.0
+        version: 1.18.0(postcss@8.5.15)
+      postcss-simple-vars:
+        specifier: ^7.0.1
+        version: 7.0.1(postcss@8.5.15)
       typescript:
         specifier: ^6.0.0
         version: 6.0.3
@@ -6655,7 +6737,7 @@ snapshots:
       react: 19.2.6
       react-dom: 19.2.6(react@19.2.6)
 
-  '@refinedev/nextjs-router@7.0.5(@refinedev/core@5.0.12(@tanstack/react-query@5.100.10(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@16.2.6(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
+  '@refinedev/nextjs-router@7.0.5(@refinedev/core@5.0.12(@tanstack/react-query@5.100.10(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)':
     dependencies:
       '@refinedev/core': 5.0.12(@tanstack/react-query@5.100.10(react@19.2.6))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@types/react': 19.2.14
@@ -9833,7 +9915,7 @@ snapshots:
 
   neo-async@2.6.2: {}
 
-  next-auth@5.0.0-beta.31(next@16.2.6(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6):
+  next-auth@5.0.0-beta.31(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6):
     dependencies:
       '@auth/core': 0.41.2
       next: 16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -10109,6 +10191,11 @@ snapshots:
       camelcase-css: 2.0.1
       postcss: 8.5.14
 
+  postcss-js@4.1.0(postcss@8.5.15):
+    dependencies:
+      camelcase-css: 2.0.1
+      postcss: 8.5.15
+
   postcss-mixins@12.1.2(postcss@8.5.14):
     dependencies:
       postcss: 8.5.14
@@ -10117,9 +10204,22 @@ snapshots:
       sugarss: 5.0.1(postcss@8.5.14)
       tinyglobby: 0.2.16
 
+  postcss-mixins@12.1.2(postcss@8.5.15):
+    dependencies:
+      postcss: 8.5.15
+      postcss-js: 4.1.0(postcss@8.5.15)
+      postcss-simple-vars: 7.0.1(postcss@8.5.15)
+      sugarss: 5.0.1(postcss@8.5.15)
+      tinyglobby: 0.2.16
+
   postcss-nested@7.0.2(postcss@8.5.14):
     dependencies:
       postcss: 8.5.14
+      postcss-selector-parser: 7.1.1
+
+  postcss-nested@7.0.2(postcss@8.5.15):
+    dependencies:
+      postcss: 8.5.15
       postcss-selector-parser: 7.1.1
 
   postcss-preset-mantine@1.18.0(postcss@8.5.14):
@@ -10127,6 +10227,12 @@ snapshots:
       postcss: 8.5.14
       postcss-mixins: 12.1.2(postcss@8.5.14)
       postcss-nested: 7.0.2(postcss@8.5.14)
+
+  postcss-preset-mantine@1.18.0(postcss@8.5.15):
+    dependencies:
+      postcss: 8.5.15
+      postcss-mixins: 12.1.2(postcss@8.5.15)
+      postcss-nested: 7.0.2(postcss@8.5.15)
 
   postcss-selector-parser@7.1.1:
     dependencies:
@@ -10136,6 +10242,10 @@ snapshots:
   postcss-simple-vars@7.0.1(postcss@8.5.14):
     dependencies:
       postcss: 8.5.14
+
+  postcss-simple-vars@7.0.1(postcss@8.5.15):
+    dependencies:
+      postcss: 8.5.15
 
   postcss@8.4.31:
     dependencies:
@@ -10757,6 +10867,10 @@ snapshots:
   sugarss@5.0.1(postcss@8.5.14):
     dependencies:
       postcss: 8.5.14
+
+  sugarss@5.0.1(postcss@8.5.15):
+    dependencies:
+      postcss: 8.5.15
 
   superjson@2.2.6:
     dependencies:

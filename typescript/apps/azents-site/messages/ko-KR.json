@@ -1,0 +1,237 @@
+{
+  "metadata": {
+    "title": "Azents | Self-host managed agents",
+    "description": "내 클라우드에서 managed agents를 운영하기 위한 open-source control plane입니다."
+  },
+  "nav": {
+    "architecture": "아키텍처",
+    "roadmap": "로드맵",
+    "github": "GitHub",
+    "docs": "문서",
+    "changeLanguage": "언어 변경"
+  },
+  "hero": {
+    "eyebrow": "Self-host managed agents",
+    "headline": "내 클라우드에서 운영하는 managed agents.",
+    "subheadline": "Azents는 agent session과 Runtime을 팀 인프라 안에서 돌리기 위한 open-source control plane입니다.",
+    "supporting": "Repo, 파일, credential, internal system 옆에서 실행하세요.",
+    "discussion": "열린 이슈 보기",
+    "cta": {
+      "github": "GitHub",
+      "docs": "문서 읽기"
+    }
+  },
+  "architecture": {
+    "eyebrow": "아키텍처",
+    "title": "소유한 인프라를 위한 컨트롤 플레인.",
+    "body": "엔진은 에이전트 세션을 조율합니다. 런타임은 사용자 경계 안에서 코드, 도구, 파일 작업을 실행합니다.",
+    "diagram": {
+      "label": "사용자와 팀은 Azents 엔진에 연결하고, Azents 엔진은 사용자 클라우드 또는 온프레미스 환경의 런타임을 조율합니다.",
+      "path": "azents/control-plane",
+      "split": "engine != runtime",
+      "team": {
+        "kind": "01 / ingress",
+        "title": "사용자 / 팀",
+        "description": "실제 작업 공간을 대상으로 지속 가능한 세션을 시작합니다."
+      },
+      "engine": {
+        "title": "Azents Engine",
+        "kind": "02 / control plane",
+        "description": "세션, 상태, 조율, 인계를 담당합니다."
+      },
+      "runtime": {
+        "kind": "03 / execution plane",
+        "title": "Runtime",
+        "description": "사용자 인프라 안에서 도구와 작업 공간 작업을 실행합니다."
+      },
+      "signals": {
+        "sessionLog": {
+          "label": "세션 로그",
+          "value": "durable events + replay"
+        },
+        "handover": {
+          "label": "인계",
+          "value": "Engine worker 이동 가능"
+        },
+        "runtimeLease": {
+          "label": "Runtime lease",
+          "value": "workspace scoped execution"
+        },
+        "boundary": {
+          "label": "보안 경계",
+          "value": "사용자 클라우드 / 사설 네트워크 / 온프레미스"
+        }
+      }
+    },
+    "terms": {
+      "engine": {
+        "title": "Engine",
+        "body": "분산 session과 orchestration layer입니다."
+      },
+      "runtime": {
+        "title": "Runtime",
+        "body": "코드, 파일, 도구를 위한 실행 환경입니다."
+      },
+      "session": {
+        "title": "Session",
+        "body": "오래 실행되는 agent task를 위한 durable work context입니다."
+      },
+      "toolkit": {
+        "title": "Toolkit",
+        "body": "사설 capability에 대한 통제된 접근입니다."
+      }
+    }
+  },
+  "problem": {
+    "eyebrow": "remote runs",
+    "title": "노트북을 닫아도 일은 계속돼야 합니다.",
+    "body": "긴 작업은 로컬 터미널보다 workspace 가까이에 있는 Runtime에 맡기는 편이 낫습니다.",
+    "panelTitle": "Remote run이 좋아지는 순간",
+    "panelBody": "Session이 살아 있고, 진행 상황이 보이고, 다시 이어받을 수 있어야 합니다.",
+    "flow": {
+      "cloud": "laptop",
+      "systems": "workspace"
+    },
+    "items": {
+      "sessions": {
+        "title": "끊기지 않는 작업",
+        "body": "탭이나 SSH가 끊겨도 run은 계속됩니다."
+      },
+      "scaling": {
+        "title": "Workspace 옆 실행",
+        "body": "Repo, files, shell, task state 가까이에서 돌립니다."
+      },
+      "failover": {
+        "title": "다시 이어받기",
+        "body": "다른 기기에서도 같은 session으로 돌아올 수 있습니다."
+      },
+      "observability": {
+        "title": "진행 상황 확인",
+        "body": "Command output, diff, blocker를 한 곳에서 봅니다."
+      },
+      "permissions": {
+        "title": "팀 단위 작업",
+        "body": "한 사람의 노트북이 아니라 workspace에 run을 남깁니다."
+      },
+      "state": {
+        "title": "작업에 맞는 Runtime",
+        "body": "무거운 작업에는 그에 맞는 실행 환경을 붙입니다."
+      }
+    },
+    "footnote": "Remote run은 agent가 계속 일하게 만드는 방식입니다. 다음 문제는 그 실행 위치입니다."
+  },
+  "selfHosted": {
+    "eyebrow": "your cloud",
+    "title": "Managed agents를 내 클라우드의 시스템으로 운영하세요.",
+    "body": "Repo, credential, internal API, audit log가 있는 곳에서 Runtime을 관리합니다.",
+    "thesis": "Azents는 remote run을 팀 인프라 안에 올려 운영하는 self-hosted control plane입니다.",
+    "keywords": {
+      "data": "Data control",
+      "security": "Security boundary",
+      "internal": "사설 시스템",
+      "regulatory": "규정 준수",
+      "privateCloud": "On-prem / private cloud"
+    }
+  },
+  "bootstrapping": {
+    "eyebrow": "스스로를 개발하는 도구",
+    "title": "Azents는 이미 자기 coding harness를 사용합니다.",
+    "body": "Azents는 이제 Azents 개발에 사용됩니다. Coding harness는 repository, edits, shell, PR, CI, review feedback, verification을 다룹니다.",
+    "capabilities": {
+      "repo": "변경 전에 저장소를 읽습니다",
+      "editing": "작업 중인 변경분을 유지하며 파일을 편집합니다",
+      "shell": "통제된 작업 공간에서 명령을 실행합니다",
+      "github": "PR을 열고 리뷰 피드백을 처리합니다",
+      "ci": "CI를 보고 실패 원인을 분리합니다",
+      "review": "구현과 검증을 반복합니다"
+    }
+  },
+  "features": {
+    "eyebrow": "제공하는 것",
+    "title": "Managed-agent operations, self-hosted.",
+    "body": "또 하나의 채팅 UI가 아닙니다. 실제 시스템 가까이에서 일하는 에이전트를 위한 운영 레이어입니다.",
+    "items": {
+      "sessions": {
+        "title": "Managed sessions",
+        "body": "지속 가능한 기록을 가진 장기 실행 작업 맥락입니다."
+      },
+      "history": {
+        "title": "이벤트 기록",
+        "body": "재생, 감사, 검토를 위한 실행 이벤트입니다."
+      },
+      "separation": {
+        "title": "Engine / Runtime split",
+        "body": "조율과 작업 공간 실행을 분리해 확장합니다."
+      },
+      "permissions": {
+        "title": "도구 권한",
+        "body": "에이전트가 읽고, 실행하고, 호출하고, 변경할 수 있는 범위를 통제합니다."
+      },
+      "providers": {
+        "title": "Runtime providers",
+        "body": "Docker와 Kubernetes 중심의 실행 환경을 운영합니다."
+      },
+      "harness": {
+        "title": "Coding harness",
+        "body": "저장소, PR, CI 루프를 위한 개발 워크플로입니다."
+      },
+      "tools": {
+        "title": "자체 호스팅 모델",
+        "body": "사설 클라우드, 온프레미스, 규제 환경을 위해 설계되었습니다."
+      }
+    }
+  },
+  "roadmap": {
+    "eyebrow": "공개적으로 빌드 중",
+    "title": "Managed agents를 직접 통제하고 싶은 팀을 위해.",
+    "body": "플랫폼 엔지니어, 인프라 팀, AI 제품 빌더, 자체 호스팅 조직을 위한 프로젝트입니다.",
+    "currentFocus": "현재 집중 영역",
+    "audience": {
+      "platform": "플랫폼 엔지니어",
+      "devops": "인프라 / DevOps 팀",
+      "builders": "AI 제품 빌더",
+      "selfHosted": "자체 호스팅 팀",
+      "sensitive": "민감 데이터 조직"
+    },
+    "items": {
+      "deployment": "자체 호스팅 배포 문서",
+      "reliability": "Engine and Runtime reliability",
+      "providers": "Runtime provider hardening",
+      "harness": "Coding harness maturity",
+      "observability": "에이전트 관측성",
+      "localLlm": "로컬 LLM 지원",
+      "workflows": "더 넓은 에이전트 워크플로"
+    }
+  },
+  "finalCta": {
+    "title": "Self-host managed agents.",
+    "body": "Agent session, Runtime, tools를 작업이 이미 존재하는 곳에서 실행하세요.",
+    "github": "GitHub",
+    "docs": "문서 읽기"
+  },
+  "footer": {
+    "tagline": "Azents는 self-hosted managed agents를 위한 open-source infrastructure입니다.",
+    "github": "GitHub",
+    "discussion": "이슈"
+  },
+  "fontPreview": {
+    "notes": {
+      "current": "현재 사용 중",
+      "native": "macOS / 플랫폼 기본",
+      "warmer": "더 따뜻하고 제품적인 인상",
+      "neutral": "중립적이고 익숙함",
+      "fallback": "설치되어 있으면 사용, 아니면 시스템 글꼴",
+      "editorial": "에디토리얼 대비"
+    },
+    "sampleLabel": "글꼴 샘플",
+    "eyebrow": "Self-host managed agents",
+    "headline": "Managed agents를 내 클라우드에서.",
+    "subheadline": "Azents는 agent session, Runtime, tools, execution state를 운영하기 위한 open-source control plane입니다.",
+    "supporting": "Runtime을 코드, 파일, 권한, 사설 시스템 가까이에 두세요.",
+    "rendered": "렌더링:",
+    "pageEyebrow": "Azents 글꼴 미리보기",
+    "pageTitle": "같은 문구, 다른 타입.",
+    "pageBody": "로컬/시스템 글꼴 스택을 사용하므로, 아래 렌더링 줄에서 브라우저가 실제로 선택한 글꼴을 확인할 수 있습니다.",
+    "checking": "확인 중..."
+  }
+}

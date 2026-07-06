@@ -1,0 +1,45 @@
+{
+  "name": "@azents/site",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3004",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint src --max-warnings 0 --cache --cache-strategy content",
+    "lint:fix": "eslint src --max-warnings 0 --fix --cache --cache-strategy content",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write --cache 'src/**/*.{ts,tsx}' 'messages/**/*.json'",
+    "format:check": "prettier --check --cache 'src/**/*.{ts,tsx}' 'messages/**/*.json'"
+  },
+  "dependencies": {
+    "@mantine/core": "^9.0.0",
+    "@mantine/hooks": "^9.0.0",
+    "@mantine/modals": "^9.0.0",
+    "@tabler/icons-react": "^3.36.1",
+    "geist": "^1.7.0",
+    "next": "^16.0.10",
+    "next-intl": "^4.8.2",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@eslint-community/eslint-plugin-eslint-comments": "^4.5.0",
+    "@next/eslint-plugin-next": "^16.0.10",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "eslint": "^10.0.1",
+    "eslint-config-next": "^16.0.10",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-check-file": "^3.3.1",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-perfectionist": "^5.0.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "postcss": "^8.5.4",
+    "postcss-preset-mantine": "^1.17.0",
+    "postcss-simple-vars": "^7.0.1",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.49.0"
+  }
+}
