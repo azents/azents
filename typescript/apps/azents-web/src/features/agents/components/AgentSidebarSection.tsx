@@ -76,7 +76,7 @@ export function AgentSidebarSection({
     const items = agentsQuery.data?.items ?? [];
     const q = query.toLowerCase();
     const filtered = items
-      .filter((a) => a.role !== "subagent" && a.enabled)
+      .filter((a) => a.enabled)
       .filter(
         (a) =>
           !q ||

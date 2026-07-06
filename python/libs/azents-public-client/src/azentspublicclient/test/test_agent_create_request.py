@@ -43,12 +43,10 @@ class TestAgentCreateRequest(unittest.TestCase):
                 system_prompt = '',
                 enabled = True,
                 type = 'public',
-                role = 'agent',
                 runtime_provider_id = '',
                 shell_enabled = True,
                 memory_enabled = True,
-                max_turns = 56,
-                toolkit_inherit_mode = 'none'
+                max_turns = 56
             )
         else:
             return AgentCreateRequest(

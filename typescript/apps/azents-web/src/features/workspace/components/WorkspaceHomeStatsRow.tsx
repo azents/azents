@@ -3,7 +3,7 @@
 /**
  * Workspace Home top team stats 4-card.
  *
- * Design: active agents (enabled/total) / total agents / subagents.
+ * Design: active agents (enabled/total) / total agents.
  * "Currently working (busy)" omitted in first pass due to no realtime state tracking.
  */
 
@@ -70,7 +70,6 @@ export function WorkspaceHomeStatsRow({
         total={stats.totalAgents}
       />
       <StatCard label={t("totalAgents")} value={stats.totalAgents} />
-      <StatCard label={t("subagents")} value={stats.subagentsCount} />
     </SimpleGrid>
   );
 }

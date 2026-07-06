@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import (
     ResolveContext,
-    SubagentToolkitContext,
     Toolkit,
     ToolkitProvider,
     ToolkitState,
@@ -207,11 +206,6 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
     ) -> None:
         """Register shared Runtime instruction context store."""
         self._instruction_context_store = store
-
-    def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
-        """Apply parent runtime context sharing rules to subagent execution."""
-        self.set_runtime_agent_id(context.parent_agent_id)
-        self.set_runtime_session_id(context.parent_session_id)
 
     def hooks(self) -> RuntimeHooks:
         """Register Claude rules appendix hooks."""

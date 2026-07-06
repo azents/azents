@@ -19,7 +19,6 @@ interface AgentFixtureInput {
   name: string;
   description: string | null;
   enabled: boolean;
-  role: "agent" | "subagent";
   provider: "openai" | "anthropic" | "aws_bedrock" | null;
   modelIdentifier: string | null;
   lastActiveAt: string;
@@ -70,12 +69,10 @@ function createAgent(input: AgentFixtureInput): EnrichedAgent {
     system_prompt: null,
     enabled: input.enabled,
     type: "public",
-    role: input.role,
     runtime_provider_id: null,
-    shell_enabled: input.role !== "subagent",
+    shell_enabled: true,
     memory_enabled: true,
     max_turns: null,
-    toolkit_inherit_mode: "all",
     avatar: null,
     created_at: "2026-04-28T09:00:00.000Z",
     updated_at: input.lastActiveAt,
@@ -93,7 +90,6 @@ const primaryAgents: EnrichedAgent[] = [
     name: "Planner",
     description: "Turns rough team requests into scoped implementation plans.",
     enabled: true,
-    role: "agent",
     provider: "openai",
     modelIdentifier: "gpt-5.1",
     lastActiveAt: "2026-05-01T08:30:00.000Z",
@@ -103,7 +99,6 @@ const primaryAgents: EnrichedAgent[] = [
     name: "Release Operator",
     description: "Coordinates branch checks, PR status, and release readiness.",
     enabled: true,
-    role: "agent",
     provider: "aws_bedrock",
     modelIdentifier: "global.anthropic.claude-sonnet-4-6",
     lastActiveAt: "2026-05-01T07:10:00.000Z",
@@ -113,45 +108,9 @@ const primaryAgents: EnrichedAgent[] = [
     name: "Archive Helper",
     description: null,
     enabled: false,
-    role: "agent",
     provider: "anthropic",
     modelIdentifier: "claude-sonnet-4-5",
     lastActiveAt: "2026-04-16T13:20:00.000Z",
-  }),
-];
-
-const subagents: EnrichedAgent[] = [
-  createAgent({
-    id: "subagent-search",
-    name: "Web Search",
-    description:
-      "Finds current references before a parent agent drafts an answer.",
-    enabled: true,
-    role: "subagent",
-    provider: null,
-    modelIdentifier: null,
-    lastActiveAt: "2026-05-01T06:45:00.000Z",
-  }),
-  createAgent({
-    id: "subagent-reviewer",
-    name: "Code Reviewer",
-    description: "Checks proposed changes for regressions and missing tests.",
-    enabled: true,
-    role: "subagent",
-    provider: null,
-    modelIdentifier: null,
-    lastActiveAt: "2026-05-01T05:30:00.000Z",
-  }),
-  createAgent({
-    id: "subagent-painter",
-    name: "Painter",
-    description:
-      "Creates visual drafts when a parent agent needs image concepts.",
-    enabled: true,
-    role: "subagent",
-    provider: null,
-    modelIdentifier: null,
-    lastActiveAt: "2026-04-30T19:00:00.000Z",
   }),
 ];
 
@@ -168,12 +127,10 @@ function WorkspaceHomeStory({
     handle: "azents",
     state: {
       type: "READY",
-      primaryAgents,
-      subagents,
+      agents: primaryAgents,
       stats: {
         totalAgents: primaryAgents.length,
         enabledAgents: primaryAgents.filter((agent) => agent.enabled).length,
-        subagentsCount: subagents.length,
       },
     },
     view,
@@ -199,7 +156,7 @@ const meta = {
     ),
   ],
   args: {
-    initialView: "subagents",
+    initialView: "agents",
     initialQuery: "",
     initialShowDisabled: false,
   },
@@ -208,8 +165,6 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
-
-export const Subagents = {} satisfies Story;
 
 export const Agents = {
   args: {

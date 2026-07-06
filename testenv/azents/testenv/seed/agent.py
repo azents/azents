@@ -12,16 +12,12 @@ from dataclasses import dataclass
 import httpx
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
-from azentspublicclient.models.agent_role import AgentRole
-from azentspublicclient.models.agent_subagent_create_request import (
-    AgentSubagentCreateRequest,
-)
 from azentspublicclient.models.agent_type import AgentType
 
 from testenv.runtime_config import TestenvConfig
 
 from .client import public_client
-from .types import Agent, AgentSubagent, Integration, User, Workspace
+from .types import Agent, Integration, User, Workspace
 from .unique import unique
 
 
@@ -43,7 +39,6 @@ class AgentService:
         *,
         name: str | None = None,
         agent_type: str = "public",
-        role: str = "agent",
         shell_enabled: bool = True,
         memory_enabled: bool = True,
         model_config_id: str | None = None,
@@ -71,7 +66,6 @@ class AgentService:
                 llm_provider_model=None,
                 additional_properties={"model_config_id": model_config_id},
                 type=AgentType(agent_type),
-                role=AgentRole(role),
                 shell_enabled=shell_enabled,
             ),
             _headers={"Authorization": f"Bearer {user.access_token}"},
@@ -91,44 +85,4 @@ class AgentService:
             integration=integration,
             name=actual_name,
             model_slug=model,
-        )
-
-    def create_subagent(
-        self,
-        user: User,
-        workspace: Workspace,
-        parent: Agent,
-        subagent_id: str,
-        description: str,
-        *,
-        enabled: bool = True,
-    ) -> AgentSubagent:
-        """Create the subagent junction for a parent agent.
-
-        Calls ``POST /workspace/{handle}/agents/{agent_id}/subagents``.
-
-        :param user: authenticated user
-        :param workspace: workspace containing the parent agent
-        :param parent: parent agent
-        :param subagent_id: subagent ID to connect
-        :param description: subagent description shown to the LLM
-        :param enabled: whether the connection is active; defaults to True
-        """
-        api = AgentV1Api(public_client(self.config))
-        resp = api.agent_v1_create_agent_subagent(
-            handle=workspace.handle,
-            agent_id=parent.id,
-            agent_subagent_create_request=AgentSubagentCreateRequest(
-                subagent_id=subagent_id,
-                description=description,
-                enabled=enabled,
-            ),
-            _headers={"Authorization": f"Bearer {user.access_token}"},
-        )
-        return AgentSubagent(
-            id=resp.id,
-            agent_id=resp.agent_id,
-            subagent_id=resp.subagent_id,
-            description=resp.description,
-            enabled=resp.enabled,
         )

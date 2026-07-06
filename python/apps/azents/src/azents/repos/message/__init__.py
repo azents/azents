@@ -25,8 +25,6 @@ from azents.engine.events.types import (
     ReasoningPayload,
     RunMarkerPayload,
     SkillLoadedPayload,
-    SubagentEndPayload,
-    SubagentStartPayload,
     SystemErrorPayload,
     SystemReminderPayload,
     ToolOutput,
@@ -48,7 +46,6 @@ _INVISIBLE_RETRY_ELIGIBILITY_ROLES = {
     MessageRole.TURN_COMPLETE,
     MessageRole.RUN_COMPLETE,
     MessageRole.COMPACTION_STARTED,
-    MessageRole.SUBAGENT_END,
     MessageRole.COMPACTION,
 }
 
@@ -80,10 +77,6 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return CompactionMarkerPayload.model_validate(row.payload)
         case EventKind.COMPACTION_SUMMARY:
             return CompactionSummaryPayload.model_validate(row.payload)
-        case EventKind.SUBAGENT_START:
-            return SubagentStartPayload.model_validate(row.payload)
-        case EventKind.SUBAGENT_END:
-            return SubagentEndPayload.model_validate(row.payload)
         case EventKind.GOAL_CONTINUATION | EventKind.GOAL_UPDATED:
             return UserMessagePayload.model_validate(row.payload)
         case EventKind.ACTION_MESSAGE:
@@ -279,50 +272,13 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                 },
                 created_at=row.created_at,
             )
-        case SubagentStartPayload():
-            return ChatMessage(
-                id=row.id,
-                session_id=row.session_id,
-                role=MessageRole.SUBAGENT_START,
-                content=None,
-                tool_calls=None,
-                tool_call_id=None,
-                attachments=[],
-                reasoning_summary=None,
-                usage=None,
-                metadata={
-                    "subagent_run_id": payload.subagent_run_id,
-                    "subagent_id": payload.subagent_id,
-                    "subagent_name": payload.subagent_name,
-                    "subagent_session_id": payload.subagent_session_id,
-                },
-                created_at=row.created_at,
-            )
         case (
             ActionExecutionResultPayload()
             | GoalBriefingPayload()
             | SkillLoadedPayload()
         ):
             return None
-        case SubagentEndPayload():
-            return ChatMessage(
-                id=row.id,
-                session_id=row.session_id,
-                role=MessageRole.SUBAGENT_END,
-                content=payload.result or payload.error,
-                tool_calls=None,
-                tool_call_id=None,
-                attachments=[],
-                reasoning_summary=None,
-                usage=None,
-                metadata={
-                    "subagent_run_id": payload.subagent_run_id,
-                    "subagent_id": payload.subagent_id,
-                    "subagent_session_id": payload.subagent_session_id,
-                    "status": payload.status,
-                },
-                created_at=row.created_at,
-            )
+
         case SystemReminderPayload():
             return None
         case SystemErrorPayload():
@@ -648,8 +604,6 @@ class MessageRepository:
         if msg.role in (
             MessageRole.TURN_COMPLETE,
             MessageRole.RUN_COMPLETE,
-            MessageRole.SUBAGENT_START,
-            MessageRole.SUBAGENT_END,
         ):
             return False
         return (

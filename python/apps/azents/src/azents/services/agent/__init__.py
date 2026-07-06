@@ -37,7 +37,6 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate, NotFound
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_admin.data import AgentAdminCreate
-from azents.repos.agent_subagent import AgentSubagentRepository
 from azents.repos.toolkit import AgentToolkitRepository
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -146,9 +145,6 @@ class AgentService:
 
     repository: Annotated[AgentRepository, Depends(AgentRepository)]
     admin_repository: Annotated[AgentAdminRepository, Depends(AgentAdminRepository)]
-    agent_subagent_repository: Annotated[
-        AgentSubagentRepository, Depends(AgentSubagentRepository)
-    ]
     workspace_model_settings_repository: Annotated[
         WorkspaceModelSettingsRepository, Depends(WorkspaceModelSettingsRepository)
     ]
@@ -314,7 +310,6 @@ class AgentService:
             bt_errors = validate_builtin_tools(
                 effective_model_parameters.builtin_tools,
                 BuiltinToolValidationContext(
-                    agent_role=create.role,
                     shell_enabled=create.shell_enabled,
                     has_toolkits=False,
                     provider_model=_builtin_tool_provider_model_from_selection(
@@ -340,14 +335,12 @@ class AgentService:
             system_prompt=create.system_prompt,
             enabled=create.enabled,
             type=create.type,
-            role=create.role,
             runtime_provider_id=(
                 create.runtime_provider_id or self.runtime_default_provider_id
             ),
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
             max_turns=create.max_turns,
-            toolkit_inherit_mode=create.toolkit_inherit_mode,
         )
         async with self.session_manager() as session:
             if create.model_selection is not None:
@@ -526,7 +519,6 @@ class AgentService:
             bt_errors = validate_builtin_tools(
                 effective_model_parameters.builtin_tools,
                 BuiltinToolValidationContext(
-                    agent_role=update.get("role", existing.role),
                     shell_enabled=new_shell_enabled,
                     has_toolkits=len(agent_toolkits) > 0,
                     provider_model=_builtin_tool_provider_model_from_selection(
@@ -546,12 +538,10 @@ class AgentService:
             "system_prompt",
             "enabled",
             "type",
-            "role",
             "runtime_provider_id",
             "shell_enabled",
             "memory_enabled",
             "max_turns",
-            "toolkit_inherit_mode",
         ):
             if key in update:
                 repo_update[key] = update[key]  # type: ignore[literal-required]

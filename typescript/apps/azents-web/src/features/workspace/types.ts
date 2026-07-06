@@ -97,9 +97,8 @@ export interface NotificationState {
   message: NotificationMessageKey;
 }
 
-/** Home agent/subagent tab filter. Persisted with URL `?view=`.
- * Default `agents`. */
-export type AgentTeamFilter = "agents" | "subagents" | "all";
+/** Home agent tab filter. Persisted with URL `?view=`. */
+export type AgentTeamFilter = "agents" | "all";
 
 /** Agent for Home card display */
 export interface EnrichedAgent extends AgentResponse {
@@ -115,8 +114,6 @@ export interface WorkspaceHomeStats {
   totalAgents: number;
   /** enabled primary agent count */
   enabledAgents: number;
-  /** subagent count */
-  subagentsCount: number;
 }
 
 /** Home page state */
@@ -125,9 +122,7 @@ export type WorkspaceHomeState =
   | { type: "ERROR"; message: string }
   | {
       type: "READY";
-      /** primary agent (role !== "subagent") */
-      primaryAgents: EnrichedAgent[];
-      /** subagent role agent */
-      subagents: EnrichedAgent[];
+      /** workspace agents */
+      agents: EnrichedAgent[];
       stats: WorkspaceHomeStats;
     };

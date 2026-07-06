@@ -12,7 +12,6 @@ export const agentFormSchema = z.object({
   lightweight_model_selection_value: z.string().nullable(),
   system_prompt: z.string().optional(),
   type: z.enum(["public", "private"]),
-  role: z.enum(["agent", "subagent"]),
   enabled: z.boolean(),
   reasoning_effort: z.enum(["low", "medium", "high"]).nullable().optional(),
   context_window_tokens: z.number().int().positive().nullable().optional(),
@@ -20,11 +19,6 @@ export const agentFormSchema = z.object({
   shell_enabled: z.boolean().optional(),
   memory_enabled: z.boolean().optional(),
   max_turns: z.number().int().positive().nullable().optional(),
-  /**
-   * Toolkit inherit mode (agent row level, DP1 A).
-   * Only meaningful when Role is 'subagent'.
-   */
-  toolkit_inherit_mode: z.enum(["none", "all"]).optional().default("none"),
   builtin_tools: z.array(z.string()).optional().default([]),
 });
 

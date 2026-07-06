@@ -273,12 +273,10 @@ export function useAgentFormContainer(
           model_parameters: modelParameters,
           system_prompt: values.system_prompt ?? null,
           type: values.type,
-          role: values.role,
           enabled: values.enabled,
           shell_enabled: values.shell_enabled,
           memory_enabled: values.memory_enabled,
           max_turns: values.max_turns ?? null,
-          toolkit_inherit_mode: values.toolkit_inherit_mode,
         });
       } else {
         createMutation.mutate({
@@ -290,12 +288,10 @@ export function useAgentFormContainer(
           model_parameters: modelParameters,
           system_prompt: values.system_prompt,
           type: values.type,
-          role: values.role,
           enabled: values.enabled,
           shell_enabled: values.shell_enabled,
           memory_enabled: values.memory_enabled,
           max_turns: values.max_turns ?? null,
-          toolkit_inherit_mode: values.toolkit_inherit_mode,
         });
       }
     },

@@ -42,10 +42,6 @@ Event transcript event kind.
 
 * `COMPACTION_SUMMARY` (value: `'compaction_summary'`)
 
-* `SUBAGENT_START` (value: `'subagent_start'`)
-
-* `SUBAGENT_END` (value: `'subagent_end'`)
-
 * `SYSTEM_REMINDER` (value: `'system_reminder'`)
 
 * `SYSTEM_ERROR` (value: `'system_error'`)

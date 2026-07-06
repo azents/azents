@@ -19,7 +19,6 @@ from azents.broker.broadcast import WebSocketBroadcast, WebSocketBroadcastPublis
 from azents.core.enums import AgentSessionRunState, RuntimeRunnerState
 from azents.core.tools import (
     ResolveContext,
-    SubagentToolkitContext,
     Toolkit,
     ToolkitProvider,
     ToolkitState,
@@ -496,13 +495,6 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
     def set_session_id(self, session_id: str) -> None:
         """Inject session_id."""
         self._session_id = session_id
-
-    def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
-        """Adjust Subagent execution to use an independent Skill projection."""
-        self.set_agent_id(context.subagent_id)
-        self.set_session_id(context.subagent_session_id)
-        self._adopted_run_ids.clear()
-        self._adopt_latest_on_next_turn = False
 
     def hooks(self) -> RuntimeHooks:
         """Return Skill projection lifecycle hooks."""

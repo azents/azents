@@ -1017,261 +1017,6 @@
         }
       }
     },
-    "/agent/v1/workspaces/{handle}/agents/{agent_id}/subagents": {
-      "get": {
-        "tags": [
-          "Agent v1"
-        ],
-        "summary": "List Agent Subagents",
-        "description": "List an Agent's subagent links.",
-        "operationId": "agent_v1_list_agent_subagents",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "handle",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Handle"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentSubagentListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Agent v1"
-        ],
-        "summary": "Create Agent Subagent",
-        "description": "Add a subagent link to an Agent.",
-        "operationId": "agent_v1_create_agent_subagent",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "handle",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Handle"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentSubagentCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentSubagentResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/agent/v1/workspaces/{handle}/agents/{agent_id}/subagents/{agent_subagent_id}": {
-      "patch": {
-        "tags": [
-          "Agent v1"
-        ],
-        "summary": "Update Agent Subagent",
-        "description": "Update a subagent link.",
-        "operationId": "agent_v1_update_agent_subagent",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "agent_subagent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Subagent Id"
-            }
-          },
-          {
-            "name": "handle",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Handle"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentSubagentUpdateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentSubagentResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Agent v1"
-        ],
-        "summary": "Delete Agent Subagent",
-        "description": "Delete a subagent link.",
-        "operationId": "agent_v1_delete_agent_subagent",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "agent_subagent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Subagent Id"
-            }
-          },
-          {
-            "name": "handle",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Handle"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime": {
       "get": {
         "tags": [
@@ -8463,11 +8208,6 @@
             "description": "Visibility scope",
             "default": "public"
           },
-          "role": {
-            "$ref": "#/components/schemas/AgentRole",
-            "description": "Role (agent/subagent)",
-            "default": "agent"
-          },
           "runtime_provider_id": {
             "anyOf": [
               {
@@ -8504,11 +8244,6 @@
             ],
             "title": "Max Turns",
             "description": "Maximum agent turn count"
-          },
-          "toolkit_inherit_mode": {
-            "$ref": "#/components/schemas/SubagentToolkitInheritMode",
-            "description": "Toolkit inherit mode; default all, meaningful for role=subagent",
-            "default": "all"
           }
         },
         "type": "object",
@@ -8789,9 +8524,6 @@
           "type": {
             "$ref": "#/components/schemas/AgentType"
           },
-          "role": {
-            "$ref": "#/components/schemas/AgentRole"
-          },
           "runtime_provider_id": {
             "anyOf": [
               {
@@ -8821,9 +8553,6 @@
               }
             ],
             "title": "Max Turns"
-          },
-          "toolkit_inherit_mode": {
-            "$ref": "#/components/schemas/SubagentToolkitInheritMode"
           },
           "avatar": {
             "anyOf": [
@@ -8859,26 +8588,15 @@
           "system_prompt",
           "enabled",
           "type",
-          "role",
           "runtime_provider_id",
           "shell_enabled",
           "memory_enabled",
           "max_turns",
-          "toolkit_inherit_mode",
           "created_at",
           "updated_at"
         ],
         "title": "AgentResponse",
         "description": "Agent response."
-      },
-      "AgentRole": {
-        "type": "string",
-        "enum": [
-          "agent",
-          "subagent"
-        ],
-        "title": "AgentRole",
-        "description": "Agent role, distinguishing agent/subagent."
       },
       "AgentRunPhase": {
         "type": "string",
@@ -9467,113 +9185,6 @@
         "title": "AgentSessionTitleUpdateRequest",
         "description": "AgentSession title update request."
       },
-      "AgentSubagentCreateRequest": {
-        "properties": {
-          "subagent_id": {
-            "type": "string",
-            "title": "Subagent Id",
-            "description": "Subagent ID to link"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "description": "Description exposed to the LLM"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled",
-            "description": "Enabled state",
-            "default": true
-          }
-        },
-        "type": "object",
-        "required": [
-          "subagent_id",
-          "description"
-        ],
-        "title": "AgentSubagentCreateRequest",
-        "description": "AgentSubagent creation request."
-      },
-      "AgentSubagentListResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/AgentSubagentResponse"
-            },
-            "type": "array",
-            "title": "Items"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "title": "AgentSubagentListResponse",
-        "description": "AgentSubagent list response."
-      },
-      "AgentSubagentResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "agent_id": {
-            "type": "string",
-            "title": "Agent Id"
-          },
-          "subagent_id": {
-            "type": "string",
-            "title": "Subagent Id"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "agent_id",
-          "subagent_id",
-          "description",
-          "enabled",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "AgentSubagentResponse",
-        "description": "AgentSubagent link response."
-      },
-      "AgentSubagentUpdateRequest": {
-        "properties": {
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "description": "Description exposed to LLM"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled",
-            "description": "Enabled flag"
-          }
-        },
-        "type": "object",
-        "title": "AgentSubagentUpdateRequest",
-        "description": "AgentSubagent update request, for partial updates."
-      },
       "AgentToolkitAttachRequest": {
         "properties": {
           "toolkit_id": {
@@ -9723,10 +9334,6 @@
             "$ref": "#/components/schemas/AgentType",
             "description": "Visibility scope"
           },
-          "role": {
-            "$ref": "#/components/schemas/AgentRole",
-            "description": "Role (agent/subagent)"
-          },
           "runtime_provider_id": {
             "anyOf": [
               {
@@ -9761,10 +9368,6 @@
             ],
             "title": "Max Turns",
             "description": "Maximum agent turn count"
-          },
-          "toolkit_inherit_mode": {
-            "$ref": "#/components/schemas/SubagentToolkitInheritMode",
-            "description": "Toolkit inherit mode"
           }
         },
         "type": "object",
@@ -12036,8 +11639,6 @@
           "interrupted",
           "compaction_marker",
           "compaction_summary",
-          "subagent_start",
-          "subagent_end",
           "system_reminder",
           "system_error",
           "unknown_adapter_output"
@@ -15880,15 +15481,6 @@
         ],
         "title": "SkillAction",
         "description": "Skill invocation turn action."
-      },
-      "SubagentToolkitInheritMode": {
-        "type": "string",
-        "enum": [
-          "none",
-          "all"
-        ],
-        "title": "SubagentToolkitInheritMode",
-        "description": "Subagent toolkit inherit mode.\n\nStored at Agent row (agents table) level (DP1 A). Consistent with Model\ninherit at the same level.\n\n- ``NONE``: Use only subagent own ``agent_toolkits`` (existing behavior).\n- ``ALL``: Use only parent toolkit and ignore subagent own toolkit.\n  (DP6 exclusive)."
       },
       "TestConnectionRequest": {
         "properties": {

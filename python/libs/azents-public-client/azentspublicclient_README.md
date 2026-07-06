@@ -83,23 +83,19 @@ Class | Method | HTTP request | Description
 *AgentV1Api* | [**agent_v1_add_agent_admin**](azentspublicclient/docs/AgentV1Api.md#agent_v1_add_agent_admin) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | Add Agent Admin
 *AgentV1Api* | [**agent_v1_create_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_create_agent) | **POST** /agent/v1/workspaces/{handle}/agents | Create Agent
 *AgentV1Api* | [**agent_v1_create_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_create_agent_memory) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | Create Agent Memory
-*AgentV1Api* | [**agent_v1_create_agent_subagent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_create_agent_subagent) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents | Create Agent Subagent
 *AgentV1Api* | [**agent_v1_delete_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_delete_agent) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id} | Delete Agent
 *AgentV1Api* | [**agent_v1_delete_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_delete_agent_memory) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Delete Agent Memory
-*AgentV1Api* | [**agent_v1_delete_agent_subagent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_delete_agent_subagent) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents/{agent_subagent_id} | Delete Agent Subagent
 *AgentV1Api* | [**agent_v1_finalize_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 *AgentV1Api* | [**agent_v1_get_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
 *AgentV1Api* | [**agent_v1_get_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
 *AgentV1Api* | [**agent_v1_list_agent_admins**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
 *AgentV1Api* | [**agent_v1_list_agent_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
-*AgentV1Api* | [**agent_v1_list_agent_subagents**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_subagents) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents | List Agent Subagents
 *AgentV1Api* | [**agent_v1_list_agents**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agents) | **GET** /agent/v1/workspaces/{handle}/agents | List Agents
 *AgentV1Api* | [**agent_v1_remove_agent_admin**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
 *AgentV1Api* | [**agent_v1_remove_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_avatar) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar | Remove Avatar
 *AgentV1Api* | [**agent_v1_request_avatar_upload**](azentspublicclient/docs/AgentV1Api.md#agent_v1_request_avatar_upload) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/upload-url | Request Avatar Upload
 *AgentV1Api* | [**agent_v1_update_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_update_agent) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id} | Update Agent
 *AgentV1Api* | [**agent_v1_update_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_update_agent_memory) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Update Agent Memory
-*AgentV1Api* | [**agent_v1_update_agent_subagent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_update_agent_subagent) | **PATCH** /agent/v1/workspaces/{handle}/agents/{agent_id}/subagents/{agent_subagent_id} | Update Agent Subagent
 *AuthV1Api* | [**auth_v1_get_login_methods**](azentspublicclient/docs/AuthV1Api.md#auth_v1_get_login_methods) | **GET** /auth/v1/login/methods | Get Login Methods
 *AuthV1Api* | [**auth_v1_get_signup_status**](azentspublicclient/docs/AuthV1Api.md#auth_v1_get_signup_status) | **GET** /auth/v1/signup/status | Get Signup Status
 *AuthV1Api* | [**auth_v1_login_with_password**](azentspublicclient/docs/AuthV1Api.md#auth_v1_login_with_password) | **POST** /auth/v1/login/password | Login With Password
@@ -245,7 +241,6 @@ Class | Method | HTTP request | Description
  - [AgentProjectPresetListResponse](azentspublicclient/docs/AgentProjectPresetListResponse.md)
  - [AgentProjectPresetResponse](azentspublicclient/docs/AgentProjectPresetResponse.md)
  - [AgentResponse](azentspublicclient/docs/AgentResponse.md)
- - [AgentRole](azentspublicclient/docs/AgentRole.md)
  - [AgentRunPhase](azentspublicclient/docs/AgentRunPhase.md)
  - [AgentRunStatus](azentspublicclient/docs/AgentRunStatus.md)
  - [AgentRuntimeActionsResponse](azentspublicclient/docs/AgentRuntimeActionsResponse.md)
@@ -265,10 +260,6 @@ Class | Method | HTTP request | Description
  - [AgentSessionStatus](azentspublicclient/docs/AgentSessionStatus.md)
  - [AgentSessionTitleSource](azentspublicclient/docs/AgentSessionTitleSource.md)
  - [AgentSessionTitleUpdateRequest](azentspublicclient/docs/AgentSessionTitleUpdateRequest.md)
- - [AgentSubagentCreateRequest](azentspublicclient/docs/AgentSubagentCreateRequest.md)
- - [AgentSubagentListResponse](azentspublicclient/docs/AgentSubagentListResponse.md)
- - [AgentSubagentResponse](azentspublicclient/docs/AgentSubagentResponse.md)
- - [AgentSubagentUpdateRequest](azentspublicclient/docs/AgentSubagentUpdateRequest.md)
  - [AgentToolkitAttachRequest](azentspublicclient/docs/AgentToolkitAttachRequest.md)
  - [AgentToolkitListResponse](azentspublicclient/docs/AgentToolkitListResponse.md)
  - [AgentToolkitResponse](azentspublicclient/docs/AgentToolkitResponse.md)
@@ -455,7 +446,6 @@ Class | Method | HTTP request | Description
  - [SetPasswordRequest](azentspublicclient/docs/SetPasswordRequest.md)
  - [SignupStatusResponse](azentspublicclient/docs/SignupStatusResponse.md)
  - [SkillAction](azentspublicclient/docs/SkillAction.md)
- - [SubagentToolkitInheritMode](azentspublicclient/docs/SubagentToolkitInheritMode.md)
  - [TestConnectionRequest](azentspublicclient/docs/TestConnectionRequest.md)
  - [TestConnectionResponse](azentspublicclient/docs/TestConnectionResponse.md)
  - [TodoItemResponse](azentspublicclient/docs/TodoItemResponse.md)

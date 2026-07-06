@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import (
     ResolveContext,
-    SubagentToolkitContext,
     Toolkit,
     ToolkitProvider,
     ToolkitState,
@@ -170,11 +169,6 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
     def set_session_id(self, session_id: str) -> None:
         """Inject session_id."""
         self._session_id = session_id
-
-    def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
-        """Adjust Subagent execution to update the subagent session todo."""
-        self.set_agent_id(context.subagent_id)
-        self.set_session_id(context.subagent_session_id)
 
     def hooks(self) -> RuntimeHooks:
         """Return Todo lifecycle hooks."""

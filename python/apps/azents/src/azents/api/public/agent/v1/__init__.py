@@ -11,8 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.repos.agent.data import NotFound
-from azents.repos.agent_subagent.data import DuplicateAgentSubagent
-from azents.repos.agent_subagent.data import NotFound as AgentSubagentNotFound
 from azents.repos.memory.data import MemoryScope
 from azents.services.agent import AgentService
 from azents.services.agent.data import (
@@ -31,14 +29,6 @@ from azents.services.agent.data import (
     PrivateAgentAccessDenied,
     WorkspaceUserNotFound,
 )
-from azents.services.agent_subagent import AgentSubagentService
-from azents.services.agent_subagent.data import (
-    AgentNotFound,
-    AgentSubagentCreateInput,
-    CrossWorkspace,
-    InvalidAgentRole,
-    SubagentNotFound,
-)
 from azents.services.memory import MemoryService
 from azents.services.memory.data import (
     DuplicateMemory,
@@ -55,10 +45,6 @@ from .data import (
     AgentCreateRequest,
     AgentListResponse,
     AgentResponse,
-    AgentSubagentCreateRequest,
-    AgentSubagentListResponse,
-    AgentSubagentResponse,
-    AgentSubagentUpdateRequest,
     AgentUpdateRequest,
     AvatarFinalizeRequest,
     AvatarUploadRequest,
@@ -100,7 +86,6 @@ async def create_agent(
         system_prompt=request_body.system_prompt,
         enabled=request_body.enabled,
         type=request_body.type,
-        role=request_body.role,
         runtime_provider_id=request_body.runtime_provider_id,
         shell_enabled=request_body.shell_enabled,
         memory_enabled=request_body.memory_enabled,
@@ -232,8 +217,6 @@ def _build_agent_update_input(
         result["enabled"] = request_body["enabled"]
     if "type" in request_body:
         result["type"] = request_body["type"]
-    if "role" in request_body:
-        result["role"] = request_body["role"]
 
     if "runtime_provider_id" in request_body:
         result["runtime_provider_id"] = request_body["runtime_provider_id"]
@@ -881,120 +864,6 @@ async def remove_agent_admin(
                     assert_never(error)
         case _:
             assert_never(result)
-
-
-# --- Agent Subagent ---
-
-
-@router.get("/workspaces/{handle}/agents/{agent_id}/subagents")
-async def list_agent_subagents(
-    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    service: Annotated[AgentSubagentService, Depends()],
-    *,
-    agent_id: str,
-) -> AgentSubagentListResponse:
-    """List an Agent's subagent links."""
-    result = await service.list_by_agent(agent_id)
-    return AgentSubagentListResponse(
-        items=[AgentSubagentResponse.convert_from(item) for item in result.items]
-    )
-
-
-@router.post(
-    "/workspaces/{handle}/agents/{agent_id}/subagents",
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_agent_subagent(
-    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    service: Annotated[AgentSubagentService, Depends()],
-    *,
-    agent_id: str,
-    request_body: AgentSubagentCreateRequest,
-) -> AgentSubagentResponse:
-    """Add a subagent link to an Agent."""
-    create_input = AgentSubagentCreateInput(
-        agent_id=agent_id,
-        subagent_id=request_body.subagent_id,
-        description=request_body.description,
-        enabled=request_body.enabled,
-    )
-    result = await service.create(create_input)
-    match result:
-        case Success(value):
-            return AgentSubagentResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case AgentNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case SubagentNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Subagent not found.",
-                    )
-                case InvalidAgentRole():
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Invalid agent role for this operation.",
-                    )
-                case CrossWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Agent and subagent must belong to the same workspace.",
-                    )
-                case DuplicateAgentSubagent():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="This subagent connection already exists.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
-
-
-@router.patch("/workspaces/{handle}/agents/{agent_id}/subagents/{agent_subagent_id}")
-async def update_agent_subagent(
-    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    service: Annotated[AgentSubagentService, Depends()],
-    *,
-    agent_id: str,
-    agent_subagent_id: str,
-    request_body: AgentSubagentUpdateRequest,
-) -> AgentSubagentResponse:
-    """Update a subagent link."""
-    result = await service.update(agent_subagent_id, request_body)
-    match result:
-        case Success(value):
-            return AgentSubagentResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case AgentSubagentNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent subagent connection not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
-
-
-@router.delete(
-    "/workspaces/{handle}/agents/{agent_id}/subagents/{agent_subagent_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def delete_agent_subagent(
-    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    service: Annotated[AgentSubagentService, Depends()],
-    *,
-    agent_id: str,
-    agent_subagent_id: str,
-) -> None:
-    """Delete a subagent link."""
-    await service.delete(agent_subagent_id)
 
 
 def mount(mounter: RouteMounter) -> None:

@@ -13,7 +13,6 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    AgentRole,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentType,
@@ -23,7 +22,6 @@ from azents.core.enums import (
 )
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.agent_subagent.data import SubagentToolkitInheritMode
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.testing.model_selection import make_test_model_selection
@@ -288,12 +286,10 @@ def _make_agent() -> Agent:
         system_prompt=None,
         enabled=True,
         type=AgentType.PUBLIC,
-        role=AgentRole.AGENT,
         runtime_provider_id=None,
         shell_enabled=True,
         memory_enabled=True,
         max_turns=None,
-        toolkit_inherit_mode=SubagentToolkitInheritMode.ALL,
         avatar=None,
         created_at=_NOW,
         updated_at=_NOW,

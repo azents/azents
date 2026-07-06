@@ -14,12 +14,10 @@ Name | Type | Description | Notes
 **system_prompt** | **str** |  | [optional] 
 **enabled** | **bool** | Enabled state | [optional] [default to True]
 **type** | [**AgentType**](AgentType.md) | Visibility scope | [optional] 
-**role** | [**AgentRole**](AgentRole.md) | Role (agent/subagent) | [optional] 
 **runtime_provider_id** | **str** |  | [optional] 
 **shell_enabled** | **bool** | Shell enabled state | [optional] [default to True]
 **memory_enabled** | **bool** | Memory enabled state | [optional] [default to True]
 **max_turns** | **int** |  | [optional] 
-**toolkit_inherit_mode** | [**SubagentToolkitInheritMode**](SubagentToolkitInheritMode.md) | Toolkit inherit mode; default all, meaningful for role&#x3D;subagent | [optional] 
 
 ## Example
 

@@ -932,47 +932,7 @@ function mapEvents(
           },
         ];
       }
-      case "subagent_start": {
-        return [
-          ...messages,
-          {
-            id: event.id,
-            role: "subagent_start",
-            content: null,
-            createdAt: event.created_at,
-            status: "complete",
-            metadata: {
-              ...eventMetadata(event),
-              subagent_run_id: stringField(payload, "subagent_run_id") ?? "",
-              subagent_id: stringField(payload, "subagent_id") ?? "",
-              subagent_name: stringField(payload, "subagent_name") ?? "",
-              subagent_session_id:
-                stringField(payload, "subagent_session_id") ?? "",
-            },
-          },
-        ];
-      }
-      case "subagent_end": {
-        return [
-          ...messages,
-          {
-            id: event.id,
-            role: "subagent_end",
-            content:
-              stringField(payload, "result") ?? stringField(payload, "error"),
-            createdAt: event.created_at,
-            status: "complete",
-            metadata: {
-              ...eventMetadata(event),
-              subagent_run_id: stringField(payload, "subagent_run_id") ?? "",
-              subagent_id: stringField(payload, "subagent_id") ?? "",
-              subagent_session_id:
-                stringField(payload, "subagent_session_id") ?? "",
-              status: stringField(payload, "status") ?? "",
-            },
-          },
-        ];
-      }
+
       case "system_error": {
         const failedRunFailure = failedRunFailureFromValue(payload.failure);
         const failureMetadata = failedRunMetadataRecord(failedRunFailure);

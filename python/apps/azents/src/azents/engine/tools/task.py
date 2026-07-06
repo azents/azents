@@ -34,7 +34,7 @@ class TaskStatusInput(BaseModel):
     task_id: str = Field(
         description=(
             "The background task ID returned by a previous tool call "
-            "(e.g., from a subagent call with run_in_background=true)."
+            "(e.g., from a delegated background operation)."
         )
     )
 

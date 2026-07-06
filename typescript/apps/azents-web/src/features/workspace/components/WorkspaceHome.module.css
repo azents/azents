@@ -45,8 +45,7 @@
 }
 
 .emptyCard,
-.statCard,
-.subagentRow {
+.statCard {
   background: var(--workspace-surface-raised);
   border: rem(1px) solid var(--workspace-border);
 }
@@ -114,8 +113,7 @@
   border-color: var(--workspace-border);
 }
 
-.teamCard:hover,
-.subagentRow:hover {
+.teamCard:hover:hover {
   background: var(--workspace-surface-hover);
   border-color: var(--workspace-border-strong);
 }
@@ -123,9 +121,4 @@
 .teamCardFooter {
   border-top: rem(1px) solid var(--workspace-border);
   color: var(--workspace-muted);
-}
-
-.subagentRow {
-  display: block;
-  border-radius: var(--mantine-radius-md);
 }

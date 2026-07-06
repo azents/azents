@@ -44,14 +44,3 @@ class Agent:
     integration: "Integration"
     name: str
     model_slug: str
-
-
-@dataclass(frozen=True)
-class AgentSubagent:
-    """Junction between a parent agent and a subagent."""
-
-    id: str
-    agent_id: str
-    subagent_id: str
-    description: str
-    enabled: bool

@@ -33,13 +33,6 @@ class AgentType(enum.StrEnum):
     PRIVATE = "private"
 
 
-class AgentRole(enum.StrEnum):
-    """Agent role, distinguishing agent/subagent."""
-
-    AGENT = "agent"
-    SUBAGENT = "subagent"
-
-
 class LLMProvider(enum.StrEnum):
     """LLM hosting provider."""
 
@@ -216,8 +209,6 @@ class EventKind(enum.StrEnum):
     INTERRUPTED = "interrupted"
     COMPACTION_MARKER = "compaction_marker"
     COMPACTION_SUMMARY = "compaction_summary"
-    SUBAGENT_START = "subagent_start"
-    SUBAGENT_END = "subagent_end"
     SYSTEM_REMINDER = "system_reminder"
     SYSTEM_ERROR = "system_error"
     UNKNOWN_ADAPTER_OUTPUT = "unknown_adapter_output"
@@ -416,8 +407,6 @@ class MessageRole(enum.StrEnum):
     RUN_COMPLETE = "run_complete"
     COMPACTION = "compaction"
     COMPACTION_STARTED = "compaction_started"
-    SUBAGENT_START = "subagent_start"
-    SUBAGENT_END = "subagent_end"
 
 
 class EventType(enum.StrEnum):
@@ -446,8 +435,6 @@ class EventType(enum.StrEnum):
     TURN_COMPLETE = "turn_complete"
     RUN_COMPLETE = "run_complete"
     COMPACTION_STARTED = "compaction_started"
-    SUBAGENT_START = "subagent_start"
-    SUBAGENT_END = "subagent_end"
     ERROR = "error"
 
 

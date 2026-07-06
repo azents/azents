@@ -17,7 +17,6 @@ import {
   Group,
   Loader,
   Modal,
-  SegmentedControl,
   Stack,
   Switch,
   Text,
@@ -27,41 +26,14 @@ import { useDisclosure } from "@mantine/hooks";
 import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { formatModelSelectionSummary } from "../model-selection";
 import type { AgentListContainerOutput } from "../containers/useAgentListContainer";
 import type { AgentResponse } from "@azents/public-client";
 
 export function AgentList(props: AgentListContainerOutput): React.ReactElement {
-  const {
-    handle,
-    listState,
-    canManage,
-    roleFilter,
-    counts,
-    onRoleFilterChange,
-    onDelete,
-    onToggleEnabled,
-  } = props;
+  const { handle, listState, canManage, onDelete, onToggleEnabled } = props;
   const t = useTranslations("workspace.agents");
-
-  const filterOptions = useMemo(
-    () => [
-      {
-        value: "agent" as const,
-        label: `${t("roleFilter.agent")} (${counts.agent})`,
-      },
-      {
-        value: "subagent" as const,
-        label: `${t("roleFilter.subagent")} (${counts.subagent})`,
-      },
-      {
-        value: "all" as const,
-        label: `${t("roleFilter.all")} (${counts.all})`,
-      },
-    ],
-    [t, counts],
-  );
 
   const [deleteOpened, { open: openDelete, close: closeDelete }] =
     useDisclosure(false);
@@ -103,23 +75,12 @@ export function AgentList(props: AgentListContainerOutput): React.ReactElement {
           {t("description")}
         </Text>
 
-        <SegmentedControl
-          value={roleFilter}
-          onChange={(value) => onRoleFilterChange(value)}
-          data={filterOptions}
-          fullWidth
-        />
-
         {listState.type === "LOADING" && <Loader />}
         {listState.type === "ERROR" && (
           <Alert color="red">{t("loadError")}</Alert>
         )}
         {listState.type === "READY" && listState.agents.length === 0 && (
-          <Text c="dimmed">
-            {counts.all === 0
-              ? t("empty")
-              : t(`emptyForFilter.${roleFilter}` as const)}
-          </Text>
+          <Text c="dimmed">{t("empty")}</Text>
         )}
         {listState.type === "READY" &&
           listState.agents.map((agent) => (
@@ -188,11 +149,6 @@ function AgentCard({
             <Text fw={500} truncate>
               {agent.name}
             </Text>
-            {agent.role === "subagent" && (
-              <Badge color="violet" variant="light" size="sm">
-                {t("roleFilter.subagent")}
-              </Badge>
-            )}
             {!agent.enabled && (
               <Badge color="gray" variant="outline" size="sm">
                 {t("disabled")}

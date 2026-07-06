@@ -20,10 +20,8 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput
-from azentspublicclient.models.agent_role import AgentRole
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
-from azentspublicclient.models.subagent_toolkit_inherit_mode import SubagentToolkitInheritMode
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -39,14 +37,12 @@ class AgentCreateRequest(BaseModel):
     system_prompt: Optional[StrictStr] = None
     enabled: Optional[StrictBool] = Field(default=True, description="Enabled state")
     type: Optional[AgentType] = Field(default=None, description="Visibility scope")
-    role: Optional[AgentRole] = Field(default=None, description="Role (agent/subagent)")
     runtime_provider_id: Optional[StrictStr] = None
     shell_enabled: Optional[StrictBool] = Field(default=True, description="Shell enabled state")
     memory_enabled: Optional[StrictBool] = Field(default=True, description="Memory enabled state")
     max_turns: Optional[StrictInt] = None
-    toolkit_inherit_mode: Optional[SubagentToolkitInheritMode] = Field(default=None, description="Toolkit inherit mode; default all, meaningful for role=subagent")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "model_selection", "lightweight_model_selection", "description", "model_parameters", "system_prompt", "enabled", "type", "role", "runtime_provider_id", "shell_enabled", "memory_enabled", "max_turns", "toolkit_inherit_mode"]
+    __properties: ClassVar[List[str]] = ["name", "model_selection", "lightweight_model_selection", "description", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "max_turns"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -158,12 +154,10 @@ class AgentCreateRequest(BaseModel):
             "system_prompt": obj.get("system_prompt"),
             "enabled": obj.get("enabled") if obj.get("enabled") is not None else True,
             "type": obj.get("type"),
-            "role": obj.get("role"),
             "runtime_provider_id": obj.get("runtime_provider_id"),
             "shell_enabled": obj.get("shell_enabled") if obj.get("shell_enabled") is not None else True,
             "memory_enabled": obj.get("memory_enabled") if obj.get("memory_enabled") is not None else True,
-            "max_turns": obj.get("max_turns"),
-            "toolkit_inherit_mode": obj.get("toolkit_inherit_mode")
+            "max_turns": obj.get("max_turns")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

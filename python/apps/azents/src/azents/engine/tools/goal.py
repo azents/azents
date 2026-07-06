@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import EventKind
 from azents.core.tools import (
     ResolveContext,
-    SubagentToolkitContext,
     Toolkit,
     ToolkitProvider,
     ToolkitState,
@@ -198,12 +197,6 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
     def set_session_id(self, session_id: str) -> None:
         """Inject session_id."""
         self._session_id = session_id
-
-    def configure_for_subagent(self, context: SubagentToolkitContext) -> None:
-        """Do not inherit parent session goal in Subagent execution."""
-        del context
-        self.set_agent_id("")
-        self.set_session_id("")
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return current goal prompt and goal tools."""

@@ -873,14 +873,12 @@ export const MessageBubble = memo(function MessageBubble({
 }: MessageBubbleProps): React.ReactElement | null {
   const t = useTranslations("chat");
 
-  // tool, system, completion marker, subagent role message hide
+  // tool, system, and completion marker messages hide
   if (
     message.role === "tool" ||
     message.role === "system" ||
     message.role === "turn_complete" ||
-    message.role === "run_complete" ||
-    message.role === "subagent_start" ||
-    message.role === "subagent_end"
+    message.role === "run_complete"
   ) {
     return null;
   }

@@ -21,10 +21,8 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_model_selection import AgentModelSelection
-from azentspublicclient.models.agent_role import AgentRole
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
-from azentspublicclient.models.subagent_toolkit_inherit_mode import SubagentToolkitInheritMode
 from azentspublicclient.models.uploaded_image import UploadedImage
 from typing import Optional, Set
 from typing_extensions import Self
@@ -44,17 +42,15 @@ class AgentResponse(BaseModel):
     system_prompt: Optional[StrictStr]
     enabled: StrictBool
     type: AgentType
-    role: AgentRole
     runtime_provider_id: Optional[StrictStr]
     shell_enabled: StrictBool
     memory_enabled: StrictBool
     max_turns: Optional[StrictInt]
-    toolkit_inherit_mode: SubagentToolkitInheritMode
     avatar: Optional[UploadedImage] = None
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "role", "runtime_provider_id", "shell_enabled", "memory_enabled", "max_turns", "toolkit_inherit_mode", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "max_turns", "avatar", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -187,12 +183,10 @@ class AgentResponse(BaseModel):
             "system_prompt": obj.get("system_prompt"),
             "enabled": obj.get("enabled"),
             "type": obj.get("type"),
-            "role": obj.get("role"),
             "runtime_provider_id": obj.get("runtime_provider_id"),
             "shell_enabled": obj.get("shell_enabled"),
             "memory_enabled": obj.get("memory_enabled"),
             "max_turns": obj.get("max_turns"),
-            "toolkit_inherit_mode": obj.get("toolkit_inherit_mode"),
             "avatar": UploadedImage.from_dict(obj["avatar"]) if obj.get("avatar") is not None else None,
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")

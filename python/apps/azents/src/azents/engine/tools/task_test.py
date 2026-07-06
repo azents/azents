@@ -49,7 +49,7 @@ async def _register_dummy(
         parent_session_id=parent_session_id,
         agent_id="agent-1",
         workspace_id="ws-1",
-        tool_name="subagent",
+        tool_name="background_tool",
     )
     return future
 
@@ -85,7 +85,7 @@ async def test_task_status_returns_running_for_live_task() -> None:
     payload = json.loads(result)
     assert payload["task_id"] == "t1"
     assert payload["status"] == "running"
-    assert payload["tool_name"] == "subagent"
+    assert payload["tool_name"] == "background_tool"
     assert payload["elapsed_seconds"] >= 0
 
     future.cancel()

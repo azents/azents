@@ -367,30 +367,6 @@ class CompactionSummaryPayload(BaseModel):
     reason: str | None = Field(default=None)
 
 
-class SubagentStartPayload(BaseModel):
-    """Subagent start payload."""
-
-    model_config = ConfigDict(frozen=True)
-
-    subagent_run_id: str = Field(min_length=1)
-    subagent_id: str = Field(min_length=1)
-    subagent_name: str = Field(min_length=1)
-    subagent_session_id: str = Field(min_length=1)
-
-
-class SubagentEndPayload(BaseModel):
-    """Subagent end payload."""
-
-    model_config = ConfigDict(frozen=True)
-
-    subagent_run_id: str = Field(min_length=1)
-    subagent_id: str = Field(min_length=1)
-    subagent_session_id: str = Field(min_length=1)
-    status: Literal["completed", "failed", "interrupted"]
-    result: str | None = Field(default=None)
-    error: str | None = Field(default=None)
-
-
 class GoalBriefingPayload(BaseModel):
     """Goal completion briefing payload."""
 
@@ -473,8 +449,6 @@ EventPayload = (
     | InterruptedPayload
     | CompactionMarkerPayload
     | CompactionSummaryPayload
-    | SubagentStartPayload
-    | SubagentEndPayload
     | GoalBriefingPayload
     | ActionMessagePayload
     | ActionExecutionResultPayload
@@ -504,8 +478,6 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.INTERRUPTED: InterruptedPayload,
     EventKind.COMPACTION_MARKER: CompactionMarkerPayload,
     EventKind.COMPACTION_SUMMARY: CompactionSummaryPayload,
-    EventKind.SUBAGENT_START: SubagentStartPayload,
-    EventKind.SUBAGENT_END: SubagentEndPayload,
     EventKind.SYSTEM_REMINDER: SystemReminderPayload,
     EventKind.SYSTEM_ERROR: SystemErrorPayload,
     EventKind.UNKNOWN_ADAPTER_OUTPUT: UnknownAdapterOutputPayload,

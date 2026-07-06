@@ -3,7 +3,7 @@
 /**
  * Workspace Home ("Our team agents") container.
  *
- * Builds primary/subagent lists and stats from `agent.list` response.
+ * Builds agent lists and stats from `agent.list` response.
  * Persist tab state with URL `?view=`.
  */
 
@@ -21,11 +21,7 @@ import type { AgentResponse } from "@azents/public-client";
 
 const VIEW_PARAM = "view";
 const DEFAULT_VIEW: AgentTeamFilter = "agents";
-const VIEW_VALUES: ReadonlySet<AgentTeamFilter> = new Set([
-  "agents",
-  "subagents",
-  "all",
-]);
+const VIEW_VALUES: ReadonlySet<AgentTeamFilter> = new Set(["agents", "all"]);
 function isAgentTeamFilter(value: unknown): value is AgentTeamFilter {
   return typeof value === "string" && VIEW_VALUES.has(value as AgentTeamFilter);
 }
@@ -81,19 +77,14 @@ export function useWorkspaceHomeContainer(
     }
     const allAgents = agentListQuery.data?.items ?? [];
     const enriched = allAgents.map((agent) => enrich(agent));
-    const primaryAgents = enriched.filter((a) => a.role !== "subagent");
-    const subagents = enriched.filter((a) => a.role === "subagent");
-
     const stats: WorkspaceHomeStats = {
-      totalAgents: primaryAgents.length,
-      enabledAgents: primaryAgents.filter((a) => a.enabled).length,
-      subagentsCount: subagents.length,
+      totalAgents: enriched.length,
+      enabledAgents: enriched.filter((a) => a.enabled).length,
     };
 
     return {
       type: "READY",
-      primaryAgents,
-      subagents,
+      agents: enriched,
       stats,
     };
   }, [

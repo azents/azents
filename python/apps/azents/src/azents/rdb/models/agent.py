@@ -8,7 +8,7 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from azents.core.enums import AgentRole, AgentType
+from azents.core.enums import AgentType
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -23,19 +23,6 @@ agent_type_enum = ENUM(
     name="agent_type",
     create_type=False,
     values_callable=_agent_type_values,
-)
-
-
-def _agent_role_values(enum_cls: type[AgentRole]) -> list[str]:
-    """Return AgentRole enum values stored in the DB."""
-    return [v.value for v in enum_cls]
-
-
-agent_role_enum = ENUM(
-    AgentRole,
-    name="agent_role",
-    create_type=False,
-    values_callable=_agent_role_values,
 )
 
 
@@ -80,26 +67,12 @@ class RDBAgent(RDBModel):
     type: Mapped[AgentType] = mapped_column(
         agent_type_enum, nullable=False, default=AgentType.PUBLIC
     )
-    role: Mapped[AgentRole] = mapped_column(
-        agent_role_enum, nullable=False, default=AgentRole.AGENT
-    )
-
     runtime_provider_id: Mapped[str | None] = mapped_column(
         sa.String(120),
         nullable=True,
         default=None,
     )
-    # Toolkit inherit mode — agent row level ('none' | 'all'), DP1 A, DP2 B.
-    # 'all' makes the runtime use the parent agent's toolkits (DP6 — exclusive).
-    # 'none' makes the runtime use the subagent's own agent_toolkits.
-    # Meaningful only when role='subagent'. Default is 'all' for new subagents.
-    toolkit_inherit_mode: Mapped[str] = mapped_column(
-        sa.String(10),
-        nullable=False,
-        default="all",
-    )
-
-    # Enable shell access for subagents; meaningful only when role=SUBAGENT.
+    # Enable runtime shell access.
     shell_enabled: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, default=True
     )
@@ -136,10 +109,6 @@ class RDBAgent(RDBModel):
         "model_selection IS NOT NULL AND lightweight_model_selection IS NOT NULL",
         name="ck_agents_model_not_null",
     )
-    CK_INHERIT_MODE = sa.CheckConstraint(
-        "toolkit_inherit_mode IN ('none', 'all')",
-        name="ck_agents_inherit_mode",
-    )
     CK_MAX_TURNS_POSITIVE = sa.CheckConstraint(
         "max_turns IS NULL OR max_turns > 0",
         name="ck_agents_max_turns_positive",
@@ -149,6 +118,5 @@ class RDBAgent(RDBModel):
         IX_WORKSPACE_ID,
         IX_RUNTIME_PROVIDER_ID,
         CK_MODEL_NOT_NULL,
-        CK_INHERIT_MODE,
         CK_MAX_TURNS_POSITIVE,
     )

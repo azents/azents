@@ -11,17 +11,12 @@ from azents.core.agent import (
     AgentModelSelectionInput,
     ModelParameters,
 )
-from azents.core.enums import AgentRole, AgentType
-from azents.repos.agent_subagent.data import SubagentToolkitInheritMode
+from azents.core.enums import AgentType
 from azents.repos.memory.data import MemoryScope
 from azents.services.agent.data import (
     AgentAdminOutput,
     AgentOutput,
     AvatarUploadTicketOutput,
-)
-from azents.services.agent_subagent.data import (
-    AgentSubagentOutput,
-    AgentSubagentUpdateInput,
 )
 from azents.services.memory.data import MemoryOutput
 from azents.services.uploads.schema import UploadedImage
@@ -41,12 +36,10 @@ class AgentResponse(BaseModel):
     system_prompt: str | None
     enabled: bool
     type: AgentType
-    role: AgentRole
     runtime_provider_id: str | None
     shell_enabled: bool
     memory_enabled: bool
     max_turns: int | None
-    toolkit_inherit_mode: SubagentToolkitInheritMode
     avatar: UploadedImage | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -68,12 +61,10 @@ class AgentResponse(BaseModel):
             system_prompt=data.system_prompt,
             enabled=data.enabled,
             type=data.type,
-            role=data.role,
             runtime_provider_id=data.runtime_provider_id,
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
             max_turns=data.max_turns,
-            toolkit_inherit_mode=data.toolkit_inherit_mode,
             avatar=data.avatar,
             created_at=data.created_at,
             updated_at=data.updated_at,
@@ -105,9 +96,6 @@ class AgentCreateRequest(BaseModel):
     system_prompt: str | None = Field(default=None, description="System prompt")
     enabled: bool = Field(default=True, description="Enabled state")
     type: AgentType = Field(default=AgentType.PUBLIC, description="Visibility scope")
-    role: AgentRole = Field(
-        default=AgentRole.AGENT, description="Role (agent/subagent)"
-    )
     runtime_provider_id: str | None = Field(
         default=None, description="Runtime Provider logical ID"
     )
@@ -115,10 +103,6 @@ class AgentCreateRequest(BaseModel):
     memory_enabled: bool = Field(default=True, description="Memory enabled state")
     max_turns: int | None = Field(
         default=None, gt=0, description="Maximum agent turn count"
-    )
-    toolkit_inherit_mode: SubagentToolkitInheritMode = Field(
-        default=SubagentToolkitInheritMode.ALL,
-        description="Toolkit inherit mode; default all, meaningful for role=subagent",
     )
 
 
@@ -141,7 +125,6 @@ class AgentUpdateRequest(TypedDict, total=False):
     system_prompt: Annotated[str | None, Field(description="System prompt")]
     enabled: Annotated[bool, Field(description="Enabled state")]
     type: Annotated[AgentType, Field(description="Visibility scope")]
-    role: Annotated[AgentRole, Field(description="Role (agent/subagent)")]
     runtime_provider_id: Annotated[
         str | None, Field(description="Runtime Provider logical ID")
     ]
@@ -149,10 +132,6 @@ class AgentUpdateRequest(TypedDict, total=False):
     memory_enabled: Annotated[bool, Field(description="Memory enabled state")]
     max_turns: Annotated[
         int | None, Field(gt=0, description="Maximum agent turn count")
-    ]
-    toolkit_inherit_mode: Annotated[
-        SubagentToolkitInheritMode,
-        Field(description="Toolkit inherit mode"),
     ]
 
 
@@ -185,51 +164,6 @@ class AgentAdminAddRequest(BaseModel):
     """AgentAdmin add request."""
 
     workspace_user_id: str = Field(description="Workspace member ID to add")
-
-
-class AgentSubagentResponse(BaseModel):
-    """AgentSubagent link response."""
-
-    id: str
-    agent_id: str
-    subagent_id: str
-    description: str
-    enabled: bool
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-    @classmethod
-    def convert_from(cls, data: AgentSubagentOutput) -> Self:
-        """Convert service model to a response object."""
-        return cls(
-            id=data.id,
-            agent_id=data.agent_id,
-            subagent_id=data.subagent_id,
-            description=data.description,
-            enabled=data.enabled,
-            created_at=data.created_at,
-            updated_at=data.updated_at,
-        )
-
-
-class AgentSubagentListResponse(BaseModel):
-    """AgentSubagent list response."""
-
-    items: list[AgentSubagentResponse]
-
-
-class AgentSubagentCreateRequest(BaseModel):
-    """AgentSubagent creation request."""
-
-    subagent_id: str = Field(description="Subagent ID to link")
-    description: str = Field(description="Description exposed to the LLM")
-    enabled: bool = Field(default=True, description="Enabled state")
-
-
-class AgentSubagentUpdateRequest(AgentSubagentUpdateInput):
-    """AgentSubagent update request, for partial updates."""
-
-    pass
 
 
 class MemoryResponse(BaseModel):

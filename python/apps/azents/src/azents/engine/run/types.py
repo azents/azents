@@ -198,7 +198,7 @@ class ShutdownInterruptError(Exception):
 
     Caught before except Exception in engine.run() tool execution loop and emits
     RunStopped. Because output remains None, it is re-executed on resume. This is
-    a general pattern, not subagent-specific: if any tool raises this exception
+    a general pattern, generic: if any tool raises this exception
     on shutdown, output is not stored and it is re-executed on resume.
     """
 

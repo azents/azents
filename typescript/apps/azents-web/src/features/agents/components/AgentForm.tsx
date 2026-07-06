@@ -38,7 +38,6 @@ import {
 } from "../model-selection";
 import { agentFormSchema } from "../schemas";
 import { AgentAdminSection } from "./AgentAdminSection";
-import { AgentSubagentSection } from "./AgentSubagentSection";
 import { AgentToolkitSection } from "./AgentToolkitSection";
 import { ModelCatalogPicker } from "./ModelCatalogPicker";
 import type { MemberItem } from "../containers/useAgentFormContainer";
@@ -130,7 +129,6 @@ export function AgentForm({
       lightweight_model_selection_value: null,
       system_prompt: "",
       type: "public",
-      role: "agent",
       enabled: true,
       reasoning_effort: null,
       context_window_tokens: null,
@@ -138,7 +136,6 @@ export function AgentForm({
       shell_enabled: true,
       memory_enabled: true,
       max_turns: null,
-      toolkit_inherit_mode: "all" as const,
       builtin_tools: [],
     },
     validate: (values) => {
@@ -180,7 +177,6 @@ export function AgentForm({
         ),
         system_prompt: agent.system_prompt ?? "",
         type: agent.type,
-        role: agent.role === "subagent" ? "subagent" : "agent",
         enabled: agent.enabled,
         reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
         context_window_tokens:
@@ -189,8 +185,6 @@ export function AgentForm({
         shell_enabled: agent.shell_enabled,
         memory_enabled: agent.memory_enabled,
         max_turns: agent.max_turns ?? null,
-        toolkit_inherit_mode:
-          agent.toolkit_inherit_mode === "all" ? "all" : "none",
         builtin_tools:
           agent.model_parameters?.builtin_tools?.map((bt) => bt.name) ?? [],
       });
@@ -385,20 +379,6 @@ export function AgentForm({
               placeholder={t("descriptionPlaceholder")}
               key={form.key("description")}
               {...form.getInputProps("description")}
-            />
-          )}
-
-          {showCapabilities && form.values.role === "subagent" && (
-            <Checkbox
-              label={t("useParentToolkitsLabel")}
-              description={t("useParentToolkitsDescription")}
-              checked={form.values.toolkit_inherit_mode === "all"}
-              onChange={(e) => {
-                form.setFieldValue(
-                  "toolkit_inherit_mode",
-                  e.currentTarget.checked ? "all" : "none",
-                );
-              }}
             />
           )}
 
@@ -613,27 +593,6 @@ export function AgentForm({
           )}
 
           {showCapabilities && (
-            <Radio.Group
-              label={t("roleLabel")}
-              key={form.key("role")}
-              {...form.getInputProps("role")}
-            >
-              <Stack gap="xs" mt="xs">
-                <Radio
-                  value="agent"
-                  label={t("roleAgent")}
-                  description={t("roleAgentDescription")}
-                />
-                <Radio
-                  value="subagent"
-                  label={t("roleSubagent")}
-                  description={t("roleSubagentDescription")}
-                />
-              </Stack>
-            </Radio.Group>
-          )}
-
-          {showCapabilities && (
             <Switch
               label={t("shellEnabledLabel")}
               description={t("shellEnabledDescription")}
@@ -662,15 +621,6 @@ export function AgentForm({
               {...form.getInputProps("enabled", { type: "checkbox" })}
             />
           )}
-
-          {showCapabilities &&
-            formState.type === "EDIT" &&
-            form.values.role === "agent" && (
-              <AgentSubagentSection
-                handle={handle}
-                agentId={formState.agent.id}
-              />
-            )}
 
           {showCapabilities && formState.type === "EDIT" && (
             <AgentToolkitSection handle={handle} agentId={formState.agent.id} />

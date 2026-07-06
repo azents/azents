@@ -199,22 +199,6 @@ export interface CompactionMarkerPayload {
   error?: string | null;
 }
 
-export interface SubagentStartPayload {
-  subagent_run_id: string;
-  subagent_id: string;
-  subagent_name: string;
-  subagent_session_id: string;
-}
-
-export interface SubagentEndPayload {
-  subagent_run_id: string;
-  subagent_id: string;
-  subagent_session_id: string;
-  status: "completed" | "failed" | "interrupted";
-  result?: string | null;
-  error?: string | null;
-}
-
 export interface GoalBriefingPayload {
   objective: string;
   created_at: string;
@@ -301,8 +285,6 @@ export type ChatEventPayload =
   | InterruptedPayload
   | CompactionMarkerPayload
   | CompactionSummaryPayload
-  | SubagentStartPayload
-  | SubagentEndPayload
   | GoalBriefingPayload
   | ActionMessagePayload
   | ActionExecutionResultPayload
@@ -337,8 +319,6 @@ export type ChatHistoryEvent =
   | EventBase<"interrupted", InterruptedPayload>
   | EventBase<"compaction_marker", CompactionMarkerPayload>
   | EventBase<"compaction_summary", CompactionSummaryPayload>
-  | EventBase<"subagent_start", SubagentStartPayload>
-  | EventBase<"subagent_end", SubagentEndPayload>
   | EventBase<"goal_continuation", UserMessagePayload>
   | EventBase<"goal_updated", UserMessagePayload>
   | EventBase<"goal_briefing", GoalBriefingPayload>
@@ -480,22 +460,6 @@ export interface ErrorItemPayload {
   content: string;
 }
 
-/** SubagentStart payload */
-export interface EngineSubagentStartPayload {
-  type: "subagent_start";
-  subagent_id: string;
-  subagent_name: string;
-  subagent_session_id: string;
-}
-
-/** SubagentEnd payload */
-export interface EngineSubagentEndPayload {
-  type: "subagent_end";
-  subagent_id: string;
-  subagent_session_id: string;
-  result: string;
-}
-
 /** Compaction summary item payload */
 export interface CompactionItemPayload {
   type: "compaction";
@@ -508,8 +472,6 @@ export type ChatEventItemPayload =
   | RunCompletePayload
   | UnknownItemPayload
   | ErrorItemPayload
-  | EngineSubagentStartPayload
-  | EngineSubagentEndPayload
   | CompactionItemPayload;
 
 /** Event envelope common wrapper.
@@ -530,8 +492,6 @@ export type TurnCompleteEvent = ChatEnvelope<TurnCompletePayload>;
 export type RunCompleteEvent = ChatEnvelope<RunCompletePayload>;
 export type UnknownItemEvent = ChatEnvelope<UnknownItemPayload>;
 export type ErrorEvent = ChatEnvelope<ErrorItemPayload>;
-export type SubagentStartEvent = ChatEnvelope<EngineSubagentStartPayload>;
-export type SubagentEndEvent = ChatEnvelope<EngineSubagentEndPayload>;
 export type CompactionItemEvent = ChatEnvelope<CompactionItemPayload>;
 
 /** Runtime status (for UI display) */
@@ -629,8 +589,6 @@ export type ChatEvent =
   | AuthorizationRequestEvent
   | CompactionStartedEvent
   | CompactionCompleteEvent
-  | SubagentStartEvent
-  | SubagentEndEvent
   | CompactionItemEvent
   | SessionCreatedEvent
   | TodoStateChangedEvent
@@ -740,9 +698,7 @@ export interface ChatMessage {
     | "goal_continuation"
     | "goal_updated"
     | "goal_briefing"
-    | "skill_loaded"
-    | "subagent_start"
-    | "subagent_end";
+    | "skill_loaded";
   content: string | null;
   toolCalls?: ActiveToolCall[];
   providerToolCalls?: ProviderToolCall[];
@@ -757,7 +713,7 @@ export interface ChatMessage {
   usage?: Record<string, unknown> | null;
   /** selected action for action-message user input */
   action?: ChatAction | null;
-  /** message metadata (subagent event etc.) */
+  /** message metadata. */
   metadata?: Record<string, string> | null;
   /** failed-run recovery metadata for terminal failed-run errors */
   failedRunFailure?: FailedRunFailureMetadata | null;

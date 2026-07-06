@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import ClassVar, Protocol
 
-from azents.core.enums import AgentRole, LLMModelDeveloper
+from azents.core.enums import LLMModelDeveloper
 
 
 class BuiltinToolConfigLike(Protocol):
@@ -57,7 +57,6 @@ class BuiltinToolProviderModel(Protocol):
 class BuiltinToolValidationContext:
     """Context required for validation."""
 
-    agent_role: AgentRole
     shell_enabled: bool
     has_toolkits: bool
     provider_model: BuiltinToolProviderModel

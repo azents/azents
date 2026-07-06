@@ -17,12 +17,10 @@ Name | Type | Description | Notes
 **system_prompt** | **str** |  | 
 **enabled** | **bool** |  | 
 **type** | [**AgentType**](AgentType.md) |  | 
-**role** | [**AgentRole**](AgentRole.md) |  | 
 **runtime_provider_id** | **str** |  | 
 **shell_enabled** | **bool** |  | 
 **memory_enabled** | **bool** |  | 
 **max_turns** | **int** |  | 
-**toolkit_inherit_mode** | [**SubagentToolkitInheritMode**](SubagentToolkitInheritMode.md) |  | 
 **avatar** | [**UploadedImage**](UploadedImage.md) |  | [optional] 
 **created_at** | **datetime** |  | 
 **updated_at** | **datetime** |  | 
