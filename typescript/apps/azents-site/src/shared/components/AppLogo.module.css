@@ -1,0 +1,24 @@
+.root {
+  color: inherit;
+  display: inline-flex;
+  line-height: 0;
+  text-decoration: none;
+  vertical-align: middle;
+}
+
+.logo {
+  display: block;
+  height: auto;
+}
+
+.lightAsset {
+  display: none;
+}
+
+:global([data-mantine-color-scheme="dark"]) .darkAsset {
+  display: none;
+}
+
+:global([data-mantine-color-scheme="dark"]) .lightAsset {
+  display: block;
+}

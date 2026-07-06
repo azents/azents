@@ -65,6 +65,7 @@ jobs:
             typescript:
               - '.github/workflows/**'
               - 'azents-admin-web.Dockerfile'
+              - 'azents-site.Dockerfile'
               - 'azents-web.Dockerfile'
               - 'python/apps/azents/specs/**'
               - 'typescript/**'
@@ -380,6 +381,10 @@ jobs:
           - name: azents-admin-web
             dockerfile: azents-admin-web.Dockerfile
             image: azents-admin-web:ci
+            extra_context: "--build-context next-cache=/tmp/next-cache"
+          - name: azents-site
+            dockerfile: azents-site.Dockerfile
+            image: azents-site:ci
             extra_context: "--build-context next-cache=/tmp/next-cache"
           - name: azents-runtime-runner
             dockerfile: python/apps/azents-runtime-runner/Dockerfile

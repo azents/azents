@@ -1,0 +1,237 @@
+{
+  "metadata": {
+    "title": "Azents | マネージドエージェントをセルフホスト",
+    "description": "自分のクラウドでマネージドエージェントを実行するためのオープンソースのコントロールプレーン。"
+  },
+  "nav": {
+    "architecture": "アーキテクチャ",
+    "roadmap": "ロードマップ",
+    "github": "GitHub",
+    "docs": "ドキュメント",
+    "changeLanguage": "言語を変更"
+  },
+  "hero": {
+    "eyebrow": "マネージドエージェントをセルフホスト",
+    "headline": "自分たちのクラウドで動く managed agents。",
+    "subheadline": "Azents は agent session と Runtime をチームのインフラで運用するための open-source control plane です。",
+    "supporting": "Repo、files、credential、internal system の近くで実行できます。",
+    "discussion": "未解決の Issue を見る",
+    "cta": {
+      "github": "GitHub で Star",
+      "docs": "ドキュメントを読む"
+    }
+  },
+  "architecture": {
+    "eyebrow": "アーキテクチャ",
+    "title": "所有するインフラのためのコントロールプレーン。",
+    "body": "エンジンはエージェントセッションを調整します。ランタイムは境界内でコード、ツール、ファイル操作を実行します。",
+    "diagram": {
+      "label": "ユーザーとチームが Azents Engine に接続し、Azents Engine がクラウドまたはオンプレミス環境内のランタイムを調整します。",
+      "path": "azents/コントロールプレーン",
+      "split": "エンジン != ランタイム",
+      "team": {
+        "kind": "01 / 入口",
+        "title": "ユーザー / チーム",
+        "description": "実際のワークスペースに対して永続的なセッションを開始します。"
+      },
+      "engine": {
+        "title": "Azents Engine",
+        "kind": "02 / コントロールプレーン",
+        "description": "セッション、状態、オーケストレーション、引き継ぎを担当します。"
+      },
+      "runtime": {
+        "kind": "03 / 実行プレーン",
+        "title": "ランタイム",
+        "description": "あなたのインフラ内でツールとワークスペース操作を実行します。"
+      },
+      "signals": {
+        "sessionLog": {
+          "label": "セッションログ",
+          "value": "永続イベント + 再生"
+        },
+        "handover": {
+          "label": "引き継ぎ",
+          "value": "エンジンワーカーは移動可能"
+        },
+        "runtimeLease": {
+          "label": "ランタイムリース",
+          "value": "ワークスペース単位の実行"
+        },
+        "boundary": {
+          "label": "セキュリティ境界",
+          "value": "自分のクラウド / プライベートネットワーク / オンプレミス"
+        }
+      }
+    },
+    "terms": {
+      "engine": {
+        "title": "エンジン",
+        "body": "分散セッションとオーケストレーションのレイヤー。"
+      },
+      "runtime": {
+        "title": "ランタイム",
+        "body": "コード、ファイル、ツールの実行環境。"
+      },
+      "session": {
+        "title": "セッション",
+        "body": "長時間のエージェントタスクのための永続的な作業コンテキスト。"
+      },
+      "toolkit": {
+        "title": "ツールキット",
+        "body": "プライベートな機能への制御されたアクセス。"
+      }
+    }
+  },
+  "problem": {
+    "eyebrow": "remote runs",
+    "title": "Laptop を閉じても、仕事は続くべきです。",
+    "body": "長い作業は local terminal ではなく、workspace の近くにある Runtime に任せる方が自然です。",
+    "panelTitle": "Remote run が効いてくる場面",
+    "panelBody": "Session が残り、進行状況が見え、あとから同じ作業に戻れることが重要です。",
+    "flow": {
+      "cloud": "laptop",
+      "systems": "workspace"
+    },
+    "items": {
+      "sessions": {
+        "title": "途切れない作業",
+        "body": "タブや SSH が切れても run は続きます。"
+      },
+      "scaling": {
+        "title": "Workspace のそばで実行",
+        "body": "Repo、files、shell、task state の近くで動きます。"
+      },
+      "failover": {
+        "title": "あとから戻れる",
+        "body": "別の端末からでも同じ session に戻れます。"
+      },
+      "observability": {
+        "title": "見える進行状況",
+        "body": "Command output、diff、blocker をひとつの場所で追えます。"
+      },
+      "permissions": {
+        "title": "チームで扱う run",
+        "body": "1 人の laptop ではなく workspace に run が残ります。"
+      },
+      "state": {
+        "title": "作業に合う Runtime",
+        "body": "重い作業には必要な CPU、tools、時間を割り当てます。"
+      }
+    },
+    "footnote": "Remote run は agent が動き続けるための形です。次に決めるのは、その実行場所です。"
+  },
+  "selfHosted": {
+    "eyebrow": "your cloud",
+    "title": "Managed agents を自分たちのクラウドで運用する。",
+    "body": "Runtime は repo、credentials、internal API、audit log の近くに置けます。",
+    "thesis": "Azents は remote run を自社インフラ内で運用するための self-hosted control plane です。",
+    "keywords": {
+      "data": "データの制御",
+      "security": "セキュリティ境界",
+      "internal": "プライベートシステム",
+      "regulatory": "コンプライアンス",
+      "privateCloud": "オンプレミス / プライベートクラウド"
+    }
+  },
+  "bootstrapping": {
+    "eyebrow": "自分自身を開発する道具",
+    "title": "Azents はすでに自分自身の開発ハーネスを使っています。",
+    "body": "Azents は Azents の開発に使われています。コーディングハーネスはリポジトリ、編集、シェル、PR、CI、レビュー対応、検証を扱います。",
+    "capabilities": {
+      "repo": "変更前にリポジトリを読みます",
+      "editing": "作業中の差分を保ちながらファイルを編集します",
+      "shell": "制御されたワークスペースでコマンドを実行します",
+      "github": "PR を開き、レビュー対応を行います",
+      "ci": "CI を監視し、失敗を切り分けます",
+      "review": "実装と検証を反復します"
+    }
+  },
+  "features": {
+    "eyebrow": "得られるもの",
+    "title": "セルフホストされたマネージドエージェント運用。",
+    "body": "もう一つのチャット UI ではありません。実際のシステムの近くで動くエージェントのための運用レイヤーです。",
+    "items": {
+      "sessions": {
+        "title": "管理されたセッション",
+        "body": "永続的な履歴を持つ長時間の作業コンテキスト。"
+      },
+      "history": {
+        "title": "イベント履歴",
+        "body": "再生、監査、検査のための実行イベント。"
+      },
+      "separation": {
+        "title": "エンジン / ランタイム分離",
+        "body": "オーケストレーションをワークスペース実行から分離して拡張します。"
+      },
+      "permissions": {
+        "title": "ツール権限",
+        "body": "エージェントが読み取り、実行、呼び出し、変更できる範囲を制御します。"
+      },
+      "providers": {
+        "title": "ランタイムプロバイダー",
+        "body": "Docker と Kubernetes 向けのプロバイダーで実行環境を動かします。"
+      },
+      "harness": {
+        "title": "コーディングハーネス",
+        "body": "リポジトリ、PR、CI ループのための開発ワークフロー。"
+      },
+      "tools": {
+        "title": "セルフホストモデル",
+        "body": "プライベートクラウド、オンプレミス、規制環境のために設計されています。"
+      }
+    }
+  },
+  "roadmap": {
+    "eyebrow": "公開しながら開発中",
+    "title": "マネージドエージェントを自分たちで制御したいチームへ。",
+    "body": "プラットフォームエンジニア、インフラチーム、AI プロダクトビルダー、セルフホスト組織のためのプロジェクトです。",
+    "currentFocus": "現在の注力領域",
+    "audience": {
+      "platform": "プラットフォームエンジニア",
+      "devops": "インフラ / DevOps チーム",
+      "builders": "AI プロダクトビルダー",
+      "selfHosted": "セルフホストチーム",
+      "sensitive": "機密データを扱う組織"
+    },
+    "items": {
+      "deployment": "セルフホスト導入ドキュメント",
+      "reliability": "エンジンとランタイムの信頼性",
+      "providers": "ランタイムプロバイダーの強化",
+      "harness": "コーディングハーネスの成熟",
+      "observability": "エージェントの可観測性",
+      "localLlm": "ローカル LLM サポート",
+      "workflows": "より広いエージェントワークフロー"
+    }
+  },
+  "finalCta": {
+    "title": "マネージドエージェントをセルフホスト。",
+    "body": "エージェントセッション、ランタイム、ツールを、作業がすでに存在する場所で実行できます。",
+    "github": "GitHub で Star",
+    "docs": "ドキュメントを読む"
+  },
+  "footer": {
+    "tagline": "Azents はセルフホストされたマネージドエージェントのためのオープンソースインフラです。",
+    "github": "GitHub",
+    "discussion": "Issue"
+  },
+  "fontPreview": {
+    "notes": {
+      "current": "現在使用中",
+      "native": "macOS / プラットフォーム標準",
+      "warmer": "より温かく、プロダクトらしい印象",
+      "neutral": "中立的でなじみやすい",
+      "fallback": "インストール済みなら使用、なければシステムフォント",
+      "editorial": "エディトリアルな対比"
+    },
+    "sampleLabel": "フォントサンプル",
+    "eyebrow": "マネージドエージェントをセルフホスト",
+    "headline": "自分のクラウドで動かすマネージドエージェント。",
+    "subheadline": "Azents はエージェントのセッション、ランタイム、ツール、実行状態のためのオープンソースのコントロールプレーンです。",
+    "supporting": "ランタイムをコード、ファイル、権限、プライベートシステムの近くに置けます。",
+    "rendered": "レンダリング:",
+    "pageEyebrow": "Azents フォントプレビュー",
+    "pageTitle": "同じコピー、違う書体。",
+    "pageBody": "ローカル/システムフォントのスタックを使うため、下のレンダリング行でブラウザが実際に選んだフォントを確認できます。",
+    "checking": "確認中..."
+  }
+}
