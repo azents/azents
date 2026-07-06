@@ -215,14 +215,14 @@ importers:
         specifier: ^7.0.1
         version: 7.1.1(eslint@10.4.0(jiti@2.7.0))
       postcss:
-        specifier: ^8.5.4
-        version: 8.5.15
+        specifier: 8.5.14
+        version: 8.5.14
       postcss-preset-mantine:
         specifier: ^1.17.0
-        version: 1.18.0(postcss@8.5.15)
+        version: 1.18.0(postcss@8.5.14)
       postcss-simple-vars:
         specifier: ^7.0.1
-        version: 7.0.1(postcss@8.5.15)
+        version: 7.0.1(postcss@8.5.14)
       typescript:
         specifier: ^6.0.0
         version: 6.0.3
