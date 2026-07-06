@@ -1,5 +1,8 @@
 :root {
   color-scheme: dark;
+  --font-azents-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-azents-sans: "Inter Variable", Inter, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 * {
@@ -8,11 +11,13 @@
 
 html {
   scroll-behavior: smooth;
+  font-family: var(--font-azents-sans);
 }
 
 body {
   margin: 0;
   background: #070a0f;
+  font-family: var(--font-azents-sans);
 }
 
 .mantine-Container-root {

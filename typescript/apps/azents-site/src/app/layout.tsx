@@ -1,6 +1,4 @@
 import { ColorSchemeScript } from "@mantine/core";
-import { GeistMono } from "geist/font/mono";
-import { GeistSans } from "geist/font/sans";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages, getTranslations } from "next-intl/server";
 import { AZENTS_BRAND } from "@/shared/lib/brand";
@@ -15,6 +13,7 @@ import { AppMantineProvider } from "@/shared/providers/mantine";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import "@fontsource-variable/inter";
 import "@mantine/core/styles.css";
 import "./globals.css";
 
@@ -64,7 +63,7 @@ export default async function RootLayout({
       <head>
         <ColorSchemeScript forceColorScheme="dark" />
       </head>
-      <body className={`${GeistSans.variable} ${GeistMono.variable}`}>
+      <body>
         <NextIntlClientProvider messages={messages}>
           <AppMantineProvider forceColorScheme="dark">
             <LocaleProvider locale={supportedLocale}>{children}</LocaleProvider>
