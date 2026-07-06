@@ -22,8 +22,8 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-07-04
-spec_version: 6
+last_verified_at: 2026-07-06
+spec_version: 7
 ---
 
 # Agent Runtime Control
@@ -116,7 +116,7 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 - process start/write operations used by model-visible `exec_command` and `write_stdin`
 - file stat/list/read/write/grep
 - file upload/download body streams
-- Git repository/worktree operations used by session initialization and cleanup
+- Git repository/worktree operations used by operation TurnAction execution and cleanup
 - operation heartbeat/progress/final events
 
 `file.stat` is the authoritative operation for classifying a workspace path as file, directory, symlink, other, or missing before a caller chooses a file or directory operation.

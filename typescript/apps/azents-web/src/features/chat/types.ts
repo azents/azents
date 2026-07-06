@@ -5,8 +5,6 @@ import type {
   AgentResponse,
   ChatEventResponse,
   InputActionDefinitionResponse,
-  SessionInitializationEventResponse,
-  SessionInitializationResponse,
 } from "@azents/public-client";
 
 // --- WebSocket event type ---
@@ -224,6 +222,10 @@ export interface GoalBriefingPayload {
   duration_seconds?: number | null;
 }
 
+export interface ActionExecutionResultPayload {
+  action_execution: ActionExecutionProjectionResponse;
+}
+
 export interface SkillLoadedPayload {
   name: string;
   skill_path: string;
@@ -303,6 +305,7 @@ export type ChatEventPayload =
   | SubagentEndPayload
   | GoalBriefingPayload
   | ActionMessagePayload
+  | ActionExecutionResultPayload
   | SkillLoadedPayload
   | SystemReminderPayload
   | SystemErrorPayload
@@ -340,6 +343,7 @@ export type ChatHistoryEvent =
   | EventBase<"goal_updated", UserMessagePayload>
   | EventBase<"goal_briefing", GoalBriefingPayload>
   | EventBase<"action_message", ActionMessagePayload>
+  | EventBase<"action_execution_result", ActionExecutionResultPayload>
   | EventBase<"skill_loaded", SkillLoadedPayload>
   | EventBase<"system_reminder", SystemReminderPayload>
   | EventBase<"system_error", SystemErrorPayload>
@@ -561,27 +565,6 @@ export interface InputActionsUpdatedEvent {
   session_id: string;
 }
 
-export interface SessionInitializationUpdatedEvent {
-  type: "session_initialization_updated";
-  session_id: string;
-  initialization: SessionInitializationResponse;
-}
-
-export interface SessionInitializationEventAppendedEvent {
-  type: "session_initialization_event_appended";
-  session_id: string;
-  event: SessionInitializationEventResponse;
-}
-
-export type SessionInitializationDetailState =
-  | { type: "IDLE" }
-  | { type: "LOADING" }
-  | { type: "ERROR"; message: string }
-  | {
-      type: "READY";
-      events: SessionInitializationEventResponse[];
-    };
-
 export type ActionExecutionProjection = ActionExecutionProjectionResponse;
 
 export interface ActionExecutionUpdatedEvent {
@@ -657,8 +640,6 @@ export type ChatEvent =
   | LiveEventRemovedEvent
   | SubscribedEvent
   | InputActionsUpdatedEvent
-  | SessionInitializationUpdatedEvent
-  | SessionInitializationEventAppendedEvent
   | ActionExecutionUpdatedEvent
   | SubscriptionHealthCheckAckEvent
   | LiveRunUpdatedEvent

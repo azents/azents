@@ -26,7 +26,6 @@ Method | HTTP request | Description
 [**chat_v1_get_agent_session_context**](ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 [**chat_v1_get_agent_session_project_defaults**](ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
 [**chat_v1_get_agent_workspace**](ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
-[**chat_v1_get_session_initialization**](ChatV1Api.md#chat_v1_get_session_initialization) | **GET** /chat/v1/sessions/{session_id}/initialization | Get Session Initialization
 [**chat_v1_get_session_project_browser_manifest**](ChatV1Api.md#chat_v1_get_session_project_browser_manifest) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest | Get Session Project Browser Manifest
 [**chat_v1_get_team_primary_agent_session**](ChatV1Api.md#chat_v1_get_team_primary_agent_session) | **GET** /chat/v1/agents/{agent_id}/team-primary-session | Get Team Primary Agent Session
 [**chat_v1_issue_ws_ticket**](ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
@@ -46,7 +45,6 @@ Method | HTTP request | Description
 [**chat_v1_reject_agent_project_registration_request**](ChatV1Api.md#chat_v1_reject_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject | Reject Agent Project Registration Request
 [**chat_v1_retry_action_execution**](ChatV1Api.md#chat_v1_retry_action_execution) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry | Retry Action Execution
 [**chat_v1_retry_failed_run**](ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
-[**chat_v1_retry_session_initialization**](ChatV1Api.md#chat_v1_retry_session_initialization) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/initialization/retry | Retry Session Initialization
 [**chat_v1_stat_agent_workspace_path**](ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
 [**chat_v1_stop_session_run**](ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
 [**chat_v1_update_agent_session_title**](ChatV1Api.md#chat_v1_update_agent_session_title) | **PATCH** /chat/v1/sessions/{session_id}/title | Update Agent Session Title
@@ -1832,85 +1830,6 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **chat_v1_get_session_initialization**
-> SessionInitializationDetailResponse chat_v1_get_session_initialization(session_id)
-
-Get Session Initialization
-
-Get durable initialization detail for a session.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.models.session_initialization_detail_response import SessionInitializationDetailResponse
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.ChatV1Api(api_client)
-    session_id = 'session_id_example' # str |
-
-    try:
-        # Get Session Initialization
-        api_response = api_instance.chat_v1_get_session_initialization(session_id)
-        print("The response of ChatV1Api->chat_v1_get_session_initialization:\n")
-        pprint(api_response)
-    except Exception as e:
-        print("Exception when calling ChatV1Api->chat_v1_get_session_initialization: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **session_id** | **str**|  |
-
-### Return type
-
-[**SessionInitializationDetailResponse**](SessionInitializationDetailResponse.md)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**200** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
 # **chat_v1_get_session_project_browser_manifest**
 > ProjectBrowserManifestResponse chat_v1_get_session_project_browser_manifest(agent_id, session_id)
 
@@ -3443,84 +3362,6 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-# **chat_v1_retry_session_initialization**
-> chat_v1_retry_session_initialization(agent_id, session_id)
-
-Retry Session Initialization
-
-Request retry for a failed session initialization.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
-
-    try:
-        # Retry Session Initialization
-        api_instance.chat_v1_retry_session_initialization(agent_id, session_id)
-    except Exception as e:
-        print("Exception when calling ChatV1Api->chat_v1_retry_session_initialization: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
-
-### Return type
-
-void (empty response body)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**204** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

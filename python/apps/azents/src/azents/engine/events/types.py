@@ -406,6 +406,14 @@ class GoalBriefingPayload(BaseModel):
     )
 
 
+class ActionExecutionResultPayload(BaseModel):
+    """Durable action execution result payload."""
+
+    model_config = ConfigDict(frozen=True)
+
+    action_execution: RawDict = Field(description="Action execution projection")
+
+
 class SkillLoadedPayload(BaseModel):
     """Loaded Skill payload."""
 
@@ -469,6 +477,7 @@ EventPayload = (
     | SubagentEndPayload
     | GoalBriefingPayload
     | ActionMessagePayload
+    | ActionExecutionResultPayload
     | SkillLoadedPayload
     | SystemReminderPayload
     | SystemErrorPayload
@@ -481,6 +490,7 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.GOAL_CONTINUATION: UserMessagePayload,
     EventKind.GOAL_UPDATED: UserMessagePayload,
     EventKind.ACTION_MESSAGE: ActionMessagePayload,
+    EventKind.ACTION_EXECUTION_RESULT: ActionExecutionResultPayload,
     EventKind.SKILL_LOADED: SkillLoadedPayload,
     EventKind.GOAL_BRIEFING: GoalBriefingPayload,
     EventKind.ASSISTANT_MESSAGE: AssistantMessagePayload,

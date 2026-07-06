@@ -24,7 +24,6 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
-from azents.repos.session_initialization import SessionInitializationRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
@@ -218,24 +217,11 @@ class TestProjectBrowserManifestService:
                 path="/workspace/agent/.azents/worktrees/session-1/app",
             ),
         )
-        initialization = (
-            await SessionInitializationRepository().create_ready_noop_if_absent(
-                rdb_session,
-                session_id=fixture.session_id,
-                completed_at=datetime.datetime.now(datetime.UTC),
-            )
-        )
-        steps = await SessionInitializationRepository().list_steps(
-            rdb_session,
-            initialization_id=initialization.id,
-        )
         await SessionGitWorktreeRepository().create(
             rdb_session,
             SessionGitWorktreeCreate(
                 id="0123456789abcdef0123456789abcdef",
                 session_id=fixture.session_id,
-                initialization_id=initialization.id,
-                step_id=steps[0].id,
                 action_execution_id=None,
                 session_workspace_project_id=project.id,
                 source_project_path="/workspace/agent/app",

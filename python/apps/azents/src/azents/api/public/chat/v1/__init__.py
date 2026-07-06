@@ -70,7 +70,6 @@ from azents.engine.tools.skill import (
     skill_actions_from_snapshot,
 )
 from azents.repos.input_buffer.data import InputBuffer
-from azents.repos.session_initialization.data import SessionInitializationEvent
 from azents.services.agent_session_input import (
     AgentSessionInputError,
     AgentSessionInputInactiveSession,
@@ -145,13 +144,8 @@ from azents.services.session_git_worktree import (
     GitWorktreeCleanupAccessDenied,
     GitWorktreeCleanupNotFound,
     GitWorktreeCleanupSessionNotFound,
-    GitWorktreeInitializationRetryAccessDenied,
-    GitWorktreeInitializationRetryNotFound,
-    GitWorktreeInitializationRetrySessionNotFound,
-    GitWorktreeInitializationRetryUnavailable,
     SessionGitWorktreeService,
 )
-from azents.services.session_initialization import SessionInitializationProjection
 from azents.services.session_storage import guess_media_type
 from azents.services.session_workspace_project import (
     AgentNotFound as ProjectAgentNotFound,
@@ -169,8 +163,6 @@ from azents.transport.chat import (
     chat_history_event_appended_dump,
     chat_live_event_removed_dump,
     chat_live_event_upserted_dump,
-    chat_session_initialization_event_appended_dump,
-    chat_session_initialization_updated_dump,
     chat_subscription_ack_dump,
     chat_subscription_health_check_ack_dump,
 )
@@ -231,8 +223,6 @@ from .data import (
     ProjectBrowserManifestPreviewRequest,
     ProjectBrowserManifestResponse,
     SessionContextResponse,
-    SessionInitializationDetailResponse,
-    SessionInitializationResponse,
     SessionWorkspaceProjectListResponse,
     SessionWorkspaceProjectRegisterRequest,
     SessionWorkspaceProjectRegistrationRequestListResponse,
@@ -530,11 +520,6 @@ async def _build_chat_write_snapshot(
                 goal=(
                     GoalStateResponse.from_domain(live.goal)
                     if live.goal is not None
-                    else None
-                ),
-                initialization=(
-                    SessionInitializationResponse.from_domain(live.initialization)
-                    if live.initialization is not None
                     else None
                 ),
                 action_executions=[
@@ -1574,34 +1559,16 @@ async def preview_agent_git_refs(
 
 async def _run_git_worktree_cleanup_background(
     session_git_worktree_service: SessionGitWorktreeService,
-    broadcast: WebSocketBroadcast,
     *,
     agent_id: str,
     session_id: str,
     session_workspace_project_id: str | None,
 ) -> None:
-    """Execute Git worktree cleanup and publish initialization updates."""
-
-    async def publish_event(event: SessionInitializationEvent) -> None:
-        await broadcast.publish(
-            session_id,
-            chat_session_initialization_event_appended_dump(event),
-        )
-
-    async def publish_projection(
-        projection: SessionInitializationProjection,
-    ) -> None:
-        await broadcast.publish(
-            session_id,
-            chat_session_initialization_updated_dump(projection),
-        )
-
+    """Execute Git worktree cleanup."""
     await session_git_worktree_service.run_cleanup_for_session(
         agent_id=agent_id,
         session_id=session_id,
         session_workspace_project_id=session_workspace_project_id,
-        on_event_appended=publish_event,
-        on_projection_updated=publish_projection,
     )
 
 
@@ -1687,63 +1654,6 @@ async def archive_agent_session(
                         status_code=409,
                         detail="Running session cannot be archived.",
                     )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
-
-
-@router.post(
-    "/agents/{agent_id}/sessions/{session_id}/initialization/retry",
-    status_code=204,
-)
-async def retry_session_initialization(
-    agent_id: str,
-    session_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
-    broker: Annotated[SessionBroker, Depends(get_broker)],
-) -> None:
-    """Request retry for a failed session initialization."""
-    _validate_uuid7_hex(agent_id, label="agent ID")
-    _validate_session_id(session_id)
-    result = await session_git_worktree_service.request_initialization_retry(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=current_user.user_id,
-    )
-    match result:
-        case Success(value):
-            if value.retry_requested:
-                await broker.send_message(
-                    SessionWakeUp(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        user_id=current_user.user_id,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=None,
-                        workspace_handle=None,
-                    )
-                )
-            return
-        case Failure(error):
-            match error:
-                case (
-                    GitWorktreeInitializationRetrySessionNotFound()
-                    | GitWorktreeInitializationRetryNotFound()
-                ):
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Session initialization not found.",
-                    )
-                case GitWorktreeInitializationRetryAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
-                case GitWorktreeInitializationRetryUnavailable():
-                    raise HTTPException(status_code=409, detail=error.reason)
                 case _:
                     assert_never(error)
         case _:
@@ -1855,7 +1765,6 @@ async def cleanup_session_git_worktree(
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> None:
     """Request manual cleanup retry for an Azents-owned session Git worktree."""
     _validate_uuid7_hex(agent_id, label="agent ID")
@@ -1872,7 +1781,6 @@ async def cleanup_session_git_worktree(
                 background_tasks.add_task(
                     _run_git_worktree_cleanup_background,
                     session_git_worktree_service,
-                    broadcast,
                     agent_id=agent_id,
                     session_id=session_id,
                     session_workspace_project_id=request.project_id,
@@ -2452,46 +2360,11 @@ async def list_live_events(
                     if value.goal is not None
                     else None
                 ),
-                initialization=(
-                    SessionInitializationResponse.from_domain(value.initialization)
-                    if value.initialization is not None
-                    else None
-                ),
                 action_executions=[
                     ActionExecutionProjectionResponse.from_domain(projection)
                     for projection in value.action_executions
                 ],
             )
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Session not found.",
-                    )
-                case SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
-
-
-@router.get("/sessions/{session_id}/initialization")
-async def get_session_initialization(
-    session_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    chat_service: Annotated[ChatSessionService, Depends()],
-) -> SessionInitializationDetailResponse:
-    """Get durable initialization detail for a session."""
-    _validate_session_id(session_id)
-    result = await chat_service.get_session_initialization_detail(
-        session_id,
-        user_id=current_user.user_id,
-    )
-    match result:
-        case Success(value):
-            return SessionInitializationDetailResponse.from_domain(value)
         case Failure(error):
             match error:
                 case SessionNotFound():

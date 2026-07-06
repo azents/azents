@@ -3,7 +3,7 @@
 import asyncio
 import dataclasses
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from typing import Protocol, assert_never
 
 from azcommon.logging import bind_extra
@@ -21,12 +21,7 @@ from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.types import CheckStop, PollMessages
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session.data import PendingSessionCommand
-from azents.repos.session_initialization.data import SessionInitializationEvent
 from azents.services.input_buffer import InputBufferService
-from azents.services.session_initialization import (
-    SessionInitializationProjection,
-    SessionInitializationRunGate,
-)
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
@@ -63,25 +58,6 @@ class AgentSessionCommandReader(Protocol):
         ...
 
 
-class SessionInitializationProcessor(Protocol):
-    """Execute pending session initialization work under runner ownership."""
-
-    async def run_git_worktree_initialization(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-        on_event_appended: Callable[[SessionInitializationEvent], Awaitable[None]]
-        | None = None,
-        on_projection_updated: Callable[
-            [SessionInitializationProjection], Awaitable[None]
-        ]
-        | None = None,
-    ) -> None:
-        """Execute pending Git worktree initialization work for a session."""
-        ...
-
-
 @dataclasses.dataclass(frozen=True)
 class _PendingIdleBoundary:
     """stale wake-up 뒤에 닫아야 하는 terminal run boundary."""
@@ -112,7 +88,6 @@ class SessionRunner:
         user_stop_finalizer: UserStopFinalizer,
         run_executor: RunExecutor,
         engine: AgentEngineProtocol,
-        initialization_processor: SessionInitializationProcessor,
     ) -> None:
         self.shutdown_event = shutdown_event
         self.event_publisher = event_publisher
@@ -121,7 +96,6 @@ class SessionRunner:
         self.agent_session_repository = agent_session_repository
         self.input_buffer_service = input_buffer_service
         self.idle_continuation_service = idle_continuation_service
-        self.initialization_processor = initialization_processor
         self.inbox = SessionRunnerInbox()
         self.runner_shutdown = asyncio.Event()
         self.terminated_event = asyncio.Event()
@@ -558,14 +532,6 @@ class SessionRunner:
     async def _process_wake_up(self, message: SessionWakeUp) -> RunExecutionResult:
         """Handle command/run/continuation lifecycle for one SessionWakeUp."""
         command = await self._get_pending_command(message.session_id)
-        if command is None and not await self._prepare_initialization_for_run_dispatch(
-            message
-        ):
-            return RunExecutionResult(
-                toolkits=[],
-                terminal_event_observed=False,
-                no_actionable_work=True,
-            )
         self.run_active = True
         try:
             result = await self._run_with_timeout(message, command=command)
@@ -580,36 +546,6 @@ class SessionRunner:
         if self.shutdown_event.is_set():
             self._drain_stop_signals()
         return result
-
-    async def _prepare_initialization_for_run_dispatch(
-        self,
-        message: SessionWakeUp,
-    ) -> bool:
-        """Run pending initialization work and return whether dispatch may proceed."""
-        gate_result = await self.session_lifecycle.get_initialization_run_gate(
-            message.session_id
-        )
-        if gate_result.gate == SessionInitializationRunGate.READY:
-            return True
-        if gate_result.gate == SessionInitializationRunGate.WAITING:
-            await self.initialization_processor.run_git_worktree_initialization(
-                agent_id=message.agent_id,
-                session_id=message.session_id,
-                on_event_appended=self.event_publisher.dispatch_initialization_event,
-                on_projection_updated=(
-                    self.event_publisher.dispatch_initialization_projection
-                ),
-            )
-            gate_result = await self.session_lifecycle.get_initialization_run_gate(
-                message.session_id
-            )
-            if gate_result.gate == SessionInitializationRunGate.READY:
-                return True
-        await self.session_lifecycle.block_run_dispatch_for_initialization(
-            message.session_id,
-            gate=gate_result.gate,
-        )
-        return False
 
     async def _get_pending_command(
         self,

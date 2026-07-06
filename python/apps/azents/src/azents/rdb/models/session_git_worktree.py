@@ -77,16 +77,6 @@ class RDBSessionGitWorktree(RDBModel):
         sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
-    initialization_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("session_initializations.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    step_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("session_initialization_steps.id", ondelete="CASCADE"),
-        nullable=False,
-    )
     source_project_path: Mapped[str] = mapped_column(sa.Text, nullable=False)
     starting_ref: Mapped[str] = mapped_column(sa.Text, nullable=False)
     worktree_path: Mapped[str] = mapped_column(sa.Text, nullable=False)

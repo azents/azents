@@ -585,7 +585,6 @@ export function useWorkspacePanelContainer({
             agentId,
             sessionId,
           }),
-          utils.chat.getSessionInitialization.invalidate({ sessionId }),
         ]);
       },
     });

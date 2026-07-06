@@ -35,7 +35,6 @@ from azents.services.session_git_worktree import (
     GitWorktreeWorkspaceItem,
     NewSessionWorkspaceItem,
 )
-from azents.services.session_initialization import SessionInitializationService
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
     normalize_session_workspace_path,
@@ -114,9 +113,6 @@ class AgentSessionInputService:
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
-    session_initialization_service: Annotated[
-        SessionInitializationService, Depends(SessionInitializationService)
-    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -234,14 +230,10 @@ class AgentSessionInputService:
                 session, agent_id
             )
             ensure_primary = self.agent_session_repository.ensure_team_primary_for_agent
-            primary_session = await ensure_primary(
+            await ensure_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
-            )
-            await self.session_initialization_service.ensure_ready_noop_initialization(
-                session,
-                session_id=primary_session.id,
             )
             workspace_items_result = self._workspace_items_from_request(
                 existing_project_paths=existing_project_paths,
@@ -436,10 +428,6 @@ class AgentSessionInputService:
             for item in workspace_items
             if isinstance(item, GitWorktreeWorkspaceItem)
         ]
-        await self.session_initialization_service.ensure_ready_noop_initialization(
-            session,
-            session_id=session_id,
-        )
         project_repository = self.session_workspace_project_repository
         for path in existing_project_paths:
             await project_repository.create_project(
