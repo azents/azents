@@ -18,7 +18,6 @@ code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/services/agent_session_input.py
-  - python/apps/azents/src/azents/services/session_initialization.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
@@ -38,7 +37,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-06
-spec_version: 58
+spec_version: 59
 ---
 
 # Agent Execution Loop
@@ -55,19 +54,18 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker checks session initialization. Blocking initialization must be `ready` before input promotion can start.
-2. Worker promotes input buffers to durable event input, including ordered `action_message` events.
-3. Worker executes operation TurnActions such as `create_git_worktree` before model dispatch; a failed operation blocks later model input until retry or discard.
-4. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
-5. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
-6. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
-7. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
+1. Worker promotes input buffers to durable event input, including ordered `action_message` events.
+2. Worker executes operation TurnActions such as `create_git_worktree` before model dispatch; a failed operation blocks later model input until retry or discard.
+3. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
+4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
+5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
+6. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
    into a LiteLLM Responses native request.
-8. `PostLowerFilterPipeline` applies adapter-native request size guard.
-9. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
-10. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
-11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
-12. When no foreground client tool call or pending follow-up remains, the runner observes the
+7. `PostLowerFilterPipeline` applies adapter-native request size guard.
+8. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
+9. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
+10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
+11. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
 Streaming deltas are UI projection only. Durable events are appended based on completed output items
@@ -371,28 +369,21 @@ user message. `SessionRunner` reads the pending
 command from the session and passes it into `RunExecutor`, which prepares the same `RunRequest` and
 `RunContext` used by normal runs before invoking the registered command handler. Running sessions,
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
-Before pending user input becomes model input, the session runner observes the session initialization
-projection. `ready` initialization allows input promotion. `pending` initialization causes the session
-runner to process legacy queued setup work before checking the gate again. `running` initialization
-owned by another processor leaves input buffers pending until a later wake-up or retry. `failed`,
-`canceled`, or cleanup-required states do not create an `agent_runs` row; users must retry setup,
-delete pending input, or create a different session. This gate belongs to the session runner boundary,
-not the model execution core, so failed setup is not represented as failed-run retry state or durable
-transcript `system_error`.
-
 Operation TurnActions are processed after input-buffer promotion and before model dispatch.
 `create_git_worktree` action execution is keyed by its durable `action_message` event, records durable
 progress in `action_executions`, publishes action execution projection updates while status or log
 entries change, creates the worktree through typed Runner Git operations, registers the created path
 as a session Project, refreshes catalog/Skill projection, and then invalidates the prepared context
 boundary. This same operation-action path covers new-session setup actions and existing-session
-Register Project worktree actions; existing-session worktree creation does not reuse the session
-initialization gate. If later pending input remains after a Project-mutating action succeeds, the
+Register Project worktree actions. If later pending input remains after a Project-mutating action succeeds, the
 runner sends a follow-up wake-up and stops the current processing boundary so the next pass rebuilds
 model/tool context from the updated Project registry. If an action fails, later pending input remains
 blocked until retry succeeds or discard marks the action `failed_final`. Retry and discard mutations
 reset or finalize only failed operation action executions, return the updated action execution
-projection, and enqueue a normal broker wake-up when more runner work is needed.
+projection, and enqueue a normal broker wake-up when more runner work is needed. Terminal completed
+worktree actions also append an `action_execution_result` durable event containing the final action
+execution projection, then live state excludes terminal action executions so completed logs survive
+history reload without persisting as live-only fallback.
 
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
@@ -449,6 +440,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-06** — v59. Removed the session-initialization run gate and documented terminal `action_execution_result` history events.
 - **2026-07-05** — v56. Reflected operation TurnAction processing before model dispatch and Project context invalidation after worktree setup.
 
 ## Idle continuation

@@ -9,6 +9,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ActionExecutionStatus,
     AgentProjectDefaultItemType,
     AgentSessionPrimaryKind,
     AgentSessionRunState,
@@ -48,10 +49,6 @@ from azents.services.session_git_worktree import (
     GitWorktreeWorkspaceItem,
     NewSessionWorkspaceItem,
     SessionGitWorktreeService,
-)
-from azents.services.session_initialization import (
-    SessionInitializationDetail,
-    SessionInitializationService,
 )
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
@@ -136,9 +133,6 @@ class ChatSessionService:
         Depends(SessionWorkspaceProjectRepository),
     ]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
-    session_initialization_service: Annotated[
-        SessionInitializationService, Depends(SessionInitializationService)
-    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -177,10 +171,6 @@ class ChatSessionService:
                     workspace_id=agent.workspace_id,
                     agent_id=agent_id,
                 )
-            )
-            await self.session_initialization_service.ensure_ready_noop_initialization(
-                session,
-                session_id=agent_session.id,
             )
             return Success(agent_session)
 
@@ -267,14 +257,10 @@ class ChatSessionService:
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
             ensure_primary = self.agent_session_repository.ensure_team_primary_for_agent
-            primary_session = await ensure_primary(
+            await ensure_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
-            )
-            await self.session_initialization_service.ensure_ready_noop_initialization(
-                session,
-                session_id=primary_session.id,
             )
             sessions = await self.agent_session_repository.list_active_by_agent_id(
                 session,
@@ -305,14 +291,10 @@ class ChatSessionService:
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
             ensure_primary = self.agent_session_repository.ensure_team_primary_for_agent
-            primary_session = await ensure_primary(
+            await ensure_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
-            )
-            await self.session_initialization_service.ensure_ready_noop_initialization(
-                session,
-                session_id=primary_session.id,
             )
             workspace_items_result = _workspace_items_from_request(
                 existing_project_paths=existing_project_paths,
@@ -445,10 +427,6 @@ class ChatSessionService:
             for item in workspace_items
             if isinstance(item, GitWorktreeWorkspaceItem)
         ]
-        await self.session_initialization_service.ensure_ready_noop_initialization(
-            session,
-            session_id=session_id,
-        )
         for path in existing_project_paths:
             await self.session_workspace_project_repository.create_project(
                 session,
@@ -774,16 +752,21 @@ class ChatSessionService:
             todo = TodoStateSnapshot.from_state(
                 await todo_store.load(agent_session.agent_id, session_id)
             )
-            initialization = await self.session_initialization_service.get_projection(
-                session,
-                session_id=session_id,
-            )
-            action_executions = (
+            terminal_action_statuses = {
+                ActionExecutionStatus.COMPLETED,
+                ActionExecutionStatus.FAILED_FINAL,
+            }
+            projections = (
                 await self.action_execution_repository.list_projections_by_session_id(
                     session,
                     session_id=session_id,
                 )
             )
+            action_executions = [
+                projection
+                for projection in projections
+                if projection.execution.status not in terminal_action_statuses
+            ]
             return Success(
                 ChatLiveStateSnapshot(
                     partial_history_events=partial_history_events,
@@ -823,42 +806,9 @@ class ChatSessionService:
                     session_run_state=agent_session.run_state,
                     todo=todo,
                     goal=goal,
-                    initialization=initialization,
                     action_executions=action_executions,
                 )
             )
-
-    async def get_session_initialization_detail(
-        self,
-        session_id: str,
-        *,
-        user_id: str,
-    ) -> Result[SessionInitializationDetail, SessionAccessError]:
-        """Fetch durable initialization detail after session access validation."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if (
-                agent_session is None
-                or agent_session.status != AgentSessionStatus.ACTIVE
-            ):
-                return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
-            )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
-            detail = await self.session_initialization_service.get_detail(
-                session,
-                session_id=session_id,
-            )
-            return Success(detail)
 
     async def delete_session(
         self,

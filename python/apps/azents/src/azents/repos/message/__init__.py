@@ -7,6 +7,7 @@ from azents.core.enums import EventKind, MessageRole
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.types import (
+    ActionExecutionResultPayload,
     AssistantMessagePayload,
     AttachmentOutputPart,
     ClientToolCallPayload,
@@ -87,6 +88,8 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return UserMessagePayload.model_validate(row.payload)
         case EventKind.ACTION_MESSAGE:
             return ActionMessagePayload.model_validate(row.payload)
+        case EventKind.ACTION_EXECUTION_RESULT:
+            return ActionExecutionResultPayload.model_validate(row.payload)
         case EventKind.GOAL_BRIEFING:
             return GoalBriefingPayload.model_validate(row.payload)
         case EventKind.SKILL_LOADED:
@@ -295,7 +298,11 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                 },
                 created_at=row.created_at,
             )
-        case GoalBriefingPayload() | SkillLoadedPayload():
+        case (
+            ActionExecutionResultPayload()
+            | GoalBriefingPayload()
+            | SkillLoadedPayload()
+        ):
             return None
         case SubagentEndPayload():
             return ChatMessage(

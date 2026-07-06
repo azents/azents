@@ -365,6 +365,7 @@ function applySubagentEvent(
     case "goal_updated":
     case "goal_briefing":
     case "skill_loaded":
+    case "action_execution_result":
     case "interrupted":
     case "system_reminder":
     case "unknown_adapter_output": {

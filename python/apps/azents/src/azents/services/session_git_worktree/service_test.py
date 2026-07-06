@@ -12,8 +12,6 @@ from azents.core.enums import (
     LLMProvider,
     RuntimeRunnerState,
     SessionGitWorktreeStatus,
-    SessionInitializationStatus,
-    SessionInitializationStepStatus,
     WorkspaceUserRole,
 )
 from azents.engine.events.action_messages import (
@@ -40,7 +38,6 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
-from azents.repos.session_initialization import SessionInitializationRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
@@ -69,7 +66,6 @@ from azents.services.session_git_worktree import (
     GitWorktreeCleanupNotFound,
     SessionGitWorktreeService,
 )
-from azents.services.session_initialization import SessionInitializationService
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
 
@@ -417,13 +413,13 @@ def _service(
         agent_session_repository=AgentSessionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         agent_runtime_repository=_RuntimeRepository(),
-        session_initialization_repository=SessionInitializationRepository(),
         session_git_worktree_repository=SessionGitWorktreeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         agent_project_catalog_repository=catalog_repository
         or AgentProjectCatalogRepository(),
         agent_project_catalog_service=_CatalogRefreshService(refresh_status),
         action_execution_repository=ActionExecutionRepository(),
+        event_transcript_repository=EventTranscriptRepository(),
         session_manager=session_manager,
         runner_operations=runner,  # pyright: ignore[reportArgumentType]
     )
@@ -451,10 +447,6 @@ def _input_service(
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
-        ),
-        session_initialization_service=SessionInitializationService(
-            session_initialization_repository=SessionInitializationRepository(),
-            session_manager=session_manager,
         ),
         session_manager=session_manager,
     )
@@ -855,7 +847,7 @@ class TestSessionGitWorktreeService:
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Valid worktree session creates ready initialization and Project rows."""
+        """Valid worktree action creates Project and catalog rows."""
         async with rdb_session_manager() as session:
             _, user_id, agent_id = await _create_agent_context(session, "ready")
         runner = _RunnerOperations()
@@ -885,13 +877,13 @@ class TestSessionGitWorktreeService:
         assert isinstance(result, Success)
         created = result.value.agent_session
         async with rdb_session_manager() as session:
-            projects_before_initialization = (
+            projects_before_action = (
                 await SessionWorkspaceProjectRepository().list_projects(
                     session,
                     session_id=created.id,
                 )
             )
-        assert projects_before_initialization == []
+        assert projects_before_action == []
 
         await _execute_first_setup_action(
             rdb_session_manager,
@@ -900,15 +892,6 @@ class TestSessionGitWorktreeService:
             session_id=created.id,
         )
         async with rdb_session_manager() as session:
-            initialization = await SessionInitializationRepository().get_by_session_id(
-                session,
-                session_id=created.id,
-            )
-            assert initialization is not None
-            steps = await SessionInitializationRepository().list_steps(
-                session,
-                initialization_id=initialization.id,
-            )
             projects = await SessionWorkspaceProjectRepository().list_projects(
                 session,
                 session_id=created.id,
@@ -918,20 +901,16 @@ class TestSessionGitWorktreeService:
                 agent_id=agent_id,
             )
 
-        assert initialization.status is SessionInitializationStatus.READY
         project_paths = [project.path for project in projects]
         assert project_paths == [runner.calls[-1]["worktree_path"]]
         assert "/workspace/agent/repo" not in project_paths
         assert [entry.path for entry in catalog] == [runner.calls[-1]["worktree_path"]]
-        assert all(
-            step.status is SessionInitializationStepStatus.COMPLETED for step in steps
-        )
 
-    async def test_invalid_ref_blocks_initialization_and_keeps_input_pending(
+    async def test_invalid_ref_fails_action_and_keeps_input_pending(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Runner invalid ref failure leaves initialization failed and input pending."""
+        """Runner invalid ref failure leaves the action failed and input pending."""
         async with rdb_session_manager() as session:
             _, user_id, agent_id = await _create_agent_context(session, "invalid-ref")
         runner = _RunnerOperations(failures=["invalid_ref: unknown revision"])
@@ -1074,7 +1053,7 @@ class TestSessionGitWorktreeService:
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Catalog upsert is blocking for worktree initialization."""
+        """Catalog upsert failure marks the action execution failed."""
         async with rdb_session_manager() as session:
             _, user_id, agent_id = await _create_agent_context(session, "catalog")
         runner = _RunnerOperations()
@@ -1126,7 +1105,7 @@ class TestSessionGitWorktreeService:
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Non-blocking status refresh warning keeps initialization ready."""
+        """Non-blocking status refresh warning keeps action execution completed."""
         async with rdb_session_manager() as session:
             _, user_id, agent_id = await _create_agent_context(session, "warning")
         runner = _RunnerOperations()
@@ -1196,16 +1175,9 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
-            initialization = await SessionInitializationRepository().get_by_session_id(
-                session,
-                session_id=session_id,
-            )
-
         assert request.cleanup_requested is True
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANUP_PENDING
-        assert initialization is not None
-        assert initialization.status is SessionInitializationStatus.CLEANUP_REQUIRED
         assert [call["operation"] for call in runner.calls] == ["create_git_worktree"]
 
     async def test_cleanup_removes_worktree_branch_and_catalog(
@@ -1241,10 +1213,6 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
-            initialization = await SessionInitializationRepository().get_by_session_id(
-                session,
-                session_id=session_id,
-            )
             catalog = await AgentProjectCatalogRepository().list_entries(
                 session,
                 agent_id=agent_id,
@@ -1255,8 +1223,6 @@ class TestSessionGitWorktreeService:
             )
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANED
-        assert initialization is not None
-        assert initialization.status is SessionInitializationStatus.CLEANED
         assert catalog == []
         assert projects == []
         assert [call["operation"] for call in runner.calls] == [
@@ -1338,10 +1304,6 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
-            initialization = await SessionInitializationRepository().get_by_session_id(
-                session,
-                session_id=session_id,
-            )
             catalog = await AgentProjectCatalogRepository().list_entries(
                 session,
                 agent_id=agent_id,
@@ -1351,11 +1313,6 @@ class TestSessionGitWorktreeService:
         assert allocation.cleanup_summary == "worktree remove failed"
         remove_call = runner.calls[1]
         assert remove_call["force"] is False
-        assert initialization is not None
-        assert initialization.status is SessionInitializationStatus.CLEANUP_REQUIRED
-        assert initialization.failure_summary == (
-            "Git worktree cleanup failed: worktree remove failed"
-        )
         assert len(catalog) == 1
 
     async def test_manual_cleanup_retry_succeeds_after_failure(
@@ -1404,14 +1361,8 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=session_id,
             )
-            initialization = await SessionInitializationRepository().get_by_session_id(
-                session,
-                session_id=session_id,
-            )
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANED
-        assert initialization is not None
-        assert initialization.status is SessionInitializationStatus.CLEANED
 
     async def test_cleanup_rejects_path_without_matching_ownership_boundary(
         self,
@@ -1458,39 +1409,3 @@ class TestSessionGitWorktreeService:
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
         assert [call["operation"] for call in runner.calls] == ["create_git_worktree"]
-
-    async def test_explicit_project_mode_still_bootstraps_noop_initialization(
-        self,
-        rdb_session_manager: SessionManager[AsyncSession],
-    ) -> None:
-        """Explicit Project mode continues to use no-op initialization."""
-        async with rdb_session_manager() as session:
-            _, user_id, agent_id = await _create_agent_context(session, "explicit")
-        input_service = _input_service(
-            rdb_session_manager,
-            _service(rdb_session_manager, _RunnerOperations()),
-        )
-
-        result = await input_service.create_team_session_with_buffered_input(
-            agent_id=agent_id,
-            message=InputMessage(
-                text="start explicit",
-                user_id=user_id,
-                headers=[],
-                metadata={"source": "chat"},
-                attachments=[],
-            ),
-            user_id=user_id,
-            existing_project_paths=["/workspace/agent/app"],
-            setup_actions=[],
-            client_request_id="explicit-project",
-        )
-
-        assert isinstance(result, Success)
-        async with rdb_session_manager() as session:
-            initialization = await SessionInitializationRepository().get_by_session_id(
-                session,
-                session_id=result.value.agent_session.id,
-            )
-        assert initialization is not None
-        assert initialization.status is SessionInitializationStatus.READY

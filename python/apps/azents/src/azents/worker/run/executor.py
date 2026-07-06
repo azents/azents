@@ -168,6 +168,7 @@ _NON_ACTIONABLE_TAIL_EVENT_KINDS = {
     EventKind.COMPACTION_MARKER,
     EventKind.COMPACTION_SUMMARY,
     EventKind.ACTION_MESSAGE,
+    EventKind.ACTION_EXECUTION_RESULT,
     EventKind.SYSTEM_ERROR,
 }
 
@@ -1343,6 +1344,18 @@ class RunExecutor:
                     },
                 )
 
+        async def publish_history_event(event: Event) -> None:
+            try:
+                await self.broadcast.publish(
+                    session_id,
+                    chat_history_event_appended_dump(event),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to broadcast action execution history event",
+                    extra={"session_id": session_id, "event_id": event.id},
+                )
+
         action = payload.action
         match action:
             case CreateGitWorktreeAction():
@@ -1352,6 +1365,7 @@ class RunExecutor:
                     action_event_id=event.id,
                     action=action,
                     on_projection_updated=publish_projection,
+                    on_history_event_appended=publish_history_event,
                 )
             case _:
                 return GitWorktreeActionExecutionResult(

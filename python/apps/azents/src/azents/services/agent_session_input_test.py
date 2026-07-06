@@ -28,7 +28,6 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer
-from azents.repos.session_initialization import SessionInitializationRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
@@ -39,7 +38,6 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
-from azents.services.session_initialization import SessionInitializationService
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .agent_session_input import (
@@ -185,16 +183,6 @@ def _input_buffer_service(
     )
 
 
-def _session_initialization_service(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> SessionInitializationService:
-    """Create SessionInitializationService for integration tests."""
-    return SessionInitializationService(
-        session_initialization_repository=SessionInitializationRepository(),
-        session_manager=rdb_session_manager,
-    )
-
-
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
@@ -286,9 +274,6 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             input_buffer_service=input_buffer_service,
-            session_initialization_service=_session_initialization_service(
-                rdb_session_manager
-            ),
             session_manager=rdb_session_manager,
         )
 
@@ -356,9 +341,6 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
-            session_initialization_service=_session_initialization_service(
-                rdb_session_manager
-            ),
             session_manager=rdb_session_manager,
         )
 
@@ -457,9 +439,6 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
-            session_initialization_service=_session_initialization_service(
-                rdb_session_manager
-            ),
             session_manager=rdb_session_manager,
         )
 
@@ -515,9 +494,6 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
-            session_initialization_service=_session_initialization_service(
-                rdb_session_manager
-            ),
             session_manager=rdb_session_manager,
         )
 
@@ -575,9 +551,6 @@ class TestAgentSessionInputService:
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
-            session_initialization_service=_session_initialization_service(
-                rdb_session_manager
-            ),
             session_manager=rdb_session_manager,
         )
 

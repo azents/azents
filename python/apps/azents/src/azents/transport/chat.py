@@ -14,8 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from azents.engine.events.types import Attachment as EventAttachment
 from azents.engine.events.types import Event
 from azents.repos.action_execution.data import ActionExecutionProjection
-from azents.repos.session_initialization.data import SessionInitializationEvent
-from azents.services.session_initialization import SessionInitializationProjection
 
 if TYPE_CHECKING:
     from azents.services.chat.data import ChatLiveRunState
@@ -42,13 +40,6 @@ class ChatAttachmentSnapshot(BaseModel):
     preview_thumbnail_width: int | None = None
     preview_thumbnail_height: int | None = None
     preview_generated_at: datetime.datetime | None = None
-
-
-def _datetime_dump(value: datetime.datetime | None) -> str | None:
-    """Convert an optional datetime to JSON transport text."""
-    if value is None:
-        return None
-    return value.isoformat().replace("+00:00", "Z")
 
 
 _ATTACHMENT_KEYS = {
@@ -183,70 +174,6 @@ def chat_action_execution_updated_dump(
         "type": "action_execution_updated",
         "session_id": projection.execution.session_id,
         "action_execution": projection.model_dump(mode="json"),
-    }
-
-
-def chat_session_initialization_updated_dump(
-    projection: SessionInitializationProjection,
-) -> dict[str, object]:
-    """Convert session initialization update to chat WS wire dict."""
-    initialization = projection.initialization
-    return {
-        "type": "session_initialization_updated",
-        "session_id": initialization.session_id,
-        "initialization": {
-            "id": initialization.id,
-            "status": initialization.status.value,
-            "failure_summary": initialization.failure_summary,
-            "retry_count": initialization.retry_count,
-            "started_at": _datetime_dump(initialization.started_at),
-            "completed_at": _datetime_dump(initialization.completed_at),
-            "failed_at": _datetime_dump(initialization.failed_at),
-            "canceled_at": _datetime_dump(initialization.canceled_at),
-            "cleaned_at": _datetime_dump(initialization.cleaned_at),
-            "updated_at": _datetime_dump(initialization.updated_at),
-            "steps": [
-                {
-                    "id": step.id,
-                    "sequence": step.sequence,
-                    "step_key": step.step_key,
-                    "step_type": step.step_type.value,
-                    "status": step.status.value,
-                    "blocking": step.blocking,
-                    "retryable": step.retryable,
-                    "attempt": step.attempt,
-                    "depends_on_step_keys": list(step.depends_on_step_keys),
-                    "resource_descriptors": list(step.resource_descriptors),
-                    "failure_reason": step.failure_reason,
-                    "started_at": _datetime_dump(step.started_at),
-                    "completed_at": _datetime_dump(step.completed_at),
-                    "failed_at": _datetime_dump(step.failed_at),
-                    "created_at": _datetime_dump(step.created_at),
-                    "updated_at": _datetime_dump(step.updated_at),
-                }
-                for step in projection.steps
-            ],
-        },
-    }
-
-
-def chat_session_initialization_event_appended_dump(
-    event: SessionInitializationEvent,
-) -> dict[str, object]:
-    """Convert session initialization event append to chat WS wire dict."""
-    return {
-        "type": "session_initialization_event_appended",
-        "session_id": event.session_id,
-        "event": {
-            "id": event.id,
-            "step_id": event.step_id,
-            "sequence": event.sequence,
-            "kind": event.kind.value,
-            "command_argv": event.command_argv,
-            "content": event.content,
-            "exit_code": event.exit_code,
-            "created_at": _datetime_dump(event.created_at),
-        },
     }
 
 

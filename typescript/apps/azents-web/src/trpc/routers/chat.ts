@@ -26,7 +26,6 @@ import {
   chatV1GetAgentSessionContext,
   chatV1GetAgentSessionProjectDefaults,
   chatV1GetAgentWorkspace,
-  chatV1GetSessionInitialization,
   chatV1GetSessionProjectBrowserManifest,
   chatV1IssueWsTicket,
   chatV1ListAgentProjectPresets,
@@ -44,7 +43,6 @@ import {
   chatV1RejectAgentProjectRegistrationRequest,
   chatV1RetryActionExecution,
   chatV1RetryFailedRun,
-  chatV1RetrySessionInitialization,
   chatV1StatAgentWorkspacePath,
   chatV1StopSessionRun,
   chatV1UpdateAgentSessionTitle,
@@ -608,46 +606,6 @@ export const chatRouter = router({
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",
-        });
-      }
-    }),
-
-  getSessionInitialization: publicProcedure
-    .input(z.object({ sessionId: z.string().min(1) }))
-    .query(async ({ ctx, input }) => {
-      try {
-        const { data } = await chatV1GetSessionInitialization({
-          client: ctx.apiClient,
-          path: { session_id: input.sessionId },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-        });
-      }
-    }),
-
-  retrySessionInitialization: publicProcedure
-    .input(
-      z.object({ agentId: z.string().min(1), sessionId: z.string().min(1) }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        await chatV1RetrySessionInitialization({
-          client: ctx.apiClient,
-          path: { agent_id: input.agentId, session_id: input.sessionId },
-          throwOnError: true,
-        });
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-          409: "CONFLICT",
         });
       }
     }),
