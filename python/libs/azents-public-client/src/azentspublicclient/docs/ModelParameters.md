@@ -7,7 +7,8 @@ LLM model parameters.  Every field is optional; unset fields use model defaults.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **temperature** | **float** |  | [optional] 
-**max_tokens** | **int** |  | [optional] 
+**context_window_tokens** | **int** |  | [optional] 
+**max_output_tokens** | **int** |  | [optional] 
 **top_p** | **float** |  | [optional] 
 **top_k** | **int** |  | [optional] 
 **stop_sequences** | **List[str]** |  | [optional] 

@@ -170,7 +170,7 @@ class LiteLLMResponsesLowerer:
         provider_id: LLMProvider | None = None,
         credential_kwargs: dict[str, object] | None = None,
         temperature: float | None = None,
-        max_tokens: int | None = None,
+        max_output_tokens: int | None = None,
         top_p: float | None = None,
         stop: list[str] | None = None,
         reasoning_effort: str | None = None,
@@ -188,7 +188,7 @@ class LiteLLMResponsesLowerer:
         self._provider_id = provider_id
         self._credential_kwargs = dict(credential_kwargs or {})
         self._temperature = temperature
-        self._max_tokens = max_tokens
+        self._max_output_tokens = max_output_tokens
         self._top_p = top_p
         self._stop = list(stop) if stop is not None else None
         self._reasoning_effort = reasoning_effort
@@ -279,8 +279,8 @@ class LiteLLMResponsesLowerer:
                 kwargs.setdefault("prompt_cache_key", prompt_cache_key)
         if self._temperature is not None:
             kwargs["temperature"] = self._temperature
-        if self._max_tokens is not None:
-            kwargs["max_output_tokens"] = self._max_tokens
+        if self._max_output_tokens is not None:
+            kwargs["max_output_tokens"] = self._max_output_tokens
         if self._top_p is not None:
             kwargs["top_p"] = self._top_p
         if self._stop is not None:

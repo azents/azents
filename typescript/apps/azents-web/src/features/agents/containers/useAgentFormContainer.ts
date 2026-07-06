@@ -81,13 +81,25 @@ export interface AgentFormContainerOutput {
 
 function buildModelParameters(values: AgentFormValues): ModelParameters | null {
   const hasBuiltinTools = values.builtin_tools.length > 0;
-  const hasModelParams = values.reasoning_effort || hasBuiltinTools;
+  const hasContextWindowTokens = values.context_window_tokens != null;
+  const hasMaxOutputTokens = values.max_output_tokens != null;
+  const hasModelParams =
+    values.reasoning_effort ||
+    hasContextWindowTokens ||
+    hasMaxOutputTokens ||
+    hasBuiltinTools;
   if (!hasModelParams) {
     return null;
   }
   return {
     ...(values.reasoning_effort
       ? { reasoning_effort: values.reasoning_effort }
+      : {}),
+    ...(hasContextWindowTokens
+      ? { context_window_tokens: values.context_window_tokens }
+      : {}),
+    ...(hasMaxOutputTokens
+      ? { max_output_tokens: values.max_output_tokens }
       : {}),
     ...(hasBuiltinTools
       ? {

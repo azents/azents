@@ -84,7 +84,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                                     ], ), 
                             parameters = azentspublicclient.models.model_parameter_capabilities.ModelParameterCapabilities(
                                 temperature = True, 
-                                max_tokens = True, 
+                                max_output_tokens = True, 
                                 top_p = True, 
                                 top_k = True, 
                                 stop_sequences = True, ), 
@@ -154,7 +154,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                                     ], ), 
                             parameters = azentspublicclient.models.model_parameter_capabilities.ModelParameterCapabilities(
                                 temperature = True, 
-                                max_tokens = True, 
+                                max_output_tokens = True, 
                                 top_p = True, 
                                 top_k = True, 
                                 stop_sequences = True, ), 

@@ -36,7 +36,7 @@ class TestModelParameterCapabilities(unittest.TestCase):
         if include_optional:
             return ModelParameterCapabilities(
                 temperature = True,
-                max_tokens = True,
+                max_output_tokens = True,
                 top_p = True,
                 top_k = True,
                 stop_sequences = True

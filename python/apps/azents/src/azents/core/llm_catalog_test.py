@@ -45,7 +45,7 @@ def test_model_capabilities_serializes_required_top_level_keys() -> None:
     assert data["built_in_tools"] == {"supported": []}
     assert data["parameters"] == {
         "temperature": False,
-        "max_tokens": False,
+        "max_output_tokens": False,
         "top_p": False,
         "top_k": False,
         "stop_sequences": False,

@@ -63,8 +63,15 @@ class ModelParameters(BaseModel):
     temperature: float | None = Field(
         default=None, ge=0.0, le=2.0, description="Generation temperature (0.0-2.0)"
     )
-    max_tokens: int | None = Field(
-        default=None, ge=1, description="Maximum token count"
+    context_window_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="Agent-level context window cap for input budgeting",
+    )
+    max_output_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum output token count",
     )
     top_p: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Top-p sampling (0.0-1.0)"

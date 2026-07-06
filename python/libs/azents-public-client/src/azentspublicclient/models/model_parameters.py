@@ -29,14 +29,15 @@ class ModelParameters(BaseModel):
     LLM model parameters.  Every field is optional; unset fields use model defaults.
     """ # noqa: E501
     temperature: Optional[Union[Annotated[float, Field(le=2.0, strict=True, ge=0.0)], Annotated[int, Field(le=2, strict=True, ge=0)]]] = None
-    max_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
+    context_window_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
+    max_output_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     top_p: Optional[Union[Annotated[float, Field(le=1.0, strict=True, ge=0.0)], Annotated[int, Field(le=1, strict=True, ge=0)]]] = None
     top_k: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     stop_sequences: Optional[Annotated[List[StrictStr], Field(max_length=4)]] = None
     reasoning_effort: Optional[StrictStr] = None
     builtin_tools: Optional[List[BuiltinToolConfig]] = Field(default=None, description="Built-in tool list to enable")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["temperature", "max_tokens", "top_p", "top_k", "stop_sequences", "reasoning_effort", "builtin_tools"]
+    __properties: ClassVar[List[str]] = ["temperature", "context_window_tokens", "max_output_tokens", "top_p", "top_k", "stop_sequences", "reasoning_effort", "builtin_tools"]
 
     @field_validator('reasoning_effort')
     def reasoning_effort_validate_enum(cls, value):
@@ -106,10 +107,15 @@ class ModelParameters(BaseModel):
         if self.temperature is None and "temperature" in self.model_fields_set:
             _dict['temperature'] = None
 
-        # set to None if max_tokens (nullable) is None
+        # set to None if context_window_tokens (nullable) is None
         # and model_fields_set contains the field
-        if self.max_tokens is None and "max_tokens" in self.model_fields_set:
-            _dict['max_tokens'] = None
+        if self.context_window_tokens is None and "context_window_tokens" in self.model_fields_set:
+            _dict['context_window_tokens'] = None
+
+        # set to None if max_output_tokens (nullable) is None
+        # and model_fields_set contains the field
+        if self.max_output_tokens is None and "max_output_tokens" in self.model_fields_set:
+            _dict['max_output_tokens'] = None
 
         # set to None if top_p (nullable) is None
         # and model_fields_set contains the field
@@ -144,7 +150,8 @@ class ModelParameters(BaseModel):
 
         _obj = cls.model_validate({
             "temperature": obj.get("temperature"),
-            "max_tokens": obj.get("max_tokens"),
+            "context_window_tokens": obj.get("context_window_tokens"),
+            "max_output_tokens": obj.get("max_output_tokens"),
             "top_p": obj.get("top_p"),
             "top_k": obj.get("top_k"),
             "stop_sequences": obj.get("stop_sequences"),

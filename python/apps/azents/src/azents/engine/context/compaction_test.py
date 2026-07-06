@@ -163,7 +163,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text="[User]: hello",
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 
@@ -202,7 +202,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text="[User]: hello",
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 
@@ -243,7 +243,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text="[User]: hello",
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 
@@ -285,7 +285,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text="[User]: hello",
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 
@@ -333,7 +333,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text="[User]: hello",
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 
@@ -372,7 +372,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text="[User]: hello",
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 
@@ -414,7 +414,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text="[User]: hello",
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 
@@ -444,7 +444,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text="[User]: hello",
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 
@@ -503,7 +503,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text=conversation_text,
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 
@@ -558,7 +558,7 @@ class TestSummarizeTextWithModel:
                 system_prompt="summarize system",
                 user_prompt="summarize user\n",
                 conversation_text="[User]: hello",
-                max_tokens=4000,
+                max_output_tokens=4000,
                 session_id="session-1",
             )
 
@@ -606,7 +606,7 @@ class TestSummarizeTextWithModel:
             system_prompt="summarize system",
             user_prompt="summarize user\n",
             conversation_text=conversation_text,
-            max_tokens=4000,
+            max_output_tokens=4000,
             session_id="session-1",
         )
 

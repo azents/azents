@@ -84,7 +84,7 @@ class RunRequest:
     model_developer: LLMModelDeveloper | None = None
     """Upstream LLM model developer, not provider-specific host."""
     temperature: float | None = None
-    max_tokens: int | None = None
+    max_output_tokens: int | None = None
     top_p: float | None = None
     stop: list[str] | None = None
     reasoning_effort: str | None = None
@@ -92,6 +92,8 @@ class RunRequest:
         default_factory=list[BuiltinToolSpec],
     )
     max_input_tokens: int = 128_000
+    context_window_tokens: int | None = None
+    """Agent-level context window cap for input budgeting. None means no override."""
     max_turns: int | None = None
     """SDK Runner max_turns. None means no turn limit."""
     compaction_model: str | None = None
@@ -124,12 +126,13 @@ class RunRequest:
     def effective_max_input_tokens(self) -> int:
         """max_input_tokens used to calculate compaction threshold.
 
-        When compaction model is specified, use the smaller context window between main
-        model and compaction model.
+        Use the smallest context window among main model, compaction model, and
+        optional Agent context window cap.
         """
         return compute_effective_context_window_tokens(
             main_max_input_tokens=self.max_input_tokens,
             compaction_max_input_tokens=self.compaction_max_input_tokens,
+            context_window_tokens=self.context_window_tokens,
         ).effective_max_input_tokens
 
     @property

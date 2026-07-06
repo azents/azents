@@ -2090,9 +2090,9 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if timezone is not None:
-
+            
             _query_params.append(('timezone', timezone))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -2691,9 +2691,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if timezone is not None:
-
+            
             _query_params.append(('timezone', timezone))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -4674,9 +4674,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if path is not None:
-
+            
             _query_params.append(('path', path))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -4950,7 +4950,7 @@ class ChatV1Api:
         if 'Accept' not in _header_params:
             _header_params['Accept'] = self.api_client.select_header_accept(
                 [
-                    'application/octet-stream',
+                    'application/octet-stream', 
                     'application/json'
                 ]
             )
@@ -5233,9 +5233,9 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if timezone is not None:
-
+            
             _query_params.append(('timezone', timezone))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -5823,9 +5823,9 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -8533,17 +8533,17 @@ class ChatV1Api:
             _path_params['session_id'] = session_id
         # process the query parameters
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         if before is not None:
-
+            
             _query_params.append(('before', before))
-
+            
         if after is not None:
-
+            
             _query_params.append(('after', after))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -9906,9 +9906,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if source_project_path is not None:
-
+            
             _query_params.append(('source_project_path', source_project_path))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -10492,13 +10492,13 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if path is not None:
-
+            
             _query_params.append(('path', path))
-
+            
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -11964,9 +11964,9 @@ class ChatV1Api:
             _path_params['agent_id'] = agent_id
         # process the query parameters
         if path is not None:
-
+            
             _query_params.append(('path', path))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter

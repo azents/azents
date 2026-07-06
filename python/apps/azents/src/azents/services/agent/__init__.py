@@ -907,6 +907,11 @@ class AgentService:
         return compute_effective_context_window_tokens(
             main_max_input_tokens=main_max_input_tokens,
             compaction_max_input_tokens=compaction_max_input_tokens,
+            context_window_tokens=(
+                agent.model_parameters.context_window_tokens
+                if agent.model_parameters is not None
+                else None
+            ),
         )
 
     async def _resolve_avatar(self, stored: StoredImage | None) -> UploadedImage | None:

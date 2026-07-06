@@ -15,6 +15,8 @@ export const agentFormSchema = z.object({
   role: z.enum(["agent", "subagent"]),
   enabled: z.boolean(),
   reasoning_effort: z.enum(["low", "medium", "high"]).nullable().optional(),
+  context_window_tokens: z.number().int().positive().nullable().optional(),
+  max_output_tokens: z.number().int().positive().nullable().optional(),
   shell_enabled: z.boolean().optional(),
   memory_enabled: z.boolean().optional(),
   max_turns: z.number().int().positive().nullable().optional(),

@@ -470,6 +470,12 @@
       "inheritModelModelIdentifier": "親エージェントのモデル",
       "systemPromptLabel": "システムプロンプト",
       "systemPromptPlaceholder": "エージェントの役割と行動指針を入力してください",
+      "contextWindowTokensLabel": "コンテキストウィンドウ上限",
+      "contextWindowTokensDescription": "任意です。このエージェントで使うモデル入力予算を制限します。Runtime はこの値、メインモデル、軽量モデルのうち最小値を使用します。",
+      "contextWindowTokensPlaceholder": "モデル制限を使用",
+      "maxOutputTokensLabel": "最大出力トークン",
+      "maxOutputTokensDescription": "任意です。応答生成の長さを制限します。空欄の場合はプロバイダーの既定値を使用します。",
+      "maxOutputTokensPlaceholder": "プロバイダー既定値",
       "maxTurnsLabel": "最大ターン数",
       "maxTurnsDescription": "任意です。指定した agent ターン数に達すると実行を停止します。空欄の場合は無制限です。",
       "maxTurnsPlaceholder": "無制限",
@@ -533,7 +539,7 @@
         },
         "model": {
           "label": "Model",
-          "description": "Main model, lightweight model, reasoning, and turn limit"
+          "description": "メインモデル、軽量モデル、トークン上限、推論、最大ターン"
         },
         "capabilities": {
           "label": "Tools and subagents",

@@ -27,12 +27,12 @@ class ModelParameterCapabilities(BaseModel):
     Configurable generation parameters supported by the model.
     """ # noqa: E501
     temperature: Optional[StrictBool] = False
-    max_tokens: Optional[StrictBool] = False
+    max_output_tokens: Optional[StrictBool] = False
     top_p: Optional[StrictBool] = False
     top_k: Optional[StrictBool] = False
     stop_sequences: Optional[StrictBool] = False
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["temperature", "max_tokens", "top_p", "top_k", "stop_sequences"]
+    __properties: ClassVar[List[str]] = ["temperature", "max_output_tokens", "top_p", "top_k", "stop_sequences"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -93,7 +93,7 @@ class ModelParameterCapabilities(BaseModel):
 
         _obj = cls.model_validate({
             "temperature": obj.get("temperature") if obj.get("temperature") is not None else False,
-            "max_tokens": obj.get("max_tokens") if obj.get("max_tokens") is not None else False,
+            "max_output_tokens": obj.get("max_output_tokens") if obj.get("max_output_tokens") is not None else False,
             "top_p": obj.get("top_p") if obj.get("top_p") is not None else False,
             "top_k": obj.get("top_k") if obj.get("top_k") is not None else False,
             "stop_sequences": obj.get("stop_sequences") if obj.get("stop_sequences") is not None else False

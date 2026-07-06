@@ -7,7 +7,7 @@ Configurable generation parameters supported by the model.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **temperature** | **bool** |  | [optional] [default to False]
-**max_tokens** | **bool** |  | [optional] [default to False]
+**max_output_tokens** | **bool** |  | [optional] [default to False]
 **top_p** | **bool** |  | [optional] [default to False]
 **top_k** | **bool** |  | [optional] [default to False]
 **stop_sequences** | **bool** |  | [optional] [default to False]

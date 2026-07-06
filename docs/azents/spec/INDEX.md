@@ -12,7 +12,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-02 | 36 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-06 | 37 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-06 | 86 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-01 | 8 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-02 | 2 |
@@ -31,11 +31,11 @@ Details of all living specs. Synchronized from frontmatter.
 | [Background Tool Call](flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-06 | 15 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
-| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-01 | 17 |
+| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-06 | 18 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-03 | 9 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-06 | 12 |
-| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-03 | 10 |
+| [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-06 | 11 |
 | [Subagent Delegation Flow](flow/subagent-delegation.md) | @Hardtack | 2026-07-01 | 13 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-06-15 | 5 |

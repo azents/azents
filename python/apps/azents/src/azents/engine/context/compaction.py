@@ -68,7 +68,7 @@ class SummaryModelCall(Protocol):
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_tokens: int,
+        max_output_tokens: int,
         session_id: str | None = None,
     ) -> Awaitable[str]:
         """Call the summary model."""
@@ -229,11 +229,14 @@ async def summarize_text_with_model(
     system_prompt: str,
     user_prompt: str,
     conversation_text: str,
-    max_tokens: int,
+    max_output_tokens: int,
     session_id: str | None = None,
 ) -> str:
     """Create compaction summary with LiteLLM Responses API."""
-    endpoint_max_tokens = responses_max_output_tokens(provider, max_tokens)
+    endpoint_max_output_tokens = responses_max_output_tokens(
+        provider,
+        max_output_tokens,
+    )
 
     L = bind_extra(
         logger,
@@ -243,8 +246,8 @@ async def summarize_text_with_model(
             "session_id": session_id,
             "conversation_chars": len(conversation_text),
             "conversation_estimated_tokens": _estimated_tokens(conversation_text),
-            "requested_max_tokens": max_tokens,
-            "endpoint_max_output_tokens": endpoint_max_tokens,
+            "requested_max_output_tokens": max_output_tokens,
+            "endpoint_max_output_tokens": endpoint_max_output_tokens,
         },
     )
     current_conversation_text = conversation_text
@@ -269,7 +272,7 @@ async def summarize_text_with_model(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 conversation_text=current_conversation_text,
-                endpoint_max_tokens=endpoint_max_tokens,
+                endpoint_max_output_tokens=endpoint_max_output_tokens,
             )
         except CompactionContextWindowExceededError:
             if retry_index >= len(_SUMMARY_CONTEXT_RETRY_KEEP_RATIOS):
@@ -315,7 +318,7 @@ async def _summarize_text_attempt(
     system_prompt: str,
     user_prompt: str,
     conversation_text: str,
-    endpoint_max_tokens: int | None,
+    endpoint_max_output_tokens: int | None,
 ) -> str:
     """Try creating summary once with LiteLLM Responses API."""
     try:
@@ -326,7 +329,7 @@ async def _summarize_text_attempt(
             input_items=[{"role": "user", "content": user_prompt + conversation_text}],
             instructions=system_prompt,
             stream=True,
-            max_output_tokens=endpoint_max_tokens,
+            max_output_tokens=endpoint_max_output_tokens,
         )
         return await extract_response_text(response)
     except ResponsesOutputError as exc:
