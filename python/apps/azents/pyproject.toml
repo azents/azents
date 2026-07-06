@@ -21,7 +21,7 @@ dependencies = [
     # Auth & Security
     "bcrypt==5.0.0",
     "pyjwt==2.13.0",
-    "cryptography==48.0.1",
+    "cryptography==49.0.0",
     # Utilities
     "pytz==2026.2",
     "tzdata==2026.2",
