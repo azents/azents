@@ -102,19 +102,10 @@ class GoalStateStore:
     async def load(self, agent_id: str, session_id: str) -> GoalState:
         """Fetch session goal state."""
         async with self._session_manager() as session:
-            return await self.load_with_session(session, agent_id, session_id)
-
-    async def load_with_session(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        session_id: str,
-    ) -> GoalState:
-        """Fetch session goal state using an existing database session."""
-        handle = await self._make_handle(session, agent_id, session_id)
-        if handle is None:
-            return GoalState()
-        return await handle.load(default_factory=GoalState)
+            handle = await self._make_handle(session, agent_id, session_id)
+            if handle is None:
+                return GoalState()
+            return await handle.load(default_factory=GoalState)
 
     async def update(
         self,

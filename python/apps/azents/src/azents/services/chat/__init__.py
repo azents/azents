@@ -746,19 +746,11 @@ class ChatSessionService:
             )
             goal_store = GoalStateStore(session_manager=self.session_manager)
             goal = GoalStateSnapshot.from_state(
-                await goal_store.load_with_session(
-                    session,
-                    agent_session.agent_id,
-                    session_id,
-                )
+                await goal_store.load(agent_session.agent_id, session_id)
             )
             todo_store = TodoStateStore(session_manager=self.session_manager)
             todo = TodoStateSnapshot.from_state(
-                await todo_store.load_with_session(
-                    session,
-                    agent_session.agent_id,
-                    session_id,
-                )
+                await todo_store.load(agent_session.agent_id, session_id)
             )
             terminal_action_statuses = {
                 ActionExecutionStatus.COMPLETED,
