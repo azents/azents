@@ -1,6 +1,9 @@
 import { ColorSchemeScript } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages, getTranslations } from "next-intl/server";
+import { unstable_noStore as noStore } from "next/cache";
+import { getPublicConfig } from "@/config";
+import { GoogleAnalytics } from "@/shared/components/GoogleAnalytics";
 import { AZENTS_BRAND } from "@/shared/lib/brand";
 import {
   DEFAULT_LOCALE,
@@ -88,8 +91,11 @@ export default async function RootLayout({
 }: {
   children: ReactNode;
 }): Promise<React.ReactElement> {
+  noStore();
+
   const locale = await getLocale();
   const messages = await getMessages();
+  const { googleAnalyticsId } = getPublicConfig();
 
   const supportedLocale: SupportedLocale = isSupportedLocale(locale)
     ? locale
@@ -106,6 +112,9 @@ export default async function RootLayout({
         />
       </head>
       <body>
+        {googleAnalyticsId ? (
+          <GoogleAnalytics measurementId={googleAnalyticsId} />
+        ) : null}
         <NextIntlClientProvider messages={messages}>
           <AppMantineProvider forceColorScheme="dark">
             <LocaleProvider locale={supportedLocale}>{children}</LocaleProvider>

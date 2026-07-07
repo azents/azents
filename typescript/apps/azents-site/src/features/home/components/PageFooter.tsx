@@ -3,6 +3,7 @@
 import { Anchor, Box, Container, Group, rem, Text } from "@mantine/core";
 import { IconBrandGithub, IconMessageCircle } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { trackCtaClick, trackDiscussionClick } from "@/shared/lib/analytics";
 import { SITE_LINKS } from "@/shared/lib/links";
 
 export function PageFooter(): React.ReactElement {
@@ -22,7 +23,18 @@ export function PageFooter(): React.ReactElement {
             {t("tagline")}
           </Text>
           <Group gap="lg">
-            <Anchor c="dimmed" href={SITE_LINKS.github} target="_blank">
+            <Anchor
+              c="dimmed"
+              href={SITE_LINKS.github}
+              onClick={() =>
+                trackCtaClick({
+                  ctaId: "footer_github",
+                  ctaLocation: "footer",
+                  destinationUrl: SITE_LINKS.github,
+                })
+              }
+              target="_blank"
+            >
               <Group gap={rem(6)}>
                 <IconBrandGithub size={16} />
                 <Text span size="sm">
@@ -30,7 +42,12 @@ export function PageFooter(): React.ReactElement {
                 </Text>
               </Group>
             </Anchor>
-            <Anchor c="dimmed" href={SITE_LINKS.issues} target="_blank">
+            <Anchor
+              c="dimmed"
+              href={SITE_LINKS.issues}
+              onClick={() => trackDiscussionClick("footer")}
+              target="_blank"
+            >
               <Group gap={rem(6)}>
                 <IconMessageCircle size={16} />
                 <Text span size="sm">
