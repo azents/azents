@@ -2,12 +2,19 @@ import { ColorSchemeScript } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages, getTranslations } from "next-intl/server";
 import { AZENTS_BRAND } from "@/shared/lib/brand";
-import { SITE_LINKS } from "@/shared/lib/links";
 import {
   DEFAULT_LOCALE,
   isSupportedLocale,
   type SupportedLocale,
 } from "@/shared/lib/locale";
+import {
+  LOCALE_TO_OG_LOCALE,
+  OG_IMAGE,
+  SEO_KEYWORDS,
+  SITE_NAME,
+  SITE_URL,
+  STRUCTURED_DATA,
+} from "@/shared/lib/seo";
 import { LocaleProvider } from "@/shared/providers/locale";
 import { AppMantineProvider } from "@/shared/providers/mantine";
 import type { Metadata } from "next";
@@ -18,29 +25,60 @@ import "@mantine/core/styles.css";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getLocale();
+  const supportedLocale: SupportedLocale = isSupportedLocale(locale)
+    ? locale
+    : DEFAULT_LOCALE;
   const t = await getTranslations("metadata");
+  const title = t("title");
+  const description = t("description");
 
   return {
-    title: t("title"),
-    description: t("description"),
+    metadataBase: new URL(SITE_URL),
+    alternates: {
+      canonical: "/",
+    },
+    applicationName: SITE_NAME,
+    authors: [{ name: "Azents", url: SITE_URL }],
+    category: "developer tools",
+    creator: "Azents",
+    description,
     icons: {
+      apple: [{ url: AZENTS_BRAND.icon, sizes: "180x180" }],
       icon: [
         { url: "/brand/azents/favicon-32.png", sizes: "32x32" },
         { url: "/brand/azents/favicon-16.png", sizes: "16x16" },
       ],
     },
+    keywords: SEO_KEYWORDS,
+    manifest: "/manifest.webmanifest",
     openGraph: {
-      title: t("title"),
-      description: t("description"),
-      images: [{ url: AZENTS_BRAND.openGraphImage, width: 1200, height: 630 }],
+      description,
+      images: [OG_IMAGE],
+      locale: LOCALE_TO_OG_LOCALE[supportedLocale],
+      siteName: SITE_NAME,
+      title,
       type: "website",
-      url: SITE_LINKS.github,
+      url: SITE_URL,
     },
+    publisher: "Azents",
+    robots: {
+      follow: true,
+      googleBot: {
+        follow: true,
+        index: true,
+        "max-image-preview": "large",
+        "max-snippet": -1,
+        "max-video-preview": -1,
+      },
+      index: true,
+    },
+    title,
     twitter: {
       card: "summary_large_image",
-      title: t("title"),
-      description: t("description"),
+      description,
       images: [AZENTS_BRAND.openGraphImage],
+      title,
     },
   };
 }
@@ -62,6 +100,10 @@ export default async function RootLayout({
     <html lang={htmlLang} suppressHydrationWarning>
       <head>
         <ColorSchemeScript forceColorScheme="dark" />
+        <script
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+          type="application/ld+json"
+        />
       </head>
       <body>
         <NextIntlClientProvider messages={messages}>
