@@ -1,6 +1,7 @@
 "use client";
 
 import { Box } from "@mantine/core";
+import { ArchitectureDeepDiveSection } from "./components/ArchitectureDeepDiveSection";
 import { ArchitectureSection } from "./components/ArchitectureSection";
 import { BootstrappingSection } from "./components/BootstrappingSection";
 import { CtaSection } from "./components/CtaSection";
@@ -20,6 +21,7 @@ export function HomePage(): React.ReactElement {
       <ProblemSection />
       <SelfHostedSection />
       <ArchitectureSection />
+      <ArchitectureDeepDiveSection />
       <BootstrappingSection />
       <FeaturesSection />
       <RoadmapSection />

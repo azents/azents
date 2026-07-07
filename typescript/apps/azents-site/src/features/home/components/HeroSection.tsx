@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Anchor,
   Box,
   Button,
   Container,
@@ -11,9 +10,9 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconBrandGithub, IconMessageCircle } from "@tabler/icons-react";
+import { IconBrandGithub } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { trackCtaClick, trackDiscussionClick } from "@/shared/lib/analytics";
+import { trackCtaClick } from "@/shared/lib/analytics";
 import { SITE_LINKS } from "@/shared/lib/links";
 
 export function HeroSection(): React.ReactElement {
@@ -85,17 +84,6 @@ export function HeroSection(): React.ReactElement {
               {t("cta.github")}
             </Button>
           </Group>
-          <Anchor
-            c="dimmed"
-            href={SITE_LINKS.issues}
-            onClick={() => trackDiscussionClick("hero")}
-            target="_blank"
-          >
-            <Group gap="xs">
-              <IconMessageCircle size={18} />
-              <Text span>{t("discussion")}</Text>
-            </Group>
-          </Anchor>
         </Stack>
       </Container>
     </Box>

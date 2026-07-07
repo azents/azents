@@ -2,7 +2,6 @@
 
 import {
   ActionIcon,
-  Anchor,
   Box,
   Button,
   Container,
@@ -14,7 +13,7 @@ import {
 import { IconBrandGithub } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { AppLogo } from "@/shared/components/AppLogo";
-import { trackCtaClick, trackSectionNavClick } from "@/shared/lib/analytics";
+import { trackCtaClick } from "@/shared/lib/analytics";
 import { SITE_LINKS } from "@/shared/lib/links";
 import { LocaleSwitcher } from "./LocaleSwitcher";
 
@@ -35,33 +34,11 @@ export function Header(): React.ReactElement {
     >
       <Container size="xl">
         <Group h={rem(68)} justify="space-between" wrap="nowrap">
-          <Anchor
-            href="#top"
-            lh={0}
-            onClick={() => trackSectionNavClick({ targetSection: "top" })}
-          >
+          <Box lh={0}>
             <AppLogo width={112} />
-          </Anchor>
+          </Box>
 
           <Group gap="xs" wrap="nowrap">
-            <Anchor
-              c="dimmed"
-              href="#architecture"
-              onClick={() =>
-                trackSectionNavClick({ targetSection: "architecture" })
-              }
-              visibleFrom="sm"
-            >
-              {t("architecture")}
-            </Anchor>
-            <Anchor
-              c="dimmed"
-              href="#roadmap"
-              onClick={() => trackSectionNavClick({ targetSection: "roadmap" })}
-              visibleFrom="sm"
-            >
-              {t("roadmap")}
-            </Anchor>
             <LocaleSwitcher />
             <Button
               component="a"
