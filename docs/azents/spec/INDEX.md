@@ -13,13 +13,13 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-06 | 38 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-06 | 86 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-07 | 87 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-01 | 8 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-02 | 2 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-06 | 45 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-06-29 | 5 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-06 | 34 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-07 | 35 |
 
 ## Flow Specs
 

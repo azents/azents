@@ -44,8 +44,6 @@ interface ProjectPanelProps {
   onSetProjectRegistrationMode: (mode: ProjectRegistrationMode) => void;
   onSetProjectRegistrationStartingRef: (ref: string | null) => void;
   onSubmitProjectRegistration: () => void;
-  onApproveRegistrationRequest: (requestId: string) => void;
-  onRejectRegistrationRequest: (requestId: string) => void;
   onDeleteProject: (projectId: string) => void;
 }
 
@@ -63,8 +61,6 @@ export function ProjectPanel({
   onSetProjectRegistrationMode,
   onSetProjectRegistrationStartingRef,
   onSubmitProjectRegistration,
-  onApproveRegistrationRequest,
-  onRejectRegistrationRequest,
   onDeleteProject,
 }: ProjectPanelProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
@@ -199,56 +195,6 @@ export function ProjectPanel({
             >
               {t("registerProjectBrowse")}
             </Button>
-          </Stack>
-        </Paper>
-
-        <Paper withBorder p="md" radius="lg">
-          <Stack gap="sm">
-            <Text size="lg" fw={700}>
-              {t("requestsTitle")}
-            </Text>
-            {projectState.registrationRequests.length === 0 ? (
-              <Text size="sm" c="dimmed">
-                {t("requestsEmpty")}
-              </Text>
-            ) : (
-              projectState.registrationRequests.map((request) => (
-                <Paper key={request.id} withBorder p="sm" radius="md">
-                  <Stack gap="sm">
-                    <Box>
-                      <Text size="sm" fw={600} truncate>
-                        {request.path}
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        {request.reason}
-                      </Text>
-                    </Box>
-                    <Group gap="xs">
-                      <Button
-                        size="xs"
-                        onClick={() => onApproveRegistrationRequest(request.id)}
-                        loading={
-                          projectState.pendingApproveRequestId === request.id
-                        }
-                      >
-                        {t("approveRequest")}
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="light"
-                        color="gray"
-                        onClick={() => onRejectRegistrationRequest(request.id)}
-                        loading={
-                          projectState.pendingRejectRequestId === request.id
-                        }
-                      >
-                        {t("rejectRequest")}
-                      </Button>
-                    </Group>
-                  </Stack>
-                </Paper>
-              ))
-            )}
           </Stack>
         </Paper>
       </Stack>

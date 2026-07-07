@@ -1,6 +1,6 @@
 # SessionWorkspaceProjectRegisterRequest
 
-Existing Agent Workspace folder Project registration request.
+Existing Agent Workspace folder Project registration payload.
 
 ## Properties
 

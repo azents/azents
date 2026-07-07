@@ -27,22 +27,10 @@ const readyProjectState: WorkspaceProjectPanelState = {
       updated_at: "2026-05-09T00:02:00Z",
     },
   ],
-  registrationRequests: [
-    {
-      id: "request-1",
-      path: "/workspace/agent/reporting",
-      reason: "Agent created this folder for a long-running analysis.",
-      status: "pending",
-      created_at: "2026-05-09T00:00:00Z",
-      updated_at: "2026-05-09T00:00:00Z",
-    },
-  ],
   registrationDialog: { type: "CLOSED" },
   isRegisteringProject: false,
   isCreatingWorktree: false,
   registerProjectError: null,
-  pendingApproveRequestId: null,
-  pendingRejectRequestId: null,
   pendingDeleteProjectId: null,
 };
 
@@ -69,8 +57,6 @@ const meta = {
     onSetProjectRegistrationMode: noop,
     onSetProjectRegistrationStartingRef: noop,
     onSubmitProjectRegistration: noop,
-    onApproveRegistrationRequest: noop,
-    onRejectRegistrationRequest: noop,
     onDeleteProject: noop,
   },
 } satisfies Meta<typeof ProjectPanel>;
@@ -101,7 +87,6 @@ export const Empty = {
     projectState: {
       ...readyProjectState,
       projects: [],
-      registrationRequests: [],
     },
   },
 } satisfies Story;

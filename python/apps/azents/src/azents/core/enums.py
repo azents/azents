@@ -383,14 +383,6 @@ class SnapshotKind(enum.StrEnum):
     DEBOUNCE = "debounce"
 
 
-class SessionWorkspaceProjectRegistrationRequestStatus(enum.StrEnum):
-    """Session Workspace Project registration request status."""
-
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-
-
 class MessageRole(enum.StrEnum):
     """Message role for chat API response (ChatMessage).
 
