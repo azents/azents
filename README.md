@@ -1,105 +1,52 @@
 # Azents
 
-Azents is an AI agent platform with a Python backend, runtime providers, web frontends, E2E fixtures, documentation, and Helm packaging in one repository.
+Managed agents, inside your cloud.
 
-## Repository Structure
+Azents is an open-source control plane for remote agent runtimes. It keeps
+sessions, tools, permissions, and execution state close to your repositories and
+private network, so managed agents can run where the work actually happens.
 
-| Path | Purpose |
-| --- | --- |
-| `python/apps/azents/` | Azents API server, worker, scheduler, and domain logic |
-| `python/apps/azents-runtime-runner/` | Runtime runner image and entrypoint |
-| `python/apps/azents-runtime-provider-docker/` | Docker runtime provider |
-| `python/apps/azents-runtime-provider-kubernetes/` | Kubernetes runtime provider |
-| `python/libs/az-common/` | Shared Python utilities |
-| `python/libs/azents-runtime-control/` | Runtime control protocol/client |
-| `python/libs/azents-public-client/` | Generated Python public API client |
-| `python/libs/azents-admin-client/` | Generated Python admin API client |
-| `typescript/apps/azents-web/` | Main Azents web application |
-| `typescript/apps/azents-admin-web/` | Admin web application |
-| `typescript/packages/azents-public-client/` | Generated TypeScript public API client |
-| `typescript/packages/azents-admin-client/` | Generated TypeScript admin API client |
-| `testenv/azents/` | Local fixtures, prerequisite checks, and E2E substrate |
-| `docs/azents/` | ADR, design notes, and living specs |
-| `infra/charts/azents/` | Helm chart |
-| `proto/azents/` | Runtime control protobuf definitions |
+Learn more at [azents.io](https://azents.io).
 
-## Local Development
+## Why Azents
 
-```console
-$ docker compose -f docker-compose.azents.yaml up -d
-```
+- **Remote runs that keep going**: Long-running agent work should not depend on a
+  laptop tab, SSH session, or local process staying alive.
+- **Runtime in your infrastructure**: Run managed agent sessions next to the
+  workspace, services, credentials, and network boundaries they need.
+- **Self-hosted control**: Keep ownership of deployment, policy, observability,
+  and data residency while using an open-source agent control plane.
+- **Team-visible work**: Track tool calls, command output, diffs, blockers, and
+  handoffs from one shared system instead of a single developer machine.
 
-Run the backend:
+## What Is In This Repository
 
-```console
-$ cd python/apps/azents
-$ uv run python -m azents
-```
+This repository contains the Azents backend, runtime providers, web apps, API
+clients, documentation, test fixtures, and Helm packaging.
 
-Run the web app:
+The main implementation areas are:
 
-```console
-$ cd typescript
-$ pnpm install
-$ pnpm run dev --filter=@azents/web
-```
+- `python/apps/azents/`: API server, workers, scheduler, and domain logic
+- `python/apps/azents-runtime-*`: runtime runner and provider packages
+- `typescript/apps/azents-web/`: Azents web application
+- `typescript/apps/azents-site/`: public Azents website
+- `docs/azents/`: ADRs, design notes, and living specs
+- `infra/charts/azents/`: Helm chart
+- `proto/azents/`: runtime control protobuf definitions
 
-## Quality Checks
+## Links
 
-Python backend:
-
-```console
-$ cd python/apps/azents
-$ uv run ruff check --fix .
-$ uv run ruff format .
-$ uv run pyright
-```
-
-Python shared library:
-
-```console
-$ cd python/libs/az-common
-$ uv run ruff check --fix .
-$ uv run ruff format .
-$ uv run pyright
-```
-
-TypeScript workspace:
-
-```console
-$ cd typescript
-$ pnpm run format
-$ pnpm run lint
-$ pnpm run typecheck
-```
-
-Azents E2E:
-
-```console
-$ cd testenv/azents/e2e
-$ uv run pytest ./src
-```
-
-## OpenAPI Clients
-
-Backend OpenAPI specs are emitted from `python/apps/azents/specs/` and consumed by Python and TypeScript generated clients.
-
-```console
-$ cd python/apps/azents
-$ uv run python src/cli/dump_openapi.py
-
-$ cd ../../../typescript
-$ pnpm run generate --filter=@azents/public-client --filter=@azents/admin-client
-```
-
-## Deployment Artifacts
-
-- Container images are built from the Azents Dockerfiles in this repository.
-- The Helm chart lives at `infra/charts/azents/`.
-- Public project domain: `azents.io`.
+- Website: [azents.io](https://azents.io)
+- Documentation: [docs/azents](./docs/azents/INDEX.md)
+- Development guide: [DEVELOPMENT.md](./DEVELOPMENT.md)
+- Trademark policy: [TRADEMARKS.md](./TRADEMARKS.md)
 
 ## License
 
 Azents source code is licensed under the [MIT License](./LICENSE).
 
-The Azents name, logo, icons, and other brand assets are not licensed under the MIT License. You may not use them in a way that suggests you are the official Azents project, an official Azents cloud or hosting provider, or endorsed by Azents without written permission. See [TRADEMARKS.md](./TRADEMARKS.md) for details.
+The Azents name, logo, icons, and other brand assets are not licensed under the
+MIT License. You may not use them in a way that suggests you are the official
+Azents project, an official Azents cloud or hosting provider, or endorsed by
+Azents without written permission. See [TRADEMARKS.md](./TRADEMARKS.md) for
+details.
