@@ -94,6 +94,7 @@
         "imageAlt": "Abstract architecture diagram showing a durable session loop separated from runtime execution.",
         "eyebrow": "01 / session loop",
         "title": "An independent session loop, decoupled from runtime execution.",
+        "mobileTitle": "An independent session loop.",
         "body": "Engine owns the agent loop and durable events. Runtime is called only when work needs files, tools, shell, or compute.",
         "diagram": {
           "sessionLabel": "durable session",
@@ -113,6 +114,7 @@
         "imageAlt": "Abstract architecture diagram showing a runtime adapter branching into multiple provider backends.",
         "eyebrow": "02 / runtime adapter",
         "title": "Providers sit behind one runtime adapter.",
+        "mobileTitle": "One adapter, many providers.",
         "body": "Kubernetes is first. The same adapter shape can map to local machines, E2B, or custom execution backends as the project grows.",
         "diagram": {
           "adapterLabel": "stable interface",
@@ -132,6 +134,7 @@
         "imageAlt": "Abstract architecture diagram showing a long-running agent timeline with durable state and handoff.",
         "eyebrow": "03 / long-running agent",
         "title": "Long-running agents need durable state.",
+        "mobileTitle": "Durable state for long runs.",
         "body": "Runs should keep their history, progress, and handoff point even when a tab closes, a worker moves, or execution is reprovisioned.",
         "diagram": {
           "railLabel": "run timeline",

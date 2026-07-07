@@ -94,6 +94,7 @@
         "imageAlt": "Durable session loop と Runtime 実行境界の分離を示す抽象 architecture diagram。",
         "eyebrow": "01 / session loop",
         "title": "Runtime execution から decouple された独立 session loop。",
+        "mobileTitle": "独立した session loop。",
         "body": "Engine が agent loop と durable events を扱い、Runtime は files、tools、shell、compute が必要なときだけ呼び出されます。",
         "diagram": {
           "sessionLabel": "durable session",
@@ -113,6 +114,7 @@
         "imageAlt": "Runtime adapter が複数の provider backend へ分岐する様子を示す抽象 architecture diagram。",
         "eyebrow": "02 / runtime adapter",
         "title": "Provider はひとつの Runtime adapter の後ろに置きます。",
+        "mobileTitle": "ひとつの adapter、複数の provider。",
         "body": "まずは Kubernetes からです。同じ adapter 形状で local machine、E2B、custom backend へ広げられるようにします。",
         "diagram": {
           "adapterLabel": "stable interface",
@@ -132,6 +134,7 @@
         "imageAlt": "Long-running agent の timeline、durable state、handoff を示す抽象 architecture diagram。",
         "eyebrow": "03 / long-running agent",
         "title": "Long-running agent には durable state が必要です。",
+        "mobileTitle": "長い run に durable state を。",
         "body": "Tab が閉じても、worker が移っても、実行環境が再作成されても、history、progress、handoff point は残るべきです。",
         "diagram": {
           "railLabel": "run timeline",

@@ -94,6 +94,7 @@
         "imageAlt": "Diagramme d'architecture abstrait montrant une session loop durable séparée de l'exécution Runtime.",
         "eyebrow": "01 / session loop",
         "title": "Une session loop indépendante, découplée du Runtime.",
+        "mobileTitle": "Une session loop indépendante.",
         "body": "L'Engine possède la boucle agent et les événements durables. Le Runtime est appelé seulement pour les files, tools, shell ou compute.",
         "diagram": {
           "sessionLabel": "durable session",
@@ -113,6 +114,7 @@
         "imageAlt": "Diagramme d'architecture abstrait montrant un runtime adapter connecté à plusieurs providers.",
         "eyebrow": "02 / runtime adapter",
         "title": "Les providers restent derrière un seul Runtime adapter.",
+        "mobileTitle": "Un adapter, plusieurs providers.",
         "body": "Kubernetes arrive en premier. La même forme d'adapter peut ensuite viser une machine locale, E2B ou des backends custom.",
         "diagram": {
           "adapterLabel": "stable interface",
@@ -132,6 +134,7 @@
         "imageAlt": "Diagramme d'architecture abstrait montrant une timeline de long-running agent avec état durable et handoff.",
         "eyebrow": "03 / long-running agent",
         "title": "Un long-running agent a besoin d'un état durable.",
+        "mobileTitle": "État durable pour les longs runs.",
         "body": "Un run doit garder son historique, sa progression et son point de reprise même si l'onglet se ferme, qu'un worker bouge ou que l'exécution est reprovisionnée.",
         "diagram": {
           "railLabel": "run timeline",

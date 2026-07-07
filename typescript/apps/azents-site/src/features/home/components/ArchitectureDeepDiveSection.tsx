@@ -100,7 +100,12 @@ function ArchitectureSlide({
               {t(`slides.${slideId}.eyebrow`)}
             </Text>
             <Title fz={{ base: rem(28), md: rem(40) }} lh={1.1} order={3}>
-              {t(`slides.${slideId}.title`)}
+              <span className={classes.desktopTitle}>
+                {t(`slides.${slideId}.title`)}
+              </span>
+              <span className={classes.mobileTitle}>
+                {t(`slides.${slideId}.mobileTitle`)}
+              </span>
             </Title>
             <Text c="dimmed" lh={1.65} size="lg">
               {t(`slides.${slideId}.body`)}

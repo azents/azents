@@ -4,8 +4,20 @@
   color: var(--mantine-color-dark-0);
 }
 
+.mobileTitle {
+  display: none;
+}
+
 @media (max-width: 48em) {
   .controls {
     display: none;
+  }
+
+  .desktopTitle {
+    display: none;
+  }
+
+  .mobileTitle {
+    display: inline;
   }
 }
