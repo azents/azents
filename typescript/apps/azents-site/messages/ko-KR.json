@@ -4,8 +4,6 @@
     "description": "내 클라우드에서 managed agents를 운영하기 위한 open-source control plane입니다."
   },
   "nav": {
-    "architecture": "아키텍처",
-    "roadmap": "로드맵",
     "github": "GitHub",
     "docs": "문서",
     "changeLanguage": "언어 변경"
@@ -15,16 +13,15 @@
     "headline": "내 클라우드에서 운영하는 managed agents.",
     "subheadline": "Azents는 agent session과 Runtime을 팀 인프라 안에서 돌리기 위한 open-source control plane입니다.",
     "supporting": "Repo, 파일, credential, internal system 옆에서 실행하세요.",
-    "discussion": "열린 이슈 보기",
     "cta": {
       "github": "GitHub",
       "docs": "문서 읽기"
     }
   },
   "architecture": {
-    "eyebrow": "아키텍처",
-    "title": "소유한 인프라를 위한 컨트롤 플레인.",
-    "body": "엔진은 에이전트 세션을 조율합니다. 런타임은 사용자 경계 안에서 코드, 도구, 파일 작업을 실행합니다.",
+    "eyebrow": "작동 방식",
+    "title": "하나의 control plane. 내 인프라의 Runtime.",
+    "body": "Azents는 session을 control plane에 두고, workspace 작업은 내 인프라 안의 Runtime에서 실행합니다.",
     "diagram": {
       "label": "사용자와 팀은 Azents 엔진에 연결하고, Azents 엔진은 사용자 클라우드 또는 온프레미스 환경의 런타임을 조율합니다.",
       "path": "azents/control-plane",
@@ -82,6 +79,90 @@
       }
     }
   },
+  "architectureDeepDive": {
+    "eyebrow": "Architecture",
+    "title": "Remote agent를 오래 돌리기 위한 설계.",
+    "body": "Azents는 session loop, Runtime boundary, provider별 실행을 분리해 agent 작업이 실제 인프라 위에서도 이어지게 만듭니다.",
+    "controls": {
+      "goToSlide": "Architecture slide {slide}로 이동",
+      "keyboardLabel": "Architecture carousel. 왼쪽/오른쪽 화살표, Home, End 키로 slide를 이동할 수 있습니다."
+    },
+    "gestureHint": "스크롤, 스와이프, 화살표 키로 넘기세요. {current} / {total}",
+    "slides": {
+      "decoupledLoop": {
+        "tab": "Loop 분리",
+        "imageAlt": "Durable session loop와 Runtime 실행 경계가 분리된 구조를 보여주는 추상 architecture diagram.",
+        "eyebrow": "01 / session loop",
+        "title": "Runtime 실행과 분리된 독립 session loop.",
+        "body": "Engine이 agent loop와 durable event를 맡고, Runtime은 파일, 도구, shell, compute가 필요할 때 호출됩니다.",
+        "diagram": {
+          "sessionLabel": "durable session",
+          "sessionTitle": "Append-only event log",
+          "sessionBody": "Run은 특정 Runtime 하나에 묶이지 않고 replay, inspection, resume이 가능합니다.",
+          "eventFlow": "events in, actions out",
+          "loopLabel": "control plane",
+          "loopTitle": "Session loop",
+          "loopBody": "Event를 읽고, 다음 행동을 정하고, 다음 event를 기록합니다.",
+          "runtimeLabel": "execution boundary",
+          "runtimeTitle": "Runtime",
+          "runtimeBody": "Workspace 작업을 실행하며, session을 잃지 않고 교체될 수 있습니다."
+        }
+      },
+      "providers": {
+        "tab": "Providers",
+        "imageAlt": "Runtime adapter가 여러 provider backend로 연결되는 구조를 보여주는 추상 architecture diagram.",
+        "eyebrow": "02 / runtime adapter",
+        "title": "Provider는 하나의 Runtime adapter 뒤에 둡니다.",
+        "body": "지금은 Kubernetes가 먼저입니다. 같은 adapter 형태로 local machine, E2B, custom backend까지 확장할 수 있게 가져갑니다.",
+        "diagram": {
+          "adapterLabel": "stable interface",
+          "adapterTitle": "Runtime adapter",
+          "adapterBody": "Engine은 workspace-scoped execution을 요청하고, Provider가 실행 환경을 어떻게 띄울지 결정합니다.",
+          "providerFlow": "provider choice",
+          "providers": {
+            "kubernetes": "Kubernetes",
+            "local": "Local machine",
+            "e2b": "E2B",
+            "custom": "Custom provider"
+          }
+        }
+      },
+      "longRunning": {
+        "tab": "Long runs",
+        "imageAlt": "Long-running agent의 timeline, durable state, handoff를 보여주는 추상 architecture diagram.",
+        "eyebrow": "03 / long-running agent",
+        "title": "Long-running agent에는 durable state가 필요합니다.",
+        "body": "탭이 닫히거나, worker가 바뀌거나, 실행 환경이 다시 잡혀도 history, progress, handoff point는 남아야 합니다.",
+        "diagram": {
+          "railLabel": "run timeline",
+          "events": {
+            "start": {
+              "time": "t0",
+              "title": "Start",
+              "body": "실제 workspace를 대상으로 session이 시작됩니다."
+            },
+            "disconnect": {
+              "time": "t1",
+              "title": "Disconnect",
+              "body": "Client가 떠나도 run은 끝나지 않습니다."
+            },
+            "handover": {
+              "time": "t2",
+              "title": "Handoff",
+              "body": "다른 Engine worker가 event log에서 이어받습니다."
+            },
+            "resume": {
+              "time": "t3",
+              "title": "Resume",
+              "body": "진행 상황이 보이고 durable state에서 계속됩니다."
+            }
+          },
+          "state": "session state survives",
+          "replay": "events can replay"
+        }
+      }
+    }
+  },
   "problem": {
     "eyebrow": "remote runs",
     "title": "노트북을 닫아도 일은 계속돼야 합니다.",
@@ -135,7 +216,7 @@
   },
   "bootstrapping": {
     "eyebrow": "스스로를 개발하는 도구",
-    "title": "Azents는 이미 자기 coding harness를 사용합니다.",
+    "title": "Azents는 스스로 발전합니다.",
     "body": "Azents는 이제 Azents 개발에 사용됩니다. Coding harness는 repository, edits, shell, PR, CI, review feedback, verification을 다룹니다.",
     "capabilities": {
       "repo": "변경 전에 저장소를 읽습니다",
@@ -182,10 +263,10 @@
     }
   },
   "roadmap": {
-    "eyebrow": "공개적으로 빌드 중",
-    "title": "Managed agents를 직접 통제하고 싶은 팀을 위해.",
-    "body": "플랫폼 엔지니어, 인프라 팀, AI 제품 빌더, 자체 호스팅 조직을 위한 프로젝트입니다.",
-    "currentFocus": "현재 집중 영역",
+    "eyebrow": "현재 집중",
+    "title": "실제 시스템 가까이에서 agent를 운영하는 팀을 위해.",
+    "body": "Platform engineer, infra team, AI product builder, self-hosted control이 필요한 조직을 위한 프로젝트입니다.",
+    "currentFocus": "집중 영역",
     "audience": {
       "platform": "플랫폼 엔지니어",
       "devops": "인프라 / DevOps 팀",
@@ -210,9 +291,7 @@
     "docs": "문서 읽기"
   },
   "footer": {
-    "tagline": "Azents는 self-hosted managed agents를 위한 open-source infrastructure입니다.",
-    "github": "GitHub",
-    "discussion": "이슈"
+    "tagline": "Azents는 self-hosted managed agents를 위한 open-source infrastructure입니다."
   },
   "fontPreview": {
     "notes": {

@@ -19,6 +19,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import "@fontsource-variable/inter";
+import "@mantine/carousel/styles.css";
 import "@mantine/core/styles.css";
 import "./globals.css";
 

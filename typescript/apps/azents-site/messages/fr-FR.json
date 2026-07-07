@@ -4,8 +4,6 @@
     "description": "Le control plane open source pour exécuter des agents managés dans votre cloud."
   },
   "nav": {
-    "architecture": "Architecture",
-    "roadmap": "Feuille de route",
     "github": "GitHub",
     "docs": "Docs",
     "changeLanguage": "Changer de langue"
@@ -15,16 +13,15 @@
     "headline": "Des managed agents dans votre cloud.",
     "subheadline": "Azents est un open-source control plane pour exploiter des agent sessions et des Runtimes dans votre propre infrastructure.",
     "supporting": "Exécutez près des repos, des files, des credentials et des internal systems.",
-    "discussion": "Voir les issues ouvertes",
     "cta": {
       "github": "Star sur GitHub",
       "docs": "Lire les docs"
     }
   },
   "architecture": {
-    "eyebrow": "architecture",
-    "title": "Un control plane pour l'infrastructure que vous possédez.",
-    "body": "Le moteur coordonne les sessions d'agents. Le runtime exécute le code, les outils et les opérations fichiers dans votre périmètre.",
+    "eyebrow": "fonctionnement",
+    "title": "Un control plane. Votre périmètre runtime.",
+    "body": "Azents garde les sessions dans le control plane et exécute les opérations workspace via des runtimes dans votre infrastructure.",
     "diagram": {
       "label": "L'utilisateur et l'équipe se connectent à Azents Engine, qui coordonne le runtime dans votre cloud ou votre environnement sur site.",
       "path": "azents/control-plane",
@@ -79,6 +76,90 @@
       "toolkit": {
         "title": "Boîte à outils",
         "body": "Accès contrôlé aux capacités privées."
+      }
+    }
+  },
+  "architectureDeepDive": {
+    "eyebrow": "Architecture",
+    "title": "Les choix qui rendent les agents distants durables.",
+    "body": "Azents sépare la session loop, la frontière Runtime et l'exécution propre à chaque provider pour que le travail agentique survive à la vraie infrastructure.",
+    "controls": {
+      "goToSlide": "Aller au slide architecture {slide}",
+      "keyboardLabel": "Carousel architecture. Utilisez les flèches gauche et droite, Home et End pour changer de slide."
+    },
+    "gestureHint": "Défilez, swipez ou utilisez les flèches. {current} / {total}",
+    "slides": {
+      "decoupledLoop": {
+        "tab": "Loop séparée",
+        "imageAlt": "Diagramme d'architecture abstrait montrant une session loop durable séparée de l'exécution Runtime.",
+        "eyebrow": "01 / session loop",
+        "title": "Une session loop indépendante, découplée du Runtime.",
+        "body": "L'Engine possède la boucle agent et les événements durables. Le Runtime est appelé seulement pour les files, tools, shell ou compute.",
+        "diagram": {
+          "sessionLabel": "durable session",
+          "sessionTitle": "Append-only event log",
+          "sessionBody": "Le run peut être rejoué, inspecté et repris hors d'un Runtime particulier.",
+          "eventFlow": "events in, actions out",
+          "loopLabel": "control plane",
+          "loopTitle": "Session loop",
+          "loopBody": "Lit les events, décide la prochaine action, écrit le prochain event.",
+          "runtimeLabel": "execution boundary",
+          "runtimeTitle": "Runtime",
+          "runtimeBody": "Exécute les opérations workspace et peut être remplacé sans perdre la session."
+        }
+      },
+      "providers": {
+        "tab": "Providers",
+        "imageAlt": "Diagramme d'architecture abstrait montrant un runtime adapter connecté à plusieurs providers.",
+        "eyebrow": "02 / runtime adapter",
+        "title": "Les providers restent derrière un seul Runtime adapter.",
+        "body": "Kubernetes arrive en premier. La même forme d'adapter peut ensuite viser une machine locale, E2B ou des backends custom.",
+        "diagram": {
+          "adapterLabel": "stable interface",
+          "adapterTitle": "Runtime adapter",
+          "adapterBody": "L'Engine demande une exécution limitée au workspace. Le Provider choisit comment provisionner cette exécution.",
+          "providerFlow": "provider choice",
+          "providers": {
+            "kubernetes": "Kubernetes",
+            "local": "Local machine",
+            "e2b": "E2B",
+            "custom": "Custom provider"
+          }
+        }
+      },
+      "longRunning": {
+        "tab": "Long runs",
+        "imageAlt": "Diagramme d'architecture abstrait montrant une timeline de long-running agent avec état durable et handoff.",
+        "eyebrow": "03 / long-running agent",
+        "title": "Un long-running agent a besoin d'un état durable.",
+        "body": "Un run doit garder son historique, sa progression et son point de reprise même si l'onglet se ferme, qu'un worker bouge ou que l'exécution est reprovisionnée.",
+        "diagram": {
+          "railLabel": "run timeline",
+          "events": {
+            "start": {
+              "time": "t0",
+              "title": "Start",
+              "body": "Une session démarre sur un vrai workspace."
+            },
+            "disconnect": {
+              "time": "t1",
+              "title": "Disconnect",
+              "body": "Le client peut partir sans terminer le run."
+            },
+            "handover": {
+              "time": "t2",
+              "title": "Handoff",
+              "body": "Un autre Engine worker reprend depuis l'event log."
+            },
+            "resume": {
+              "time": "t3",
+              "title": "Resume",
+              "body": "La progression reste visible et le run continue depuis l'état durable."
+            }
+          },
+          "state": "session state survives",
+          "replay": "events can replay"
+        }
       }
     }
   },
@@ -182,10 +263,10 @@
     }
   },
   "roadmap": {
-    "eyebrow": "construction publique",
-    "title": "Pour les équipes qui veulent garder leurs agents managés sous contrôle.",
-    "body": "Pour les platform engineers, les équipes infra, les builders de produits IA et les organisations auto-hébergées.",
-    "currentFocus": "Priorité actuelle",
+    "eyebrow": "priorités actuelles",
+    "title": "Pour les équipes qui exploitent des agents près de leurs vrais systèmes.",
+    "body": "Pour les platform engineers, les équipes infra, les builders de produits IA et les organisations qui veulent un contrôle self-hosted.",
+    "currentFocus": "Axes de travail",
     "audience": {
       "platform": "Platform engineers",
       "devops": "Équipes infra / DevOps",
@@ -210,9 +291,7 @@
     "docs": "Lire les docs"
   },
   "footer": {
-    "tagline": "Azents est une infrastructure open source pour agents managés auto-hébergés.",
-    "github": "GitHub",
-    "discussion": "Issues"
+    "tagline": "Azents est une infrastructure open source pour agents managés auto-hébergés."
   },
   "fontPreview": {
     "notes": {
