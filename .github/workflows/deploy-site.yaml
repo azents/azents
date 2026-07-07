@@ -1,0 +1,64 @@
+name: Deploy Site
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy-site.yaml
+      - typescript/apps/azents-site/**
+      - typescript/package.json
+      - typescript/pnpm-lock.yaml
+      - typescript/pnpm-workspace.yaml
+      - typescript/tsconfig.base.json
+      - typescript/turbo.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: build-and-publish-site-branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+      - name: Install pnpm
+        uses: pnpm/action-setup@f3d73ada1fa6e5c0c19973ff70a3f5cabf225cc5 # v6.0.0
+        with:
+          package_json_file: typescript/package.json
+      - name: Install dependencies
+        run: cd typescript && pnpm install --frozen-lockfile
+      - name: Build site
+        env:
+          SITE_GOOGLE_ANALYTICS_ID: ${{ vars.SITE_GOOGLE_ANALYTICS_ID }}
+        run: cd typescript && pnpm run build --filter=@azents/site
+      - name: Publish static site branch
+        env:
+          DEPLOY_BRANCH: site
+        run: |
+          set -euo pipefail
+          publish_dir="$(mktemp -d)"
+          cp -a typescript/apps/azents-site/out/. "${publish_dir}/"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --orphan "${DEPLOY_BRANCH}-publish"
+          git rm -rf --ignore-unmatch .
+          cp -a "${publish_dir}/". .
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Static site output is unchanged."
+            exit 0
+          fi
+          git commit -m "Deploy Azents site"
+          git push --force origin HEAD:"${DEPLOY_BRANCH}"

@@ -13,6 +13,7 @@ import {
 } from "@mantine/core";
 import { IconBrandGithub, IconMessageCircle } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { trackCtaClick, trackDiscussionClick } from "@/shared/lib/analytics";
 import { SITE_LINKS } from "@/shared/lib/links";
 
 export function HeroSection(): React.ReactElement {
@@ -70,6 +71,13 @@ export function HeroSection(): React.ReactElement {
               component="a"
               href={SITE_LINKS.github}
               leftSection={<IconBrandGithub size={20} />}
+              onClick={() =>
+                trackCtaClick({
+                  ctaId: "hero_github",
+                  ctaLocation: "hero",
+                  destinationUrl: SITE_LINKS.github,
+                })
+              }
               radius="md"
               size="lg"
               target="_blank"
@@ -77,7 +85,12 @@ export function HeroSection(): React.ReactElement {
               {t("cta.github")}
             </Button>
           </Group>
-          <Anchor c="dimmed" href={SITE_LINKS.issues} target="_blank">
+          <Anchor
+            c="dimmed"
+            href={SITE_LINKS.issues}
+            onClick={() => trackDiscussionClick("hero")}
+            target="_blank"
+          >
             <Group gap="xs">
               <IconMessageCircle size={18} />
               <Text span>{t("discussion")}</Text>

@@ -13,7 +13,8 @@
         "CI",
         "SENTRY_AUTH_TOKEN",
         "SENTRY_ORG",
-        "SENTRY_PROJECT"
+        "SENTRY_PROJECT",
+        "SITE_GOOGLE_ANALYTICS_ID"
       ]
     },
     "dev": {

@@ -12,6 +12,7 @@ import {
 } from "@mantine/core";
 import { IconBrandGithub } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { trackCtaClick } from "@/shared/lib/analytics";
 import { SITE_LINKS } from "@/shared/lib/links";
 
 export function CtaSection(): React.ReactElement {
@@ -41,6 +42,13 @@ export function CtaSection(): React.ReactElement {
                 component="a"
                 href={SITE_LINKS.github}
                 leftSection={<IconBrandGithub size={20} />}
+                onClick={() =>
+                  trackCtaClick({
+                    ctaId: "final_cta_github",
+                    ctaLocation: "final_cta",
+                    destinationUrl: SITE_LINKS.github,
+                  })
+                }
                 radius="md"
                 size="lg"
                 target="_blank"

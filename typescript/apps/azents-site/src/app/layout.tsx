@@ -1,12 +1,10 @@
 import { ColorSchemeScript } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
-import { getLocale, getMessages, getTranslations } from "next-intl/server";
+import { getPublicConfig } from "@/config";
+import { getMessagesForLocale } from "@/i18n/messages";
+import { GoogleAnalytics } from "@/shared/components/GoogleAnalytics";
 import { AZENTS_BRAND } from "@/shared/lib/brand";
-import {
-  DEFAULT_LOCALE,
-  isSupportedLocale,
-  type SupportedLocale,
-} from "@/shared/lib/locale";
+import { DEFAULT_LOCALE } from "@/shared/lib/locale";
 import {
   LOCALE_TO_OG_LOCALE,
   OG_IMAGE,
@@ -24,19 +22,20 @@ import "@fontsource-variable/inter";
 import "@mantine/core/styles.css";
 import "./globals.css";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const locale = await getLocale();
-  const supportedLocale: SupportedLocale = isSupportedLocale(locale)
-    ? locale
-    : DEFAULT_LOCALE;
-  const t = await getTranslations("metadata");
-  const title = t("title");
-  const description = t("description");
+export function generateMetadata(): Metadata {
+  const messages = getMessagesForLocale(DEFAULT_LOCALE);
+  const { title, description } = messages.metadata;
 
   return {
     metadataBase: new URL(SITE_URL),
     alternates: {
       canonical: "/",
+      languages: {
+        "en-US": "/en-US/",
+        "fr-FR": "/fr-FR/",
+        "ja-JP": "/ja-JP/",
+        "ko-KR": "/ko-KR/",
+      },
     },
     applicationName: SITE_NAME,
     authors: [{ name: "Azents", url: SITE_URL }],
@@ -55,7 +54,7 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       description,
       images: [OG_IMAGE],
-      locale: LOCALE_TO_OG_LOCALE[supportedLocale],
+      locale: LOCALE_TO_OG_LOCALE[DEFAULT_LOCALE],
       siteName: SITE_NAME,
       title,
       type: "website",
@@ -83,21 +82,16 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: ReactNode;
-}): Promise<React.ReactElement> {
-  const locale = await getLocale();
-  const messages = await getMessages();
-
-  const supportedLocale: SupportedLocale = isSupportedLocale(locale)
-    ? locale
-    : DEFAULT_LOCALE;
-  const htmlLang = supportedLocale.split("-")[0];
+}): React.ReactElement {
+  const messages = getMessagesForLocale(DEFAULT_LOCALE);
+  const { siteGoogleAnalyticsId } = getPublicConfig();
 
   return (
-    <html lang={htmlLang} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         <ColorSchemeScript forceColorScheme="dark" />
         <script
@@ -106,9 +100,12 @@ export default async function RootLayout({
         />
       </head>
       <body>
-        <NextIntlClientProvider messages={messages}>
+        {siteGoogleAnalyticsId ? (
+          <GoogleAnalytics measurementId={siteGoogleAnalyticsId} />
+        ) : null}
+        <NextIntlClientProvider locale={DEFAULT_LOCALE} messages={messages}>
           <AppMantineProvider forceColorScheme="dark">
-            <LocaleProvider locale={supportedLocale}>{children}</LocaleProvider>
+            <LocaleProvider locale={DEFAULT_LOCALE}>{children}</LocaleProvider>
           </AppMantineProvider>
         </NextIntlClientProvider>
       </body>

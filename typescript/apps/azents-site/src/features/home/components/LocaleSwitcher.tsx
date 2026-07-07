@@ -3,6 +3,7 @@
 import { Button, Menu } from "@mantine/core";
 import { IconLanguage } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { trackLocaleChange } from "@/shared/lib/analytics";
 import {
   LOCALE_DISPLAY_NAMES,
   SUPPORTED_LOCALES,
@@ -32,7 +33,12 @@ export function LocaleSwitcher(): React.ReactElement {
         {SUPPORTED_LOCALES.map((loc: SupportedLocale) => (
           <Menu.Item
             key={loc}
-            onClick={() => setLocale(loc)}
+            onClick={() => {
+              if (loc !== locale) {
+                trackLocaleChange({ fromLocale: locale, toLocale: loc });
+              }
+              setLocale(loc);
+            }}
             {...(loc !== locale && { c: "dimmed" })}
           >
             {LOCALE_DISPLAY_NAMES[loc]}
