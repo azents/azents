@@ -94,6 +94,7 @@
         "imageAlt": "Durable session loop와 Runtime 실행 경계가 분리된 구조를 보여주는 추상 architecture diagram.",
         "eyebrow": "01 / session loop",
         "title": "Runtime 실행과 분리된 독립 session loop.",
+        "mobileTitle": "독립적인 session loop.",
         "body": "Engine이 agent loop와 durable event를 맡고, Runtime은 파일, 도구, shell, compute가 필요할 때 호출됩니다.",
         "diagram": {
           "sessionLabel": "durable session",
@@ -113,6 +114,7 @@
         "imageAlt": "Runtime adapter가 여러 provider backend로 연결되는 구조를 보여주는 추상 architecture diagram.",
         "eyebrow": "02 / runtime adapter",
         "title": "Provider는 하나의 Runtime adapter 뒤에 둡니다.",
+        "mobileTitle": "하나의 adapter, 여러 provider.",
         "body": "지금은 Kubernetes가 먼저입니다. 같은 adapter 형태로 local machine, E2B, custom backend까지 확장할 수 있게 가져갑니다.",
         "diagram": {
           "adapterLabel": "stable interface",
@@ -132,6 +134,7 @@
         "imageAlt": "Long-running agent의 timeline, durable state, handoff를 보여주는 추상 architecture diagram.",
         "eyebrow": "03 / long-running agent",
         "title": "Long-running agent에는 durable state가 필요합니다.",
+        "mobileTitle": "긴 run을 위한 durable state.",
         "body": "탭이 닫히거나, worker가 바뀌거나, 실행 환경이 다시 잡혀도 history, progress, handoff point는 남아야 합니다.",
         "diagram": {
           "railLabel": "run timeline",
