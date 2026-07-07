@@ -155,8 +155,6 @@ from azents.services.session_workspace_project import (
     ProjectAccessDenied,
     ProjectNotFound,
     ProjectPathConflict,
-    RegistrationRequestAlreadyResolved,
-    RegistrationRequestNotFound,
     SessionWorkspaceProjectService,
 )
 from azents.transport.chat import (
@@ -225,8 +223,6 @@ from .data import (
     SessionContextResponse,
     SessionWorkspaceProjectListResponse,
     SessionWorkspaceProjectRegisterRequest,
-    SessionWorkspaceProjectRegistrationRequestListResponse,
-    SessionWorkspaceProjectRegistrationRequestResponse,
     SessionWorkspaceProjectResponse,
     TodoStateResponse,
     UploadResponse,
@@ -2063,126 +2059,6 @@ async def list_agent_projects(
             )
         case Failure(error):
             _raise_project_access_error(error)
-        case _:
-            assert_never(result)
-
-
-@router.get("/agents/{agent_id}/sessions/{session_id}/project-registration-requests")
-async def list_agent_project_registration_requests(
-    agent_id: str,
-    session_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    project_service: Annotated[SessionWorkspaceProjectService, Depends()],
-) -> SessionWorkspaceProjectRegistrationRequestListResponse:
-    """List Project registration requests for an AgentSession."""
-    _validate_session_id(session_id)
-    result = await project_service.list_registration_requests_for_session(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=current_user.user_id,
-    )
-    match result:
-        case Success(requests):
-            return SessionWorkspaceProjectRegistrationRequestListResponse(
-                items=[
-                    SessionWorkspaceProjectRegistrationRequestResponse.from_domain(
-                        request
-                    )
-                    for request in requests
-                ]
-            )
-        case Failure(error):
-            _raise_project_access_error(error)
-        case _:
-            assert_never(result)
-
-
-@router.post(
-    "/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/approve"
-)
-async def approve_agent_project_registration_request(
-    agent_id: str,
-    session_id: str,
-    request_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    project_service: Annotated[SessionWorkspaceProjectService, Depends()],
-) -> SessionWorkspaceProjectResponse:
-    """Approve an AgentSession Project registration request."""
-    _validate_session_id(session_id)
-    result = await project_service.approve_registration_request_for_session(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=current_user.user_id,
-        request_id=request_id,
-    )
-    match result:
-        case Success(project):
-            return SessionWorkspaceProjectResponse.from_domain(project)
-        case Failure(error):
-            match error:
-                case RegistrationRequestNotFound():
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Project registration request not found.",
-                    )
-                case RegistrationRequestAlreadyResolved():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Project registration request is already resolved.",
-                    )
-                case InvalidProjectPath():
-                    raise HTTPException(status_code=400, detail=error.reason)
-                case ProjectPathConflict():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Project path conflicts with an existing Project.",
-                    )
-                case ProjectAgentNotFound() | ProjectAccessDenied():
-                    _raise_project_access_error(error)
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
-
-
-@router.post(
-    "/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject",
-    status_code=204,
-)
-async def reject_agent_project_registration_request(
-    agent_id: str,
-    session_id: str,
-    request_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    project_service: Annotated[SessionWorkspaceProjectService, Depends()],
-) -> None:
-    """Reject an AgentSession Project registration request."""
-    _validate_session_id(session_id)
-    result = await project_service.reject_registration_request_for_session(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=current_user.user_id,
-        request_id=request_id,
-    )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case RegistrationRequestNotFound():
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Project registration request not found.",
-                    )
-                case RegistrationRequestAlreadyResolved():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Project registration request is already resolved.",
-                    )
-                case ProjectAgentNotFound() | ProjectAccessDenied():
-                    _raise_project_access_error(error)
-                case _:
-                    assert_never(error)
         case _:
             assert_never(result)
 

@@ -111,7 +111,6 @@ Class | Method | HTTP request | Description
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_cancel_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_cancel_device) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id} | Cancel Device
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_poll_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_poll_device) | **GET** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id} | Poll Device
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_start_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_start_device) | **POST** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start | Start Device
-*ChatV1Api* | [**chat_v1_approve_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_approve_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/approve | Approve Agent Project Registration Request
 *ChatV1Api* | [**chat_v1_archive_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_archive_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/archive | Archive Agent Session
 *ChatV1Api* | [**chat_v1_bulk_delete_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
 *ChatV1Api* | [**chat_v1_bulk_move_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
@@ -137,7 +136,6 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_get_team_primary_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_team_primary_agent_session) | **GET** /chat/v1/agents/{agent_id}/team-primary-session | Get Team Primary Agent Session
 *ChatV1Api* | [**chat_v1_issue_ws_ticket**](azentspublicclient/docs/ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
 *ChatV1Api* | [**chat_v1_list_agent_project_presets**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_project_presets) | **GET** /chat/v1/agents/{agent_id}/project-presets | List Agent Project Presets
-*ChatV1Api* | [**chat_v1_list_agent_project_registration_requests**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_project_registration_requests) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests | List Agent Project Registration Requests
 *ChatV1Api* | [**chat_v1_list_agent_projects**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects | List Agent Projects
 *ChatV1Api* | [**chat_v1_list_agent_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions | List Agent Sessions
 *ChatV1Api* | [**chat_v1_list_history_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_history_events) | **GET** /chat/v1/sessions/{session_id}/history | List History Events
@@ -149,7 +147,6 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_preview_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_project_browser_manifest) | **POST** /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview | Preview Project Browser Manifest
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
-*ChatV1Api* | [**chat_v1_reject_agent_project_registration_request**](azentspublicclient/docs/ChatV1Api.md#chat_v1_reject_agent_project_registration_request) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests/{request_id}/reject | Reject Agent Project Registration Request
 *ChatV1Api* | [**chat_v1_retry_action_execution**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_action_execution) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry | Retry Action Execution
 *ChatV1Api* | [**chat_v1_retry_failed_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
@@ -440,8 +437,6 @@ Class | Method | HTTP request | Description
  - [SessionContextSystemPromptResponse](azentspublicclient/docs/SessionContextSystemPromptResponse.md)
  - [SessionWorkspaceProjectListResponse](azentspublicclient/docs/SessionWorkspaceProjectListResponse.md)
  - [SessionWorkspaceProjectRegisterRequest](azentspublicclient/docs/SessionWorkspaceProjectRegisterRequest.md)
- - [SessionWorkspaceProjectRegistrationRequestListResponse](azentspublicclient/docs/SessionWorkspaceProjectRegistrationRequestListResponse.md)
- - [SessionWorkspaceProjectRegistrationRequestResponse](azentspublicclient/docs/SessionWorkspaceProjectRegistrationRequestResponse.md)
  - [SessionWorkspaceProjectResponse](azentspublicclient/docs/SessionWorkspaceProjectResponse.md)
  - [SetPasswordRequest](azentspublicclient/docs/SetPasswordRequest.md)
  - [SignupStatusResponse](azentspublicclient/docs/SignupStatusResponse.md)

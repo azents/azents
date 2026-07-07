@@ -208,13 +208,10 @@ const projectRootEntries: WorkspaceEntry[] = [
 const readyProjectState: WorkspaceProjectPanelState = {
   type: "READY",
   projects: [],
-  registrationRequests: [],
   registrationDialog: { type: "CLOSED" },
   isRegisteringProject: false,
   isCreatingWorktree: false,
   registerProjectError: null,
-  pendingApproveRequestId: null,
-  pendingRejectRequestId: null,
   pendingDeleteProjectId: null,
 };
 

@@ -8,7 +8,6 @@ import {
   agentRuntimeV1RestartAgentRuntime,
   agentRuntimeV1StartAgentRuntime,
   agentRuntimeV1StopAgentRuntime,
-  chatV1ApproveAgentProjectRegistrationRequest,
   chatV1ArchiveAgentSession,
   chatV1BulkDeleteAgentWorkspacePaths,
   chatV1BulkMoveAgentWorkspacePaths,
@@ -29,7 +28,6 @@ import {
   chatV1GetSessionProjectBrowserManifest,
   chatV1IssueWsTicket,
   chatV1ListAgentProjectPresets,
-  chatV1ListAgentProjectRegistrationRequests,
   chatV1ListAgentProjects,
   chatV1ListAgentSessions,
   chatV1ListHistoryEvents,
@@ -40,7 +38,6 @@ import {
   chatV1PreviewProjectBrowserManifest,
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
-  chatV1RejectAgentProjectRegistrationRequest,
   chatV1RetryActionExecution,
   chatV1RetryFailedRun,
   chatV1StatAgentWorkspacePath,
@@ -449,87 +446,6 @@ export const chatRouter = router({
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",
-        });
-      }
-    }),
-
-  listAgentProjectRegistrationRequests: publicProcedure
-    .input(
-      z.object({ agentId: z.string().min(1), sessionId: z.string().min(1) }),
-    )
-    .query(async ({ ctx, input }) => {
-      try {
-        const { data } = await chatV1ListAgentProjectRegistrationRequests({
-          client: ctx.apiClient,
-          path: { agent_id: input.agentId, session_id: input.sessionId },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-        });
-      }
-    }),
-
-  approveAgentProjectRegistrationRequest: publicProcedure
-    .input(
-      z.object({
-        agentId: z.string().min(1),
-        sessionId: z.string().min(1),
-        requestId: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await chatV1ApproveAgentProjectRegistrationRequest({
-          client: ctx.apiClient,
-          path: {
-            agent_id: input.agentId,
-            session_id: input.sessionId,
-            request_id: input.requestId,
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          400: "BAD_REQUEST",
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-          409: "CONFLICT",
-        });
-      }
-    }),
-
-  rejectAgentProjectRegistrationRequest: publicProcedure
-    .input(
-      z.object({
-        agentId: z.string().min(1),
-        sessionId: z.string().min(1),
-        requestId: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        await chatV1RejectAgentProjectRegistrationRequest({
-          client: ctx.apiClient,
-          path: {
-            agent_id: input.agentId,
-            session_id: input.sessionId,
-            request_id: input.requestId,
-          },
-          throwOnError: true,
-        });
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-          409: "CONFLICT",
         });
       }
     }),
