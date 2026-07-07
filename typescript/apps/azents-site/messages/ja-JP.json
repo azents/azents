@@ -18,6 +18,10 @@
       "docs": "ドキュメントを読む"
     }
   },
+  "productScreenshot": {
+    "label": "Azents の製品画面",
+    "imageAlt": "チャット、tool call、workspace files を表示している Azents の session 画面。"
+  },
   "architecture": {
     "eyebrow": "仕組み",
     "title": "ひとつの control plane。Runtime は自分たちの境界内に。",

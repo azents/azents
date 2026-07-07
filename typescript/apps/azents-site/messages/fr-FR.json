@@ -18,6 +18,10 @@
       "docs": "Lire les docs"
     }
   },
+  "productScreenshot": {
+    "label": "Capture produit Azents",
+    "imageAlt": "Écran de session Azents montrant le chat, les appels d'outils et les fichiers du workspace."
+  },
   "architecture": {
     "eyebrow": "fonctionnement",
     "title": "Un control plane. Votre périmètre runtime.",

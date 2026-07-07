@@ -18,6 +18,10 @@
       "docs": "문서 읽기"
     }
   },
+  "productScreenshot": {
+    "label": "Azents 제품 화면",
+    "imageAlt": "채팅, tool call, workspace 파일을 보여주는 Azents session 화면."
+  },
   "architecture": {
     "eyebrow": "작동 방식",
     "title": "하나의 control plane. 내 인프라의 Runtime.",

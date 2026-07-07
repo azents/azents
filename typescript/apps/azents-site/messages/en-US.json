@@ -18,6 +18,10 @@
       "docs": "Read the docs"
     }
   },
+  "productScreenshot": {
+    "label": "Azents product screenshot",
+    "imageAlt": "Azents session screen showing chat, tool calls, and workspace files."
+  },
   "architecture": {
     "eyebrow": "how it works",
     "title": "One control plane. Your runtime boundary.",
