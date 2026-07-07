@@ -14,6 +14,7 @@ import {
 import { IconBrandGithub } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { AppLogo } from "@/shared/components/AppLogo";
+import { trackCtaClick, trackSectionNavClick } from "@/shared/lib/analytics";
 import { SITE_LINKS } from "@/shared/lib/links";
 import { LocaleSwitcher } from "./LocaleSwitcher";
 
@@ -34,15 +35,31 @@ export function Header(): React.ReactElement {
     >
       <Container size="xl">
         <Group h={rem(68)} justify="space-between" wrap="nowrap">
-          <Anchor href="#top" lh={0}>
+          <Anchor
+            href="#top"
+            lh={0}
+            onClick={() => trackSectionNavClick({ targetSection: "top" })}
+          >
             <AppLogo width={112} />
           </Anchor>
 
           <Group gap="xs" wrap="nowrap">
-            <Anchor c="dimmed" href="#architecture" visibleFrom="sm">
+            <Anchor
+              c="dimmed"
+              href="#architecture"
+              onClick={() =>
+                trackSectionNavClick({ targetSection: "architecture" })
+              }
+              visibleFrom="sm"
+            >
               {t("architecture")}
             </Anchor>
-            <Anchor c="dimmed" href="#roadmap" visibleFrom="sm">
+            <Anchor
+              c="dimmed"
+              href="#roadmap"
+              onClick={() => trackSectionNavClick({ targetSection: "roadmap" })}
+              visibleFrom="sm"
+            >
               {t("roadmap")}
             </Anchor>
             <LocaleSwitcher />
@@ -50,6 +67,13 @@ export function Header(): React.ReactElement {
               component="a"
               href={SITE_LINKS.github}
               leftSection={<IconBrandGithub size={18} />}
+              onClick={() =>
+                trackCtaClick({
+                  ctaId: "header_github",
+                  ctaLocation: "header",
+                  destinationUrl: SITE_LINKS.github,
+                })
+              }
               radius="md"
               size="sm"
               target="_blank"
@@ -62,6 +86,13 @@ export function Header(): React.ReactElement {
               <ActionIcon
                 component="a"
                 href={SITE_LINKS.github}
+                onClick={() =>
+                  trackCtaClick({
+                    ctaId: "header_mobile_github",
+                    ctaLocation: "header_mobile",
+                    destinationUrl: SITE_LINKS.github,
+                  })
+                }
                 radius="md"
                 size="lg"
                 target="_blank"

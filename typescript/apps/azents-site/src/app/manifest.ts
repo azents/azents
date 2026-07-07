@@ -2,6 +2,8 @@ import { AZENTS_BRAND } from "@/shared/lib/brand";
 import { SITE_NAME } from "@/shared/lib/seo";
 import type { MetadataRoute } from "next";
 
+export const dynamic = "force-static";
+
 export default function manifest(): MetadataRoute.Manifest {
   return {
     background_color: "#070a0f",

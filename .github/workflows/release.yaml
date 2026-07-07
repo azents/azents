@@ -120,10 +120,6 @@ jobs:
             package: azents-admin-web
             dockerfile: azents-admin-web.Dockerfile
             extra_context: "--build-context next-cache=/tmp/next-cache"
-          - component: site
-            package: azents-site
-            dockerfile: azents-site.Dockerfile
-            extra_context: "--build-context next-cache=/tmp/next-cache"
           - component: runtime-runner
             package: azents-runtime-runner
             dockerfile: python/apps/azents-runtime-runner/Dockerfile
