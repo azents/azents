@@ -594,6 +594,25 @@
           "archiveConfirmDescription": "Cette session sera retirée de la liste des sessions actives. Les données de conversation sont conservées.",
           "archiveCancel": "Annuler"
         },
+        "subagents": {
+          "title": "Sous-agents",
+          "open": "Ouvrir l’arbre des sous-agents",
+          "loading": "Chargement de l’arbre des sous-agents…",
+          "summary": "{count, plural, =0 {Aucun sous-agent} =1 {1 sous-agent} other {# sous-agents}}",
+          "total": "{count, plural, =1 {1 nœud} other {# nœuds}}",
+          "empty": "Les sous-agents créés depuis cette session apparaîtront ici.",
+          "rootBadge": "Racine",
+          "unread": "Non lu",
+          "runIndex": "Run {index}",
+          "status": {
+            "idle": "Inactif",
+            "running": "En cours",
+            "completed": "Terminé",
+            "errored": "Erreur",
+            "interrupted": "Interrompu",
+            "notFound": "Introuvable"
+          }
+        },
         "inheritModelBadge": "Hérite du parent",
         "danger": {
           "title": "Zone dangereuse",

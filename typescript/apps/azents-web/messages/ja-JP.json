@@ -594,6 +594,25 @@
           "archiveConfirmDescription": "このセッションはアクティブなセッション一覧から削除されます。会話データは保持されます。",
           "archiveCancel": "キャンセル"
         },
+        "subagents": {
+          "title": "サブエージェント",
+          "open": "サブエージェントツリーを開く",
+          "loading": "サブエージェントツリーを読み込み中…",
+          "summary": "サブエージェント {count} 件",
+          "total": "ノード {count} 件",
+          "empty": "このセッションから作成されたサブエージェントがここに表示されます。",
+          "rootBadge": "ルート",
+          "unread": "未読",
+          "runIndex": "Run {index}",
+          "status": {
+            "idle": "待機中",
+            "running": "実行中",
+            "completed": "完了",
+            "errored": "エラー",
+            "interrupted": "中断",
+            "notFound": "見つかりません"
+          }
+        },
         "inheritModelBadge": "親のモデルを継承",
         "danger": {
           "title": "危険ゾーン",

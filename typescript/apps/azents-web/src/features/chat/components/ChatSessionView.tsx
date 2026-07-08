@@ -9,12 +9,25 @@
  * status text session with leakdoes not..
  */
 
-import { Box, Drawer, useMantineTheme } from "@mantine/core";
+import {
+  ActionIcon,
+  Box,
+  Drawer,
+  Group,
+  rem,
+  useMantineTheme,
+} from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
+import { IconGitBranch } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
+import {
+  SubagentTreePanel,
+  type SubagentTreePanelState,
+} from "@/features/agents/components/SubagentTreePanel";
 import { formatModelSelectionSummary } from "@/features/agents/model-selection";
+import { trpc } from "@/trpc/client";
 import { useChatSessionContainer } from "../containers/useChatSessionContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
@@ -46,11 +59,13 @@ export function ChatSessionView({
   onConnectionStatusChange,
 }: ChatSessionViewProps): React.ReactElement {
   const t = useTranslations("chat");
+  const tAgentDetail = useTranslations("workspace.agents.detail");
   const theme = useMantineTheme();
   const isWorkspacePanelDocked = useMediaQuery(
     `(min-width: ${theme.breakpoints.lg})`,
   );
   const [runtimeDrawerOpened, setRuntimeDrawerOpened] = useState(false);
+  const [subagentDrawerOpened, setSubagentDrawerOpened] = useState(false);
   const [headerSession, setHeaderSession] =
     useState<AgentSessionResponse>(session);
   useEffect(() => {
@@ -67,6 +82,17 @@ export function ChatSessionView({
     sessionId,
     autoRefreshVisible: isWorkspacePanelDocked || runtimeDrawerOpened,
   });
+  const subagentTreeQuery = trpc.chat.getSubagentTree.useQuery({
+    agentId: agent.id,
+    sessionId,
+  });
+  const subagentTreeState: SubagentTreePanelState = subagentTreeQuery.isPending
+    ? { type: "LOADING" }
+    : subagentTreeQuery.isError
+      ? { type: "ERROR", message: subagentTreeQuery.error.message }
+      : typeof subagentTreeQuery.data === "undefined"
+        ? { type: "LOADING" }
+        : { type: "LOADED", tree: subagentTreeQuery.data };
   const effectiveContextWindowTokens =
     agent.effective_context_window_tokens ?? null;
   const modelName = formatModelSelectionSummary(agent.model_selection);
@@ -81,14 +107,24 @@ export function ChatSessionView({
         onSessionTitleChange={setHeaderSession}
         onOpenRuntime={() => setRuntimeDrawerOpened(true)}
         chatControls={
-          <TokenUsageIndicator
-            usage={output.tokenUsage}
-            effectiveContextWindowTokens={effectiveContextWindowTokens}
-            autoCompactionThresholdTokens={
-              agent.effective_auto_compaction_threshold_tokens
-            }
-            modelName={modelName}
-          />
+          <Group gap="xs" wrap="nowrap">
+            <TokenUsageIndicator
+              usage={output.tokenUsage}
+              effectiveContextWindowTokens={effectiveContextWindowTokens}
+              autoCompactionThresholdTokens={
+                agent.effective_auto_compaction_threshold_tokens
+              }
+              modelName={modelName}
+            />
+            <ActionIcon
+              variant="subtle"
+              radius="xl"
+              onClick={() => setSubagentDrawerOpened(true)}
+              aria-label={tAgentDetail("subagents.open")}
+            >
+              <IconGitBranch size={rem(18)} />
+            </ActionIcon>
+          </Group>
         }
       />
       <Box flex={1} mih={0}>
@@ -134,6 +170,36 @@ export function ChatSessionView({
           todo={output.todo}
         />
       </Box>
+      <Drawer
+        opened={subagentDrawerOpened}
+        onClose={() => setSubagentDrawerOpened(false)}
+        title={tAgentDetail("subagents.title")}
+        position="right"
+        size="md"
+        styles={{
+          body: {
+            flex: 1,
+            minHeight: 0,
+            overflow: "hidden",
+            padding: 0,
+          },
+          content: {
+            display: "flex",
+            flexDirection: "column",
+            height: "100dvh",
+            overflow: "hidden",
+          },
+          header: { flexShrink: 0 },
+        }}
+      >
+        <SubagentTreePanel
+          handle={handle}
+          agentId={agent.id}
+          activeSessionId={sessionId}
+          state={subagentTreeState}
+          onNavigate={() => setSubagentDrawerOpened(false)}
+        />
+      </Drawer>
       <Drawer
         hiddenFrom="lg"
         opened={runtimeDrawerOpened}
