@@ -12,6 +12,7 @@ from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.execution import (
     AgentRunExecution,
     AgentRunExecutionRequest,
+    InputPollResult,
     ModelCallPreparer,
     PreparedModelCall,
     TurnEndReason,
@@ -1094,24 +1095,26 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
     async def poll_input_events(
         session: AsyncSession,
         session_id: str,
-    ) -> list[Event]:
+    ) -> InputPollResult:
         """Append queued user input at second turn boundary."""
         nonlocal poll_count
         poll_count += 1
         if poll_count != 2:
-            return []
-        return [
-            await transcript_repo.append(
-                session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.USER_MESSAGE,
-                    payload=UserMessagePayload(
-                        content="Is something odd with the grep tool?",
-                    ).model_dump(mode="json", exclude_none=True),
-                ),
-            )
-        ]
+            return InputPollResult(events=[])
+        return InputPollResult(
+            events=[
+                await transcript_repo.append(
+                    session,
+                    EventCreate(
+                        session_id=session_id,
+                        kind=EventKind.USER_MESSAGE,
+                        payload=UserMessagePayload(
+                            content="Is something odd with the grep tool?",
+                        ).model_dump(mode="json", exclude_none=True),
+                    ),
+                )
+            ]
+        )
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
@@ -1150,6 +1153,60 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
     assert (
         UserMessagePayload(content="Is something odd with the grep tool?")
         in second_turn_payloads
+    )
+
+
+async def test_context_invalidation_exits_before_next_model_call() -> None:
+    """Context invalidation exits the run before stale model lowering."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    lowerer = _RecordingLowerer()
+    poll_count = 0
+
+    async def poll_input_events(
+        session: AsyncSession,
+        session_id: str,
+    ) -> InputPollResult:
+        """Request a handoff at the second turn boundary."""
+        del session, session_id
+        nonlocal poll_count
+        poll_count += 1
+        return InputPollResult(events=[], context_invalidated=poll_count == 2)
+
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=lowerer,
+            tool_executor=_ToolExecutor(),
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=2,
+        ),
+        poll_input_events=poll_input_events,
+    )
+
+    assert status == AgentRunStatus.CANCELLED
+    assert poll_count == 2
+    assert len(lowerer.transcripts) == 1
+    assert run_repo.terminal == AgentRunStatus.CANCELLED
+    assert all(
+        event.kind is not EventKind.RUN_MARKER for event in transcript_repo.events
     )
 
 

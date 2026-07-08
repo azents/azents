@@ -15,10 +15,9 @@ from azents.broker.types import (
     SessionWakeUp,
 )
 from azents.core.enums import AgentRunStatus
-from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.contracts import AgentEngineProtocol, ToolkitBinding
 from azents.engine.run.errors import UserVisibleRuntimeError
-from azents.engine.run.types import CheckStop, PollMessages
+from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session.data import PendingSessionCommand
 from azents.services.input_buffer import InputBufferService
@@ -166,9 +165,9 @@ class SessionRunner:
     def _make_poll_fn(self) -> PollMessages:
         """Create poll_messages callback to inject into engine.run()."""
 
-        async def poll() -> list[RunUserMessage]:
+        async def poll() -> PollMessagesResult:
             self._drain_stop_signals()
-            return []
+            return PollMessagesResult(user_messages=[])
 
         return poll
 
@@ -292,6 +291,8 @@ class SessionRunner:
     async def _mark_idle_after_boundary(
         self,
         boundary: _PendingIdleBoundary,
+        *,
+        enqueue_idle_continuation: bool = True,
     ) -> bool:
         """Close a terminal boundary through idle transition and idle hook."""
         logger.info(
@@ -307,13 +308,16 @@ class SessionRunner:
         if not marked_idle:
             return False
         await self.session_lifecycle.clear_session_activity(boundary.message.session_id)
-        if boundary.run_status == AgentRunStatus.COMPLETED:
+        if (
+            boundary.run_status == AgentRunStatus.COMPLETED
+            and enqueue_idle_continuation
+        ):
             await self.idle_continuation_service.enqueue(
                 boundary.message,
                 toolkits=boundary.toolkits,
                 run_id=boundary.run_id,
             )
-        else:
+        elif boundary.run_status != AgentRunStatus.COMPLETED:
             logger.info(
                 "Skipped idle continuation because terminal run did not complete",
                 extra={

@@ -39,6 +39,8 @@ from azents.engine.events.engine_events import (
 from azents.engine.events.execution import (
     AgentRunExecution,
     AgentRunExecutionRequest,
+    InputPoller,
+    InputPollResult,
     PreparedModelCall,
 )
 from azents.engine.events.file_parts import RequestLocalModelFileResolver
@@ -134,9 +136,7 @@ class RunExecution(Protocol):
         request: AgentRunExecutionRequest,
         *,
         check_stop: CheckStop | None = None,
-        poll_input_events: (
-            Callable[[AsyncSession, str], Awaitable[list[Event]]] | None
-        ) = None,
+        poll_input_events: InputPoller | None = None,
     ) -> AgentRunStatus:
         """Run the run."""
         ...
@@ -533,6 +533,8 @@ class AgentEngineAdapter:
 
         if status in {AgentRunStatus.COMPLETED, AgentRunStatus.FAILED}:
             yield ephemeral(RunComplete())
+        elif status is AgentRunStatus.CANCELLED:
+            return
         else:
             yield ephemeral(RunStopped())
 
@@ -696,23 +698,30 @@ def _make_input_poller(
     poll_messages: PollMessages | None,
     *,
     transcript_repo: TranscriptRepository,
-) -> Callable[[AsyncSession, str], Awaitable[list[Event]]] | None:
-    """Convert legacy boundary poll to event transcript append callback."""
+) -> Callable[[AsyncSession, str], Awaitable[InputPollResult]] | None:
+    """Convert boundary poll to event transcript append callback."""
     if poll_messages is None:
         return None
 
     async def poll(
         session: AsyncSession,
         session_id: str,
-    ) -> list[Event]:
-        messages = await poll_messages()
-        if not messages:
-            return []
-        return await _append_run_user_messages(
+    ) -> InputPollResult:
+        result = await poll_messages()
+        if not result.user_messages:
+            return InputPollResult(
+                events=[],
+                context_invalidated=result.context_invalidated,
+            )
+        events = await _append_run_user_messages(
             session,
             session_id,
-            messages,
+            result.user_messages,
             transcript_repo=transcript_repo,
+        )
+        return InputPollResult(
+            events=events,
+            context_invalidated=result.context_invalidated,
         )
 
     return poll

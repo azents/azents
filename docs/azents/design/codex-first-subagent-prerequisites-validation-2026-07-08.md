@@ -22,6 +22,8 @@ Validated commits and PRs:
 | #238 | `fdd9310` | Toolkit taxonomy and execution-mode filter groundwork |
 | #239 | `ecf9c20` | Head-bound context fork helper and FilePart placeholders |
 | #240 | `ea707e1` | Root `SessionAgentContext` Project/worktree foundation |
+| #241 | `a6599fd` | ADR/requirements mapping validation |
+| #245 | `0c84410` | TurnAction turn-boundary gap fix |
 
 ## ADR and Requirements Mapping
 
@@ -31,6 +33,7 @@ Validated commits and PRs:
 | Prerequisite plan PR 2 | Low-level input buffer writer appends rows and returns created rows without owning broker wake-up. | `python/apps/azents/src/azents/services/input_buffer.py` | `InputBufferService.enqueue()` returns `InputBufferEnqueueResult`; wake-up decisions were removed from this low-level path. | Implemented | #237 |
 | Prerequisite plan PR 2 | Move wake ownership to fixed producer/orchestrator boundaries. | `python/apps/azents/src/azents/services/agent_session_input.py`, `python/apps/azents/src/azents/services/chat_write.py`, `python/apps/azents/src/azents/worker/input/queue.py`, `python/apps/azents/src/azents/worker/session/idle_continuation.py` | User input, action input, chat write, queued worker input, background results, and idle continuations call `AgentSessionRepository.mark_running_for_input_wakeup()` at their owning boundary. | Implemented | #237 |
 | Prerequisite plan PR 2 | Preserve current first-message, edit, TurnAction, goal/system continuation, live pending input, and broker wake behavior. | `python/apps/azents/src/azents/services/agent_session_input_test.py`, `python/apps/azents/src/azents/services/input_buffer_test.py`, `python/apps/azents/src/azents/worker/session/idle_continuation_test.py` | Focused tests cover wake marking, idempotency, continuation wake-up, and unchanged input buffer behavior. | Implemented | #237 |
+| ADR-0086 / ADR-0094 | Process TurnActions at turn boundaries, not only at run-entry/run-complete boundaries. | `python/apps/azents/src/azents/worker/run/executor.py`, `python/apps/azents/src/azents/engine/events/execution.py`, `python/apps/azents/src/azents/worker/session/runner.py` | Model-call boundary polling now includes action-message promotion and operation-action execution. Context-invalidating actions cancel the current run without a completed run marker and enqueue a fresh wake-up; failed operation actions are marked failed and FIFO processing continues. | Implemented | #245 |
 | Prerequisite plan PR 3 | Split memory auto-bound behavior into Memory Read and Memory Write capabilities. | `python/apps/azents/src/azents/engine/tools/builtin.py`, `python/apps/azents/src/azents/engine/run/resolve.py` | `MemoryReadToolkit` and `MemoryWriteToolkit` are resolved separately instead of one combined memory auto-bind capability. | Implemented | #238 |
 | Prerequisite plan PR 3 | Add execution-mode filtering seam for future subagent mode without registering subagent tools. | `python/apps/azents/src/azents/core/tools.py`, `python/apps/azents/src/azents/engine/run/resolve.py` | `ToolkitExecutionMode` and `_allows_execution_mode()` route toolkit candidates through root/subagent allowlists. Worker execution still passes root mode. | Implemented | #238 |
 | Prerequisite plan PR 3 | Keep Memory Read eligible for future subagent mode and Memory Write excluded from future subagent-mode auto-binding. | `python/apps/azents/src/azents/engine/run/resolve.py`, `python/apps/azents/src/azents/engine/run/resolve_test.py` | Memory Read uses root+subagent allowed modes; Memory Write remains root-only. Resolver tests assert the split. | Implemented | #238 |
@@ -52,7 +55,7 @@ Validated commits and PRs:
 
 ## Gap Closure
 
-No prerequisite-stack gaps remain open after code inspection. Items that are intentionally not implemented here are outside the prerequisite stack and remain assigned to the later subagent implementation stack:
+The validation pass found one prerequisite-stack gap: running sessions promoted TurnActions only at the next run-entry boundary instead of each model-call turn boundary. PR #245 closes that gap. No prerequisite-stack gaps remain open after code inspection. Items that are intentionally not implemented here are outside the prerequisite stack and remain assigned to the later subagent implementation stack:
 
 | Deferred item | Reason | Owning stack |
 | --- | --- | --- |
@@ -73,6 +76,9 @@ $ cd python/apps/azents && uv run ruff check . && uv run ruff format --check .
 $ cd python/apps/azents && uv run pyright
 $ cd python/apps/azents && uv run pytest src/azents/repos/session_workspace_project src/azents/repos/session_git_worktree src/azents/repos/agent_session/repository_test.py src/azents/services/session_workspace_project/service_test.py src/azents/services/session_git_worktree/service_test.py src/azents/services/project_browser_manifest_test.py -q
 $ cd python/apps/azents && uv run pytest src/azents/services/agent_session_input_test.py src/azents/services/chat/team_session_test.py src/azents/services/chat/input_buffer_test.py src/azents/engine/tools/builtin_test.py src/azents/engine/tools/claude_rules_test.py -q
+$ cd python/apps/azents && uv run pytest -q src/azents/engine/events/execution_test.py -k 'turn_boundary_control'
+$ cd python/apps/azents && uv run pytest -q src/azents/worker/run/executor_test.py -k 'boundary_poll'
+$ cd python/apps/azents && uv run pytest -q src/azents/worker/worker_test.py -k 'boundary_poll_broadcasts_input_buffer_taxonomy_actions'
 ```
 
 Results:
@@ -82,7 +88,8 @@ Results:
 - Pyright: passed with 0 errors.
 - Repository/service Project/worktree/session tests: 1 passed, 40 skipped because DB-backed tests require local testcontainers runtime.
 - Input/chat/tool regression tests: 57 passed, 22 skipped because DB-backed tests require local testcontainers runtime.
+- Turn-boundary action targeted tests: passed (1 engine execution test, 3 executor boundary-poll tests, 1 worker broadcast regression test).
 
 ## Conclusion
 
-The prerequisite stack satisfies the planned foundation requirements and keeps the new subagent product surface unexposed. The next step is to create this validation PR, then begin CI monitoring for PRs #237-#240 and this validation PR together.
+The prerequisite stack satisfies the planned foundation requirements and keeps the new subagent product surface unexposed after the TurnAction turn-boundary fix. The next step is to open PR #245 on top of the validation PR and monitor CI for PRs #236-#241 and #245 together.

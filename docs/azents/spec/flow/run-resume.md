@@ -18,9 +18,10 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
+  - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-06
-spec_version: 12
+last_verified_at: 2026-07-08
+spec_version: 14
 ---
 
 # Run Resume
@@ -169,7 +170,7 @@ The takeover path must preserve single-session execution:
 
 ## Operation Action Recovery
 
-Operation TurnActions are durable `action_message` inputs. When takeover sees pending setup action input or a pending retry action execution, the worker resumes from the durable action message and `action_executions` projection. A completed action is not duplicated. A failed action leaves later pending input in place until user retry or discard changes the action execution state. If a Project-mutating action completes and later input remains, the worker uses a follow-up wake-up boundary so model/tool context is rebuilt from the updated Project registry before run creation. Completed worktree action projections are appended to durable history as `action_execution_result` events and terminal live action state is not kept as a persistent live fallback.
+Operation TurnActions are durable `action_message` inputs. When takeover sees pending setup action input or a pending retry action execution, the worker resumes from the durable action message and `action_executions` projection. A completed action is not duplicated. A failed action is marked failed and FIFO processing continues to later pending input; retry/discard mutations remain scoped to the failed action execution but are not required to unblock the queue. Running workers also process TurnActions at model-call turn boundaries instead of waiting for the run-complete boundary. If a Project-mutating action completes and later input remains, the worker marks the current agent run cancelled without appending a completed run marker and uses a follow-up wake-up boundary so model/tool context is rebuilt from the updated Project registry before run creation or before the next model call. Completed worktree action projections are appended to durable history as `action_execution_result` events and terminal live action state is not kept as a persistent live fallback.
 
 ## Failed-run Retry Recovery
 
@@ -224,5 +225,7 @@ that next run to observe `check_stop()` as true.
 
 ## Changelog
 
-- **2026-07-05** (spec_version 11) — Added operation TurnAction recovery semantics for action-based Git worktree setup.
+- **2026-07-08** (spec_version 14) — Clarified that failed TurnActions continue FIFO processing and context invalidation uses a cancelled run boundary plus follow-up wake-up, not a completed run marker.
+- **2026-07-08** (spec_version 13) — Clarified that running workers process TurnActions at model-call turn boundaries and hand off after context invalidation.
 - **2026-07-06** (spec_version 12) — Removed session-initialization recovery and documented durable terminal action result recovery.
+- **2026-07-05** (spec_version 11) — Added operation TurnAction recovery semantics for action-based Git worktree setup.

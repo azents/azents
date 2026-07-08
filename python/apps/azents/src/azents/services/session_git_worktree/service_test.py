@@ -663,7 +663,7 @@ class TestSessionGitWorktreeService:
             action_event_id=action_event.id,
             action=action_payload.action,
         )
-        assert first_result.completed is False
+        assert first_result.completed is True
         async with rdb_session_manager() as session:
             failed = await ActionExecutionRepository().get_by_action_event_id(
                 session,
@@ -731,7 +731,7 @@ class TestSessionGitWorktreeService:
             action_event_id=action_event.id,
             action=action_payload.action,
         )
-        assert first_result.completed is False
+        assert first_result.completed is True
         async with rdb_session_manager() as session:
             failed = await ActionExecutionRepository().get_by_action_event_id(
                 session,
