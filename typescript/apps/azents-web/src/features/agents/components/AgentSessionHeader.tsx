@@ -23,6 +23,7 @@ import {
 import {
   IconChartBar,
   IconFolderOpen,
+  IconGitBranch,
   IconMenu2,
   IconMessageCircle,
   IconPencil,
@@ -46,9 +47,14 @@ function isContextPage(value: string | null): boolean {
   );
 }
 
-function resolveActiveTab(page: string | null): "chat" | "context" {
+function resolveActiveTab(
+  page: string | null,
+): "chat" | "context" | "subagents" {
   if (isContextPage(page)) {
     return "context";
+  }
+  if (page === "subagents") {
+    return "subagents";
   }
   return "chat";
 }
@@ -180,6 +186,8 @@ export function AgentSessionHeader({
         router.push(`${basePath}/sessions/${sessionId}`);
       } else if (value === "context") {
         router.push(`${basePath}/sessions/${sessionId}?page=context`);
+      } else if (value === "subagents") {
+        router.push(`${basePath}/sessions/${sessionId}?page=subagents`);
       }
     },
     [router, basePath, sessionId],
@@ -359,6 +367,12 @@ export function AgentSessionHeader({
             </Tabs.Tab>
             <Tabs.Tab value="context" leftSection={<IconChartBar size={14} />}>
               {t("tabs.context")}
+            </Tabs.Tab>
+            <Tabs.Tab
+              value="subagents"
+              leftSection={<IconGitBranch size={14} />}
+            >
+              {t("subagents.title")}
             </Tabs.Tab>
           </Tabs.List>
         </Tabs>
