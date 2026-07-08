@@ -39,11 +39,13 @@ class _InputBufferService:
         self.checked_session_ids.append(session_id)
         return self.pending
 
-    async def enqueue_many_in_transaction(
+    async def enqueue_many(
         self,
+        session: object,
         inputs: list[InputBufferEnqueue],
     ) -> list[InputBufferEnqueueResult]:
         """Record the transaction-level enqueue request."""
+        del session
         self.enqueued_batches.append(inputs)
         return [
             InputBufferEnqueueResult(
@@ -63,6 +65,42 @@ class _InputBufferService:
             )
             for index, input in enumerate(inputs)
         ]
+
+
+class _SessionContext:
+    """Async DB session context test double."""
+
+    async def __aenter__(self) -> object:
+        """Return a placeholder session."""
+        return object()
+
+    async def __aexit__(self, *args: object) -> None:
+        """Exit context."""
+        return None
+
+
+class _SessionManager:
+    """SessionManager test double."""
+
+    def __call__(self) -> _SessionContext:
+        """Return an async session context."""
+        return _SessionContext()
+
+
+class _AgentSessionRepository:
+    """AgentSessionRepository test double."""
+
+    def __init__(self) -> None:
+        self.marked_running: list[str] = []
+
+    async def mark_running_for_input_wakeup(
+        self,
+        session: object,
+        session_id: str,
+    ) -> None:
+        """Record wake transition."""
+        del session
+        self.marked_running.append(session_id)
 
 
 class _EventPublisher:
@@ -133,12 +171,18 @@ def _service(
     input_buffer_service: _InputBufferService,
     event_publisher: _EventPublisher,
     broker: _Broker,
+    agent_session_repository: _AgentSessionRepository | None = None,
 ) -> IdleContinuationService:
     """Create IdleContinuationService under test."""
     return IdleContinuationService(
         input_buffer_service=cast(InputBufferService, input_buffer_service),
+        agent_session_repository=cast(
+            Any,
+            agent_session_repository or _AgentSessionRepository(),
+        ),
         event_publisher=cast(WorkerEventPublisher, event_publisher),
         broker=cast(SessionBroker, broker),
+        session_manager=cast(Any, _SessionManager()),
     )
 
 

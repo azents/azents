@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import InputBufferKind
@@ -17,7 +18,10 @@ from azents.engine.hooks.types import (
     SessionIdleHookContext,
 )
 from azents.engine.run.contracts import ToolkitBinding
+from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
+from azents.rdb.session import SessionManager
+from azents.repos.agent_session import AgentSessionRepository
 from azents.services.chat.live_events import input_buffer_to_live_event
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.worker.deps import get_worker_broker
@@ -29,8 +33,16 @@ class IdleContinuationService:
     """Store idle hook continuations as pending session input."""
 
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    agent_session_repository: Annotated[
+        AgentSessionRepository,
+        Depends(AgentSessionRepository),
+    ]
     event_publisher: Annotated[WorkerEventPublisher, Depends(WorkerEventPublisher)]
     broker: Annotated[SessionBroker, Depends(get_worker_broker)]
+    session_manager: Annotated[
+        SessionManager[AsyncSession],
+        Depends(get_session_manager),
+    ]
 
     async def enqueue(
         self,
@@ -57,12 +69,19 @@ class IdleContinuationService:
         if not result.continuations:
             return False
 
-        enqueue_results = await self.input_buffer_service.enqueue_many_in_transaction(
-            [
-                self._continuation_input(message, continuation)
-                for continuation in result.continuations
-            ],
-        )
+        continuation_inputs = [
+            self._continuation_input(message, continuation)
+            for continuation in result.continuations
+        ]
+        async with self.session_manager() as session:
+            enqueue_results = await self.input_buffer_service.enqueue_many(
+                session,
+                continuation_inputs,
+            )
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                message.session_id,
+            )
         for enqueue_result in enqueue_results:
             await self.event_publisher.dispatch_event(
                 message.session_id,
