@@ -126,6 +126,13 @@ class SessionType(enum.StrEnum):
     SYSTEM = "system"
 
 
+class ToolkitExecutionMode(enum.StrEnum):
+    """Execution mode used by Toolkit resolution filters."""
+
+    ROOT = "root"
+    SUBAGENT = "subagent"
+
+
 # ---------------------------------------------------------------------------
 # Runtime context
 # ---------------------------------------------------------------------------

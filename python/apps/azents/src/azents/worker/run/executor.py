@@ -28,6 +28,7 @@ from azents.core.enums import (
 from azents.core.tools import (
     SessionType,
     ToolkitContext,
+    ToolkitExecutionMode,
     ToolkitProvider,
 )
 from azents.engine.events.action_messages import (
@@ -470,6 +471,7 @@ class RunExecutor:
             toolkits = await resolve_agent_tools(
                 invoke_input.agent_id,
                 context,
+                execution_mode=ToolkitExecutionMode.ROOT,
                 toolkit_registry=self.toolkit_registry,
                 agent_toolkit_repository=self.agent_toolkit_repository,
                 toolkit_repository=self.toolkit_repository,
