@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-06-29
+updated: 2026-07-08
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -38,22 +38,19 @@ code_paths:
   - python/apps/azents/src/azents/services/workspace_invitation/**
   - typescript/apps/azents-web/src/features/auth/**
   - typescript/apps/azents-web/src/features/signup/**
-  - typescript/apps/azents-web/src/features/signup-token-admin/**
   - typescript/apps/azents-web/src/features/password-reset/**
-  - typescript/apps/azents-web/src/features/password-reset-admin/**
   - typescript/apps/azents-web/src/features/bootstrap/**
   - typescript/apps/azents-web/src/trpc/routers/auth.ts
-  - typescript/apps/azents-web/src/trpc/routers/signup-token-admin.ts
-  - typescript/apps/azents-web/src/trpc/routers/password-reset-token-admin.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace.ts
 api_routes:
   - /auth/v1
   - /user/v1
   - /security/v1
+  - /workspace/v1
   - /admin/auth/v1
   - /admin/workspace/v1
-last_verified_at: 2026-06-29
-spec_version: 5
+last_verified_at: 2026-07-08
+spec_version: 6
 ---
 
 # User & Authentication
@@ -226,9 +223,9 @@ Token redeem validates password policy before consuming the token. On success it
 
 ### 3.7 First owner bootstrap
 
-`GET /admin/workspace/v1/bootstrap/status` returns first owner bootstrap availability.
+`GET /workspace/v1/bootstrap/status` returns first owner bootstrap availability.
 
-`POST /admin/workspace/v1/bootstrap/first-owner` succeeds only under following conditions.
+`POST /workspace/v1/bootstrap/first-owner` succeeds only under following conditions.
 
 - `first_owner_bootstrap_enabled=true`
 - total user count is 0
@@ -315,6 +312,11 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - `POST /password-reset-tokens/preview` → `{ valid, email, expires_at }` (`email` is a masked current email hint)
 - `POST /password-reset-tokens/redeem` → `{ success }`
 
+### Public — `/workspace/v1`
+
+- `GET /bootstrap/status` → `{ available }`
+- `POST /bootstrap/first-owner` → `{ workspace_handle, user_id }`
+
 ### Admin — `/admin/auth/v1`
 
 - `POST /signup-tokens` → token metadata + one-time plaintext token
@@ -327,8 +329,7 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 
 ### Admin — `/admin/workspace/v1`
 
-- `GET /bootstrap/status` → `{ available }`
-- `POST /bootstrap/first-owner` → `{ workspace_handle, user_id }`
+- Retains first-owner bootstrap endpoints for the separate Admin API surface. Main web must use the public `/workspace/v1/bootstrap/*` endpoints instead of calling Admin API directly.
 
 ### Public — `/security/v1`
 
@@ -346,10 +347,10 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 
 - `/login` — existing login page. Existing users continue with password or email OTP. It exposes a signup-link request action only when registration policy and email delivery allow it.
 - `/signup?token=...` — previews a signup token, shows a masked email hint, and redeems it with user-entered email and password.
-- `/account/signup-tokens` — account settings page for creating manual signup links, listing token metadata, and revoking active tokens. The one-time plaintext link is shown only immediately after creation.
 - `/reset-password?token=...` — previews an admin-issued reset token and submits a new password. Success does not auto-login; user signs in separately.
-- `/account/password-reset-tokens` — account settings page for admins to create manual password reset links, list token metadata, and revoke active tokens. The one-time plaintext link is shown only immediately after creation.
-- `/setup` — first owner bootstrap UI. It calls bootstrap status and only succeeds when server-side bootstrap is available.
+- `/setup` — first owner bootstrap UI. It calls public bootstrap status/first-owner endpoints and only succeeds when server-side bootstrap is available.
+
+Main web does not expose admin-issued signup token or password reset token management. Those operations remain on the separate Admin API until a product-level system admin permission model is defined.
 
 ## 9. Changelog
 
@@ -359,3 +360,4 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - **2026-06-29** (v5) — Removed GitHub PAT credential storage from the user-auth domain; GitHub auth is now toolkit-level only.
 - **2026-06-18** (v3) — Verified cleanup: signup token failed redeem paths no longer consume `used_count`; login signup CTA is gated by signup status; preview exposes a masked email hint; account signup-token admin UI is documented.
 - **2026-06-18** (v4) — Added credential provider projection, SMTP-gated email credential validity, last valid credential deletion invariant, and admin-issued password reset tokens.
+- **2026-07-08** (v6) — Moved first-owner bootstrap to public Workspace API for main web and removed main-web admin-issued token management pending a system admin permission model.

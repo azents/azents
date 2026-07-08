@@ -26,10 +26,24 @@ class TestWorkspaceV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_workspace_v1_bootstrap_first_owner(self) -> None:
+        """Test case for workspace_v1_bootstrap_first_owner
+
+        Bootstrap First Owner
+        """
+        pass
+
     def test_workspace_v1_create_workspace(self) -> None:
         """Test case for workspace_v1_create_workspace
 
         Create Workspace
+        """
+        pass
+
+    def test_workspace_v1_get_bootstrap_status(self) -> None:
+        """Test case for workspace_v1_get_bootstrap_status
+
+        Get Bootstrap Status
         """
         pass
 

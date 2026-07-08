@@ -113,6 +113,9 @@ __all__ = [
     "AvatarUploadTicketResponse",
     "AwsConfig",
     "AwsSecrets",
+    "BootstrapFirstOwnerRequest",
+    "BootstrapFirstOwnerResponse",
+    "BootstrapStatusResponse",
     "BuiltinToolConfig",
     "ChatEditMessageWriteRequest",
     "ChatEventPageResponse",
@@ -395,6 +398,9 @@ from azentspublicclient.models.avatar_upload_request import AvatarUploadRequest 
 from azentspublicclient.models.avatar_upload_ticket_response import AvatarUploadTicketResponse as AvatarUploadTicketResponse
 from azentspublicclient.models.aws_config import AwsConfig as AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets as AwsSecrets
+from azentspublicclient.models.bootstrap_first_owner_request import BootstrapFirstOwnerRequest as BootstrapFirstOwnerRequest
+from azentspublicclient.models.bootstrap_first_owner_response import BootstrapFirstOwnerResponse as BootstrapFirstOwnerResponse
+from azentspublicclient.models.bootstrap_status_response import BootstrapStatusResponse as BootstrapStatusResponse
 from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig as BuiltinToolConfig
 from azentspublicclient.models.chat_edit_message_write_request import ChatEditMessageWriteRequest as ChatEditMessageWriteRequest
 from azentspublicclient.models.chat_event_page_response import ChatEventPageResponse as ChatEventPageResponse

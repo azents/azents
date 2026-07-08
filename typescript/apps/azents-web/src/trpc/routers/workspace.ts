@@ -6,33 +6,20 @@
  * - create: workspace create (auth required)
  */
 import {
-  createClient as createAdminClient,
-  createConfig as createAdminConfig,
   workspaceV1BootstrapFirstOwner,
-  workspaceV1GetBootstrapStatus,
-} from "@azents/admin-client";
-import {
   workspaceV1CreateWorkspace,
+  workspaceV1GetBootstrapStatus,
   workspaceV1ListWorkspaces,
 } from "@azents/public-client";
 import { z } from "zod/v4";
-import { getServerConfig } from "@/config/server";
-import { safeFetch } from "@/shared/lib/safe-fetch";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
-function createBootstrapAdminClient(): ReturnType<typeof createAdminClient> {
-  const config = getServerConfig();
-  return createAdminClient(
-    createAdminConfig({ baseUrl: config.internalApiUrl, fetch: safeFetch }),
-  );
-}
-
 export const workspaceRouter = router({
-  bootstrapStatus: publicProcedure.query(async () => {
+  bootstrapStatus: publicProcedure.query(async ({ ctx }) => {
     try {
       const { data } = await workspaceV1GetBootstrapStatus({
-        client: createBootstrapAdminClient(),
+        client: ctx.apiClient,
         throwOnError: true,
       });
       return data;
@@ -51,10 +38,10 @@ export const workspaceRouter = router({
         workspaceHandle: z.string().min(1).max(30),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await workspaceV1BootstrapFirstOwner({
-          client: createBootstrapAdminClient(),
+          client: ctx.apiClient,
           body: {
             email: input.email,
             password: input.password,

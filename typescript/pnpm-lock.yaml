@@ -241,9 +241,6 @@ importers:
 
   apps/azents-web:
     dependencies:
-      '@azents/admin-client':
-        specifier: workspace:*
-        version: link:../../packages/azents-admin-client
       '@azents/public-client':
         specifier: workspace:*
         version: link:../../packages/azents-public-client

@@ -92,6 +92,9 @@ azentspublicclient/docs/AvatarUploadRequest.md
 azentspublicclient/docs/AvatarUploadTicketResponse.md
 azentspublicclient/docs/AwsConfig.md
 azentspublicclient/docs/AwsSecrets.md
+azentspublicclient/docs/BootstrapFirstOwnerRequest.md
+azentspublicclient/docs/BootstrapFirstOwnerResponse.md
+azentspublicclient/docs/BootstrapStatusResponse.md
 azentspublicclient/docs/BuiltinToolConfig.md
 azentspublicclient/docs/ChatEditMessageWriteRequest.md
 azentspublicclient/docs/ChatEventPageResponse.md
@@ -357,6 +360,9 @@ azentspublicclient/models/avatar_upload_request.py
 azentspublicclient/models/avatar_upload_ticket_response.py
 azentspublicclient/models/aws_config.py
 azentspublicclient/models/aws_secrets.py
+azentspublicclient/models/bootstrap_first_owner_request.py
+azentspublicclient/models/bootstrap_first_owner_response.py
+azentspublicclient/models/bootstrap_status_response.py
 azentspublicclient/models/builtin_tool_config.py
 azentspublicclient/models/chat_edit_message_write_request.py
 azentspublicclient/models/chat_event_page_response.py
@@ -612,6 +618,9 @@ azentspublicclient/test/test_avatar_upload_request.py
 azentspublicclient/test/test_avatar_upload_ticket_response.py
 azentspublicclient/test/test_aws_config.py
 azentspublicclient/test/test_aws_secrets.py
+azentspublicclient/test/test_bootstrap_first_owner_request.py
+azentspublicclient/test/test_bootstrap_first_owner_response.py
+azentspublicclient/test/test_bootstrap_status_response.py
 azentspublicclient/test/test_builtin_tool_config.py
 azentspublicclient/test/test_chat_edit_message_write_request.py
 azentspublicclient/test/test_chat_event_page_response.py

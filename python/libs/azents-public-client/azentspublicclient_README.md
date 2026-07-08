@@ -215,7 +215,9 @@ Class | Method | HTTP request | Description
 *WorkspaceUserV1Api* | [**workspaceuser_v1_update_workspace_user_role**](azentspublicclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_update_workspace_user_role) | **PATCH** /workspace-user/v1/workspaces/{handle}/workspace-users/{workspace_user_id} | Update Workspace User Role
 *WorkspaceModelSettingsV1Api* | [**workspace_model_settings_v1_get_workspace_model_settings**](azentspublicclient/docs/WorkspaceModelSettingsV1Api.md#workspace_model_settings_v1_get_workspace_model_settings) | **GET** /workspace-model-settings/v1/workspaces/{handle} | Get Workspace Model Settings
 *WorkspaceModelSettingsV1Api* | [**workspace_model_settings_v1_update_workspace_model_settings**](azentspublicclient/docs/WorkspaceModelSettingsV1Api.md#workspace_model_settings_v1_update_workspace_model_settings) | **PUT** /workspace-model-settings/v1/workspaces/{handle} | Update Workspace Model Settings
+*WorkspaceV1Api* | [**workspace_v1_bootstrap_first_owner**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_bootstrap_first_owner) | **POST** /workspace/v1/bootstrap/first-owner | Bootstrap First Owner
 *WorkspaceV1Api* | [**workspace_v1_create_workspace**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_create_workspace) | **POST** /workspace/v1/workspaces | Create Workspace
+*WorkspaceV1Api* | [**workspace_v1_get_bootstrap_status**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_get_bootstrap_status) | **GET** /workspace/v1/bootstrap/status | Get Bootstrap Status
 *WorkspaceV1Api* | [**workspace_v1_get_workspace_by_handle**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_get_workspace_by_handle) | **GET** /workspace/v1/workspaces/{handle} | Get Workspace By Handle
 *WorkspaceV1Api* | [**workspace_v1_list_workspaces**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_list_workspaces) | **GET** /workspace/v1/workspaces | List Workspaces
 
@@ -292,6 +294,9 @@ Class | Method | HTTP request | Description
  - [AvatarUploadTicketResponse](azentspublicclient/docs/AvatarUploadTicketResponse.md)
  - [AwsConfig](azentspublicclient/docs/AwsConfig.md)
  - [AwsSecrets](azentspublicclient/docs/AwsSecrets.md)
+ - [BootstrapFirstOwnerRequest](azentspublicclient/docs/BootstrapFirstOwnerRequest.md)
+ - [BootstrapFirstOwnerResponse](azentspublicclient/docs/BootstrapFirstOwnerResponse.md)
+ - [BootstrapStatusResponse](azentspublicclient/docs/BootstrapStatusResponse.md)
  - [BuiltinToolConfig](azentspublicclient/docs/BuiltinToolConfig.md)
  - [ChatEditMessageWriteRequest](azentspublicclient/docs/ChatEditMessageWriteRequest.md)
  - [ChatEventPageResponse](azentspublicclient/docs/ChatEventPageResponse.md)

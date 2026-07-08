@@ -7192,6 +7192,70 @@
         ]
       }
     },
+    "/workspace/v1/bootstrap/status": {
+      "get": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Get Bootstrap Status",
+        "description": "Get whether first owner bootstrap is available.\n\nThis endpoint is intentionally public because it is available only before\nthe first user exists and is gated by server-side bootstrap invariants.",
+        "operationId": "workspace_v1_get_bootstrap_status",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace/v1/bootstrap/first-owner": {
+      "post": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Bootstrap First Owner",
+        "description": "Create the first Owner and Workspace.\n\nThis endpoint is intentionally public because normal authentication cannot\nexist before the first user. The service allows it only when user count is\nzero and first-owner bootstrap is enabled.",
+        "operationId": "workspace_v1_bootstrap_first_owner",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BootstrapFirstOwnerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapFirstOwnerResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workspace/v1/workspaces/{handle}": {
       "get": {
         "tags": [
@@ -10227,6 +10291,87 @@
           "file"
         ],
         "title": "Body_chat_v1_upload_file_for_agent"
+      },
+      "BootstrapFirstOwnerRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Owner email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "Owner initial password"
+          },
+          "owner_name": {
+            "type": "string",
+            "title": "Owner Name",
+            "description": "Owner display name"
+          },
+          "workspace_name": {
+            "type": "string",
+            "title": "Workspace Name",
+            "description": "Workspace name"
+          },
+          "workspace_handle": {
+            "type": "string",
+            "title": "Workspace Handle",
+            "description": "Workspace handle"
+          },
+          "locale": {
+            "type": "string",
+            "title": "Locale",
+            "description": "Locale (BCP 47)",
+            "default": "ko-KR"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password",
+          "owner_name",
+          "workspace_name",
+          "workspace_handle"
+        ],
+        "title": "BootstrapFirstOwnerRequest",
+        "description": "First owner bootstrap request."
+      },
+      "BootstrapFirstOwnerResponse": {
+        "properties": {
+          "workspace_handle": {
+            "type": "string",
+            "title": "Workspace Handle",
+            "description": "Created Workspace handle"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "Created Owner User ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_handle",
+          "user_id"
+        ],
+        "title": "BootstrapFirstOwnerResponse",
+        "description": "First owner bootstrap response."
+      },
+      "BootstrapStatusResponse": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "bootstrap availability flag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "BootstrapStatusResponse",
+        "description": "First owner bootstrap status response."
       },
       "BuiltinToolConfig": {
         "properties": {
