@@ -15,6 +15,13 @@ class SessionGitWorktree(BaseModel):
 
     id: str = Field(description="Session Git worktree ID")
     session_id: str = Field(description="AgentSession ID")
+    session_agent_context_id: str = Field(description="SessionAgentContext ID")
+    created_by_session_agent_id: str | None = Field(
+        description="SessionAgent ID that created the allocation"
+    )
+    created_by_agent_session_id: str | None = Field(
+        description="AgentSession ID that created the allocation"
+    )
     action_execution_id: str | None = Field(
         description="ActionExecution ID for operation-based worktree creation"
     )

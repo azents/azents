@@ -10,6 +10,7 @@ class SessionWorkspaceProject(BaseModel):
 
     id: str = Field(description="Project ID")
     session_id: str = Field(description="AgentSession ID")
+    session_agent_context_id: str = Field(description="SessionAgentContext ID")
     path: str = Field(description="Absolute path under /workspace/agent")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")

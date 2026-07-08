@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import (
     AgentRunStatus,
+    AgentSessionKind,
     AgentSessionStartReason,
     AgentSessionStatus,
     EventKind,
@@ -1284,6 +1285,7 @@ def _agent_session() -> AgentSession:
         workspace_id="workspace-1",
         agent_id="agent-1",
         handle="test-session-handle",
+        session_kind=AgentSessionKind.ROOT,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,

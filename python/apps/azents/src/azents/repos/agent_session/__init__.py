@@ -12,19 +12,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionEndReason,
+    AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
+    SessionAgentKind,
 )
 from azents.core.session_handle import generate_session_handle
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
+from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 
 from .data import AgentSession, AgentSessionCreate, PendingSessionCommand
 
 SESSION_HANDLE_INSERT_ATTEMPTS = 10
+_ROOT_SESSION_AGENT_NAME = "root"
+_ROOT_SESSION_AGENT_PATH = "/root"
+_DEFAULT_SESSION_AGENT_TYPE = "default"
 
 
 @dataclass(frozen=True)
@@ -54,6 +62,7 @@ class AgentSessionRepository:
                     workspace_id=create.workspace_id,
                     agent_id=create.agent_id,
                     handle=generate_session_handle(),
+                    session_kind=create.session_kind,
                     status=AgentSessionStatus.ACTIVE,
                     title=create.title,
                     primary_kind=create.primary_kind,
@@ -64,6 +73,13 @@ class AgentSessionRepository:
             )
             rdb = result.scalar_one_or_none()
             if rdb is not None:
+                if create.session_kind is AgentSessionKind.ROOT:
+                    await self._create_root_session_agent_tree(
+                        session,
+                        agent_session_id=rdb.id,
+                        workspace_id=rdb.workspace_id,
+                        agent_id=rdb.agent_id,
+                    )
                 await session.flush()
                 return self._build(rdb)
 
@@ -88,7 +104,10 @@ class AgentSessionRepository:
         """Fetch workspace AgentSession list in latest-first order."""
         result = await session.execute(
             sa.select(RDBAgentSession)
-            .where(RDBAgentSession.workspace_id == workspace_id)
+            .where(
+                RDBAgentSession.workspace_id == workspace_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+            )
             .order_by(RDBAgentSession.updated_at.desc())
         )
         return [self._build(rdb) for rdb in result.scalars()]
@@ -111,6 +130,7 @@ class AgentSessionRepository:
             sa.select(RDBAgentSession)
             .where(
                 RDBAgentSession.agent_id == agent_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
             .order_by(
@@ -132,6 +152,7 @@ class AgentSessionRepository:
             sa.select(RDBAgentSession)
             .where(
                 RDBAgentSession.agent_id == agent_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.primary_kind.is_(None),
             )
@@ -179,6 +200,7 @@ class AgentSessionRepository:
         result = await session.execute(
             sa.select(RDBAgentSession).where(
                 RDBAgentSession.agent_id == agent_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
@@ -223,6 +245,7 @@ class AgentSessionRepository:
                     workspace_id=workspace_id,
                     agent_id=agent_id,
                     handle=generate_session_handle(),
+                    session_kind=AgentSessionKind.ROOT,
                     status=AgentSessionStatus.ACTIVE,
                     title=None,
                     primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
@@ -233,6 +256,12 @@ class AgentSessionRepository:
             )
             rdb = result.scalar_one_or_none()
             if rdb is not None:
+                await self._create_root_session_agent_tree(
+                    session,
+                    agent_session_id=rdb.id,
+                    workspace_id=rdb.workspace_id,
+                    agent_id=rdb.agent_id,
+                )
                 await session.flush()
                 return self._build(rdb)
 
@@ -696,6 +725,52 @@ class AgentSessionRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def _create_root_session_agent_tree(
+        self,
+        session: AsyncSession,
+        *,
+        agent_session_id: str,
+        workspace_id: str,
+        agent_id: str,
+    ) -> None:
+        """Create the root SessionAgent and context for a root AgentSession."""
+        context_id = uuid7().hex
+        root_session_agent_id = uuid7().hex
+        runtime_id = await self._get_agent_runtime_id(session, agent_id=agent_id)
+        context = RDBSessionAgentContext(
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            agent_runtime_id=runtime_id,
+        )
+        context.id = context_id
+        session.add(context)
+        await session.flush()
+        root_agent = RDBSessionAgent(
+            context_id=context_id,
+            root_session_agent_id=root_session_agent_id,
+            agent_session_id=agent_session_id,
+            kind=SessionAgentKind.ROOT,
+            name=_ROOT_SESSION_AGENT_NAME,
+            path=_ROOT_SESSION_AGENT_PATH,
+            agent_type=_DEFAULT_SESSION_AGENT_TYPE,
+            parent_session_agent_id=None,
+        )
+        root_agent.id = root_session_agent_id
+        session.add(root_agent)
+        context.root_session_agent_id = root_session_agent_id
+
+    async def _get_agent_runtime_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> str | None:
+        """Return current runtime ID for an Agent when already provisioned."""
+        result = await session.execute(
+            sa.select(RDBAgentRuntime.id).where(RDBAgentRuntime.agent_id == agent_id)
+        )
+        return result.scalar_one_or_none()
+
     def _build(self, rdb: RDBAgentSession) -> AgentSession:
         """Convert RDB model to domain model."""
         return AgentSession(
@@ -703,6 +778,7 @@ class AgentSessionRepository:
             workspace_id=rdb.workspace_id,
             agent_id=rdb.agent_id,
             handle=rdb.handle,
+            session_kind=rdb.session_kind,
             status=rdb.status,
             primary_kind=rdb.primary_kind,
             start_reason=rdb.start_reason,

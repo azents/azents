@@ -116,6 +116,20 @@ class AgentSessionRunState(enum.StrEnum):
     RUNNING = "running"
 
 
+class AgentSessionKind(enum.StrEnum):
+    """AgentSession listing category."""
+
+    ROOT = "root"
+    SUBAGENT = "subagent"
+
+
+class SessionAgentKind(enum.StrEnum):
+    """SessionAgent tree node kind."""
+
+    ROOT = "root"
+    SUBAGENT = "subagent"
+
+
 class AgentSessionTitleSource(enum.StrEnum):
     """Source of the current AgentSession title."""
 

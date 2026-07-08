@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from azents.core.enums import (
     AgentSessionEndReason,
+    AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStartReason,
@@ -21,6 +22,7 @@ class AgentSession(BaseModel):
     workspace_id: str = Field(description="Workspace ID")
     agent_id: str = Field(description="Agent ID")
     handle: str = Field(description="Human-readable session handle")
+    session_kind: AgentSessionKind = Field(description="Session listing category")
     status: AgentSessionStatus = Field(description="AgentSession status")
     primary_kind: AgentSessionPrimaryKind | None = Field(
         default=None,
@@ -119,6 +121,10 @@ class AgentSessionCreate(BaseModel):
     workspace_id: str = Field(description="Workspace ID")
     agent_id: str = Field(description="Agent ID")
     title: str | None = Field(description="User-facing session title")
+    session_kind: AgentSessionKind = Field(
+        default=AgentSessionKind.ROOT,
+        description="Session listing category",
+    )
     primary_kind: AgentSessionPrimaryKind | None = Field(
         default=None,
         description="Primary session role",

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import (
+    AgentSessionKind,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -96,6 +97,7 @@ def _agent_session(
         workspace_id=workspace_id,
         agent_id=agent_id,
         handle="test-session-handle",
+        session_kind=AgentSessionKind.ROOT,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,

@@ -13,6 +13,7 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionKind,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentType,
@@ -258,6 +259,7 @@ def _make_agent_session() -> AgentSession:
         workspace_id="workspace-1",
         agent_id="agent-1",
         handle="test-session-handle",
+        session_kind=AgentSessionKind.ROOT,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,
