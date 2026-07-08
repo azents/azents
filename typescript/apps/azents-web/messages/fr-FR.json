@@ -553,6 +553,10 @@
           "shellDisabled": "Shell off"
         }
       },
+      "settingsLayout": {
+        "backToAgent": "Retour à l’agent",
+        "backToSettings": "Retour aux paramètres"
+      },
       "detail": {
         "tabs": {
           "chat": "Discussion",

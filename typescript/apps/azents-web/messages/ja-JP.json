@@ -553,6 +553,10 @@
           "shellDisabled": "Shell off"
         }
       },
+      "settingsLayout": {
+        "backToAgent": "エージェントに戻る",
+        "backToSettings": "設定に戻る"
+      },
       "detail": {
         "tabs": {
           "chat": "チャット",

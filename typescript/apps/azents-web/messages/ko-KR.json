@@ -553,6 +553,10 @@
           "shellDisabled": "Shell 꺼짐"
         }
       },
+      "settingsLayout": {
+        "backToAgent": "에이전트로 돌아가기",
+        "backToSettings": "설정으로 돌아가기"
+      },
       "detail": {
         "tabs": {
           "chat": "채팅",

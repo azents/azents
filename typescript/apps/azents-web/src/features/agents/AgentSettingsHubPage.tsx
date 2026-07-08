@@ -2,10 +2,10 @@
 
 /** Agent settings hub page entry. */
 
-import { Box } from "@mantine/core";
+import { rem } from "@mantine/core";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
-import { AgentSettingsHeader } from "./components/AgentSettingsHeader";
 import { AgentSettingsHub } from "./components/AgentSettingsHub";
+import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
 import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSettingsHubContainerProps {
@@ -24,10 +24,14 @@ function AgentSettingsHubWithHeader({
   agent,
 }: AgentSettingsHubContainerProps): React.ReactElement {
   return (
-    <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
-      <AgentSettingsHeader agent={agent} />
+    <AgentSettingsLayout
+      handle={handle}
+      agent={agent}
+      backTarget="agent"
+      backMaxWidth={rem(860)}
+    >
       <AgentSettingsHub handle={handle} agent={agent} />
-    </Box>
+    </AgentSettingsLayout>
   );
 }
 
