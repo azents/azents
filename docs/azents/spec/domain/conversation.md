@@ -19,6 +19,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/scheduler.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
+  - python/apps/azents/src/azents/rdb/models/session_agent.py
+  - python/apps/azents/src/azents/rdb/models/session_agent_context.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/event.py
   - python/apps/azents/src/azents/rdb/models/input_buffer.py
@@ -29,6 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/exchange_file.py
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/agent_run/**
+  - python/apps/azents/src/azents/repos/agent_execution/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/repos/input_buffer/**
   - python/apps/azents/src/azents/repos/session_git_worktree/**
@@ -79,6 +82,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
@@ -88,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-08
-spec_version: 88
+spec_version: 89
 ---
 
 # Conversation & Events
@@ -106,6 +110,8 @@ erDiagram
     Agent ||--|| AgentRuntime : "has runtime"
     Agent ||--o{ AgentSession : "has sessions"
     AgentRuntime }o--|| Workspace : "scoped to"
+    AgentSession ||--|| SessionAgent : "linked participant"
+    SessionAgent ||--o{ SessionAgent : "child participants"
     AgentSession ||--o{ Event : "event transcript"
     AgentSession ||--o{ AgentRun : "durable execution runs"
     AgentSession ||--o{ ExchangeFile : "shows uploads and artifacts"
@@ -126,6 +132,11 @@ execution control state is stored on `AgentSession`; detailed run phase/tool sta
 `agent_runs`. Runtime lifecycle state must not be used as the authority for a session run, pending
 command, stop intent, or run heartbeat.
 
+`SessionAgent` is the session-scoped participant tree used by subagents. It does not replace
+`AgentSession`; every participant links one-to-one to an `AgentSession`, and the linked session owns
+that participant's transcript, runs, input buffers, Goal, Todo, Toolkit State, Skill projection,
+ModelFiles, artifacts, and exchange files.
+
 ## 2. AgentSession
 
 `rdb/models/agent_session.py` stores session identity and lifecycle.
@@ -135,6 +146,7 @@ command, stop intent, or run heartbeat.
 | `id` | `str(32)` | UUID7 hex |
 | `handle` | string | Human-readable, BIP-39-derived session handle used for user-facing allocation names such as owned Git worktree paths. |
 | `workspace_id` / `agent_id` | FK | Workspace and agent boundary |
+| `session_kind` | enum | `root` or `subagent`; ordinary session lists include only `root` sessions |
 | `status` | enum | `active` or `archived` |
 | `primary_kind` | enum \| null | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind. |
 | `start_reason` | enum | `initial`, `system_recovery` |
@@ -228,6 +240,33 @@ write is invalid and must not enqueue a broker wake-up for that alternate sessio
 is not stored on `AgentSession`; runtime lookup happens only after a session target has already been
 selected.
 
+### SessionAgent
+
+`rdb/models/session_agent.py` stores the live participant tree for one root session. A root
+`AgentSession` has one root `SessionAgent` with path `/root`. `spawn_agent` creates child or nested
+`SessionAgent` rows with `kind = subagent`, a linked hidden `AgentSession` whose `session_kind` is
+`subagent`, and the same workspace and Agent boundary as the parent session.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | `str(32)` | SessionAgent ID |
+| `context_id` | FK | Root-tree context shared by all participants in the tree |
+| `root_session_agent_id` | FK self | Root participant for this tree |
+| `agent_session_id` | FK `agent_sessions` | One-to-one linked transcript/execution session |
+| `kind` | enum | `root` or `subagent` |
+| `name` | string | Tree-local name segment. Child names must start with a letter or number and contain only letters, numbers, underscores, or hyphens. |
+| `path` | text | Canonical absolute path under `/root` |
+| `agent_type` | string | Spawned agent type snapshot. Current supported value is `default`. |
+| `parent_session_agent_id` | FK self \| null | Parent participant; null only for the root participant |
+| `last_task_message` | text \| null | Latest delegated task/message preview |
+| `parent_observed_run_index` / `parent_observed_event_id` | int / `str(32)` \| null | Cursor for terminal child run results observed by the parent |
+
+The tree enforces unique `(root_session_agent_id, path)` and `(parent_session_agent_id, name)`. The
+repository resolves absolute paths such as `/root/reviewer` and current-agent-relative child paths.
+It never resolves across root trees. Ordinary agent session list APIs filter to `session_kind = root`,
+so child sessions stay hidden from the Agent rail while remaining directly readable through authorized
+history, live, and detail routes.
+
 ### SessionWorkspaceProject
 
 `rdb/models/session_workspace_project.py` stores the project registry used as session working
@@ -287,6 +326,8 @@ before destructive cleanup can remove a path or branch.
 | `active_tool_calls` | JSONB array | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, `background` |
 | `retry_state` | JSONB \| null | Durable failed-run retry state while the run remains `running`; cleared on terminal transition |
 | `last_completed_event_id` | `str(32)` \| null | Terminal run boundary event id when available |
+| `terminal_result_event_id` | `str(32)` \| null | Terminal assistant/error event used by parent subagent observation |
+| `terminal_result_message` | text \| null | User-safe terminal message returned by `wait_agent` and projected in the Subagent Tree |
 | `created_at` / `updated_at` | timestamptz | Durable lifecycle timestamps |
 
 Phase values are `idle`, `preparing_input`, `waiting_for_model`, `streaming_model`,
@@ -320,11 +361,14 @@ Event kinds:
 - `goal_continuation`
 - `goal_updated`
 - `action_message`
+- `agent_message`
 - `action_execution_result`
 - `skill_loaded`
 - `goal_briefing`
 - `system_error`
 - `unknown_adapter_output`
+
+`agent_message` records agent-to-agent mailbox delivery in the target child session. Its payload stores `message_kind` (`spawn_agent`, `send_message`, or `followup_task`), source/target `SessionAgent` ids, source/target canonical paths, and content. Model lowering renders it as explicitly sourced delegated user-role-compatible input for the target session; the parent transcript keeps only the ordinary collaboration tool call/result.
 
 `action_message` records user-selected TurnActions. `skill` actions load Skill context and are hidden
 from the chat timeline once the matching `skill_loaded` event and optional normal user message are
@@ -376,6 +420,11 @@ event-list APIs:
 - `GET /chat/v1/sessions/{session_id}/live` returns current non-durable live state such as
   streaming assistant text, streaming reasoning, active tool calls, pending input buffers, run state,
   session todo snapshot, and action execution projections.
+- `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree` returns the durable
+  Subagent Tree projection for the root tree containing the selected root or child session. The
+  projection includes nested nodes, canonical paths, linked child `agent_session_id` values for
+  detail routes, projected status, latest task/message preview, latest run metadata, terminal result
+  preview, and unread terminal result indicator.
 
 Both responses use the same event transport shape as the durable transcript. The removed
 `/chat/v1/sessions/{session_id}/messages` aggregate endpoint is not part of the public contract:
@@ -405,7 +454,10 @@ WebSocket chat clients receive subscription and event actions:
 - `todo_state_changed` when the session-scoped TodoToolkit State changes;
 - `live_run_updated` when the authoritative running run projection changes, including failed-run retry state;
 - `live_run_cleared` when terminal run cleanup removes the current run projection;
-- `action_execution_updated` when an operation TurnAction execution projection changes.
+- `action_execution_updated` when an operation TurnAction execution projection changes;
+- `subagent_tree_changed` when subagent tool side effects or wait observation cursors change the
+  durable Subagent Tree projection. This event is an invalidation signal only; clients refetch the
+  dedicated tree API instead of treating the live event as tree state.
 
 Durable/live handoff follows these invariants:
 
@@ -442,8 +494,8 @@ error message when diagram rendering fails.
 
 Chat route input buffers are flushed before model-call boundaries and promoted to durable session
 input. Session runner payload ingress uses input buffers. The supported input buffer kinds are
-`user_message`, `edited_user_message`, `background_completion`, `goal_continuation`, and
-`action_message`. Broker messages do not carry model input payloads.
+`user_message`, `edited_user_message`, `background_completion`, `goal_continuation`,
+`action_message`, and `agent_message`. Broker messages do not carry model input payloads.
 
 Input buffers are session-bound. The `input_buffers` table stores `session_id`, not
 `agent_runtime_id`. Runtime-specific columns or runtime-scoped buffer queries are invalid because the
@@ -470,6 +522,7 @@ The durable event kind is determined by buffer kind at flush time:
 | `background_completion` | `background_completion` |
 | `goal_continuation` | `goal_continuation` |
 | `action_message` | `action_message` |
+| `agent_message` | `agent_message` |
 
 Wake-up delivery is a signal only. The persisted buffer plus the `running` state transition is the
 recovery source of truth if the signal is lost. Operation `action_message` buffers are promoted and
@@ -512,8 +565,11 @@ subscription/history/live event actions and accept only the `subscription_health
 message for subscription reconcile. Chat input, edit, command, and stop payloads are not accepted on
 WebSocket. Stop is a REST control boundary: `POST /chat/v1/sessions/{session_id}/stop`.
 Stop records a durable `agent_sessions.stop_requested_at` intent and sends a best-effort broker stop
-signal so an active runner can cancel immediately. Runner polling of the DB intent covers broker
-signal loss.
+signal so an active runner can cancel immediately. If the stopped session is linked to a
+`SessionAgent`, stop applies to that participant subtree: a root session stop records stop intents for
+running descendants, while a child detail stop records stop intents for that child subtree. Runner
+polling of the DB intent covers broker signal loss. Model-visible `interrupt_agent` remains
+target-scoped and does not automatically stop descendants.
 `/chat/v1/sessions/new` is not a WebSocket write or subscription route. Web clients first resolve
 the team primary session through `GET /chat/v1/agents/{agent_id}/team-primary-session`, navigate to
 `/w/{handle}/agents/{agent_id}/sessions/{session_id}`, and then write through
@@ -552,18 +608,24 @@ storage JSON dump.
 - Event transcript is the durable model/tool source of truth.
 - Native artifacts are opaque replay optimizations, never event state.
 - `agent_runs.phase` and `active_tool_calls` are the durable UI activity source.
-- Public chat UI state is restored from `/history`, `/live`, and event WebSocket actions, including session todo and action execution state.
+- Public chat UI state is restored from `/history`, `/live`, the dedicated Subagent Tree API, and event WebSocket actions, including session todo, action execution state, and subagent tree invalidations.
 - Existing transcript/session data migration is not required for the private service cutover.
 - Web chat message/edit/command writes have a single REST commit boundary; WebSocket is not a fallback write path.
 - Web chat stop has a single REST control boundary; WebSocket is not a fallback stop/control path.
 - `client_request_id` retry for chat writes must converge to the same accepted target without duplicate side effects.
 - Input buffers are session-bound and must not store or require `agent_runtime_id`.
+- `SessionAgent` is the subagent tree source of truth; `AgentSession` remains the transcript/run/input boundary.
+- Child sessions are hidden from ordinary Agent session lists by `session_kind = subagent`, not by access-control bypass.
+- `wait_agent` observes terminal child run projections once by advancing `parent_observed_run_index`; it must not infer results by scanning child transcript history.
 - Any service path that enqueues input buffers must mark `agent_sessions.run_state` as `running` in
   the same transaction.
 
 ## 10. Verification
 
 Current verification:
+
+- `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/services/chat/subagent_tree_test.py src/azents/worker/run/executor_test.py -q`
+- `cd testenv/azents/e2e && uv run pytest ./src/tests/azents/public/test_subagents.py -q` in Docker-enabled deterministic E2E environments
 
 - `cd python/apps/azents && uv run pytest src/azents/runtime -q`
 - `cd python/apps/azents && uv run pyright`
@@ -575,6 +637,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-08** — v89. Added the current `SessionAgent` subagent tree, `agent_message` mailbox input, terminal child run projection, Subagent Tree API, hidden child session semantics, and subtree stop behavior.
 - **2026-07-08** — v88. Clarified TurnAction FIFO behavior: failed operation actions are marked failed and later input continues, while successful Project mutation rebuilds context at the next boundary.
 - **2026-07-06** — v86. Removed SessionInitialization from current conversation state and added durable `action_execution_result` terminal history events.
 - **2026-07-05** — v85. Promoted operation TurnAction execution for new-session Git worktree setup, action execution projections, and clean setup request fields.

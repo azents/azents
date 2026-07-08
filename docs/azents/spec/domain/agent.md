@@ -44,13 +44,13 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-06
-spec_version: 38
+last_verified_at: 2026-07-08
+spec_version: 39
 ---
 
 # Agent Domain Spec
 
-Agent is central execution unit of azents. Within Workspace, it bundles model selection snapshot, system prompt, model parameters, and toolkit access; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop.
+Agent is central execution unit of azents. Within Workspace, it bundles model selection snapshot, system prompt, model parameters, and toolkit access; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop. Session-scoped subagents do not create a separate persistent Agent role; they are represented by `SessionAgent` tree nodes linked to hidden child `AgentSession` rows under the same Agent.
 
 ## 1. Core Model
 
@@ -237,14 +237,15 @@ Following contracts do not exist in current system.
 - `agents.model_config_inherit_mode`
 - `agents.model_parameter_overrides`
 - runtime `ModelConfig` lookup / default parameter merge
-- subagent role, junction, API, and runtime delegation tool
+- legacy subagent role, junction, API, and blocking runtime delegation tool
 - subagent model runtime inheritance
 
 ## 8. Change History
 
 | Date | Version | Change |
 |---|---:|---|
-| 2026-07-06 | 38 | Removed subagent role, junction, API, runtime delegation, and living spec surfaces |
+| 2026-07-08 | 39 | Clarified that current subagents are session-scoped `SessionAgent` participants, not persistent Agent roles |
+| 2026-07-06 | 38 | Removed legacy subagent role, junction, API, runtime delegation, and living spec surfaces |
 | 2026-07-06 | 37 | Renamed Agent output token cap to `max_output_tokens` and added Agent `context_window_tokens` effective context override |
 | 2026-07-02 | 36 | Added Agent Memory management routes and settings UI boundary |
 | 2026-06-18 | 35 | Corrected integration model listing fetch failure to propagate original exception instead of failure variant/5xx HTTPException |

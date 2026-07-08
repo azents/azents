@@ -38,7 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-08
-spec_version: 61
+spec_version: 62
 ---
 
 # Agent Execution Loop
@@ -55,7 +55,7 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker promotes input buffers to durable event input, including ordered `action_message` events, at wake-up entry and at each model-call turn boundary.
+1. Worker promotes input buffers to durable event input, including ordered `action_message` and `agent_message` events, at wake-up entry and at each model-call turn boundary.
 2. Worker executes operation TurnActions such as `create_git_worktree` before the next model dispatch; a failed operation is marked failed and FIFO processing continues to later pending input.
 3. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
@@ -91,6 +91,8 @@ Phase enum:
 `active_tool_calls` contains `call_id`, `name`, redacted/summarized `arguments`, `started_at`,
 and `background`. The UI LLM running indicator uses `waiting_for_model` / `streaming_model`, and
 tool activity uses `executing_tools` and `active_tool_calls`.
+
+`terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. Subagent parent observation and Subagent Tree unread/result previews read this projection instead of scanning child transcript history.
 
 `retry_state` is nullable durable JSON on `agent_runs`. When present, it records failed-run retry
 progress for a still-running run and includes the latest user-safe error message, failed attempt
@@ -244,6 +246,31 @@ original user action message. The Responses lowerer injects it as a user-role in
 the Skill has been loaded, requires the model to read and follow the embedded body, and points to the
 following normal user message for the request. The durable Skill `action_message` is audit data and is
 not actionable model input.
+
+## 4.1 Subagent Scheduling and Mailbox Input
+
+Subagent runs use the same worker, broker, `AgentSession`, and `AgentRunExecution` path as root runs.
+Before resolving tools, the worker reads the selected session. If `agent_sessions.session_kind = subagent`,
+toolkit resolution uses subagent execution mode; otherwise it uses root execution mode. Subagent mode
+excludes root/user-facing auto-bound capabilities such as Memory Write and Goal Toolkit
+while keeping the subagent collaboration toolkit available.
+
+Subagent collaboration tools communicate through target child input buffers:
+
+- `spawn_agent` creates a child `SessionAgent` plus hidden child `AgentSession`, optionally forks the
+  parent's current model-visible context, appends that selected context to the child transcript, writes
+  an initial `agent_message`, marks the child running, and sends a broker wake-up.
+- `send_message` writes an `agent_message` to the target child without waking it.
+- `followup_task` writes an `agent_message`, marks the child running, and sends a broker wake-up.
+
+`agent_message` lowering renders the mailbox payload as explicitly sourced delegated input for the
+target child session. Broker wake-ups remain payload-free; recovery is based on persisted input
+buffers and `agent_sessions.run_state`.
+
+User-facing stop is subtree-aware: stopping a root session records stop intent for running linked
+descendants, and stopping a child detail session records stop intent for that child subtree.
+Model-visible `interrupt_agent` is intentionally narrower and records stop intent only for the named
+target child current run.
 
 ## 5. Tool Loop
 
@@ -442,6 +469,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-08** — v62. Documented subagent worker scheduling through normal session runs, `agent_message` mailbox promotion, subagent execution-mode tool resolution, terminal result projections, and subtree stop behavior.
 - **2026-07-08** — v61. Process TurnActions at every model-call turn boundary; failed actions are marked failed and FIFO processing continues, while context invalidation exits through a follow-up wake-up without a completed run marker.
 - **2026-07-08** — v60. Process TurnActions at every model-call turn boundary and close the current run when an operation action blocks or invalidates context.
 - **2026-07-06** — v59. Removed the session-initialization run gate and documented terminal `action_execution_result` history events.
