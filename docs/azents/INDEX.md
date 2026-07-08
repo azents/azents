@@ -146,8 +146,9 @@ _13 documents_
 - [ADR-0093: New Session Mixed Workspace Selection](adr/0093-new-session-mixed-workspace-selection.md)
 - [ADR-0094: Model Session Operations as Turn Actions](adr/0094-action-as-operation-turn-actions.md)
 - [ADR-0095: Register Project Picker Worktree UI](adr/0095-register-project-picker-worktree-ui.md)
+- [ADR-0096: Codex-first Subagent Redesign](adr/0096-codex-first-subagent-redesign.md)
 
-_98 documents_
+_99 documents_
 
 ## Issues (Bug Tracking)
 
@@ -179,4 +180,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 351
+- Total documents: 355
