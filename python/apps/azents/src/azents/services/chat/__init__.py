@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentProjectDefaultItemType,
+    AgentRunStatus,
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStatus,
@@ -19,7 +20,7 @@ from azents.core.enums import (
     InputBufferKind,
 )
 from azents.engine.events.action_messages import CreateGitWorktreeAction
-from azents.engine.events.types import Event
+from azents.engine.events.types import AgentRunState, Event
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
 from azents.rdb.deps import get_session_manager
@@ -38,7 +39,11 @@ from azents.repos.agent_project_default.data import (
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_project_preset.data import AgentProjectPreset
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
+from azents.repos.agent_session.data import (
+    AgentSession,
+    AgentSessionCreate,
+    SessionAgent,
+)
 from azents.repos.message import MessageRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
@@ -81,12 +86,92 @@ from .data import (
     SessionAccessDenied,
     SessionAccessError,
     SessionNotFound,
+    SubagentTreeNode,
+    SubagentTreeProjection,
     UpdateGoalError,
     UpdateGoalResult,
     UpdateGoalStatusInput,
     UpdateSessionTitleError,
 )
 from .live_events import LiveEventStore, input_buffer_to_live_event
+
+
+def _subagent_tree_node(
+    agent: SessionAgent,
+    *,
+    session: AgentSession | None,
+    latest_run: AgentRunState | None,
+) -> SubagentTreeNode:
+    """Build a Subagent Tree projection node."""
+    run_status = latest_run.status if latest_run is not None else None
+    run_index = latest_run.run_index if latest_run is not None else None
+    terminal_result_event_id = (
+        latest_run.terminal_result_event_id if latest_run is not None else None
+    )
+    terminal_result_message = (
+        latest_run.terminal_result_message if latest_run is not None else None
+    )
+    return SubagentTreeNode(
+        session_agent_id=agent.id,
+        agent_session_id=agent.agent_session_id,
+        parent_session_agent_id=agent.parent_session_agent_id,
+        name=agent.name,
+        path=agent.path,
+        agent_type=agent.agent_type,
+        status=_project_subagent_status(session, run_status),
+        last_task_message=agent.last_task_message,
+        unread_result=_has_unread_subagent_result(agent, run_status, run_index),
+        latest_run_id=latest_run.id if latest_run is not None else None,
+        latest_run_index=run_index,
+        latest_run_status=run_status,
+        terminal_result_event_id=terminal_result_event_id,
+        terminal_result_message=terminal_result_message,
+    )
+
+
+def _project_subagent_status(
+    session: AgentSession | None,
+    latest_run_status: AgentRunStatus | None,
+) -> str:
+    """Project AgentSession/run status for Subagent Tree consumers."""
+    if session is None:
+        return "not_found"
+    if session.run_state == AgentSessionRunState.RUNNING:
+        return "running"
+    if latest_run_status is None:
+        return "idle"
+    if latest_run_status == AgentRunStatus.COMPLETED:
+        return "completed"
+    if latest_run_status == AgentRunStatus.FAILED:
+        return "errored"
+    if latest_run_status in {
+        AgentRunStatus.STOPPED,
+        AgentRunStatus.INTERRUPTED,
+        AgentRunStatus.CANCELLED,
+    }:
+        return "interrupted"
+    return latest_run_status.value
+
+
+def _has_unread_subagent_result(
+    agent: SessionAgent,
+    latest_run_status: AgentRunStatus | None,
+    latest_run_index: int | None,
+) -> bool:
+    """Return whether latest terminal result is unread by the parent."""
+    if latest_run_status not in {
+        AgentRunStatus.COMPLETED,
+        AgentRunStatus.FAILED,
+        AgentRunStatus.STOPPED,
+        AgentRunStatus.INTERRUPTED,
+        AgentRunStatus.CANCELLED,
+    }:
+        return False
+    if latest_run_index is None:
+        return False
+    if agent.parent_observed_run_index is None:
+        return True
+    return latest_run_index > agent.parent_observed_run_index
 
 
 class _InvalidGoalStatusTransitionError(Exception):
@@ -235,6 +320,88 @@ class ChatSessionService:
             if workspace_user is None:
                 return Failure(SessionNotFound())
             return Success(agent_session)
+
+    async def get_subagent_tree(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[SubagentTreeProjection, SessionAccessError]:
+        """Fetch the durable Subagent Tree projection for a session tree."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if (
+                agent_session is None
+                or agent_session.agent_id != agent_id
+                or agent_session.status != AgentSessionStatus.ACTIVE
+            ):
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent_session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionAccessDenied())
+            current_agent = (
+                await self.agent_session_repository.get_session_agent_by_session_id(
+                    session,
+                    session_id,
+                )
+            )
+            if current_agent is None:
+                return Failure(SessionNotFound())
+            tree_agents = await self.agent_session_repository.list_session_agent_tree(
+                session,
+                root_session_agent_id=current_agent.root_session_agent_id,
+            )
+            sessions_by_id = await self.agent_session_repository.list_by_ids(
+                session,
+                agent_session_ids=[agent.agent_session_id for agent in tree_agents],
+            )
+            latest_runs = await self.agent_run_repository.list_latest_by_session_ids(
+                session,
+                session_ids=[agent.agent_session_id for agent in tree_agents],
+            )
+            nodes_by_id = {
+                agent.id: _subagent_tree_node(
+                    agent,
+                    session=sessions_by_id.get(agent.agent_session_id),
+                    latest_run=latest_runs.get(agent.agent_session_id),
+                )
+                for agent in tree_agents
+            }
+            roots: list[SubagentTreeNode] = []
+            for agent in tree_agents:
+                node = nodes_by_id[agent.id]
+                if agent.parent_session_agent_id is None:
+                    roots.append(node)
+                    continue
+                parent = nodes_by_id.get(agent.parent_session_agent_id)
+                if parent is None:
+                    roots.append(node)
+                    continue
+                parent.children.append(node)
+            root_agent = await self.agent_session_repository.get_session_agent_by_id(
+                session,
+                current_agent.root_session_agent_id,
+            )
+            if root_agent is None:
+                return Failure(SessionNotFound())
+            return Success(
+                SubagentTreeProjection(
+                    root_session_agent_id=root_agent.id,
+                    root_agent_session_id=root_agent.agent_session_id,
+                    current_session_agent_id=current_agent.id,
+                    nodes=roots,
+                )
+            )
 
     async def list_agent_sessions(
         self,

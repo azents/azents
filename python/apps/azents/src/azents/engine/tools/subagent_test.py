@@ -20,6 +20,7 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.tools import ToolkitStatus, TurnContext
+from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -291,11 +292,17 @@ async def _make_toolkit() -> tuple[
     _AgentSessionRepository,
     _InputBufferService,
     _Broker,
+    list[SubagentTreeChanged],
 ]:
     """Create an initialized SubagentToolkit fixture."""
     agent_session_repository = _AgentSessionRepository()
     input_buffer_service = _InputBufferService()
     broker = _Broker()
+    published_events: list[SubagentTreeChanged] = []
+
+    async def publish_event(event: SubagentTreeChanged) -> None:
+        published_events.append(event)
+
     toolkit = SubagentToolkit(
         session_manager=_session_manager,
         agent_session_repository=cast(AgentSessionRepository, agent_session_repository),
@@ -310,24 +317,34 @@ async def _make_toolkit() -> tuple[
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
-            publish_event=cast(Any, object()),
+            publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
     )
     assert state.status == ToolkitStatus.ENABLED
-    return toolkit, agent_session_repository, input_buffer_service, broker
+    return (
+        toolkit,
+        agent_session_repository,
+        input_buffer_service,
+        broker,
+        published_events,
+    )
 
 
 async def test_send_message_is_queue_only() -> None:
     """send_message writes mailbox input without waking the target child."""
-    toolkit, repo, input_service, broker = await _make_toolkit()
+    toolkit, repo, input_service, broker, published_events = await _make_toolkit()
+
+    async def publish_event(event: SubagentTreeChanged) -> None:
+        published_events.append(event)
+
     state = await toolkit.update_context(
         TurnContext(
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
-            publish_event=cast(Any, object()),
+            publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
     )
@@ -346,18 +363,23 @@ async def test_send_message_is_queue_only() -> None:
     assert repo.last_task_updates == [("child-agent", "note")]
     assert repo.marked_running == []
     assert broker.messages == []
+    assert [event.type for event in published_events] == ["subagent_tree_changed"]
 
 
 async def test_followup_task_wakes_target_child() -> None:
     """followup_task writes mailbox input and wakes the target child."""
-    toolkit, repo, input_service, broker = await _make_toolkit()
+    toolkit, repo, input_service, broker, published_events = await _make_toolkit()
+
+    async def publish_event(event: SubagentTreeChanged) -> None:
+        published_events.append(event)
+
     state = await toolkit.update_context(
         TurnContext(
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
-            publish_event=cast(Any, object()),
+            publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
     )
@@ -379,18 +401,23 @@ async def test_followup_task_wakes_target_child() -> None:
     wake = broker.messages[0]
     assert isinstance(wake, SessionWakeUp)
     assert wake.session_id == "child-session"
+    assert [event.type for event in published_events] == ["subagent_tree_changed"]
 
 
 async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
     """wait_agent observes unread child terminal results once."""
-    toolkit, repo, _input_service, _broker = await _make_toolkit()
+    toolkit, repo, _input_service, _broker, published_events = await _make_toolkit()
+
+    async def publish_event(event: SubagentTreeChanged) -> None:
+        published_events.append(event)
+
     state = await toolkit.update_context(
         TurnContext(
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
-            publish_event=cast(Any, object()),
+            publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
     )
@@ -403,6 +430,7 @@ async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
         "timed_out": False,
     }
     assert repo.observation_updates == [("child-agent", 1, "event".rjust(32, "0"))]
+    assert [event.type for event in published_events] == ["subagent_tree_changed"]
 
     second_result = await tool.handler(json.dumps({"agent_name": "child"}))
 
@@ -411,3 +439,4 @@ async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
         "timed_out": False,
     }
     assert repo.observation_updates == [("child-agent", 1, "event".rjust(32, "0"))]
+    assert [event.type for event in published_events] == ["subagent_tree_changed"]

@@ -180,6 +180,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_get_subagent_tree(self) -> None:
+        """Test case for chat_v1_get_subagent_tree
+
+        Get Subagent Tree
+        """
+        pass
+
     def test_chat_v1_get_team_primary_agent_session(self) -> None:
         """Test case for chat_v1_get_team_primary_agent_session
 

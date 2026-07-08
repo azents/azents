@@ -2,6 +2,7 @@
 
 import datetime
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -111,6 +112,21 @@ class AgentSessionRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def list_by_ids(
+        self,
+        session: AsyncSession,
+        *,
+        agent_session_ids: Sequence[str],
+    ) -> dict[str, AgentSession]:
+        """Fetch AgentSessions by ID."""
+        ids = list(dict.fromkeys(agent_session_ids))
+        if not ids:
+            return {}
+        result = await session.execute(
+            sa.select(RDBAgentSession).where(RDBAgentSession.id.in_(ids))
+        )
+        return {rdb.id: self._build(rdb) for rdb in result.scalars()}
 
     async def get_session_agent_by_session_id(
         self,

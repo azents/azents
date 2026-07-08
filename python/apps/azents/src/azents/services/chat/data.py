@@ -79,6 +79,37 @@ class ChatLiveStateSnapshot:
 
 
 @dataclasses.dataclass(frozen=True)
+class SubagentTreeNode:
+    """Subagent tree projection node."""
+
+    session_agent_id: str
+    agent_session_id: str
+    parent_session_agent_id: str | None
+    name: str
+    path: str
+    agent_type: str
+    status: str
+    last_task_message: str | None
+    unread_result: bool
+    latest_run_id: str | None
+    latest_run_index: int | None
+    latest_run_status: AgentRunStatus | None
+    terminal_result_event_id: str | None
+    terminal_result_message: str | None
+    children: list["SubagentTreeNode"] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(frozen=True)
+class SubagentTreeProjection:
+    """Subagent tree projection for one root SessionAgent tree."""
+
+    root_session_agent_id: str
+    root_agent_session_id: str
+    current_session_agent_id: str
+    nodes: list[SubagentTreeNode]
+
+
+@dataclasses.dataclass(frozen=True)
 class UpdateGoalResult:
     """Goal update result and wake-up information."""
 

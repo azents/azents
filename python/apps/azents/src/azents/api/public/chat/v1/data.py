@@ -46,6 +46,8 @@ from azents.services.chat.data import (
     NewSessionProjectDefaults,
     NewSessionProjectDefaultsSource,
     NewSessionProjectDefaultWorkspaceItem,
+    SubagentTreeNode,
+    SubagentTreeProjection,
 )
 from azents.services.chat.workspace import (
     AgentWorkspaceAccessConnecting,
@@ -555,6 +557,84 @@ class ChatStopResponse(BaseModel):
     """REST stop response."""
 
     session_id: str = Field(description="AgentSession ID")
+
+
+class SubagentTreeNodeResponse(BaseModel):
+    """Subagent Tree node response."""
+
+    session_agent_id: str = Field(description="SessionAgent ID")
+    agent_session_id: str = Field(description="Linked AgentSession ID")
+    parent_session_agent_id: str | None = Field(
+        default=None,
+        description="Parent SessionAgent ID",
+    )
+    name: str = Field(description="SessionAgent local name")
+    path: str = Field(description="Canonical absolute SessionAgent path")
+    agent_type: str = Field(description="Spawned agent type snapshot")
+    status: str = Field(description="Projected execution status")
+    last_task_message: str | None = Field(default=None, description="Latest task text")
+    unread_result: bool = Field(description="Whether latest terminal result is unread")
+    latest_run_id: str | None = Field(default=None, description="Latest AgentRun ID")
+    latest_run_index: int | None = Field(
+        default=None,
+        description="Latest AgentRun index",
+    )
+    latest_run_status: AgentRunStatus | None = Field(
+        default=None,
+        description="Latest AgentRun status",
+    )
+    terminal_result_event_id: str | None = Field(
+        default=None,
+        description="Terminal result source event ID",
+    )
+    terminal_result_message: str | None = Field(
+        default=None,
+        description="Terminal result message",
+    )
+    children: list["SubagentTreeNodeResponse"] = Field(
+        default_factory=list,
+        description="Child SessionAgents",
+    )
+
+    @classmethod
+    def from_domain(cls, node: SubagentTreeNode) -> Self:
+        """Convert from service model."""
+        return cls(
+            session_agent_id=node.session_agent_id,
+            agent_session_id=node.agent_session_id,
+            parent_session_agent_id=node.parent_session_agent_id,
+            name=node.name,
+            path=node.path,
+            agent_type=node.agent_type,
+            status=node.status,
+            last_task_message=node.last_task_message,
+            unread_result=node.unread_result,
+            latest_run_id=node.latest_run_id,
+            latest_run_index=node.latest_run_index,
+            latest_run_status=node.latest_run_status,
+            terminal_result_event_id=node.terminal_result_event_id,
+            terminal_result_message=node.terminal_result_message,
+            children=[cls.from_domain(child) for child in node.children],
+        )
+
+
+class SubagentTreeResponse(BaseModel):
+    """Subagent Tree response."""
+
+    root_session_agent_id: str = Field(description="Root SessionAgent ID")
+    root_agent_session_id: str = Field(description="Root AgentSession ID")
+    current_session_agent_id: str = Field(description="Current SessionAgent ID")
+    nodes: list[SubagentTreeNodeResponse] = Field(description="Root tree nodes")
+
+    @classmethod
+    def from_domain(cls, value: SubagentTreeProjection) -> Self:
+        """Convert from service model."""
+        return cls(
+            root_session_agent_id=value.root_session_agent_id,
+            root_agent_session_id=value.root_agent_session_id,
+            current_session_agent_id=value.current_session_agent_id,
+            nodes=[SubagentTreeNodeResponse.from_domain(node) for node in value.nodes],
+        )
 
 
 class SlashCommandResponse(BaseModel):

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
 from azents.core.enums import AgentRunStatus, AgentSessionRunState, InputBufferKind
 from azents.core.tools import (
+    PublishEventFn,
     ResolveContext,
     Toolkit,
     ToolkitProvider,
@@ -17,6 +18,7 @@ from azents.core.tools import (
     ToolkitStatus,
     TurnContext,
 )
+from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.fork_context import (
     ForkTurnsSelection,
     InvalidForkTurns,
@@ -133,6 +135,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.broker = broker
         self.session_id: str | None = None
         self.user_id: str | None = None
+        self.publish_event: PublishEventFn | None = None
 
     def set_session_id(self, session_id: str) -> None:
         """Inject current AgentSession ID."""
@@ -142,6 +145,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         """Return subagent collaboration tools."""
         self.session_id = context.session_id or self.session_id
         self.user_id = context.user_id
+        self.publish_event = context.publish_event
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
@@ -223,6 +227,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 )
 
             await self._wake_session(child_session)
+            await self._publish_tree_changed(child)
             return _json(
                 {
                     "agent_name": child.name,
@@ -258,6 +263,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     session_agent_id=resolution.target.id,
                     last_task_message=input.message,
                 )
+            await self._publish_tree_changed(resolution.target)
             return _json(
                 {
                     "status": "queued",
@@ -298,6 +304,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     last_task_message=input.task,
                 )
             await self._wake_session(target_session)
+            await self._publish_tree_changed(resolution.target)
             return _json(
                 {
                     "status": "assigned",
@@ -311,6 +318,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     def _wait_agent_tool(self) -> FunctionTool:
         async def wait_agent(input: WaitAgentInput) -> str:
             """Observe unread terminal child results."""
+            changed_targets: list[SessionAgent] = []
             async with self.session_manager() as session:
                 current = await self._current_session_agent(session)
                 targets = await self._wait_targets(session, current, input.agent_name)
@@ -342,29 +350,30 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                         or f"{target.path}: {run.status.value}"
                     )
                     messages.append(text)
-                    session_agent_repo = self.agent_session_repository
-                    await session_agent_repo.update_session_agent_observation_cursor(
+                    repo = self.agent_session_repository
+                    updated = await repo.update_session_agent_observation_cursor(
                         session,
                         session_agent_id=target.id,
                         parent_observed_run_index=run.run_index,
                         parent_observed_event_id=run.terminal_result_event_id,
                     )
-                if messages:
-                    return _json({"message": "\n\n".join(messages), "timed_out": False})
-                if (
-                    running
-                    and input.timeout_seconds is not None
-                    and input.timeout_seconds > 0
-                ):
-                    return _json(
-                        {
-                            "message": "Still running: " + ", ".join(running),
-                            "timed_out": True,
-                        }
-                    )
+                    changed_targets.append(updated or target)
+            for target in changed_targets:
+                await self._publish_tree_changed(target)
+            if messages:
+                return _json({"message": "\n\n".join(messages), "timed_out": False})
+            if (
+                running
+                and input.timeout_seconds is not None
+                and input.timeout_seconds > 0
+            ):
                 return _json(
-                    {"message": "No unread terminal result.", "timed_out": False}
+                    {
+                        "message": "Still running: " + ", ".join(running),
+                        "timed_out": True,
+                    }
                 )
+            return _json({"message": "No unread terminal result.", "timed_out": False})
 
         return make_tool(wait_agent, name="wait_agent")
 
@@ -395,6 +404,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                         session_id=target_session.id, user_id=self.user_id
                     )
                 )
+            await self._publish_tree_changed(resolution.target)
             return _json({"previous_status": previous_status})
 
         return make_tool(interrupt_agent, name="interrupt_agent")
@@ -522,6 +532,17 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 session,
                 target.agent_session_id,
             )
+
+    async def _publish_tree_changed(self, changed: SessionAgent) -> None:
+        """Publish a non-durable Subagent Tree invalidation event."""
+        if self.publish_event is None:
+            return
+        await self.publish_event(
+            SubagentTreeChanged(
+                root_session_agent_id=changed.root_session_agent_id,
+                changed_session_agent_id=changed.id,
+            )
+        )
 
     async def _wake_session(self, session: AgentSession) -> None:
         await self.broker.send_message(

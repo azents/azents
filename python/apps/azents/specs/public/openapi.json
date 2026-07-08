@@ -3184,6 +3184,63 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Get Subagent Tree",
+        "description": "Get the durable Subagent Tree projection for a session tree.",
+        "operationId": "chat_v1_get_subagent_tree",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubagentTreeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/sessions/{session_id}/title": {
       "patch": {
         "tags": [
@@ -15368,6 +15425,184 @@
         ],
         "title": "SkillAction",
         "description": "Skill invocation turn action."
+      },
+      "SubagentTreeNodeResponse": {
+        "properties": {
+          "session_agent_id": {
+            "type": "string",
+            "title": "Session Agent Id",
+            "description": "SessionAgent ID"
+          },
+          "agent_session_id": {
+            "type": "string",
+            "title": "Agent Session Id",
+            "description": "Linked AgentSession ID"
+          },
+          "parent_session_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Session Agent Id",
+            "description": "Parent SessionAgent ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "SessionAgent local name"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Canonical absolute SessionAgent path"
+          },
+          "agent_type": {
+            "type": "string",
+            "title": "Agent Type",
+            "description": "Spawned agent type snapshot"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Projected execution status"
+          },
+          "last_task_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Task Message",
+            "description": "Latest task text"
+          },
+          "unread_result": {
+            "type": "boolean",
+            "title": "Unread Result",
+            "description": "Whether latest terminal result is unread"
+          },
+          "latest_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Run Id",
+            "description": "Latest AgentRun ID"
+          },
+          "latest_run_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Run Index",
+            "description": "Latest AgentRun index"
+          },
+          "latest_run_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRunStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest AgentRun status"
+          },
+          "terminal_result_event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Result Event Id",
+            "description": "Terminal result source event ID"
+          },
+          "terminal_result_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Result Message",
+            "description": "Terminal result message"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/SubagentTreeNodeResponse"
+            },
+            "type": "array",
+            "title": "Children",
+            "description": "Child SessionAgents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_agent_id",
+          "agent_session_id",
+          "name",
+          "path",
+          "agent_type",
+          "status",
+          "unread_result"
+        ],
+        "title": "SubagentTreeNodeResponse",
+        "description": "Subagent Tree node response."
+      },
+      "SubagentTreeResponse": {
+        "properties": {
+          "root_session_agent_id": {
+            "type": "string",
+            "title": "Root Session Agent Id",
+            "description": "Root SessionAgent ID"
+          },
+          "root_agent_session_id": {
+            "type": "string",
+            "title": "Root Agent Session Id",
+            "description": "Root AgentSession ID"
+          },
+          "current_session_agent_id": {
+            "type": "string",
+            "title": "Current Session Agent Id",
+            "description": "Current SessionAgent ID"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SubagentTreeNodeResponse"
+            },
+            "type": "array",
+            "title": "Nodes",
+            "description": "Root tree nodes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "root_session_agent_id",
+          "root_agent_session_id",
+          "current_session_agent_id",
+          "nodes"
+        ],
+        "title": "SubagentTreeResponse",
+        "description": "Subagent Tree response."
       },
       "TestConnectionRequest": {
         "properties": {

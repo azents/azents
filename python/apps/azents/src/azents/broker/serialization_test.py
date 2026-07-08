@@ -18,6 +18,7 @@ from azents.engine.events.engine_events import (
     RunStarted,
     RunStopped,
     RuntimeErrorEvent,
+    SubagentTreeChanged,
 )
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -110,6 +111,19 @@ class TestSerializeEngineEvent:
         assert serialize_event(CompactionComplete(continuing=True)) == {
             "type": "compaction_complete",
             "continuing": True,
+        }
+
+    def test_subagent_tree_changed(self) -> None:
+        """Serialize SubagentTreeChanged."""
+        assert serialize_event(
+            SubagentTreeChanged(
+                root_session_agent_id="root-agent",
+                changed_session_agent_id="child-agent",
+            )
+        ) == {
+            "type": "subagent_tree_changed",
+            "root_session_agent_id": "root-agent",
+            "changed_session_agent_id": "child-agent",
         }
 
 
