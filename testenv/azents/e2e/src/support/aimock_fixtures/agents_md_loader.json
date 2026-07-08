@@ -589,8 +589,16 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E wait child",
-        "hasToolResult": false
+        "toolCallId": "call_subagent_wait_child"
+      },
+      "response": {
+        "content": "Subagent wait observed child result."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E wait child"
       },
       "response": {
         "toolCalls": [
@@ -603,15 +611,6 @@
             }
           }
         ]
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_wait_child"
-      },
-      "response": {
-        "content": "Subagent wait observed child result."
       }
     },
     {

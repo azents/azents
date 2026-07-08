@@ -2,6 +2,7 @@
 
 import time
 from dataclasses import dataclass
+from typing import cast
 
 import azentsadminclient
 import azentspublicclient
@@ -32,10 +33,11 @@ from support.utils import (
 )
 
 _SPAWN_MESSAGE = "Subagent E2E spawn child"
+_SPAWN_RESPONSE = "Subagent child was spawned."
 _CHILD_TASK = "Subagent E2E child task"
 _CHILD_RESPONSE = "Subagent child completed."
 _WAIT_MESSAGE = "Subagent E2E wait child"
-_WAIT_RESPONSE = "Subagent wait observed child result."
+_WAIT_CALL_ID = "call_subagent_wait_child"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
@@ -242,6 +244,86 @@ def _history_contents(
     return contents
 
 
+def _tool_result_output_text(event: dict[str, object]) -> str | None:
+    """Return persisted client tool result text for a history event."""
+    if event.get("kind") != "client_tool_result":
+        return None
+    payload = _event_payload(event)
+    output = payload.get("output")
+    if isinstance(output, str):
+        return output
+    if isinstance(output, list):
+        texts: list[str] = []
+        for part in cast("list[object]", output):
+            if not isinstance(part, dict):
+                continue
+            part_dict = cast("dict[str, object]", part)
+            text = part_dict.get("text")
+            if isinstance(text, str):
+                texts.append(text)
+        return "\n".join(texts)
+    if output is None:
+        return None
+    return str(output)
+
+
+def _wait_for_tool_result_content(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    call_id: str,
+    expected: str,
+    timeout: float = 120,
+) -> None:
+    """Wait until a client tool result contains expected text."""
+    deadline = time.monotonic() + timeout
+    last_outputs: list[str] = []
+    while time.monotonic() < deadline:
+        last_outputs = []
+        for event in _history(
+            public_url=public_url, token=token, session_id=session_id
+        ):
+            payload = _event_payload(event)
+            if payload.get("call_id") != call_id:
+                continue
+            output = _tool_result_output_text(event)
+            if output is not None:
+                last_outputs.append(output)
+        if any(expected in output for output in last_outputs):
+            return
+        time.sleep(0.5)
+    raise TimeoutError(
+        f"tool result content not observed: {call_id}, {expected}, {last_outputs!r}"
+    )
+
+
+def _run_marker_completed(event: dict[str, object]) -> bool:
+    """Return whether a history event is a completed run marker."""
+    if event.get("kind") != "run_marker":
+        return False
+    return _event_payload(event).get("status") == "completed"
+
+
+def _wait_for_run_complete(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    timeout: float = 120,
+) -> None:
+    """Wait until a session history contains a completed run marker."""
+    deadline = time.monotonic() + timeout
+    last_kinds: list[object] = []
+    while time.monotonic() < deadline:
+        events = _history(public_url=public_url, token=token, session_id=session_id)
+        if any(_run_marker_completed(event) for event in events):
+            return
+        last_kinds = [event.get("kind") for event in events]
+        time.sleep(0.5)
+    raise TimeoutError(f"completed run marker not observed: {last_kinds!r}")
+
+
 def _wait_for_content(
     *,
     public_url: str,
@@ -370,6 +452,54 @@ def _wait_for_child_node(
     raise TimeoutError(f"child node state was not observed: {last_tree!r}")
 
 
+def _session_run_state(
+    *,
+    public_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+) -> str:
+    """Return the authoritative AgentSession run state."""
+    response = requests.get(
+        f"{public_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
+        headers=_headers(token),
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = _json_object(response)
+    run_state = payload.get("run_state")
+    if not isinstance(run_state, str):
+        raise AssertionError(f"Session response did not include run_state: {payload!r}")
+    return run_state
+
+
+def _wait_for_session_run_state(
+    *,
+    public_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    expected: str,
+    timeout: float = 120,
+) -> None:
+    """Wait until an AgentSession reaches the expected run state."""
+    deadline = time.monotonic() + timeout
+    last_state: str | None = None
+    while time.monotonic() < deadline:
+        last_state = _session_run_state(
+            public_url=public_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        if last_state == expected:
+            return
+        time.sleep(0.5)
+    raise TimeoutError(
+        f"session run state not observed: {expected}, last_state={last_state!r}"
+    )
+
+
 def _session_ids(
     *,
     public_url: str,
@@ -443,6 +573,24 @@ class TestSubagents:
             token=workspace.token,
             agent_id=agent_id,
         )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_SPAWN_RESPONSE,
+        )
+        _wait_for_run_complete(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
 
         _wait_for_content(
             public_url=azents_public_server_url,
@@ -472,11 +620,12 @@ class TestSubagents:
             session_id=root_session_id,
             message=_WAIT_MESSAGE,
         )
-        _wait_for_content(
+        _wait_for_tool_result_content(
             public_url=azents_public_server_url,
             token=workspace.token,
             session_id=root_session_id,
-            expected=_WAIT_RESPONSE,
+            call_id=_WAIT_CALL_ID,
+            expected=_CHILD_RESPONSE,
         )
         _, observed_child = _wait_for_child_node(
             public_url=azents_public_server_url,
