@@ -3,8 +3,10 @@
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.rdb.models.session_workspace_project import (
-    RDBSessionWorkspaceProject,
+from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.models.session_agent_context import (
+    RDBSessionAgentContext,
+    RDBSessionAgentContextProject,
 )
 
 from .data import (
@@ -22,14 +24,18 @@ class SessionWorkspaceProjectRepository:
         create: SessionWorkspaceProjectCreate,
     ) -> SessionWorkspaceProject:
         """Create Project row."""
-        rdb = RDBSessionWorkspaceProject(
+        context_id = await self._get_context_id_by_session_id(
+            session,
             session_id=create.session_id,
+        )
+        rdb = RDBSessionAgentContextProject(
+            session_agent_context_id=context_id,
             path=create.path,
         )
         session.add(rdb)
         await session.flush()
         await session.refresh(rdb)
-        return self._build_project(rdb)
+        return self._build_project(rdb, session_id=create.session_id)
 
     async def get_project_by_id(
         self,
@@ -37,10 +43,27 @@ class SessionWorkspaceProjectRepository:
         project_id: str,
     ) -> SessionWorkspaceProject | None:
         """Fetch Project by ID."""
-        rdb = await session.get(RDBSessionWorkspaceProject, project_id)
-        if rdb is None:
+        result = await session.execute(
+            sa.select(
+                RDBSessionAgentContextProject,
+                RDBSessionAgent.agent_session_id,
+            )
+            .join(
+                RDBSessionAgentContext,
+                RDBSessionAgentContext.id
+                == RDBSessionAgentContextProject.session_agent_context_id,
+            )
+            .join(
+                RDBSessionAgent,
+                RDBSessionAgent.id == RDBSessionAgentContext.root_session_agent_id,
+            )
+            .where(RDBSessionAgentContextProject.id == project_id)
+        )
+        row = result.one_or_none()
+        if row is None:
             return None
-        return self._build_project(rdb)
+        rdb, session_id = row
+        return self._build_project(rdb, session_id=session_id)
 
     async def get_project_by_path(
         self,
@@ -50,16 +73,20 @@ class SessionWorkspaceProjectRepository:
         path: str,
     ) -> SessionWorkspaceProject | None:
         """Fetch Project by AgentSession and path."""
+        context_id = await self._get_context_id_by_session_id(
+            session,
+            session_id=session_id,
+        )
         result = await session.execute(
-            sa.select(RDBSessionWorkspaceProject).where(
-                RDBSessionWorkspaceProject.session_id == session_id,
-                RDBSessionWorkspaceProject.path == path,
+            sa.select(RDBSessionAgentContextProject).where(
+                RDBSessionAgentContextProject.session_agent_context_id == context_id,
+                RDBSessionAgentContextProject.path == path,
             )
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        return self._build_project(rdb)
+        return self._build_project(rdb, session_id=session_id)
 
     async def list_projects(
         self,
@@ -68,12 +95,18 @@ class SessionWorkspaceProjectRepository:
         session_id: str,
     ) -> list[SessionWorkspaceProject]:
         """Fetch Project list of AgentSession ordered by path."""
-        result = await session.execute(
-            sa.select(RDBSessionWorkspaceProject)
-            .where(RDBSessionWorkspaceProject.session_id == session_id)
-            .order_by(RDBSessionWorkspaceProject.path)
+        context_id = await self._get_context_id_by_session_id(
+            session,
+            session_id=session_id,
         )
-        return [self._build_project(rdb) for rdb in result.scalars()]
+        result = await session.execute(
+            sa.select(RDBSessionAgentContextProject)
+            .where(RDBSessionAgentContextProject.session_agent_context_id == context_id)
+            .order_by(RDBSessionAgentContextProject.path)
+        )
+        return [
+            self._build_project(rdb, session_id=session_id) for rdb in result.scalars()
+        ]
 
     async def delete_project(
         self,
@@ -83,23 +116,47 @@ class SessionWorkspaceProjectRepository:
         session_id: str,
     ) -> bool:
         """Delete Project row."""
+        context_id = await self._get_context_id_by_session_id(
+            session,
+            session_id=session_id,
+        )
         result = await session.execute(
-            sa.delete(RDBSessionWorkspaceProject).where(
-                RDBSessionWorkspaceProject.id == project_id,
-                RDBSessionWorkspaceProject.session_id == session_id,
+            sa.delete(RDBSessionAgentContextProject).where(
+                RDBSessionAgentContextProject.id == project_id,
+                RDBSessionAgentContextProject.session_agent_context_id == context_id,
             )
         )
         await session.flush()
         return result.rowcount > 0  # pyright: ignore[reportAttributeAccessIssue]  # SQLAlchemy CursorResult.rowcount returns int at runtime.
 
+    async def _get_context_id_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> str:
+        """Fetch SessionAgentContext ID for an AgentSession."""
+        result = await session.execute(
+            sa.select(RDBSessionAgent.context_id).where(
+                RDBSessionAgent.agent_session_id == session_id,
+            )
+        )
+        context_id = result.scalar_one_or_none()
+        if context_id is None:
+            raise ValueError("SessionAgentContext not found for AgentSession")
+        return context_id
+
     def _build_project(
         self,
-        rdb: RDBSessionWorkspaceProject,
+        rdb: RDBSessionAgentContextProject,
+        *,
+        session_id: str,
     ) -> SessionWorkspaceProject:
         """Convert RDB Project row to domain model."""
         return SessionWorkspaceProject(
             id=rdb.id,
-            session_id=rdb.session_id,
+            session_id=session_id,
+            session_agent_context_id=rdb.session_agent_context_id,
             path=rdb.path,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,

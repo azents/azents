@@ -107,6 +107,7 @@ def _make_project(*, path: str = "/workspace/agent/project") -> SessionWorkspace
     return SessionWorkspaceProject(
         id="project-1",
         session_id="session-1",
+        session_agent_context_id="context-1",
         path=path,
         created_at=now,
         updated_at=now,

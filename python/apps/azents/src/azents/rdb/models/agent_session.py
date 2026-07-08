@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import (
     AgentSessionEndReason,
+    AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStartReason,
@@ -30,6 +31,13 @@ def _agent_session_run_state_values(
     enum_cls: type[AgentSessionRunState],
 ) -> list[str]:
     """Return AgentSessionRunState enum values stored in the DB."""
+    return [v.value for v in enum_cls]
+
+
+def _agent_session_kind_values(
+    enum_cls: type[AgentSessionKind],
+) -> list[str]:
+    """Return AgentSessionKind enum values stored in the DB."""
     return [v.value for v in enum_cls]
 
 
@@ -73,6 +81,12 @@ agent_session_run_state_enum = ENUM(
     create_type=False,
     values_callable=_agent_session_run_state_values,
 )
+agent_session_kind_enum = ENUM(
+    AgentSessionKind,
+    name="agent_session_kind",
+    create_type=False,
+    values_callable=_agent_session_kind_values,
+)
 agent_session_primary_kind_enum = ENUM(
     AgentSessionPrimaryKind,
     name="agent_session_primary_kind",
@@ -107,6 +121,7 @@ class RDBAgentSession(RDBModel):
     UQ_HANDLE = sa.UniqueConstraint("handle", name="uq_agent_sessions_handle")
     IX_WORKSPACE_ID = sa.Index("ix_agent_sessions_workspace_id", "workspace_id")
     IX_AGENT_ID = sa.Index("ix_agent_sessions_agent_id", "agent_id")
+    IX_SESSION_KIND = sa.Index("ix_agent_sessions_session_kind", "session_kind")
     IX_AGENT_ACTIVE_LAST_USER_INPUT = sa.Index(
         "ix_agent_sessions_agent_active_last_user_input",
         "agent_id",
@@ -162,6 +177,11 @@ class RDBAgentSession(RDBModel):
         nullable=False,
     )
     handle: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    session_kind: Mapped[AgentSessionKind] = mapped_column(
+        agent_session_kind_enum,
+        nullable=False,
+        default=AgentSessionKind.ROOT,
+    )
     status: Mapped[AgentSessionStatus] = mapped_column(
         agent_session_status_enum,
         nullable=False,
@@ -332,6 +352,7 @@ class RDBAgentSession(RDBModel):
         UQ_HANDLE,
         IX_WORKSPACE_ID,
         IX_AGENT_ID,
+        IX_SESSION_KIND,
         IX_AGENT_ACTIVE_LAST_USER_INPUT,
         IX_MODEL_INPUT_HEAD_EVENT_ID,
         IX_MODEL_FILE_GC_LAG,

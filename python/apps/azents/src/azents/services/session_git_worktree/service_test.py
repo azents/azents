@@ -21,7 +21,7 @@ from azents.engine.events.action_messages import (
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.models.session_git_worktree import RDBSessionGitWorktree
+from azents.rdb.models.session_agent_context import RDBSessionAgentContextGitWorktree
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.action_execution.data import ActionExecutionProjection
@@ -1386,7 +1386,7 @@ class TestSessionGitWorktreeService:
                 session_id=session_id,
             )
             assert allocation is not None
-            row = await session.get(RDBSessionGitWorktree, allocation.id)
+            row = await session.get(RDBSessionAgentContextGitWorktree, allocation.id)
             assert row is not None
             row.worktree_path = "/workspace/agent/user-owned/repo"
             await session.flush()
