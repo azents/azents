@@ -15,8 +15,10 @@ code_paths:
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/tools/**
+  - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
+  - python/apps/azents/src/azents/worker/deps.py
   - python/apps/azents/src/azents/repos/mcp_oauth_connection/**
   - python/apps/azents/src/azents/rdb/models/toolkit_state.py
   - python/apps/azents/src/azents/runtime/**
@@ -31,7 +33,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-08
-spec_version: 46
+spec_version: 47
 ---
 
 # Toolkit
@@ -104,7 +106,7 @@ ToolkitConfig `slug` is the DB-registered toolkit's model-visible namespace. It 
 {toolkit_slug}__{tool_name}
 ```
 
-Auto-bound single-instance toolkits use `use_prefix=False`; their tool names are exposed as-is. This applies to Memory Read, Memory Write, Runtime file/process tools, and the session-bound Goal/Todo tools. For example, `list_memories`, `save_memory`, `exec_command`, `write_stdin`, `read`, `get_goal`, and `update_todo` are not prefixed.
+Auto-bound single-instance toolkits use `use_prefix=False`; their tool names are exposed as-is. This applies to Memory Read, Memory Write, Runtime file/process tools, Subagent collaboration tools, and the session-bound Goal/Todo tools. For example, `list_memories`, `save_memory`, `exec_command`, `write_stdin`, `read`, `spawn_agent`, `wait_agent`, `get_goal`, and `update_todo` are not prefixed.
 
 Some toolkits may add their own internal segment before the outer ToolkitConfig slug is applied. GitHub multi-installation routing does this by prefixing each installation's MCP tools with a safe account-login segment. With ToolkitConfig slug `github`, installation `azents`, and MCP tool `get_file_contents`, the final model-visible name becomes:
 
@@ -307,6 +309,29 @@ Appendix and state:
 - Runtime/FileStorage communication failures after a successful read are logged as errors and leave the read output unchanged.
 - Toolkit State failures and code bugs are not swallowed by `ClaudeRulesToolkit`; they flow to the runtime hook dispatcher fail-open path.
 
+### Auto-bound Subagent Collaboration Toolkit
+
+`SubagentToolkitProvider` is an auto-bound toolkit resolved by the worker. It is eligible in both root
+and subagent execution modes and exposes the coherent collaboration bundle as unprefixed tools:
+
+- `spawn_agent`
+- `send_message`
+- `followup_task`
+- `wait_agent`
+- `interrupt_agent`
+- `list_agents`
+
+`spawn_agent` currently supports only `agent_type = default`; unsupported values fail as tool errors.
+The toolkit stores inter-agent delivery as target session `agent_message` input buffers. `send_message`
+queues without waking the target, while `spawn_agent` and `followup_task` mark the target session
+running and send normal broker wake-up signals. `wait_agent` reads unread terminal run projections and
+advances the child observation cursor only for returned results. `interrupt_agent` records stop intent
+only for the named target session and returns its previous projected status; it does not close, delete,
+or recursively stop descendants.
+
+The toolkit emits non-durable `subagent_tree_changed` events as invalidation signals. Durable tree
+state remains in `SessionAgent`, linked `AgentSession`, and latest `agent_runs` rows.
+
 ### Goal/Todo Prompt and Result Stability
 
 Goal and Todo auto-bound toolkits expose fixed tool definitions independent of current stored state. Their Toolkit prompts are fixed instruction text and do not include the current Goal objective/status or Todo list. The model can call `get_goal` when it needs exact Goal state; Todo UI/state snapshots remain the user-visible source of truth for Todo state. Goal Toolkit is root/user-facing and is filtered out of future subagent-mode auto-binding.
@@ -317,7 +342,8 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 
 | Toolkit | Activation condition | Credential source |
 |---|---|---|
-| `memory_read` | auto-bound when Agent memory is enabled; eligible for root and future subagent execution modes | — |
+| `memory_read` | auto-bound when Agent memory is enabled; eligible for root and subagent execution modes | — |
+| `subagent` | auto-bound collaboration toolkit; eligible for root and subagent execution modes | `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` |
 | `memory_write` | auto-bound when Agent memory is enabled and execution mode is root | — |
 | `runtime` | auto-bound when runtime tools are enabled. Domain restriction by ShellEnvironment. | — |
 | `claude_rules` | auto-bound when runtime tools are enabled; exposes hooks only, no model-visible tools | — |
@@ -332,7 +358,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 
 Memory Read, Memory Write, Runtime file/process tools, Goal, Todo, AGENTS.md, Claude Rules, schedule, and background-task behavior are runtime-owned capabilities rather than user-created `ToolkitConfig` rows unless explicitly represented in the ToolkitConfig API. Runtime-only toolkits are mounted by worker/runtime policy and are not inherited through `agent_toolkits` rows.
 
-Toolkit resolution receives an execution mode. Current root sessions use root mode. The future subagent mode reuses this filter seam to keep root/user-facing capabilities such as Memory Write and Goal Toolkit out of subagent auto-binding without changing DB-registered ToolkitConfig resolution.
+Toolkit resolution receives an execution mode. Root sessions use root mode. Child sessions whose `AgentSession.session_kind` is `subagent` use subagent mode. This filter keeps root/user-facing capabilities such as Memory Write and Goal Toolkit out of subagent auto-binding without changing DB-registered ToolkitConfig resolution. Runtime file/process tools, Memory Read, Claude Rules, Skill, and Subagent collaboration remain eligible for subagent mode when their normal activation conditions are satisfied.
 
 
 ## Business Rules
@@ -494,6 +520,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-08** (spec_version 47) — Added the auto-bound Subagent collaboration toolkit and updated execution-mode filtering from future subagent mode to current root/subagent resolution.
 - **2026-07-08** (spec_version 46) — Split auto-bound memory resolution into Memory Read and Memory Write capabilities, renamed the auto-bound runtime binding from shell to runtime, and documented root/subagent execution-mode filtering for Memory Write and Goal Toolkit.
 - **2026-07-01** (spec_version 43) — Added Goal compaction summary enrichment behavior.
 - **2026-07-01** (spec_version 42) — Added Todo compaction summary enrichment behavior.

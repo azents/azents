@@ -17,6 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/services/uploads/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/engine/events/file_parts.py
+  - python/apps/azents/src/azents/engine/events/fork_context.py
   - python/apps/azents/src/azents/engine/events/model_file_parts.py
   - python/apps/azents/src/azents/engine/events/model_file_materializer.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
@@ -27,8 +28,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/hooks/useFileUpload.ts
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
-last_verified_at: 2026-07-03
-spec_version: 9
+last_verified_at: 2026-07-08
+spec_version: 10
 ---
 
 # File Exchange Storage
@@ -69,6 +70,8 @@ If original non-image payload exceeds size cap, ModelFile is not created and is 
 
 Active transcript FilePart referencing deleted or missing ModelFile is rewritten at pre-lower stage into bounded text placeholder in event payload itself. This rewrite applies equally to user message, assistant message, and client/provider tool result payload, so later compaction, reload, REST/WS projection do not interpret unavailable FilePart as rich input again.
 
+When `spawn_agent` forks parent model-visible context into a child session, FileParts are degraded to bounded text placeholders before appending the selected events to the child transcript. Forking does not copy blobs, does not create child ModelFiles, and does not share ModelFile rows through subagent tree context. If the child needs bytes, the parent must hand off a runtime path, exchange/artifact URI workflow, or another explicit transfer outside automatic context fork.
+
 ### Agent presents sandbox file
 
 `present_file` tool publishes only files under Provider-reported Agent Workspace as public Exchange attachment to user. Files outside allowed path are rejected. Published attachment appears in chat UI attachment list and can be retrieved through download endpoint.
@@ -95,3 +98,7 @@ Active transcript FilePart referencing deleted or missing ModelFile is rewritten
 - Conversation event envelope follows [`../domain/conversation.md`](../domain/conversation.md).
 - Session Workspace file/project state follows [`../domain/workspace.md`](../domain/workspace.md).
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
+
+## Changelog
+
+- **2026-07-08** — v10. Documented subagent context-fork FilePart placeholder degradation and the no-blob-copy boundary.

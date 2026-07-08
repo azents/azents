@@ -12,10 +12,11 @@ code_paths:
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/engine/tools/skill.py
   - python/apps/azents/src/azents/worker/deps.py
+  - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-06
-spec_version: 15
+last_verified_at: 2026-07-08
+spec_version: 16
 ---
 
 # Chat Session Resync
@@ -73,6 +74,7 @@ sequenceDiagram
 | `input_actions_updated` | server → client | `session_id` | composer action definitions changed; client reloads `/actions`. |
 | `todo_state_changed` | server → client | `todo` | session todo Toolkit State snapshot changed. |
 | `action_execution_updated` | server → client | `session_id`, `action_execution` | Current operation TurnAction execution projection changed, including status and durable progress events. |
+| `subagent_tree_changed` | server → client | `root_session_agent_id`, `changed_session_agent_id` | Subagent Tree projection invalidation signal; client refetches the dedicated tree API. |
 
 Client does not query history/live REST baseline before `subscribed` ack. If health check ack timeout or socket close occurs, switch to ticket refresh/reconnect path.
 
@@ -118,6 +120,22 @@ Response fields:
 `snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.action_executions` is the current nonterminal operation TurnAction projection list.
 
 Action-execution retry and discard mutation responses return the updated action execution projection immediately. When the mutation schedules more runner work, the backend also sends a normal broker wake-up, and subsequent progress is reconciled through the same `action_execution_updated` WebSocket action and `/live.action_executions` baseline. Clients must upsert the returned projection by execution id and then keep accepting newer projection updates from WebSocket or REST baseline reload.
+
+## 5.2 REST Subagent Tree Contract
+
+`GET /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree` returns the durable
+Subagent Tree projection for the root tree containing the selected root or child session. It is a
+separate resync surface from `/live`; `/live` does not embed the full tree. The response includes the
+root `SessionAgent` id, root `AgentSession` id, current `SessionAgent` id, and nested tree nodes.
+
+Each node contains the linked `agent_session_id` used for direct child detail routes, canonical path,
+projected status, latest task/message preview, unread terminal result flag, latest run metadata,
+terminal result source event id, terminal result message preview, and children. Refresh/reconnect must
+reconstruct tree state by refetching this endpoint from durable DB state.
+
+`subagent_tree_changed` is not source-of-truth state. The frontend invalidates all cached Subagent
+Tree queries when it receives the event so both root and child detail views converge on the same
+durable projection after refetch.
 
 ## 6. Timeline State Rules
 
@@ -276,9 +294,11 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 - History pagination always returns page renderable oldest to newest.
 - Legacy aggregate `/messages` fallback is not used.
 - Terminal worktree action execution results are chat history events of kind `action_execution_result`; clients reconcile in-progress action logs through `/live.action_executions` and `action_execution_updated`.
+- Subagent Tree state is restored from the dedicated tree endpoint; `subagent_tree_changed` only invalidates/refetches cached tree queries.
 
 ## 11. Changelog
 
+- **2026-07-08** — v16. Added Subagent Tree resync contract, `subagent_tree_changed` invalidation semantics, and frontend tree cache convergence behavior.
 - **2026-07-06** — v15. Removed session-initialization resync state and documented durable `action_execution_result` recovery.
 - **2026-07-06** — v14. Added action-execution retry/discard mutation response reconciliation semantics.
 - **2026-07-05** — v13. Added action execution WebSocket projection updates and anchored operation-progress rendering semantics.

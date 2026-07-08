@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-06-15
-spec_version: 5
+last_verified_at: 2026-07-08
+spec_version: 6
 ---
 
 # E2E Primary Test Strategy
@@ -40,7 +40,7 @@ This spec defines boundaries connecting azents feature design, E2E location, fix
 
 | Layer | Responsibility | Prohibited |
 | --- | --- | --- |
-| `testenv/azents/e2e/` | pytest-based product behavior E2E. Primary verification location for API/WS/browser/user journey regression. | Do not wrap E2E with testenv fixture command. |
+| `testenv/azents/e2e/` | pytest-based product behavior E2E. Primary verification location for API/WS/browser/user journey regression. | Do not wrap E2E with testenv fixture command. Do not create product state through direct DB writes. |
 | `testenv/azents/fixtures/` | Prepare reusable product state readiness and verify with doctor. | Do not own E2E/feature QA plan instead. |
 | `testenv/azents/contracts/` | Declare credential/prerequisite contract and safe metadata schema. | Do not output raw secrets or store them in snapshots. |
 | `testenv/azents/support/` | Promote only helpers confirmed to be repeatedly used in E2E/fixture/prerequisite. | Do not preemptively commonize. |
@@ -89,6 +89,8 @@ Consumer policy:
 
 E2E and fixture/prerequisite diagnostic read only snapshot during test and do not run doctor again.
 
+E2E tests reproduce product behavior through user-facing UI, public/internal test APIs, slash commands, OAuth flow, or documented fixture/prerequisite setup. They must not insert, update, or delete product rows directly to manufacture feature state. Cleanup SQL is allowed only in explicitly scoped reset helpers, not inside feature scenario tests.
+
 ## CI Policy
 
 Always-on deterministic CI does not depend on external credential.
@@ -119,6 +121,10 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 - live evidence: provider-enabled lifecycle, Provider-reported workspace path, persistence preservation across stop/restart, reset-only destructive behavior, reconnect/stale generation, provider liveness, Helm-enabled environment participation.
 
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
+
+## Changelog
+
+- **2026-07-08** — v6. Added the no-direct-DB-write E2E scenario boundary used by subagent validation.
 
 ## Related Records
 

@@ -2,6 +2,7 @@
 title: "Codex-first Subagent Redesign Implementation Design"
 created: 2026-07-08
 updated: 2026-07-08
+implemented: 2026-07-08
 tags: [architecture, backend, frontend, engine, api]
 ---
 # Codex-first Subagent Redesign Implementation Design
