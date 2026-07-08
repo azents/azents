@@ -4,17 +4,20 @@ import asyncio
 import datetime
 from uuid import uuid4
 
+import pytest
 from azcommon.result import Success
 from pytest import MonkeyPatch
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 import azents.repos.agent_session as agent_session_repo
 from azents.core.enums import (
+    AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
     LLMProvider,
+    SessionAgentKind,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -270,3 +273,318 @@ class TestAgentSessionRepository:
         refreshed = await repo.get_by_id(rdb_session, agent_session.id)
         assert refreshed is not None
         assert refreshed.lifecycle_started_at == first_claimed_at
+
+    async def test_session_agent_child_tree_creation_and_lookup(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Child and nested SessionAgents share one root tree context."""
+        workspace_id = await _create_workspace(rdb_session, "session-agent-tree-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "session-agent-tree")
+        repo = AgentSessionRepository()
+        root_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+        assert root_agent.kind == SessionAgentKind.ROOT
+        assert root_agent.path == "/root"
+
+        child = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=root_agent.id,
+            name="reviewer_1",
+            agent_type="default",
+            title="Reviewer",
+            last_task_message="Review this change",
+        )
+        nested = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=child.id,
+            name="fixer-2",
+            agent_type="default",
+            title=None,
+            last_task_message="Fix the review findings",
+        )
+
+        assert child.kind == SessionAgentKind.SUBAGENT
+        assert child.context_id == root_agent.context_id
+        assert child.root_session_agent_id == root_agent.id
+        assert child.parent_session_agent_id == root_agent.id
+        assert child.path == "/root/reviewer_1"
+        assert child.last_task_message == "Review this change"
+        assert nested.context_id == root_agent.context_id
+        assert nested.root_session_agent_id == root_agent.id
+        assert nested.parent_session_agent_id == child.id
+        assert nested.path == "/root/reviewer_1/fixer-2"
+
+        tree = await repo.list_session_agent_tree(
+            rdb_session,
+            root_session_agent_id=root_agent.id,
+        )
+        assert [agent.path for agent in tree] == [
+            "/root",
+            "/root/reviewer_1",
+            "/root/reviewer_1/fixer-2",
+        ]
+        descendants = await repo.list_descendant_session_agents(
+            rdb_session,
+            session_agent_id=child.id,
+            include_self=False,
+        )
+        assert [agent.id for agent in descendants] == [nested.id]
+
+        resolved_relative = await repo.resolve_session_agent_path(
+            rdb_session,
+            current_session_agent_id=root_agent.id,
+            path="reviewer_1/fixer-2",
+        )
+        resolved_absolute = await repo.resolve_session_agent_path(
+            rdb_session,
+            current_session_agent_id=nested.id,
+            path="/root/reviewer_1",
+        )
+        assert resolved_relative is not None
+        assert resolved_relative.id == nested.id
+        assert resolved_absolute is not None
+        assert resolved_absolute.id == child.id
+
+        observed = await repo.update_session_agent_observation_cursor(
+            rdb_session,
+            session_agent_id=child.id,
+            parent_observed_run_index=3,
+            parent_observed_event_id="0123456789abcdef0123456789abcdef",
+        )
+        assert observed is not None
+        assert observed.parent_observed_run_index == 3
+        assert observed.parent_observed_event_id == "0123456789abcdef0123456789abcdef"
+
+    async def test_session_agent_child_names_are_strict(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Child SessionAgent names are strict canonical path segments."""
+        workspace_id = await _create_workspace(rdb_session, "session-agent-name-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "session-agent-name")
+        repo = AgentSessionRepository()
+        root_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+
+        for name in ["", "has space", "../x", "x/y", "-bad", "한글", "a" * 65]:
+            with pytest.raises(ValueError):
+                await repo.create_child_session_agent(
+                    rdb_session,
+                    parent_session_agent_id=root_agent.id,
+                    name=name,
+                    agent_type="default",
+                    title=None,
+                    last_task_message=None,
+                )
+
+    async def test_session_agent_duplicate_sibling_is_rejected(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Sibling SessionAgents cannot reuse a parent-local name."""
+        workspace_id = await _create_workspace(rdb_session, "session-agent-dupe-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "session-agent-dupe")
+        repo = AgentSessionRepository()
+        root_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+        await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=root_agent.id,
+            name="worker",
+            agent_type="default",
+            title=None,
+            last_task_message=None,
+        )
+
+        with pytest.raises(ValueError):
+            await repo.create_child_session_agent(
+                rdb_session,
+                parent_session_agent_id=root_agent.id,
+                name="worker",
+                agent_type="default",
+                title=None,
+                last_task_message=None,
+            )
+
+    async def test_session_agent_path_lookup_is_root_tree_scoped(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Path lookup does not cross root SessionAgent trees."""
+        workspace_id = await _create_workspace(rdb_session, "session-agent-scope-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "session-agent-scope")
+        repo = AgentSessionRepository()
+        first_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+            ),
+        )
+        second_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+            ),
+        )
+        first_root = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            first_session.id,
+        )
+        second_root = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            second_session.id,
+        )
+        assert first_root is not None
+        assert second_root is not None
+        child = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=first_root.id,
+            name="worker",
+            agent_type="default",
+            title=None,
+            last_task_message=None,
+        )
+
+        resolved_from_second_tree = await repo.resolve_session_agent_path(
+            rdb_session,
+            current_session_agent_id=second_root.id,
+            path=child.path,
+        )
+
+        assert resolved_from_second_tree is None
+
+    async def test_child_agent_sessions_are_hidden_from_ordinary_lists(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Child AgentSessions are hidden by session_kind from ordinary lists."""
+        workspace_id = await _create_workspace(rdb_session, "session-agent-hidden-ws")
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "session-agent-hidden"
+        )
+        repo = AgentSessionRepository()
+        root_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+        child = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=root_agent.id,
+            name="worker",
+            agent_type="default",
+            title=None,
+            last_task_message=None,
+        )
+
+        workspace_sessions = await repo.list_by_workspace(rdb_session, workspace_id)
+        active_sessions = await repo.list_active_by_agent_id(rdb_session, agent_id)
+        child_session = await repo.get_by_id(rdb_session, child.agent_session_id)
+
+        assert [session.id for session in workspace_sessions] == [root_session.id]
+        assert [session.id for session in active_sessions] == [root_session.id]
+        assert child_session is not None
+        assert child_session.session_kind == AgentSessionKind.SUBAGENT
+
+    async def test_delete_session_agent_subtree_deletes_child_sessions(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Deleting a linked AgentSession deletes the SessionAgent subtree sessions."""
+        workspace_id = await _create_workspace(rdb_session, "session-agent-delete-ws")
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "session-agent-delete"
+        )
+        repo = AgentSessionRepository()
+        root_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+        child = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=root_agent.id,
+            name="worker",
+            agent_type="default",
+            title=None,
+            last_task_message=None,
+        )
+        nested = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=child.id,
+            name="nested",
+            agent_type="default",
+            title=None,
+            last_task_message=None,
+        )
+
+        await repo.delete_by_id(rdb_session, root_session.id)
+
+        assert await repo.get_by_id(rdb_session, root_session.id) is None
+        assert await repo.get_by_id(rdb_session, child.agent_session_id) is None
+        assert await repo.get_by_id(rdb_session, nested.agent_session_id) is None
+        assert await repo.get_session_agent_by_id(rdb_session, root_agent.id) is None
+        assert await repo.get_session_agent_by_id(rdb_session, child.id) is None
+        assert await repo.get_session_agent_by_id(rdb_session, nested.id) is None

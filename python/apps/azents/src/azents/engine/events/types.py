@@ -576,6 +576,8 @@ class AgentRunState(BaseModel):
     active_tool_calls: list[ActiveToolCall] = Field(default_factory=list)
     retry_state: FailedRunRetryState | None = Field(default=None)
     last_completed_event_id: str | None = Field(default=None)
+    terminal_result_event_id: str | None = Field(default=None)
+    terminal_result_message: str | None = Field(default=None)
     stop_requested_at: datetime.datetime | None = Field(default=None)
     started_at: datetime.datetime
     ended_at: datetime.datetime | None = Field(default=None)

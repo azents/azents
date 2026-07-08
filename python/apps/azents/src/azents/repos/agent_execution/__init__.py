@@ -558,6 +558,8 @@ class AgentRunRepository:
         *,
         ended_at: datetime.datetime,
         last_completed_event_id: str | None = None,
+        terminal_result_event_id: str | None = None,
+        terminal_result_message: str | None = None,
     ) -> AgentRunState:
         """Transition Run to terminal state."""
         return await self.update(
@@ -570,6 +572,8 @@ class AgentRunRepository:
                 retry_state=None,
                 ended_at=ended_at,
                 last_completed_event_id=last_completed_event_id,
+                terminal_result_event_id=terminal_result_event_id,
+                terminal_result_message=terminal_result_message,
             ),
         )
 
@@ -581,6 +585,8 @@ class AgentRunRepository:
         *,
         ended_at: datetime.datetime,
         last_completed_event_id: str | None = None,
+        terminal_result_event_id: str | None = None,
+        terminal_result_message: str | None = None,
     ) -> AgentRunState | None:
         """Close Run as terminal state if it is still running."""
         rdb = await session.get(RDBAgentRun, run_id)
@@ -594,6 +600,8 @@ class AgentRunRepository:
         rdb.retry_state = None
         rdb.ended_at = ended_at
         rdb.last_completed_event_id = last_completed_event_id
+        rdb.terminal_result_event_id = terminal_result_event_id
+        rdb.terminal_result_message = terminal_result_message
         await session.flush()
         await session.refresh(rdb)
         return self._build(rdb)
@@ -614,6 +622,8 @@ class AgentRunRepository:
             if rdb.retry_state is not None
             else None,
             last_completed_event_id=rdb.last_completed_event_id,
+            terminal_result_event_id=rdb.terminal_result_event_id,
+            terminal_result_message=rdb.terminal_result_message,
             stop_requested_at=rdb.stop_requested_at,
             started_at=rdb.started_at,
             ended_at=rdb.ended_at,

@@ -1,6 +1,7 @@
 """AgentSession repository."""
 
 import datetime
+import re
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -27,12 +28,27 @@ from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 
-from .data import AgentSession, AgentSessionCreate, PendingSessionCommand
+from .data import AgentSession, AgentSessionCreate, PendingSessionCommand, SessionAgent
 
 SESSION_HANDLE_INSERT_ATTEMPTS = 10
 _ROOT_SESSION_AGENT_NAME = "root"
 _ROOT_SESSION_AGENT_PATH = "/root"
 _DEFAULT_SESSION_AGENT_TYPE = "default"
+_CHILD_SESSION_AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
+def validate_session_agent_child_name(name: str) -> None:
+    """Validate a child SessionAgent name segment."""
+    if not _CHILD_SESSION_AGENT_NAME_PATTERN.fullmatch(name):
+        raise ValueError(
+            "SessionAgent name must start with a letter or number and contain "
+            "only letters, numbers, underscores, or hyphens"
+        )
+
+
+def _join_session_agent_path(parent_path: str, child_name: str) -> str:
+    """Build a canonical child path."""
+    return f"{parent_path}/{child_name}"
 
 
 @dataclass(frozen=True)
@@ -95,6 +111,229 @@ class AgentSessionRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def get_session_agent_by_session_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> SessionAgent | None:
+        """Fetch SessionAgent linked to an AgentSession."""
+        rdb = await session.scalar(
+            sa.select(RDBSessionAgent).where(
+                RDBSessionAgent.agent_session_id == agent_session_id
+            )
+        )
+        if rdb is None:
+            return None
+        return self._build_session_agent(rdb)
+
+    async def get_root_session_agent_by_session_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> SessionAgent | None:
+        """Fetch root SessionAgent for the tree containing an AgentSession."""
+        current = await self.get_session_agent_by_session_id(session, agent_session_id)
+        if current is None:
+            return None
+        rdb = await session.get(RDBSessionAgent, current.root_session_agent_id)
+        if rdb is None:
+            return None
+        return self._build_session_agent(rdb)
+
+    async def get_session_agent_by_id(
+        self,
+        session: AsyncSession,
+        session_agent_id: str,
+    ) -> SessionAgent | None:
+        """Fetch SessionAgent by ID."""
+        rdb = await session.get(RDBSessionAgent, session_agent_id)
+        if rdb is None:
+            return None
+        return self._build_session_agent(rdb)
+
+    async def list_session_agent_tree(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_agent_id: str,
+    ) -> list[SessionAgent]:
+        """Fetch all SessionAgents in a root tree ordered by path."""
+        result = await session.execute(
+            sa.select(RDBSessionAgent)
+            .where(RDBSessionAgent.root_session_agent_id == root_session_agent_id)
+            .order_by(RDBSessionAgent.path.asc())
+        )
+        return [self._build_session_agent(rdb) for rdb in result.scalars()]
+
+    async def list_descendant_session_agents(
+        self,
+        session: AsyncSession,
+        *,
+        session_agent_id: str,
+        include_self: bool,
+    ) -> list[SessionAgent]:
+        """Fetch descendants for a SessionAgent inside its root tree."""
+        current = await session.get(RDBSessionAgent, session_agent_id)
+        if current is None:
+            raise ValueError("SessionAgent not found")
+        descendant_prefix = f"{current.path}/"
+        conditions = [
+            RDBSessionAgent.root_session_agent_id == current.root_session_agent_id,
+            RDBSessionAgent.path.startswith(descendant_prefix, autoescape=True),
+        ]
+        if include_self:
+            conditions = [
+                RDBSessionAgent.root_session_agent_id == current.root_session_agent_id,
+                sa.or_(
+                    RDBSessionAgent.id == current.id,
+                    RDBSessionAgent.path.startswith(descendant_prefix, autoescape=True),
+                ),
+            ]
+        result = await session.execute(
+            sa.select(RDBSessionAgent)
+            .where(*conditions)
+            .order_by(RDBSessionAgent.path.asc())
+        )
+        return [self._build_session_agent(rdb) for rdb in result.scalars()]
+
+    async def get_session_agent_by_path(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_agent_id: str,
+        path: str,
+    ) -> SessionAgent | None:
+        """Fetch a SessionAgent by canonical path inside one root tree."""
+        if (
+            not path.startswith(f"{_ROOT_SESSION_AGENT_PATH}/")
+            and path != _ROOT_SESSION_AGENT_PATH
+        ):
+            raise ValueError("SessionAgent path must be absolute under /root")
+        rdb = await session.scalar(
+            sa.select(RDBSessionAgent).where(
+                RDBSessionAgent.root_session_agent_id == root_session_agent_id,
+                RDBSessionAgent.path == path,
+            )
+        )
+        if rdb is None:
+            return None
+        return self._build_session_agent(rdb)
+
+    async def resolve_session_agent_path(
+        self,
+        session: AsyncSession,
+        *,
+        current_session_agent_id: str,
+        path: str,
+    ) -> SessionAgent | None:
+        """Resolve an absolute or current-agent-relative SessionAgent path."""
+        current = await session.get(RDBSessionAgent, current_session_agent_id)
+        if current is None:
+            raise ValueError("SessionAgent not found")
+
+        if path == ".":
+            resolved_path = current.path
+        elif path.startswith("/"):
+            resolved_path = path
+        else:
+            for segment in path.split("/"):
+                validate_session_agent_child_name(segment)
+            resolved_path = f"{current.path}/{path}"
+
+        if not (
+            resolved_path == _ROOT_SESSION_AGENT_PATH
+            or resolved_path.startswith(f"{_ROOT_SESSION_AGENT_PATH}/")
+        ):
+            return None
+        return await self.get_session_agent_by_path(
+            session,
+            root_session_agent_id=current.root_session_agent_id,
+            path=resolved_path,
+        )
+
+    async def create_child_session_agent(
+        self,
+        session: AsyncSession,
+        *,
+        parent_session_agent_id: str,
+        name: str,
+        agent_type: str,
+        title: str | None,
+        last_task_message: str | None,
+    ) -> SessionAgent:
+        """Create a child SessionAgent and linked hidden AgentSession."""
+        validate_session_agent_child_name(name)
+        parent_row = await session.execute(
+            sa.select(RDBSessionAgent, RDBAgentSession)
+            .join(
+                RDBAgentSession,
+                RDBAgentSession.id == RDBSessionAgent.agent_session_id,
+            )
+            .where(RDBSessionAgent.id == parent_session_agent_id)
+            .with_for_update(of=RDBSessionAgent)
+        )
+        parent = parent_row.one_or_none()
+        if parent is None:
+            raise ValueError("Parent SessionAgent not found")
+        parent_agent, parent_agent_session = parent
+        child_path = _join_session_agent_path(parent_agent.path, name)
+
+        existing = await session.scalar(
+            sa.select(RDBSessionAgent.id).where(
+                RDBSessionAgent.root_session_agent_id
+                == parent_agent.root_session_agent_id,
+                RDBSessionAgent.path == child_path,
+            )
+        )
+        if existing is not None:
+            raise ValueError("SessionAgent sibling name already exists")
+
+        child_agent_session = await self._create_linked_subagent_session(
+            session,
+            workspace_id=parent_agent_session.workspace_id,
+            agent_id=parent_agent_session.agent_id,
+            title=title,
+        )
+        rdb = RDBSessionAgent(
+            context_id=parent_agent.context_id,
+            root_session_agent_id=parent_agent.root_session_agent_id,
+            agent_session_id=child_agent_session.id,
+            kind=SessionAgentKind.SUBAGENT,
+            name=name,
+            path=child_path,
+            agent_type=agent_type,
+            parent_session_agent_id=parent_agent.id,
+            last_task_message=last_task_message,
+        )
+        session.add(rdb)
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build_session_agent(rdb)
+
+    async def update_session_agent_observation_cursor(
+        self,
+        session: AsyncSession,
+        *,
+        session_agent_id: str,
+        parent_observed_run_index: int | None,
+        parent_observed_event_id: str | None,
+    ) -> SessionAgent | None:
+        """Update the terminal-result observation cursor for a SessionAgent."""
+        result = await session.execute(
+            sa.update(RDBSessionAgent)
+            .where(RDBSessionAgent.id == session_agent_id)
+            .values(
+                parent_observed_run_index=parent_observed_run_index,
+                parent_observed_event_id=parent_observed_event_id,
+            )
+            .returning(RDBSessionAgent)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build_session_agent(rdb)
 
     async def list_by_workspace(
         self,
@@ -185,9 +424,21 @@ class AgentSessionRepository:
         session: AsyncSession,
         agent_session_id: str,
     ) -> None:
-        """Delete AgentSession by ID."""
+        """Delete AgentSession and any linked SessionAgent subtree sessions."""
+        linked_agent = await self.get_session_agent_by_session_id(
+            session,
+            agent_session_id,
+        )
+        session_ids = [agent_session_id]
+        if linked_agent is not None:
+            descendants = await self.list_descendant_session_agents(
+                session,
+                session_agent_id=linked_agent.id,
+                include_self=True,
+            )
+            session_ids = [agent.agent_session_id for agent in descendants]
         await session.execute(
-            sa.delete(RDBAgentSession).where(RDBAgentSession.id == agent_session_id)
+            sa.delete(RDBAgentSession).where(RDBAgentSession.id.in_(session_ids))
         )
         await session.flush()
 
@@ -759,6 +1010,39 @@ class AgentSessionRepository:
         session.add(root_agent)
         context.root_session_agent_id = root_session_agent_id
 
+    async def _create_linked_subagent_session(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        title: str | None,
+    ) -> RDBAgentSession:
+        """Create the hidden AgentSession backing a child SessionAgent."""
+        for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
+            result = await session.execute(
+                pg_insert(RDBAgentSession)
+                .values(
+                    id=uuid7().hex,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    handle=generate_session_handle(),
+                    session_kind=AgentSessionKind.SUBAGENT,
+                    status=AgentSessionStatus.ACTIVE,
+                    title=title,
+                    primary_kind=None,
+                    start_reason=AgentSessionStartReason.INITIAL,
+                )
+                .on_conflict_do_nothing(index_elements=[RDBAgentSession.handle])
+                .returning(RDBAgentSession)
+            )
+            rdb = result.scalar_one_or_none()
+            if rdb is not None:
+                await session.flush()
+                return rdb
+
+        raise RuntimeError("AgentSession handle generation exhausted retry attempts")
+
     async def _get_agent_runtime_id(
         self,
         session: AsyncSession,
@@ -770,6 +1054,25 @@ class AgentSessionRepository:
             sa.select(RDBAgentRuntime.id).where(RDBAgentRuntime.agent_id == agent_id)
         )
         return result.scalar_one_or_none()
+
+    def _build_session_agent(self, rdb: RDBSessionAgent) -> SessionAgent:
+        """Convert RDB SessionAgent row to domain model."""
+        return SessionAgent(
+            id=rdb.id,
+            context_id=rdb.context_id,
+            root_session_agent_id=rdb.root_session_agent_id,
+            agent_session_id=rdb.agent_session_id,
+            kind=rdb.kind,
+            name=rdb.name,
+            path=rdb.path,
+            agent_type=rdb.agent_type,
+            parent_session_agent_id=rdb.parent_session_agent_id,
+            last_task_message=rdb.last_task_message,
+            parent_observed_run_index=rdb.parent_observed_run_index,
+            parent_observed_event_id=rdb.parent_observed_event_id,
+            created_at=rdb.created_at,
+            updated_at=rdb.updated_at,
+        )
 
     def _build(self, rdb: RDBAgentSession) -> AgentSession:
         """Convert RDB model to domain model."""
