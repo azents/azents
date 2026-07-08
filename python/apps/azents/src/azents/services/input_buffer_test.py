@@ -332,11 +332,11 @@ def _input_buffer_service(
 class TestInputBufferService:
     """Validate InputBufferService behavior."""
 
-    async def test_enqueue_creates_buffer_and_marks_session_running(
+    async def test_enqueue_creates_buffer_without_marking_session_running(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Enqueue owns both pending row creation and running transition."""
+        """Enqueue only appends pending rows; producers own wake transitions."""
         session_id, user_id = await _create_fixture(
             rdb_session_manager,
             "input-buffer-enqueue-running",
@@ -374,7 +374,7 @@ class TestInputBufferService:
         assert result.input_buffer.session_id == session_id
         assert result.input_buffer.content == "wake me"
         assert after is not None
-        assert after.run_state == AgentSessionRunState.RUNNING
+        assert after.run_state == AgentSessionRunState.IDLE
 
     async def test_flush_promotes_buffer_and_deletes_row(
         self,

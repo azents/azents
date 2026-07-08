@@ -310,5 +310,6 @@ def get_background_registry(
         broker=broker,
         session_manager=session_manager,
         input_buffer_service=input_buffer_service,
+        agent_session_repository=AgentSessionRepository(),
     )
     return BackgroundTaskRegistry(on_complete=background_result_injector.inject)

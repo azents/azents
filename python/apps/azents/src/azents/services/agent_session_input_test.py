@@ -109,6 +109,15 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
             updated_at=now,
         )
 
+    async def mark_running_for_input_wakeup(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> None:
+        """Record wake transition."""
+        del session, session_id
+        self.calls.append("mark_running_for_input_wakeup")
+
 
 class _InputBufferServiceDouble(InputBufferService):
     """InputBufferService double for tests."""
@@ -299,6 +308,7 @@ class TestAgentSessionInputService:
             "get_by_id",
             "ensure_for_agent",
             "enqueue_input_buffer",
+            "mark_running_for_input_wakeup",
         ]
         assert input_buffer_service.enqueued is not None
         assert input_buffer_service.enqueued.session_id == "session-1"

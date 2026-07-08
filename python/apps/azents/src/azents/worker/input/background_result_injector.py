@@ -11,6 +11,7 @@ from azents.core.enums import InputBufferKind
 from azents.engine.run.background import BackgroundTask
 from azents.engine.run.types import FunctionToolResult
 from azents.rdb.session import SessionManager
+from azents.repos.agent_session import AgentSessionRepository
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class BackgroundTaskResultInjector:
     broker: SessionBroker
     session_manager: SessionManager[AsyncSession]
     input_buffer_service: InputBufferService
+    agent_session_repository: AgentSessionRepository
 
     async def inject(self, task: BackgroundTask) -> None:
         """Inject Background task completion as new parent session InputBuffer.
@@ -127,6 +129,10 @@ class BackgroundTaskResultInjector:
                         attachments=[],
                         file_parts=[],
                     ),
+                )
+                await self.agent_session_repository.mark_running_for_input_wakeup(
+                    session,
+                    task.parent_session_id,
                 )
 
             await self.broker.send_message(
