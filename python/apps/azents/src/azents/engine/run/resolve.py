@@ -22,6 +22,7 @@ from azents.core.tools import (
     ResolveContext,
     Toolkit,
     ToolkitContext,
+    ToolkitExecutionMode,
     ToolkitProvider,
 )
 from azents.engine.context.window import get_max_input_tokens
@@ -35,8 +36,9 @@ from azents.engine.run.types import (
     BuiltinToolSpec,
 )
 from azents.engine.tools.builtin import (
-    BuiltinToolkit,
     BuiltinToolkitProvider,
+    MemoryReadToolkit,
+    MemoryWriteToolkit,
     RuntimeToolkit,
 )
 from azents.engine.tools.claude_rules import (
@@ -76,6 +78,18 @@ from .input import (
 logger = logging.getLogger(__name__)
 
 _SLOW_TOOLKIT_RESOLVE_SECONDS = 1.0
+_ROOT_EXECUTION_MODES = frozenset({ToolkitExecutionMode.ROOT})
+_ROOT_AND_SUBAGENT_EXECUTION_MODES = frozenset(
+    {ToolkitExecutionMode.ROOT, ToolkitExecutionMode.SUBAGENT}
+)
+
+
+def _allows_execution_mode(
+    allowed_modes: frozenset[ToolkitExecutionMode],
+    execution_mode: ToolkitExecutionMode,
+) -> bool:
+    """Return whether a Toolkit candidate should bind in this execution mode."""
+    return execution_mode in allowed_modes
 
 
 def _toolkit_resolve_log_extra(
@@ -640,6 +654,7 @@ async def resolve_agent_tools(
     agent_id: str,
     context: ToolkitContext,
     *,
+    execution_mode: ToolkitExecutionMode,
     toolkit_registry: dict[str, ToolkitProvider[Any]],
     agent_toolkit_repository: AgentToolkitRepository,
     toolkit_repository: ToolkitRepository,
@@ -661,6 +676,7 @@ async def resolve_agent_tools(
 
     :param agent_id: Agent ID
     :param context: Toolkit runtime context
+    :param execution_mode: Toolkit resolution mode for root or future subagent runs
     :param toolkit_registry: toolkit_type to ToolkitProvider instance mapping
     :param agent_toolkit_repository: AgentToolkit repository
     :param toolkit_repository: Toolkit repository
@@ -682,7 +698,7 @@ async def resolve_agent_tools(
     :return: List of (Toolkit, slug) tuples
     """
     agent_toolkits = await agent_toolkit_repository.list_by_agent(session, agent_id)
-    # (provider, resolved, config, slug, prompt, use_prefix, toolkit_type)
+    # (provider, resolved, config, slug, prompt, use_prefix, toolkit_type, modes)
     # toolkit_type is populated only for DB-registered toolkits; auto-binding is None
     pending: list[
         tuple[
@@ -693,6 +709,7 @@ async def resolve_agent_tools(
             str | None,
             bool,
             str | None,
+            frozenset[ToolkitExecutionMode],
         ]
     ] = []
 
@@ -753,11 +770,13 @@ async def resolve_agent_tools(
                 toolkit.prompt,
                 True,
                 at.toolkit_type,
+                _ROOT_AND_SUBAGENT_EXECUTION_MODES,
             )
         )
 
-    # Auto-bound Toolkit: configure runtime-independent base tools and runner-dependent
-    # tools as separate toolkits.
+    # Auto-bound Toolkit: configure memory and runtime capabilities as separate
+    # Toolkit bindings so future execution modes can filter capabilities without
+    # changing model-visible tool names.
     if builtin_toolkit_provider is not None:
         # runtime_domain_config is required: parent uses agent/workspace settings,
         builtin_config = BuiltinToolkitProvider.validate_config(
@@ -767,104 +786,12 @@ async def resolve_agent_tools(
                 "denied_domains": list(runtime_domain_config.denied_domains),
             }
         )
-        builtin_context = ResolveContext(
-            toolkit_id="",
-            toolkit_name="builtin",
-            credentials_json=None,
-            agent_id=context.agent_id,
-            session_id=context.session_id,
-            user_id=context.user_id,
-            session=session,
-            web_url=web_url,
-            oauth_secret_key=oauth_secret_key,
-            workspace_id=context.workspace_id,
-            workspace_handle=workspace_handle,
-        )
-        builtin_resolved = await _resolve_toolkit_with_logging(
-            agent_id=agent_id,
-            context=context,
-            source="auto",
-            slug="builtin",
-            provider=builtin_toolkit_provider,
-            toolkit_name="builtin",
-            resolve=builtin_toolkit_provider.resolve_builtin(
-                builtin_config,
-                builtin_context,
-            ),
-        )
-        if isinstance(builtin_resolved, BuiltinToolkit):
-            builtin_resolved.set_agent_id(agent_id)
-            builtin_resolved.set_session_id(context.session_id)
-        pending.append(
-            (
-                builtin_toolkit_provider,
-                builtin_resolved,
-                builtin_config,
-                "builtin",
-                None,
-                False,
-                None,
-            )
-        )
-
-        if runtime_tools_enabled:
-            instruction_context_store = RuntimeInstructionContextStore()
-            runtime_context = ResolveContext(
-                toolkit_id="",
-                toolkit_name="shell",
-                credentials_json=None,
-                agent_id=context.agent_id,
-                session_id=context.session_id,
-                user_id=context.user_id,
-                session=session,
-                web_url=web_url,
-                oauth_secret_key=oauth_secret_key,
-                workspace_id=context.workspace_id,
-                workspace_handle=workspace_handle,
-            )
-            runtime_resolved = await _resolve_toolkit_with_logging(
-                agent_id=agent_id,
-                context=context,
-                source="auto",
-                slug="shell",
-                provider=builtin_toolkit_provider,
-                toolkit_name="shell",
-                resolve=builtin_toolkit_provider.resolve(
-                    builtin_config,
-                    runtime_context,
-                ),
-            )
-            # Inject session_id / agent_id into RuntimeToolkit.
-            if isinstance(runtime_resolved, RuntimeToolkit):
-                runtime_resolved.set_agent_id(agent_id)
-                runtime_resolved.set_session_id(context.session_id)
-                runtime_resolved.set_instruction_context_store(
-                    instruction_context_store
-                )
-                # Register peer toolkits to collect env when shell() runs.
-                # DB-registered toolkits are already in pending. In current structure,
-                # credential injection into runtime is limited to DB-registered toolkits
-                # such as EnvVarToolkit, so including peers up to here is sufficient.
-                peer_toolkits = [resolved for _, resolved, _, _, _, _, _ in pending]
-                runtime_resolved.set_peer_toolkits(peer_toolkits)
-
-                pending.append(
-                    (
-                        builtin_toolkit_provider,
-                        runtime_resolved,
-                        builtin_config,
-                        "shell",
-                        None,
-                        False,
-                        None,
-                    )
-                )
-
-            if claude_rules_toolkit_provider is not None:
-                claude_rules_config = ClaudeRulesToolkitProvider.validate_config({})
-                claude_rules_context = ResolveContext(
+        if memory_enabled:
+            memory_read_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+            if _allows_execution_mode(memory_read_modes, execution_mode):
+                memory_read_context = ResolveContext(
                     toolkit_id="",
-                    toolkit_name="claude_rules",
+                    toolkit_name="memory_read",
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
@@ -875,38 +802,190 @@ async def resolve_agent_tools(
                     workspace_id=context.workspace_id,
                     workspace_handle=workspace_handle,
                 )
-                claude_rules_resolved = await _resolve_toolkit_with_logging(
+                memory_read_resolved = await _resolve_toolkit_with_logging(
                     agent_id=agent_id,
                     context=context,
                     source="auto",
-                    slug="claude_rules",
-                    provider=claude_rules_toolkit_provider,
-                    toolkit_name="claude_rules",
-                    resolve=claude_rules_toolkit_provider.resolve(
-                        claude_rules_config,
-                        claude_rules_context,
+                    slug="memory_read",
+                    provider=builtin_toolkit_provider,
+                    toolkit_name="memory_read",
+                    resolve=builtin_toolkit_provider.resolve_memory_read(
+                        builtin_config,
+                        memory_read_context,
                     ),
                 )
-                if isinstance(claude_rules_resolved, ClaudeRulesToolkit):
-                    claude_rules_resolved.set_agent_id(agent_id)
-                    claude_rules_resolved.set_session_id(context.session_id)
-                    claude_rules_resolved.set_instruction_context_store(
-                        instruction_context_store
-                    )
+                if isinstance(memory_read_resolved, MemoryReadToolkit):
+                    memory_read_resolved.set_agent_id(agent_id)
+                    memory_read_resolved.set_session_id(context.session_id)
                 pending.append(
                     (
-                        claude_rules_toolkit_provider,
-                        claude_rules_resolved,
-                        claude_rules_config,
-                        "claude_rules",
+                        builtin_toolkit_provider,
+                        memory_read_resolved,
+                        builtin_config,
+                        "memory_read",
                         None,
                         False,
                         None,
+                        memory_read_modes,
                     )
                 )
 
+            memory_write_modes = _ROOT_EXECUTION_MODES
+            if _allows_execution_mode(memory_write_modes, execution_mode):
+                memory_write_context = ResolveContext(
+                    toolkit_id="",
+                    toolkit_name="memory_write",
+                    credentials_json=None,
+                    agent_id=context.agent_id,
+                    session_id=context.session_id,
+                    user_id=context.user_id,
+                    session=session,
+                    web_url=web_url,
+                    oauth_secret_key=oauth_secret_key,
+                    workspace_id=context.workspace_id,
+                    workspace_handle=workspace_handle,
+                )
+                memory_write_resolved = await _resolve_toolkit_with_logging(
+                    agent_id=agent_id,
+                    context=context,
+                    source="auto",
+                    slug="memory_write",
+                    provider=builtin_toolkit_provider,
+                    toolkit_name="memory_write",
+                    resolve=builtin_toolkit_provider.resolve_memory_write(
+                        builtin_config,
+                        memory_write_context,
+                    ),
+                )
+                if isinstance(memory_write_resolved, MemoryWriteToolkit):
+                    memory_write_resolved.set_agent_id(agent_id)
+                    memory_write_resolved.set_session_id(context.session_id)
+                pending.append(
+                    (
+                        builtin_toolkit_provider,
+                        memory_write_resolved,
+                        builtin_config,
+                        "memory_write",
+                        None,
+                        False,
+                        None,
+                        memory_write_modes,
+                    )
+                )
+
+        if runtime_tools_enabled:
+            instruction_context_store = RuntimeInstructionContextStore()
+            runtime_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+            if _allows_execution_mode(runtime_modes, execution_mode):
+                runtime_context = ResolveContext(
+                    toolkit_id="",
+                    toolkit_name="runtime",
+                    credentials_json=None,
+                    agent_id=context.agent_id,
+                    session_id=context.session_id,
+                    user_id=context.user_id,
+                    session=session,
+                    web_url=web_url,
+                    oauth_secret_key=oauth_secret_key,
+                    workspace_id=context.workspace_id,
+                    workspace_handle=workspace_handle,
+                )
+                runtime_resolved = await _resolve_toolkit_with_logging(
+                    agent_id=agent_id,
+                    context=context,
+                    source="auto",
+                    slug="runtime",
+                    provider=builtin_toolkit_provider,
+                    toolkit_name="runtime",
+                    resolve=builtin_toolkit_provider.resolve(
+                        builtin_config,
+                        runtime_context,
+                    ),
+                )
+                # Inject session_id / agent_id into RuntimeToolkit.
+                if isinstance(runtime_resolved, RuntimeToolkit):
+                    runtime_resolved.set_agent_id(agent_id)
+                    runtime_resolved.set_session_id(context.session_id)
+                    runtime_resolved.set_instruction_context_store(
+                        instruction_context_store
+                    )
+                    # Register peer toolkits to collect env when runtime tools run.
+                    # DB-registered toolkits are already in pending. In current
+                    # structure, credential injection into runtime is limited to
+                    # DB-registered toolkits such as EnvVarToolkit, so including
+                    # peers up to here is sufficient.
+                    peer_toolkits = [
+                        resolved for _, resolved, _, _, _, _, _, _ in pending
+                    ]
+                    runtime_resolved.set_peer_toolkits(peer_toolkits)
+
+                    pending.append(
+                        (
+                            builtin_toolkit_provider,
+                            runtime_resolved,
+                            builtin_config,
+                            "runtime",
+                            None,
+                            False,
+                            None,
+                            runtime_modes,
+                        )
+                    )
+
+            if claude_rules_toolkit_provider is not None:
+                claude_rules_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+                if _allows_execution_mode(claude_rules_modes, execution_mode):
+                    claude_rules_config = ClaudeRulesToolkitProvider.validate_config({})
+                    claude_rules_context = ResolveContext(
+                        toolkit_id="",
+                        toolkit_name="claude_rules",
+                        credentials_json=None,
+                        agent_id=context.agent_id,
+                        session_id=context.session_id,
+                        user_id=context.user_id,
+                        session=session,
+                        web_url=web_url,
+                        oauth_secret_key=oauth_secret_key,
+                        workspace_id=context.workspace_id,
+                        workspace_handle=workspace_handle,
+                    )
+                    claude_rules_resolved = await _resolve_toolkit_with_logging(
+                        agent_id=agent_id,
+                        context=context,
+                        source="auto",
+                        slug="claude_rules",
+                        provider=claude_rules_toolkit_provider,
+                        toolkit_name="claude_rules",
+                        resolve=claude_rules_toolkit_provider.resolve(
+                            claude_rules_config,
+                            claude_rules_context,
+                        ),
+                    )
+                    if isinstance(claude_rules_resolved, ClaudeRulesToolkit):
+                        claude_rules_resolved.set_agent_id(agent_id)
+                        claude_rules_resolved.set_session_id(context.session_id)
+                        claude_rules_resolved.set_instruction_context_store(
+                            instruction_context_store
+                        )
+                    pending.append(
+                        (
+                            claude_rules_toolkit_provider,
+                            claude_rules_resolved,
+                            claude_rules_config,
+                            "claude_rules",
+                            None,
+                            False,
+                            None,
+                            claude_rules_modes,
+                        )
+                    )
+
     # Auto-bound Toolkit: session goal
-    if goal_toolkit_provider is not None:
+    goal_modes = _ROOT_EXECUTION_MODES
+    if goal_toolkit_provider is not None and _allows_execution_mode(
+        goal_modes,
+        execution_mode,
+    ):
         goal_config = GoalToolkitProvider.validate_config({})
         goal_context = ResolveContext(
             toolkit_id="",
@@ -945,11 +1024,16 @@ async def resolve_agent_tools(
                 None,
                 False,
                 None,
+                goal_modes,
             )
         )
 
     # Auto-bound Toolkit: filesystem Skills
-    if skill_toolkit_provider is not None:
+    skill_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+    if skill_toolkit_provider is not None and _allows_execution_mode(
+        skill_modes,
+        execution_mode,
+    ):
         skill_config = SkillToolkitProvider.validate_config({})
         skill_context = ResolveContext(
             toolkit_id="",
@@ -988,11 +1072,16 @@ async def resolve_agent_tools(
                 None,
                 False,
                 None,
+                skill_modes,
             )
         )
 
     # Auto-bound Toolkit: session todo
-    if todo_toolkit_provider is not None:
+    todo_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+    if todo_toolkit_provider is not None and _allows_execution_mode(
+        todo_modes,
+        execution_mode,
+    ):
         todo_config = TodoToolkitProvider.validate_config({})
         todo_context = ResolveContext(
             toolkit_id="",
@@ -1031,6 +1120,7 @@ async def resolve_agent_tools(
                 None,
                 False,
                 None,
+                todo_modes,
             )
         )
 
@@ -1041,7 +1131,8 @@ async def resolve_agent_tools(
             use_prefix=_pfx,
             toolkit_type=_ttype,
         )
-        for _prov, _resolved, _cfg, _slug, _prompt, _pfx, _ttype in pending
+        for _prov, _resolved, _cfg, _slug, _prompt, _pfx, _ttype, _modes in pending
+        if _allows_execution_mode(_modes, execution_mode)
     ]
 
     return result
