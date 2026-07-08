@@ -432,6 +432,12 @@ export interface TodoStateChangedEvent {
   todo: TodoStateSnapshot;
 }
 
+export interface SubagentTreeChangedEvent {
+  type: "subagent_tree_changed";
+  root_session_agent_id: string;
+  changed_session_agent_id: string;
+}
+
 // ---------------------------------------------------------------------------
 // Event envelope — events-unification after durable items  of wire shape.
 // Pydantic Event  of model_dump result: top-level type (computed_field  with
@@ -592,6 +598,7 @@ export type ChatEvent =
   | CompactionItemEvent
   | SessionCreatedEvent
   | TodoStateChangedEvent
+  | SubagentTreeChangedEvent
   | AccountLinkNudgeEvent
   | HistoryEventAppendedEvent
   | LiveEventUpsertedEvent

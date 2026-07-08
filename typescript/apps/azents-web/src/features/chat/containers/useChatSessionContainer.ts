@@ -1742,6 +1742,14 @@ export function useChatSessionContainer(
         return;
       }
 
+      if ("type" in event && event.type === "subagent_tree_changed") {
+        void utils.chat.getSubagentTree.invalidate({
+          agentId: agent.id,
+          sessionId,
+        });
+        return;
+      }
+
       if ("type" in event && event.type === "action_execution_updated") {
         const actionExecution = event.action_execution;
         setManagedLiveState((prev) => ({
@@ -1971,6 +1979,7 @@ export function useChatSessionContainer(
       connectionInfoQuery,
       sessionId,
       utils.chat.getSessionProjectBrowserManifest,
+      utils.chat.getSubagentTree,
       utils.chat.listAgentProjects,
       utils.chat.listInputActions,
     ],

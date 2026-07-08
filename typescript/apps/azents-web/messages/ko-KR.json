@@ -594,6 +594,25 @@
           "archiveConfirmDescription": "이 세션은 활성 세션 목록에서 제거됩니다. 대화 데이터는 보존됩니다.",
           "archiveCancel": "취소"
         },
+        "subagents": {
+          "title": "하위 에이전트",
+          "open": "하위 에이전트 트리 열기",
+          "loading": "하위 에이전트 트리를 불러오는 중…",
+          "summary": "하위 에이전트 {count}개",
+          "total": "노드 {count}개",
+          "empty": "이 세션에서 생성된 하위 에이전트가 여기에 표시됩니다.",
+          "rootBadge": "루트",
+          "unread": "읽지 않음",
+          "runIndex": "Run {index}",
+          "status": {
+            "idle": "대기",
+            "running": "실행 중",
+            "completed": "완료",
+            "errored": "오류",
+            "interrupted": "중단됨",
+            "notFound": "없음"
+          }
+        },
         "inheritModelBadge": "상위 모델 상속",
         "danger": {
           "title": "위험한 작업",
