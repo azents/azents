@@ -7,6 +7,7 @@ owner: "@Hardtack"
 touches_domains: [agent, conversation, toolkit]
 code_paths:
   - python/apps/azents/src/azents/engine/run/contracts.py
+  - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/engine/io/user_input.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/tools/**
@@ -36,8 +37,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-06
-spec_version: 59
+last_verified_at: 2026-07-08
+spec_version: 61
 ---
 
 # Agent Execution Loop
@@ -54,8 +55,8 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker promotes input buffers to durable event input, including ordered `action_message` events.
-2. Worker executes operation TurnActions such as `create_git_worktree` before model dispatch; a failed operation blocks later model input until retry or discard.
+1. Worker promotes input buffers to durable event input, including ordered `action_message` events, at wake-up entry and at each model-call turn boundary.
+2. Worker executes operation TurnActions such as `create_git_worktree` before the next model dispatch; a failed operation is marked failed and FIFO processing continues to later pending input.
 3. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
 5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
@@ -367,21 +368,24 @@ user message. `SessionRunner` reads the pending
 command from the session and passes it into `RunExecutor`, which prepares the same `RunRequest` and
 `RunContext` used by normal runs before invoking the registered command handler. Running sessions,
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
-Operation TurnActions are processed after input-buffer promotion and before model dispatch.
-`create_git_worktree` action execution is keyed by its durable `action_message` event, records durable
-progress in `action_executions`, publishes action execution projection updates while status or log
-entries change, creates the worktree through typed Runner Git operations, registers the created path
-as a session Project, refreshes catalog/Skill projection, and then invalidates the prepared context
+Operation TurnActions are processed after input-buffer promotion and before model dispatch at both
+wake-up entry and model-call turn boundaries inside an already-running run. `create_git_worktree`
+action execution is keyed by its durable `action_message` event, records durable progress in
+`action_executions`, publishes action execution projection updates while status or log entries
+change, creates the worktree through typed Runner Git operations, registers the created path as a
+session Project, refreshes catalog/Skill projection, and then invalidates the prepared context
 boundary. This same operation-action path covers new-session setup actions and existing-session
-Register Project worktree actions. If later pending input remains after a Project-mutating action succeeds, the
-runner sends a follow-up wake-up and stops the current processing boundary so the next pass rebuilds
-model/tool context from the updated Project registry. If an action fails, later pending input remains
-blocked until retry succeeds or discard marks the action `failed_final`. Retry and discard mutations
-reset or finalize only failed operation action executions, return the updated action execution
-projection, and enqueue a normal broker wake-up when more runner work is needed. Terminal completed
-worktree actions also append an `action_execution_result` durable event containing the final action
-execution projection, then live state excludes terminal action executions so completed logs survive
-history reload without persisting as live-only fallback.
+Register Project worktree actions. If later pending input remains after a Project-mutating action
+succeeds at a turn boundary, the runner marks the current agent run cancelled without appending a
+completed run marker, sends a follow-up wake-up, and stops the current processing boundary so the next
+pass rebuilds model/tool context from the updated Project registry. If an action fails at a turn
+boundary, the action execution is marked failed and FIFO processing continues to later pending input
+without waiting for retry/discard. Retry and discard mutations remain scoped to failed operation
+action executions, return the updated action execution projection, and enqueue a normal broker
+wake-up when more runner work is needed. Terminal completed worktree actions also append an
+`action_execution_result` durable event containing the final action execution projection, then live
+state excludes terminal action executions so completed logs survive history reload without persisting
+as live-only fallback.
 
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
@@ -438,6 +442,8 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-08** — v61. Process TurnActions at every model-call turn boundary; failed actions are marked failed and FIFO processing continues, while context invalidation exits through a follow-up wake-up without a completed run marker.
+- **2026-07-08** — v60. Process TurnActions at every model-call turn boundary and close the current run when an operation action blocks or invalidates context.
 - **2026-07-06** — v59. Removed the session-initialization run gate and documented terminal `action_execution_result` history events.
 - **2026-07-05** — v56. Reflected operation TurnAction processing before model dispatch and Project context invalidation after worktree setup.
 
@@ -452,8 +458,9 @@ terminal run status is `completed`; failed, stopped, interrupted, cancelled, or 
 runs must not enqueue Goal continuation.
 
 Wake-up is a signal, not work by itself. If a wake-up reaches a running session, it is a no-op signal.
-If a wake-up reaches the runner and there is no pending command, input buffer, or other actionable
-work, the runner must no-op instead of forcing a model call.
+The warm runner polls input buffers at model-call turn boundaries, so accepted TurnActions are not
+held until the run-complete boundary. If a wake-up reaches the runner and there is no pending command,
+input buffer, or other actionable work, the runner must no-op instead of forcing a model call.
 
 The required run-completion order is:
 

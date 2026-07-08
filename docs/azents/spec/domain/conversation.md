@@ -87,8 +87,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-07
-spec_version: 87
+last_verified_at: 2026-07-08
+spec_version: 88
 ---
 
 # Conversation & Events
@@ -166,8 +166,9 @@ worktree as a session Project. Legacy `workspace_items`, `workspace_mode`, and `
 fields are not part of the current contract.
 `POST /chat/v1/agents/{agent_id}/sessions/messages` creates the same kind of non-primary team session
 and enqueues setup action inputs plus the first user message in one write boundary. Setup action inputs
-remain ahead of the user message in FIFO order, so the first model run is gated until blocking action
-execution either completes or the user retries/discards a failed action. The first-message create
+remain ahead of the user message in FIFO order. Successful Project-mutating action execution gates the
+first model run until context can be rebuilt from the updated Project registry; failed actions are
+marked failed and FIFO processing continues to the first user message. The first-message create
 response is `ChatWriteResponse`, including the created `session_id` and live snapshot. azents-web Agent detail routes surface the active
 session list in the Agent rail and navigate selected sessions through
 `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action navigates to
@@ -250,8 +251,9 @@ project prompt selection fall back to a parent, team-primary, or runtime session
 
 The legacy setup lifecycle tables are no longer part of the current conversation model. Setup work that affects a session is represented by
 durable operation TurnActions, and ordinary sessions have no separate setup baseline row. The session
-runner processes pending action messages before later model input and blocks later input only when the
-operation action itself has not completed or has failed without retry/discard.
+runner processes pending action messages before later model input. A Project-mutating action that
+succeeds invalidates prepared context and forces the next processing boundary to rebuild context;
+failed actions are marked failed and do not block later FIFO input.
 
 `action_executions` stores durable execution state for operation TurnActions keyed by the
 corresponding durable `action_message` event id. `action_execution_events` stores ordered progress
@@ -471,8 +473,8 @@ The durable event kind is determined by buffer kind at flush time:
 
 Wake-up delivery is a signal only. The persisted buffer plus the `running` state transition is the
 recovery source of truth if the signal is lost. Operation `action_message` buffers are promoted and
-executed before later model input at the same boundary. A failed operation action blocks later pending
-input until retry or discard changes its state; no separate session-initialization gate exists.
+executed before later model input at the same boundary. A failed operation action is marked failed and
+FIFO processing continues to later pending input; no separate session-initialization gate exists.
 
 Web chat message/edit/command writes use REST commit endpoints instead of WebSocket write payloads.
 `GET /chat/v1/agents/{agent_id}/team-primary-session` resolves or creates the agent's team
@@ -573,6 +575,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-08** — v88. Clarified TurnAction FIFO behavior: failed operation actions are marked failed and later input continues, while successful Project mutation rebuilds context at the next boundary.
 - **2026-07-06** — v86. Removed SessionInitialization from current conversation state and added durable `action_execution_result` terminal history events.
 - **2026-07-05** — v85. Promoted operation TurnAction execution for new-session Git worktree setup, action execution projections, and clean setup request fields.
 - **2026-07-04** — v83. Removed existing-session Git worktree attachment from the current conversation API and initialization contract.

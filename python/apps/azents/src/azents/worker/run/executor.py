@@ -72,7 +72,7 @@ from azents.engine.run.resolve import (
     resolve_agent_tools,
     resolve_invoke_input,
 )
-from azents.engine.run.types import CheckStop, PollMessages
+from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
 from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import (
@@ -167,7 +167,6 @@ class RunInputPollResult:
     user_messages: list[RunUserMessage]
     has_actionable_work: bool
     context_invalidated: bool = False
-    action_blocked: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -175,7 +174,6 @@ class OperationActionProcessResult:
     """Result of processing promoted operation actions."""
 
     context_invalidated: bool
-    blocked: bool
 
 
 def _runtime_hook_provider_refs(
@@ -304,14 +302,6 @@ class RunExecutor:
                 poll_fn=None,
                 process_actions=True,
             )
-            if initial_input.action_blocked:
-                await self.session_lifecycle.mark_session_idle(message.session_id)
-                await self.session_lifecycle.clear_session_activity(message.session_id)
-                return RunExecutionResult(
-                    toolkits=[],
-                    terminal_event_observed=False,
-                    no_actionable_work=False,
-                )
             if initial_input.context_invalidated:
                 if await self.input_buffer_service.has_pending_session_input_buffers(
                     message.session_id
@@ -666,6 +656,11 @@ class RunExecutor:
         run_completed = False
         run_end_reason: RunEndReason = "unknown"
         terminal_run_status: AgentRunStatus | None = None
+        turn_boundary_context_invalidated = False
+
+        def mark_turn_boundary_context_invalidated() -> None:
+            nonlocal turn_boundary_context_invalidated
+            turn_boundary_context_invalidated = True
 
         async def consume_emit(item: Emit) -> None:
             """Apply run lifecycle side effects for one engine emit."""
@@ -713,10 +708,10 @@ class RunExecutor:
                 try:
                     if command_handler is None:
                         boundary_poll = self.make_boundary_poll(
-                            agent_id=message.agent_id,
-                            session_id=message.session_id,
+                            message=message,
                             model=run_request.model,
                             poll_fn=poll_fn,
+                            mark_context_invalidated=mark_turn_boundary_context_invalidated,
                         )
                         engine_iter = self.engine.run(
                             run_request,
@@ -733,6 +728,10 @@ class RunExecutor:
 
                     async for item in engine_iter:
                         await consume_emit(item)
+                    if turn_boundary_context_invalidated:
+                        run_completed = True
+                        run_end_reason = "cancelled"
+                        terminal_run_status = AgentRunStatus.CANCELLED
                     if command_handler is not None:
                         await dispatch_event(message.session_id, RunComplete())
                         run_completed = True
@@ -1072,23 +1071,31 @@ class RunExecutor:
     def make_boundary_poll(
         self,
         *,
-        agent_id: str,
-        session_id: str,
+        message: SessionWakeUp,
         model: str | None,
         poll_fn: PollMessages | None,
+        mark_context_invalidated: Callable[[], None],
     ) -> PollMessages:
-        """Combine model-call boundary polling with input-buffer promotion."""
+        """Combine model-call boundary polling with turn action processing."""
 
-        async def poll() -> list[RunUserMessage]:
-            return (
-                await self.poll_run_inputs(
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    model=model,
-                    poll_fn=poll_fn,
-                    process_actions=False,
-                )
-            ).user_messages
+        async def poll() -> PollMessagesResult:
+            result = await self.poll_run_inputs(
+                agent_id=message.agent_id,
+                session_id=message.session_id,
+                model=model,
+                poll_fn=poll_fn,
+                process_actions=True,
+            )
+            if result.context_invalidated:
+                mark_context_invalidated()
+                if await self.input_buffer_service.has_pending_session_input_buffers(
+                    message.session_id
+                ):
+                    await self.session_lifecycle.send_session_wake_up(message)
+            return PollMessagesResult(
+                user_messages=result.user_messages,
+                context_invalidated=result.context_invalidated,
+            )
 
         return poll
 
@@ -1102,33 +1109,46 @@ class RunExecutor:
         process_actions: bool,
     ) -> RunInputPollResult:
         """Consume pending run inputs and report whether a wake-up has work."""
-        promoted = await self._promote_input_buffers(
-            session_id=session_id,
-            model=model,
-            include_action_messages=process_actions,
-        )
-        action_result = (
-            await self._process_operation_actions(
-                agent_id=agent_id,
+        user_messages: list[RunUserMessage] = []
+        context_invalidated = False
+        while True:
+            promoted = await self._promote_input_buffers(
                 session_id=session_id,
-                events=promoted.events,
+                model=model,
+                include_action_messages=process_actions,
             )
-            if process_actions
-            else OperationActionProcessResult(
-                context_invalidated=False,
-                blocked=False,
+            if not promoted.deleted_buffer_ids:
+                break
+            user_messages.extend(promoted.user_messages)
+            action_result = (
+                await self._process_operation_actions(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    events=promoted.events,
+                )
+                if process_actions
+                else OperationActionProcessResult(context_invalidated=False)
             )
+            context_invalidated = (
+                context_invalidated or action_result.context_invalidated
+            )
+            if context_invalidated or user_messages:
+                break
+
+        queued_result = (
+            await poll_fn()
+            if poll_fn is not None and not context_invalidated
+            else PollMessagesResult(user_messages=[])
         )
-        queued_events = await poll_fn() if poll_fn is not None else []
-        user_messages = [*promoted.user_messages, *queued_events]
+        user_messages.extend(queued_result.user_messages)
+        context_invalidated = context_invalidated or queued_result.context_invalidated
         has_actionable_work = bool(
             user_messages
         ) or await self._has_actionable_model_input(session_id)
         return RunInputPollResult(
             user_messages=user_messages,
             has_actionable_work=has_actionable_work,
-            context_invalidated=action_result.context_invalidated,
-            action_blocked=action_result.blocked,
+            context_invalidated=context_invalidated,
         )
 
     async def _process_operation_actions(
@@ -1150,12 +1170,11 @@ class RunExecutor:
                 event=event,
             )
             processed_action_event_ids.add(event.id)
-            if not result.completed:
+            context_invalidated = context_invalidated or result.context_invalidated
+            if context_invalidated:
                 return OperationActionProcessResult(
                     context_invalidated=context_invalidated,
-                    blocked=True,
                 )
-            context_invalidated = context_invalidated or result.context_invalidated
 
         async with self.session_manager() as session:
             list_projections = (
@@ -1190,15 +1209,11 @@ class RunExecutor:
                 session_id=session_id,
                 event=event,
             )
-            if not result.completed:
-                return OperationActionProcessResult(
-                    context_invalidated=context_invalidated,
-                    blocked=True,
-                )
             context_invalidated = context_invalidated or result.context_invalidated
+            if context_invalidated:
+                break
         return OperationActionProcessResult(
             context_invalidated=context_invalidated,
-            blocked=False,
         )
 
     async def _process_operation_action_event(
