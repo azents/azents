@@ -19,6 +19,7 @@ from azents.engine.events.action_messages import (
     SkillAction,
 )
 from azents.engine.events.types import (
+    AgentMessagePayload,
     Event,
     FileOutputPart,
     SkillLoadedPayload,
@@ -48,6 +49,7 @@ from azents.services.session_title import initial_title_from_event
 logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 _CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
+_AGENT_MESSAGE_ADAPTER = TypeAdapter(AgentMessagePayload)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -359,6 +361,19 @@ class InputBufferService:
                         buffer=buffer,
                     )
                 )
+            elif buffer.kind == InputBufferKind.AGENT_MESSAGE:
+                user_message = await self._buffer_to_user_message(buffer)
+                promoted.append(
+                    _PromotedInputBuffer(
+                        buffer=buffer,
+                        user_message=user_message,
+                        event_kind=EventKind.AGENT_MESSAGE,
+                        payload=_JSON_OBJECT_ADAPTER.validate_python(
+                            _agent_message_payload(buffer).model_dump(mode="json")
+                        ),
+                        external_id=user_message.external_id,
+                    )
+                )
             else:
                 user_message = await self._buffer_to_user_message(buffer)
                 promoted.append(
@@ -630,6 +645,20 @@ def _next_flush_prefix(claimed: list[InputBuffer]) -> list[InputBuffer]:
     return prefix
 
 
+def _agent_message_payload(buffer: InputBuffer) -> AgentMessagePayload:
+    """Build agent_message payload from mailbox input buffer metadata."""
+    return _AGENT_MESSAGE_ADAPTER.validate_python(
+        {
+            "message_kind": buffer.metadata["message_kind"],
+            "source_session_agent_id": buffer.metadata["source_session_agent_id"],
+            "source_path": buffer.metadata["source_path"],
+            "target_session_agent_id": buffer.metadata["target_session_agent_id"],
+            "target_path": buffer.metadata["target_path"],
+            "content": buffer.content,
+        }
+    )
+
+
 def _system_error_promoted_buffer(
     buffer: InputBuffer,
     content: str,
@@ -702,5 +731,7 @@ def _event_kind_for_input_buffer(kind: InputBufferKind) -> EventKind:
             return EventKind.GOAL_CONTINUATION
         case InputBufferKind.ACTION_MESSAGE:
             return EventKind.ACTION_MESSAGE
+        case InputBufferKind.AGENT_MESSAGE:
+            return EventKind.AGENT_MESSAGE
         case _:
             assert_never(kind)

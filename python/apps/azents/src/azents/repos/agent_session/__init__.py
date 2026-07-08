@@ -311,6 +311,26 @@ class AgentSessionRepository:
         await session.refresh(rdb)
         return self._build_session_agent(rdb)
 
+    async def update_session_agent_last_task_message(
+        self,
+        session: AsyncSession,
+        *,
+        session_agent_id: str,
+        last_task_message: str | None,
+    ) -> SessionAgent | None:
+        """Update the latest task/message preview for a SessionAgent."""
+        result = await session.execute(
+            sa.update(RDBSessionAgent)
+            .where(RDBSessionAgent.id == session_agent_id)
+            .values(last_task_message=last_task_message)
+            .returning(RDBSessionAgent)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build_session_agent(rdb)
+
     async def update_session_agent_observation_cursor(
         self,
         session: AsyncSession,

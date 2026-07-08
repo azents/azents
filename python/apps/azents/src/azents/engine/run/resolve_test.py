@@ -24,6 +24,7 @@ from azents.engine.tools.claude_rules import (
     ClaudeRulesToolkitProvider,
 )
 from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
+from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.repos.agent.data import Agent
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.runtime.types import RuntimeDomainConfig
@@ -157,6 +158,15 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
     )
 
 
+def _make_subagent_provider() -> SubagentToolkitProvider:
+    """Create SubagentToolkitProvider for resolve_agent_tools tests."""
+    return SubagentToolkitProvider(
+        session_manager=AsyncMock(),
+        broker=AsyncMock(),
+        input_buffer_service=AsyncMock(),
+    )
+
+
 class TestResolveInvokeInput:
     """resolve_invoke_input tests."""
 
@@ -284,6 +294,43 @@ class TestResolveAgentTools:
         )
 
         assert [binding.slug for binding in bindings] == ["memory_read", "memory_write"]
+
+    async def test_auto_binds_subagent_toolkit_in_root_mode(self) -> None:
+        """Root sessions receive the coherent subagent collaboration bundle."""
+        session = AsyncMock(spec=AsyncSession)
+        agent_toolkit_repository = AsyncMock()
+        agent_toolkit_repository.list_by_agent.return_value = []
+
+        bindings = await resolve_agent_tools(
+            "agent-1",
+            _make_toolkit_context(),
+            execution_mode=ToolkitExecutionMode.ROOT,
+            toolkit_registry={},
+            agent_toolkit_repository=agent_toolkit_repository,
+            toolkit_repository=AsyncMock(),
+            session=session,
+            web_url="https://example.test",
+            oauth_secret_key="secret",
+            mcp_proxy_url=None,
+            runtime_domain_config=RuntimeDomainConfig(
+                allowed_domains=(),
+                denied_domains=(),
+            ),
+            subagent_toolkit_provider=_make_subagent_provider(),
+            memory_enabled=False,
+            runtime_tools_enabled=False,
+        )
+
+        assert [binding.slug for binding in bindings] == ["subagent"]
+        state = await bindings[0].toolkit.update_context(_make_turn_context())
+        assert {tool.spec.name for tool in state.tools} == {
+            "spawn_agent",
+            "send_message",
+            "followup_task",
+            "wait_agent",
+            "interrupt_agent",
+            "list_agents",
+        }
 
     async def test_subagent_mode_filters_root_only_auto_bound_toolkits(self) -> None:
         """Subagent mode keeps read/runtime capabilities and excludes root-only ones."""

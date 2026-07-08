@@ -41,6 +41,7 @@ from azents.engine.events.system_reminders import (
     format_system_reminder,
 )
 from azents.engine.events.types import (
+    AgentMessagePayload,
     AssistantMessagePayload,
     Attachment,
     ClientToolCallPayload,
@@ -186,6 +187,32 @@ class TestLiteLLMResponsesLowerer:
             },
             {"role": "user", "content": "Review this PR"},
         ]
+
+    def test_lowers_agent_message_with_source_label(self) -> None:
+        """agent_message events become sourced user-role tasks."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        transcript = [
+            _event(
+                EventKind.AGENT_MESSAGE,
+                AgentMessagePayload(
+                    message_kind="followup_task",
+                    source_session_agent_id="source-agent",
+                    source_path="/root",
+                    target_session_agent_id="target-agent",
+                    target_path="/root/child",
+                    content="continue the investigation",
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input[-1] == {
+            "role": "user",
+            "content": (
+                "Message from agent /root (followup task):\ncontinue the investigation"
+            ),
+        }
 
     def test_openai_prompt_cache_key_uses_session_scope(self) -> None:
         """OpenAI prompt cache key is stable and scoped to the session."""

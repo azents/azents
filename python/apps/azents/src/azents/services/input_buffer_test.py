@@ -17,6 +17,7 @@ from azents.core.enums import (
 )
 from azents.engine.events.action_messages import SkillAction
 from azents.engine.events.types import (
+    AgentMessagePayload,
     FileOutputPart,
     SkillLoadedPayload,
     UserMessagePayload,
@@ -174,6 +175,39 @@ async def _create_action_buffer(
                 idempotency_key=None,
                 metadata={"source": "chat"},
                 action=action.model_dump(mode="json"),
+                attachments=[],
+                file_parts=[],
+            ),
+        )
+        return created.id
+
+
+async def _create_agent_message_buffer(
+    rdb_session_manager: SessionManager[AsyncSession],
+    *,
+    session_id: str,
+    user_id: str,
+    content: str,
+) -> str:
+    """Create agent_message InputBuffer for tests."""
+    async with rdb_session_manager() as session:
+        created = await InputBufferRepository().create(
+            session,
+            InputBufferCreate(
+                session_id=session_id,
+                kind=InputBufferKind.AGENT_MESSAGE,
+                actor_user_id=user_id,
+                content=content,
+                idempotency_key=None,
+                metadata={
+                    "source": "agent_mailbox",
+                    "message_kind": "followup_task",
+                    "source_session_agent_id": "source-agent",
+                    "source_path": "/root",
+                    "target_session_agent_id": "target-agent",
+                    "target_path": "/root/child",
+                },
+                action=None,
                 attachments=[],
                 file_parts=[],
             ),
@@ -414,6 +448,40 @@ class TestInputBufferService:
                 .where(RDBInputBuffer.id == buffer_id)
             )
         assert remaining == 0
+
+    async def test_flush_promotes_agent_message_payload(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Agent mailbox input is persisted as an agent_message event."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-agent-message",
+        )
+        buffer_id = await _create_agent_message_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="continue with the next step",
+        )
+        service = _input_buffer_service(rdb_session_manager)
+
+        result = await service.flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+        )
+
+        assert result.claimed_count == 1
+        assert result.inserted_count == 1
+        assert [message.external_id for message in result.user_messages] == [buffer_id]
+        event = result.events[0]
+        assert event.kind == EventKind.AGENT_MESSAGE
+        assert event.external_id == buffer_id
+        assert isinstance(event.payload, AgentMessagePayload)
+        assert event.payload.message_kind == "followup_task"
+        assert event.payload.source_path == "/root"
+        assert event.payload.target_path == "/root/child"
+        assert event.payload.content == "continue with the next step"
 
     async def test_flush_skill_action_loads_skill_before_user_message(
         self,

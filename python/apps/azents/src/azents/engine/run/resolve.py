@@ -669,6 +669,7 @@ async def resolve_agent_tools(
     todo_toolkit_provider: TodoToolkitProvider | None = None,
     goal_toolkit_provider: GoalToolkitProvider | None = None,
     skill_toolkit_provider: SkillToolkitProvider | None = None,
+    subagent_toolkit_provider: ToolkitProvider[Any] | None = None,
     memory_enabled: bool = True,
     runtime_tools_enabled: bool = True,
 ) -> list[ToolkitBinding]:
@@ -979,6 +980,51 @@ async def resolve_agent_tools(
                             claude_rules_modes,
                         )
                     )
+
+    # Auto-bound Toolkit: subagent collaboration
+    subagent_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+    if subagent_toolkit_provider is not None and _allows_execution_mode(
+        subagent_modes,
+        execution_mode,
+    ):
+        subagent_config = type(subagent_toolkit_provider).validate_config({})
+        subagent_context = ResolveContext(
+            toolkit_id="",
+            toolkit_name="subagent",
+            credentials_json=None,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            user_id=context.user_id,
+            session=session,
+            web_url=web_url,
+            oauth_secret_key=oauth_secret_key,
+            workspace_id=context.workspace_id,
+            workspace_handle=workspace_handle,
+        )
+        subagent_resolved = await _resolve_toolkit_with_logging(
+            agent_id=agent_id,
+            context=context,
+            source="auto",
+            slug="subagent",
+            provider=subagent_toolkit_provider,
+            toolkit_name="subagent",
+            resolve=subagent_toolkit_provider.resolve(
+                subagent_config,
+                subagent_context,
+            ),
+        )
+        pending.append(
+            (
+                subagent_toolkit_provider,
+                subagent_resolved,
+                subagent_config,
+                "subagent",
+                None,
+                False,
+                None,
+                subagent_modes,
+            )
+        )
 
     # Auto-bound Toolkit: session goal
     goal_modes = _ROOT_EXECUTION_MODES

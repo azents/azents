@@ -15,6 +15,7 @@ from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import ActionMessagePayload, ChatAction
 from azents.engine.events.types import (
     ActiveToolCall,
+    AgentMessagePayload,
     AssistantMessagePayload,
     ClientToolCallPayload,
     ClientToolResultPayload,
@@ -32,6 +33,7 @@ from azents.utils.appctx import AppContext
 _LIVE_EVENT_TTL_SECONDS = 300
 _live_event_adapter = TypeAdapter(Event)
 _chat_action_adapter = TypeAdapter(ChatAction)
+_agent_message_adapter = TypeAdapter(AgentMessagePayload)
 
 
 def _live_event_key(session_id: str) -> str:
@@ -193,6 +195,21 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
             action=_chat_action_adapter.validate_python(input_buffer.action),
             message=input_buffer.content,
         )
+    elif input_buffer.kind == InputBufferKind.AGENT_MESSAGE:
+        payload = _agent_message_adapter.validate_python(
+            {
+                "message_kind": input_buffer.metadata["message_kind"],
+                "source_session_agent_id": input_buffer.metadata[
+                    "source_session_agent_id"
+                ],
+                "source_path": input_buffer.metadata["source_path"],
+                "target_session_agent_id": input_buffer.metadata[
+                    "target_session_agent_id"
+                ],
+                "target_path": input_buffer.metadata["target_path"],
+                "content": input_buffer.content,
+            }
+        )
     else:
         content: str | list[UserContentPart]
         if input_buffer.file_parts:
@@ -237,6 +254,8 @@ def _event_kind_for_input_buffer(kind: InputBufferKind) -> EventKind:
             return EventKind.GOAL_CONTINUATION
         case InputBufferKind.ACTION_MESSAGE:
             return EventKind.ACTION_MESSAGE
+        case InputBufferKind.AGENT_MESSAGE:
+            return EventKind.AGENT_MESSAGE
 
 
 class LiveEventStore(Protocol):
