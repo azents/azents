@@ -207,6 +207,21 @@ class UserMessagePayload(BaseModel):
     metadata: dict[str, str] = Field(default_factory=dict)
 
 
+class AgentMessagePayload(BaseModel):
+    """Agent-to-agent mailbox message payload."""
+
+    model_config = ConfigDict(frozen=True)
+
+    message_kind: Literal["spawn_agent", "send_message", "followup_task"] = Field(
+        description="Mailbox message kind",
+    )
+    source_session_agent_id: str = Field(description="Source SessionAgent ID")
+    source_path: str = Field(description="Source SessionAgent path")
+    target_session_agent_id: str = Field(description="Target SessionAgent ID")
+    target_path: str = Field(description="Target SessionAgent path")
+    content: str = Field(description="Message content")
+
+
 class AssistantMessagePayload(BaseModel):
     """Assistant message payload."""
 
@@ -438,6 +453,7 @@ class UnknownAdapterOutputPayload(BaseModel):
 
 EventPayload = (
     UserMessagePayload
+    | AgentMessagePayload
     | AssistantMessagePayload
     | ReasoningPayload
     | ClientToolCallPayload
@@ -464,6 +480,7 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.GOAL_CONTINUATION: UserMessagePayload,
     EventKind.GOAL_UPDATED: UserMessagePayload,
     EventKind.ACTION_MESSAGE: ActionMessagePayload,
+    EventKind.AGENT_MESSAGE: AgentMessagePayload,
     EventKind.ACTION_EXECUTION_RESULT: ActionExecutionResultPayload,
     EventKind.SKILL_LOADED: SkillLoadedPayload,
     EventKind.GOAL_BRIEFING: GoalBriefingPayload,

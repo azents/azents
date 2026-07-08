@@ -40,6 +40,7 @@ from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
+from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -168,6 +169,15 @@ class _AgentSessionRepository:
 
     def __init__(self) -> None:
         self.cleared_commands: list[tuple[str, str]] = []
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> object | None:
+        """Return no persisted AgentSession settings."""
+        del session, agent_session_id
+        return None
 
     async def clear_pending_command(
         self,
@@ -464,6 +474,7 @@ def _executor(
         todo_toolkit_provider=cast(TodoToolkitProvider, object()),
         goal_toolkit_provider=cast(GoalToolkitProvider, object()),
         skill_toolkit_provider=cast(SkillToolkitProvider, object()),
+        subagent_toolkit_provider=cast(SubagentToolkitProvider, object()),
         broadcast=cast(WebSocketBroadcast, object()),
     )
 

@@ -23,6 +23,7 @@ from azents.core.enums import (
     ActionExecutionStatus,
     AgentRunPhase,
     AgentRunStatus,
+    AgentSessionKind,
     EventKind,
 )
 from azents.core.tools import (
@@ -82,6 +83,7 @@ from azents.engine.tools.deps import (
 )
 from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
+from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -124,6 +126,7 @@ from azents.worker.deps import (
     get_command_registry,
     get_exchange_file_service,
     get_skill_toolkit_provider,
+    get_subagent_toolkit_provider,
     get_toolkit_repository,
     get_worker_broker,
     get_worker_config,
@@ -261,6 +264,9 @@ class RunExecutor:
     ]
     skill_toolkit_provider: Annotated[
         SkillToolkitProvider, Depends(get_skill_toolkit_provider)
+    ]
+    subagent_toolkit_provider: Annotated[
+        SubagentToolkitProvider, Depends(get_subagent_toolkit_provider)
     ]
     broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)]
     failed_run_finalizer: Annotated[
@@ -440,6 +446,15 @@ class RunExecutor:
             agent = await self.agent_repository.get_by_id(
                 session, invoke_input.agent_id
             )
+            agent_session = await self.agent_session_repository.get_by_id(
+                session, message.session_id
+            )
+            execution_mode = (
+                ToolkitExecutionMode.SUBAGENT
+                if agent_session is not None
+                and agent_session.session_kind == AgentSessionKind.SUBAGENT
+                else ToolkitExecutionMode.ROOT
+            )
             agent_memory_enabled = agent.memory_enabled if agent else True
             runtime_tools_enabled = agent.shell_enabled if agent else False
             runtime_domain_config = RuntimeDomainConfig(
@@ -454,6 +469,7 @@ class RunExecutor:
                     "run_id": run_id,
                     "workspace_id": run_request.workspace_id,
                     "model": run_request.model,
+                    "execution_mode": execution_mode.value,
                     "memory_enabled": agent_memory_enabled,
                     "runtime_tools_enabled": runtime_tools_enabled,
                 },
@@ -461,7 +477,7 @@ class RunExecutor:
             toolkits = await resolve_agent_tools(
                 invoke_input.agent_id,
                 context,
-                execution_mode=ToolkitExecutionMode.ROOT,
+                execution_mode=execution_mode,
                 toolkit_registry=self.toolkit_registry,
                 agent_toolkit_repository=self.agent_toolkit_repository,
                 toolkit_repository=self.toolkit_repository,
@@ -476,6 +492,7 @@ class RunExecutor:
                 todo_toolkit_provider=self.todo_toolkit_provider,
                 goal_toolkit_provider=self.goal_toolkit_provider,
                 skill_toolkit_provider=self.skill_toolkit_provider,
+                subagent_toolkit_provider=self.subagent_toolkit_provider,
                 memory_enabled=agent_memory_enabled,
                 runtime_tools_enabled=runtime_tools_enabled,
             )

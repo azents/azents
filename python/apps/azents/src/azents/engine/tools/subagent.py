@@ -1,0 +1,649 @@
+"""Subagent collaboration Toolkit."""
+
+import dataclasses
+import json
+from typing import Literal
+
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
+from azents.core.enums import AgentRunStatus, AgentSessionRunState, InputBufferKind
+from azents.core.tools import (
+    ResolveContext,
+    Toolkit,
+    ToolkitProvider,
+    ToolkitState,
+    ToolkitStatus,
+    TurnContext,
+)
+from azents.engine.events.fork_context import (
+    ForkTurnsSelection,
+    InvalidForkTurns,
+    degrade_file_parts_for_fork,
+    parse_fork_turns,
+    select_fork_events,
+)
+from azents.engine.events.types import Event
+from azents.engine.run.types import FunctionTool, FunctionToolError
+from azents.engine.tooling.make_tool import make_tool
+from azents.rdb.models.event import JSONValue
+from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+
+
+class SubagentToolkitConfig(BaseModel):
+    """Subagent collaboration Toolkit configuration."""
+
+
+class SpawnAgentInput(BaseModel):
+    """spawn_agent tool input."""
+
+    name: str = Field(description="Child agent name within the current agent")
+    task: str = Field(description="Initial task for the child agent")
+    agent_type: Literal["default"] = Field(
+        default="default",
+        description="Agent type. Only the default type is supported.",
+    )
+    fork_turns: str = Field(
+        default="none",
+        description=(
+            "Context fork selection: 'none', 'all', or a positive integer string."
+        ),
+    )
+
+
+class SendMessageInput(BaseModel):
+    """send_message tool input."""
+
+    agent_name: str = Field(description="Target agent path or child name")
+    message: str = Field(description="Message to queue for the target agent")
+
+
+class FollowupTaskInput(BaseModel):
+    """followup_task tool input."""
+
+    agent_name: str = Field(description="Target agent path or child name")
+    task: str = Field(description="Follow-up task to assign and wake")
+
+
+class WaitAgentInput(BaseModel):
+    """wait_agent tool input."""
+
+    agent_name: str | None = Field(
+        default=None,
+        description=(
+            "Optional target agent path or child name. "
+            "Omit to wait for all descendants."
+        ),
+    )
+    timeout_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        le=600,
+        description=(
+            "Optional maximum wait time. Blocking wait is completed in a later phase."
+        ),
+    )
+
+
+class InterruptAgentInput(BaseModel):
+    """interrupt_agent tool input."""
+
+    agent_name: str = Field(description="Target agent path or child name")
+
+
+_TERMINAL_STATUSES = {
+    AgentRunStatus.COMPLETED,
+    AgentRunStatus.FAILED,
+    AgentRunStatus.STOPPED,
+    AgentRunStatus.INTERRUPTED,
+    AgentRunStatus.CANCELLED,
+}
+
+
+@dataclasses.dataclass(frozen=True)
+class _TargetResolution:
+    current: SessionAgent
+    target: SessionAgent | None
+
+
+class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
+    """Model-visible subagent collaboration tools."""
+
+    def __init__(
+        self,
+        *,
+        session_manager: SessionManager[AsyncSession],
+        agent_session_repository: AgentSessionRepository,
+        agent_run_repository: AgentRunRepository,
+        event_transcript_repository: EventTranscriptRepository,
+        input_buffer_service: InputBufferService,
+        broker: SessionBroker,
+    ) -> None:
+        self.session_manager = session_manager
+        self.agent_session_repository = agent_session_repository
+        self.agent_run_repository = agent_run_repository
+        self.event_transcript_repository = event_transcript_repository
+        self.input_buffer_service = input_buffer_service
+        self.broker = broker
+        self.session_id: str | None = None
+        self.user_id: str | None = None
+
+    def set_session_id(self, session_id: str) -> None:
+        """Inject current AgentSession ID."""
+        self.session_id = session_id
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return subagent collaboration tools."""
+        self.session_id = context.session_id or self.session_id
+        self.user_id = context.user_id
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=[
+                self._spawn_agent_tool(),
+                self._send_message_tool(),
+                self._followup_task_tool(),
+                self._wait_agent_tool(),
+                self._interrupt_agent_tool(),
+                self._list_agents_tool(),
+            ],
+        )
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        """Return subagent collaboration guidance."""
+        del context
+        return (
+            "Use subagent tools to delegate independent work to child agents. "
+            "Child agents have separate transcripts and can be nested. "
+            "Use send_message for queue-only notes, followup_task for work "
+            "that should wake the child, wait_agent to observe completed "
+            "child results, and list_agents to inspect the tree."
+        )
+
+    def _spawn_agent_tool(self) -> FunctionTool:
+        async def spawn_agent(input: SpawnAgentInput) -> str:
+            """Create a child subagent and assign its initial task."""
+            if input.agent_type != "default":
+                raise FunctionToolError("Only the default agent_type is supported")
+            try:
+                fork_selection = parse_fork_turns(input.fork_turns)
+            except InvalidForkTurns as exc:
+                raise FunctionToolError(str(exc)) from None
+            if not input.task.strip():
+                raise FunctionToolError("task is required")
+
+            async with self.session_manager() as session:
+                current = await self._current_session_agent(session)
+                try:
+                    child = (
+                        await self.agent_session_repository.create_child_session_agent(
+                            session,
+                            parent_session_agent_id=current.id,
+                            name=input.name,
+                            agent_type=input.agent_type,
+                            title=input.name,
+                            last_task_message=input.task,
+                        )
+                    )
+                except ValueError as exc:
+                    raise FunctionToolError(str(exc)) from None
+                child_session = await self._session_or_error(
+                    session, child.agent_session_id
+                )
+                forked = await self._fork_events(
+                    session,
+                    parent_session_id=current.agent_session_id,
+                    head_event_id=(
+                        await self._session_or_error(session, current.agent_session_id)
+                    ).model_input_head_event_id,
+                    selection=fork_selection,
+                )
+                for event in forked:
+                    await self.event_transcript_repository.append(
+                        session,
+                        EventCreate(
+                            session_id=child.agent_session_id,
+                            kind=event.kind,
+                            payload=_payload_json(event),
+                            model_order=event.model_order,
+                        ),
+                    )
+                await self._enqueue_agent_message(
+                    session,
+                    source=current,
+                    target=child,
+                    message_kind="spawn_agent",
+                    content=input.task,
+                    wake=True,
+                )
+
+            await self._wake_session(child_session)
+            return _json(
+                {
+                    "agent_name": child.name,
+                    "agent_path": child.path,
+                    "status": "spawned",
+                }
+            )
+
+        return make_tool(spawn_agent, name="spawn_agent")
+
+    def _send_message_tool(self) -> FunctionTool:
+        async def send_message(input: SendMessageInput) -> str:
+            """Queue a message for a target child agent without waking it."""
+            if not input.message.strip():
+                raise FunctionToolError("message is required")
+            async with self.session_manager() as session:
+                resolution = await self._resolve_target(session, input.agent_name)
+                if resolution.target is None:
+                    return _json(
+                        {"status": "not_found", "agent_name": input.agent_name}
+                    )
+                await self._enqueue_agent_message(
+                    session,
+                    source=resolution.current,
+                    target=resolution.target,
+                    message_kind="send_message",
+                    content=input.message,
+                    wake=False,
+                )
+                session_agent_repo = self.agent_session_repository
+                await session_agent_repo.update_session_agent_last_task_message(
+                    session,
+                    session_agent_id=resolution.target.id,
+                    last_task_message=input.message,
+                )
+            return _json(
+                {
+                    "status": "queued",
+                    "agent_name": resolution.target.name,
+                    "agent_path": resolution.target.path,
+                }
+            )
+
+        return make_tool(send_message, name="send_message")
+
+    def _followup_task_tool(self) -> FunctionTool:
+        async def followup_task(input: FollowupTaskInput) -> str:
+            """Assign a follow-up task to a target child agent and wake it."""
+            if not input.task.strip():
+                raise FunctionToolError("task is required")
+            async with self.session_manager() as session:
+                resolution = await self._resolve_target(session, input.agent_name)
+                if resolution.target is None:
+                    return _json(
+                        {"status": "not_found", "agent_name": input.agent_name}
+                    )
+                target_session = await self._session_or_error(
+                    session,
+                    resolution.target.agent_session_id,
+                )
+                await self._enqueue_agent_message(
+                    session,
+                    source=resolution.current,
+                    target=resolution.target,
+                    message_kind="followup_task",
+                    content=input.task,
+                    wake=True,
+                )
+                session_agent_repo = self.agent_session_repository
+                await session_agent_repo.update_session_agent_last_task_message(
+                    session,
+                    session_agent_id=resolution.target.id,
+                    last_task_message=input.task,
+                )
+            await self._wake_session(target_session)
+            return _json(
+                {
+                    "status": "assigned",
+                    "agent_name": resolution.target.name,
+                    "agent_path": resolution.target.path,
+                }
+            )
+
+        return make_tool(followup_task, name="followup_task")
+
+    def _wait_agent_tool(self) -> FunctionTool:
+        async def wait_agent(input: WaitAgentInput) -> str:
+            """Observe unread terminal child results."""
+            async with self.session_manager() as session:
+                current = await self._current_session_agent(session)
+                targets = await self._wait_targets(session, current, input.agent_name)
+                if input.agent_name is not None and not targets:
+                    return _json({"message": "not_found", "timed_out": False})
+                latest_runs = (
+                    await self.agent_run_repository.list_latest_by_session_ids(
+                        session,
+                        session_ids=[target.agent_session_id for target in targets],
+                    )
+                )
+                messages: list[str] = []
+                running: list[str] = []
+                for target in targets:
+                    run = latest_runs.get(target.agent_session_id)
+                    if run is None:
+                        continue
+                    if run.status == AgentRunStatus.RUNNING:
+                        running.append(target.path)
+                        continue
+                    if run.status not in _TERMINAL_STATUSES:
+                        continue
+                    if target.parent_observed_run_index is not None and (
+                        run.run_index <= target.parent_observed_run_index
+                    ):
+                        continue
+                    text = (
+                        run.terminal_result_message
+                        or f"{target.path}: {run.status.value}"
+                    )
+                    messages.append(text)
+                    session_agent_repo = self.agent_session_repository
+                    await session_agent_repo.update_session_agent_observation_cursor(
+                        session,
+                        session_agent_id=target.id,
+                        parent_observed_run_index=run.run_index,
+                        parent_observed_event_id=run.terminal_result_event_id,
+                    )
+                if messages:
+                    return _json({"message": "\n\n".join(messages), "timed_out": False})
+                if (
+                    running
+                    and input.timeout_seconds is not None
+                    and input.timeout_seconds > 0
+                ):
+                    return _json(
+                        {
+                            "message": "Still running: " + ", ".join(running),
+                            "timed_out": True,
+                        }
+                    )
+                return _json(
+                    {"message": "No unread terminal result.", "timed_out": False}
+                )
+
+        return make_tool(wait_agent, name="wait_agent")
+
+    def _interrupt_agent_tool(self) -> FunctionTool:
+        async def interrupt_agent(input: InterruptAgentInput) -> str:
+            """Interrupt the target child agent's current run without deleting it."""
+            async with self.session_manager() as session:
+                resolution = await self._resolve_target(session, input.agent_name)
+                if resolution.target is None:
+                    return _json({"previous_status": "not_found"})
+                target_session = await self._session_or_error(
+                    session,
+                    resolution.target.agent_session_id,
+                )
+                previous_status = await self._project_agent_status(
+                    session, resolution.target
+                )
+                if target_session.run_state == AgentSessionRunState.RUNNING:
+                    await self.agent_session_repository.request_stop(
+                        session,
+                        session_id=target_session.id,
+                        stop_request_id="subagent_interrupt",
+                        user_id=self.user_id,
+                    )
+            if target_session.run_state == AgentSessionRunState.RUNNING:
+                await self.broker.send_message(
+                    SessionStopSignal(
+                        session_id=target_session.id, user_id=self.user_id
+                    )
+                )
+            return _json({"previous_status": previous_status})
+
+        return make_tool(interrupt_agent, name="interrupt_agent")
+
+    def _list_agents_tool(self) -> FunctionTool:
+        async def list_agents() -> str:
+            """List agents in the current root SessionAgent tree."""
+            async with self.session_manager() as session:
+                current = await self._current_session_agent(session)
+                tree = await self.agent_session_repository.list_session_agent_tree(
+                    session,
+                    root_session_agent_id=current.root_session_agent_id,
+                )
+                rows = []
+                for agent in tree:
+                    rows.append(
+                        {
+                            "agent_name": agent.name,
+                            "agent_path": agent.path,
+                            "agent_status": await self._project_agent_status(
+                                session, agent
+                            ),
+                            "last_task_message": agent.last_task_message,
+                        }
+                    )
+            return _json({"agents": rows})
+
+        return make_tool(list_agents, name="list_agents")
+
+    def _current_session_id(self) -> str:
+        """Return current AgentSession ID or raise a tool-level error."""
+        if self.session_id is None:
+            raise FunctionToolError("Current AgentSession ID was not provided")
+        return self.session_id
+
+    async def _current_session_agent(self, session: AsyncSession) -> SessionAgent:
+        current = await self.agent_session_repository.get_session_agent_by_session_id(
+            session,
+            self._current_session_id(),
+        )
+        if current is None:
+            raise FunctionToolError("Current SessionAgent was not found")
+        return current
+
+    async def _resolve_target(
+        self,
+        session: AsyncSession,
+        agent_name: str,
+    ) -> _TargetResolution:
+        current = await self._current_session_agent(session)
+        try:
+            target = await self.agent_session_repository.resolve_session_agent_path(
+                session,
+                current_session_agent_id=current.id,
+                path=agent_name,
+            )
+        except ValueError:
+            target = None
+        if target is not None and target.id == current.id:
+            target = None
+        return _TargetResolution(current=current, target=target)
+
+    async def _wait_targets(
+        self,
+        session: AsyncSession,
+        current: SessionAgent,
+        agent_name: str | None,
+    ) -> list[SessionAgent]:
+        if agent_name is not None:
+            try:
+                resolved = (
+                    await self.agent_session_repository.resolve_session_agent_path(
+                        session,
+                        current_session_agent_id=current.id,
+                        path=agent_name,
+                    )
+                )
+            except ValueError:
+                return []
+            if resolved is None or resolved.id == current.id:
+                return []
+            return [resolved]
+        descendants = (
+            await self.agent_session_repository.list_descendant_session_agents(
+                session,
+                session_agent_id=current.id,
+                include_self=False,
+            )
+        )
+        return descendants
+
+    async def _enqueue_agent_message(
+        self,
+        session: AsyncSession,
+        *,
+        source: SessionAgent,
+        target: SessionAgent,
+        message_kind: Literal["spawn_agent", "send_message", "followup_task"],
+        content: str,
+        wake: bool,
+    ) -> None:
+        await self.input_buffer_service.enqueue(
+            session,
+            InputBufferEnqueue(
+                session_id=target.agent_session_id,
+                kind=InputBufferKind.AGENT_MESSAGE,
+                actor_user_id=self.user_id,
+                content=content,
+                idempotency_key=None,
+                metadata={
+                    "source": "agent_mailbox",
+                    "message_kind": message_kind,
+                    "source_session_agent_id": source.id,
+                    "source_path": source.path,
+                    "target_session_agent_id": target.id,
+                    "target_path": target.path,
+                },
+                action=None,
+                attachments=[],
+                file_parts=[],
+            ),
+        )
+        if wake:
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                target.agent_session_id,
+            )
+
+    async def _wake_session(self, session: AgentSession) -> None:
+        await self.broker.send_message(
+            SessionWakeUp(
+                agent_id=session.agent_id,
+                session_id=session.id,
+                user_id=self.user_id,
+                additional_system_prompt=None,
+                interface=None,
+                workspace_id=session.workspace_id,
+                workspace_handle=None,
+            )
+        )
+
+    async def _session_or_error(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession:
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            agent_session_id,
+        )
+        if agent_session is None:
+            raise FunctionToolError("AgentSession was not found")
+        return agent_session
+
+    async def _fork_events(
+        self,
+        session: AsyncSession,
+        *,
+        parent_session_id: str,
+        head_event_id: str | None,
+        selection: ForkTurnsSelection,
+    ) -> list[Event]:
+        events = await self.event_transcript_repository.list_for_model_input(
+            session,
+            parent_session_id,
+            head_event_id=head_event_id,
+        )
+        selected = select_fork_events(
+            events,
+            selection,
+            head_event_id=head_event_id,
+        )
+        return degrade_file_parts_for_fork(selected)
+
+    async def _project_agent_status(
+        self,
+        session: AsyncSession,
+        agent: SessionAgent,
+    ) -> str:
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            agent.agent_session_id,
+        )
+        if agent_session is None:
+            return "not_found"
+        if agent_session.run_state == AgentSessionRunState.RUNNING:
+            return "running"
+        latest = await self.agent_run_repository.list_latest_by_session_ids(
+            session,
+            session_ids=[agent.agent_session_id],
+        )
+        run = latest.get(agent.agent_session_id)
+        if run is None:
+            return "idle"
+        if run.status == AgentRunStatus.COMPLETED:
+            return "completed"
+        if run.status == AgentRunStatus.FAILED:
+            return "errored"
+        if run.status in {
+            AgentRunStatus.STOPPED,
+            AgentRunStatus.INTERRUPTED,
+            AgentRunStatus.CANCELLED,
+        }:
+            return "interrupted"
+        return run.status.value
+
+
+class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
+    """Resolve the subagent collaboration Toolkit."""
+
+    slug = "subagent"
+    name = "Subagent"
+    description = "Coordinate child and nested subagents."
+    system_prompt = "Use subagent tools to coordinate child agents."
+    config_model = SubagentToolkitConfig
+
+    def __init__(
+        self,
+        *,
+        session_manager: SessionManager[AsyncSession],
+        broker: SessionBroker,
+        input_buffer_service: InputBufferService,
+    ) -> None:
+        self.session_manager = session_manager
+        self.broker = broker
+        self.input_buffer_service = input_buffer_service
+
+    async def resolve(
+        self,
+        config: SubagentToolkitConfig,
+        context: ResolveContext,
+    ) -> SubagentToolkit:
+        """Resolve per-session subagent collaboration tools."""
+        del config
+        toolkit = SubagentToolkit(
+            session_manager=self.session_manager,
+            agent_session_repository=AgentSessionRepository(),
+            agent_run_repository=AgentRunRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            input_buffer_service=self.input_buffer_service,
+            broker=self.broker,
+        )
+        toolkit.set_session_id(context.session_id)
+        return toolkit
+
+
+def _json(value: dict[str, object]) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _payload_json(event: Event) -> dict[str, JSONValue]:
+    return event.payload.model_dump(mode="json", exclude_none=True)

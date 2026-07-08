@@ -34,6 +34,7 @@ from azents.engine.tools.skill import (
     SkillStateStore,
     SkillToolkitProvider,
 )
+from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -191,6 +192,21 @@ async def get_worker_broker(
             await redis.aclose()
 
     return await appctx.get_variable(f"{__name__}.get_worker_broker", create_broker)
+
+
+def get_subagent_toolkit_provider(
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+    broker: Annotated[SessionBroker, Depends(get_worker_broker)],
+    input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)],
+) -> SubagentToolkitProvider:
+    """SubagentToolkitProvider dependency for Worker."""
+    return SubagentToolkitProvider(
+        session_manager=session_manager,
+        broker=broker,
+        input_buffer_service=input_buffer_service,
+    )
 
 
 async def get_worker_redis(

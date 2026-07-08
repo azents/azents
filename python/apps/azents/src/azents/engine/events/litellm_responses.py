@@ -47,6 +47,7 @@ from azents.engine.events.system_reminders import (
     format_system_reminder,
 )
 from azents.engine.events.types import (
+    AgentMessagePayload,
     AssistantMessagePayload,
     Attachment,
     ClientToolCallPayload,
@@ -95,6 +96,17 @@ def _format_goal_updated_event_reminder(payload: UserMessagePayload) -> str:
             resume_hint=payload.metadata.get("resume_hint"),
         )
     return format_goal_updated_reminder(payload.metadata.get("goal_objective"))
+
+
+def _format_agent_message(payload: AgentMessagePayload) -> str:
+    """Render agent_message as an explicitly sourced model-visible task."""
+    kind_label = payload.message_kind.replace("_", " ")
+    return "\n".join(
+        [
+            f"Message from agent {payload.source_path} ({kind_label}):",
+            payload.content,
+        ]
+    )
 
 
 def _format_skill_loaded_event(payload: SkillLoadedPayload) -> str:
@@ -337,6 +349,13 @@ class LiteLLMResponsesLowerer:
             return {
                 "role": "user",
                 "content": _format_skill_loaded_event(event.payload),
+            }
+        if event.kind == EventKind.AGENT_MESSAGE and isinstance(
+            event.payload, AgentMessagePayload
+        ):
+            return {
+                "role": "user",
+                "content": _format_agent_message(event.payload),
             }
         match event.payload:
             case UserMessagePayload(content=content, attachments=attachments):
