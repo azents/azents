@@ -953,17 +953,14 @@ function mapEvents(
         ];
       }
       case "goal_continuation": {
-        return [
-          ...messages,
-          {
-            id: event.id,
-            role: "goal_continuation",
-            content: null,
-            createdAt: event.created_at,
-            status: "complete",
-            metadata: eventMetadata(event),
-          },
-        ];
+        return upsertMessageByMergeKey(messages, {
+          id: event.id,
+          role: "goal_continuation",
+          content: null,
+          createdAt: event.created_at,
+          status: "complete",
+          metadata: eventMetadata(event),
+        });
       }
       case "goal_updated": {
         const metadata = isRecord(payload.metadata) ? payload.metadata : {};
@@ -1329,15 +1326,42 @@ function removePartialHistoryById(
   return { order, itemsByKey };
 }
 
+function eventExternalRoot(event: ChatEventResponse): string | null {
+  return event.external_id?.split(":", 1)[0] ?? null;
+}
+
+function partialHistoryEventMatchesDurableEvent(
+  partialEvent: ChatEventResponse,
+  durableEvent: ChatEventResponse,
+): boolean {
+  const partialKey = partialHistorySemanticKey(partialEvent);
+  const durableKey = partialHistorySemanticKey(durableEvent);
+  if (partialKey === durableKey) {
+    return true;
+  }
+  const durableExternalId = durableEvent.external_id ?? null;
+  const durableExternalRoot = eventExternalRoot(durableEvent);
+  return (
+    partialEvent.id === durableEvent.id ||
+    partialEvent.id === durableExternalId ||
+    partialEvent.id === durableExternalRoot
+  );
+}
+
 function removePartialHistoryCounterpart(
   partialHistory: PartialHistoryState,
   durableEvent: ChatEventResponse,
 ): PartialHistoryState {
-  const key = partialHistorySemanticKey(durableEvent);
-  if (!Object.prototype.hasOwnProperty.call(partialHistory.itemsByKey, key)) {
+  const order = partialHistory.order.filter((key) => {
+    const event = partialHistory.itemsByKey[key];
+    return (
+      typeof event !== "undefined" &&
+      !partialHistoryEventMatchesDurableEvent(event, durableEvent)
+    );
+  });
+  if (order.length === partialHistory.order.length) {
     return partialHistory;
   }
-  const order = partialHistory.order.filter((item) => item !== key);
   const itemsByKey = Object.fromEntries(
     order.flatMap((item) => {
       const event = partialHistory.itemsByKey[item];
@@ -1416,6 +1440,22 @@ function rememberMergeKeys(seen: Set<string>, message: ChatMessage): void {
   for (const key of getMessageMergeKeys(message)) {
     seen.add(key);
   }
+}
+
+function upsertMessageByMergeKey(
+  existing: ChatMessage[],
+  message: ChatMessage,
+): ChatMessage[] {
+  const messageKeys = new Set(getMessageMergeKeys(message));
+  const index = existing.findIndex((item) =>
+    getMessageMergeKeys(item).some((key) => messageKeys.has(key)),
+  );
+  if (index < 0) {
+    return [...existing, message];
+  }
+  return existing.map((item, itemIndex) =>
+    itemIndex === index ? message : item,
+  );
 }
 
 function mergeMessagePages(
