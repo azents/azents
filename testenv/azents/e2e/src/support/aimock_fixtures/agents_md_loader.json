@@ -549,6 +549,73 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Subagent E2E spawn child",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_spawn_child",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "child_qa",
+              "task": "Subagent E2E child task",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_spawn_child"
+      },
+      "response": {
+        "content": "Subagent child was spawned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E child task",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Subagent child completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_wait_child"
+      },
+      "response": {
+        "content": "Subagent wait observed child result."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E wait child"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_wait_child",
+            "name": "wait_agent",
+            "arguments": {
+              "agent_name": "child_qa",
+              "timeout_seconds": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Failed run retry once then succeed",
         "hasToolResult": false,
         "sequenceIndex": 0
