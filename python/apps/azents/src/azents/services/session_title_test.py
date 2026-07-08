@@ -12,6 +12,7 @@ import azents.services.session_title as session_title_module
 from azents.core.agent import AgentModelSelection
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
+    AgentSessionKind,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
@@ -299,6 +300,7 @@ class _AgentSessionRepository:
             workspace_id="workspace-001",
             agent_id="agent-001",
             handle="test-session-handle",
+            session_kind=AgentSessionKind.ROOT,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,
             title="Compare two insurance options",

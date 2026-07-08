@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import AgentType, LLMProvider
-from azents.core.tools import SessionType, ToolkitContext
+from azents.core.tools import (
+    SessionType,
+    ToolkitContext,
+    ToolkitExecutionMode,
+    TurnContext,
+)
 from azents.engine.run.input import InputMessage, InvokeInput
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
@@ -18,6 +23,7 @@ from azents.engine.tools.claude_rules import (
     ClaudeRulesAppendixDedupeState,
     ClaudeRulesToolkitProvider,
 )
+from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
 from azents.repos.agent.data import Agent
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.runtime.types import RuntimeDomainConfig
@@ -124,6 +130,18 @@ def _make_toolkit_context() -> ToolkitContext:
     )
 
 
+def _make_turn_context() -> TurnContext:
+    """Create TurnContext for resolved Toolkit tests."""
+    return TurnContext(
+        user_id="user-1",
+        workspace_id="ws-1",
+        model="gpt-4o",
+        run_id="run-1",
+        publish_event=AsyncMock(),
+        session_id="session-1",
+    )
+
+
 def _make_builtin_provider() -> BuiltinToolkitProvider:
     """Create BuiltinToolkitProvider for resolve_agent_tools tests."""
     return BuiltinToolkitProvider(
@@ -193,6 +211,7 @@ class TestResolveAgentTools:
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             agent_toolkit_repository=agent_toolkit_repository,
             toolkit_repository=AsyncMock(),
@@ -213,10 +232,25 @@ class TestResolveAgentTools:
         )
 
         assert [binding.slug for binding in bindings] == [
-            "builtin",
-            "shell",
+            "memory_read",
+            "memory_write",
+            "runtime",
             "claude_rules",
         ]
+        memory_read_state = await bindings[0].toolkit.update_context(
+            _make_turn_context()
+        )
+        memory_write_state = await bindings[1].toolkit.update_context(
+            _make_turn_context()
+        )
+        memory_read_tools = {tool.spec.name for tool in memory_read_state.tools}
+        memory_write_tools = {tool.spec.name for tool in memory_write_state.tools}
+        assert memory_read_tools == {
+            "list_memories",
+            "get_memory",
+            "search_memories",
+        }
+        assert memory_write_tools == {"save_memory", "delete_memory"}
 
     async def test_does_not_auto_bind_claude_rules_when_runtime_tools_disabled(
         self,
@@ -229,6 +263,7 @@ class TestResolveAgentTools:
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             agent_toolkit_repository=agent_toolkit_repository,
             toolkit_repository=AsyncMock(),
@@ -248,4 +283,46 @@ class TestResolveAgentTools:
             runtime_tools_enabled=False,
         )
 
-        assert [binding.slug for binding in bindings] == ["builtin"]
+        assert [binding.slug for binding in bindings] == ["memory_read", "memory_write"]
+
+    async def test_subagent_mode_filters_root_only_auto_bound_toolkits(self) -> None:
+        """Subagent mode keeps read/runtime capabilities and excludes root-only ones."""
+        session = AsyncMock(spec=AsyncSession)
+        agent_toolkit_repository = AsyncMock()
+        agent_toolkit_repository.list_by_agent.return_value = []
+
+        @asynccontextmanager
+        async def goal_session_manager() -> AsyncGenerator[AsyncSession, None]:
+            yield AsyncMock(spec=AsyncSession)
+
+        bindings = await resolve_agent_tools(
+            "agent-1",
+            _make_toolkit_context(),
+            execution_mode=ToolkitExecutionMode.SUBAGENT,
+            toolkit_registry={},
+            agent_toolkit_repository=agent_toolkit_repository,
+            toolkit_repository=AsyncMock(),
+            session=session,
+            web_url="https://example.test",
+            oauth_secret_key="secret",
+            mcp_proxy_url=None,
+            runtime_domain_config=RuntimeDomainConfig(
+                allowed_domains=(),
+                denied_domains=(),
+            ),
+            builtin_toolkit_provider=_make_builtin_provider(),
+            claude_rules_toolkit_provider=ClaudeRulesToolkitProvider(
+                store=_FakeClaudeRulesAppendixDedupeStateStore()
+            ),
+            goal_toolkit_provider=GoalToolkitProvider(
+                store=GoalStateStore(session_manager=goal_session_manager)
+            ),
+            memory_enabled=True,
+            runtime_tools_enabled=True,
+        )
+
+        assert [binding.slug for binding in bindings] == [
+            "memory_read",
+            "runtime",
+            "claude_rules",
+        ]

@@ -410,7 +410,7 @@ class SessionGitWorktreeService:
             ActionExecutionStatus.FAILED_FINAL,
         }:
             return GitWorktreeActionExecutionResult(
-                completed=False,
+                completed=True,
                 context_invalidated=False,
             )
 
@@ -426,7 +426,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
             )
             return GitWorktreeActionExecutionResult(
-                completed=False,
+                completed=True,
                 context_invalidated=False,
             )
 
@@ -443,7 +443,7 @@ class SessionGitWorktreeService:
                     failed_at=datetime.now(UTC),
                 )
                 return GitWorktreeActionExecutionResult(
-                    completed=False,
+                    completed=True,
                     context_invalidated=False,
                 )
             execution = await self.action_execution_repository.mark_running(
@@ -482,7 +482,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
             )
             return GitWorktreeActionExecutionResult(
-                completed=False,
+                completed=True,
                 context_invalidated=False,
             )
         if self.runner_operations is None:
@@ -493,7 +493,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
             )
             return GitWorktreeActionExecutionResult(
-                completed=False,
+                completed=True,
                 context_invalidated=False,
             )
 
@@ -505,7 +505,7 @@ class SessionGitWorktreeService:
         )
         if create_result is None:
             return GitWorktreeActionExecutionResult(
-                completed=False,
+                completed=True,
                 context_invalidated=False,
             )
         if not await self._run_action_register_project_step(
@@ -516,7 +516,7 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         ):
             return GitWorktreeActionExecutionResult(
-                completed=False,
+                completed=True,
                 context_invalidated=False,
             )
         if not await self._run_action_catalog_step(
@@ -527,7 +527,7 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         ):
             return GitWorktreeActionExecutionResult(
-                completed=False,
+                completed=True,
                 context_invalidated=False,
             )
         await self._run_action_refresh_project_status_step(

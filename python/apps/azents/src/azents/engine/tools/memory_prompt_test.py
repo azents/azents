@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from azents.engine.tools.builtin import collect_memory_prompt
+from azents.engine.tools import builtin as builtin_module
 from azents.repos.memory.data import MemorySummary
 
 
@@ -14,6 +14,37 @@ def _make_summary(
     description: str = "test description",
 ) -> MemorySummary:
     return MemorySummary(name=name, type=type, description=description)
+
+
+def _full_memory_rules_prompt() -> str:
+    """Return the root-session memory rules prompt."""
+    return """### Memory Rules
+
+Use list_memories, get_memory, and search_memories.
+
+### Memory Write Rules
+
+Types of memory
+What NOT to save
+Use save_memory and delete_memory.
+Scope selection
+"""
+
+
+async def _collect_memory_prompt(
+    repo: AsyncMock,
+    session: AsyncMock,
+    agent_id: str,
+    user_id: str,
+) -> str:
+    """Collect memory prompt with root-session read/write rules."""
+    return await builtin_module.collect_memory_prompt(
+        repo,
+        session,
+        agent_id,
+        user_id,
+        _full_memory_rules_prompt(),
+    )
 
 
 class TestCollectMemoryPrompt:
@@ -45,7 +76,7 @@ class TestCollectMemoryPrompt:
         """Rules are returned even when memory is absent."""
         repo = self._make_repo()
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "ag", "u")
+        result = await _collect_memory_prompt(repo, session, "ag", "u")
         assert "Memory Rules" in result
         assert "Agent Memories" not in result
         assert "Your Memories about this User" not in result
@@ -58,7 +89,7 @@ class TestCollectMemoryPrompt:
             ],
         )
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "ag", "")
+        result = await _collect_memory_prompt(repo, session, "ag", "")
         assert "Agent Memories (shared with all users)" in result
         assert "no-mock" in result
         assert "No mocking in tests" in result
@@ -71,7 +102,7 @@ class TestCollectMemoryPrompt:
             ],
         )
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "ag", "u")
+        result = await _collect_memory_prompt(repo, session, "ag", "u")
         assert "Your Memories about this User" in result
         assert "profile" in result
         assert "Go expert" in result
@@ -87,7 +118,7 @@ class TestCollectMemoryPrompt:
             ],
         )
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "ag", "u")
+        result = await _collect_memory_prompt(repo, session, "ag", "u")
         assert "Agent Memories" in result
         assert "Your Memories about this User" in result
         assert "deploy" in result
@@ -99,7 +130,7 @@ class TestCollectMemoryPrompt:
             agent_summaries=[_make_summary("x")],
         )
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "", "u")
+        result = await _collect_memory_prompt(repo, session, "", "u")
         assert "Agent Memories" not in result
         assert "Memory Rules" in result
 
@@ -109,7 +140,7 @@ class TestCollectMemoryPrompt:
             user_summaries=[_make_summary("x")],
         )
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "ag", "")
+        result = await _collect_memory_prompt(repo, session, "ag", "")
         assert "Your Memories about this User" not in result
         assert "Memory Rules" in result
 
@@ -120,7 +151,7 @@ class TestCollectMemoryPrompt:
             user_summaries=[_make_summary("b")],
         )
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "ag", "u")
+        result = await _collect_memory_prompt(repo, session, "ag", "u")
         agent_pos = result.index("Agent Memories")
         user_pos = result.index("Your Memories about this User")
         assert agent_pos < user_pos
@@ -135,7 +166,7 @@ class TestCollectMemoryPrompt:
             ],
         )
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "ag", "")
+        result = await _collect_memory_prompt(repo, session, "ag", "")
         assert "#### Feedback" in result
         assert "#### Reference" in result
         feedback_pos = result.index("#### Feedback")
@@ -149,7 +180,7 @@ class TestCollectMemoryPrompt:
         ]
         repo = self._make_repo(agent_summaries=summaries)
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "ag", "")
+        result = await _collect_memory_prompt(repo, session, "ag", "")
         assert "cleaning up old memories" in result.lower()
 
     @pytest.mark.parametrize(
@@ -173,5 +204,5 @@ class TestCollectMemoryPrompt:
         """Rules prompt includes core instructions."""
         repo = self._make_repo()
         session = AsyncMock()
-        result = await collect_memory_prompt(repo, session, "ag", "u")
+        result = await _collect_memory_prompt(repo, session, "ag", "u")
         assert expected in result

@@ -577,6 +577,7 @@ def _make_project(*, path: str) -> SessionWorkspaceProject:
     return SessionWorkspaceProject(
         id=f"project-{path.rsplit('/', maxsplit=1)[-1]}",
         session_id="session-1",
+        session_agent_context_id="context-1",
         path=path,
         created_at=now,
         updated_at=now,

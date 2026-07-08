@@ -120,7 +120,7 @@ class InputBufferService:
         session: AsyncSession,
         input: InputBufferEnqueue,
     ) -> InputBufferEnqueueResult:
-        """Create one pending input buffer and mark the session running."""
+        """Create one pending input buffer without deciding wake semantics."""
         existing = None
         if input.idempotency_key is not None:
             existing = await self.input_buffer_repository.get_by_idempotency_key(
@@ -156,10 +156,6 @@ class InputBufferService:
         else:
             created = False
             input_buffer = existing
-        await self.agent_session_repository.mark_running_for_input_wakeup(
-            session,
-            input.session_id,
-        )
         return InputBufferEnqueueResult(input_buffer=input_buffer, created=created)
 
     async def enqueue_many(
@@ -167,7 +163,7 @@ class InputBufferService:
         session: AsyncSession,
         inputs: Sequence[InputBufferEnqueue],
     ) -> list[InputBufferEnqueueResult]:
-        """Create pending input buffers and mark each affected session running."""
+        """Create pending input buffers without deciding wake semantics."""
         results = [await self.enqueue(session, input) for input in inputs]
         return results
 
@@ -175,7 +171,7 @@ class InputBufferService:
         self,
         inputs: Sequence[InputBufferEnqueue],
     ) -> list[InputBufferEnqueueResult]:
-        """Create pending inputs and running transitions in one transaction."""
+        """Create pending inputs in one transaction."""
         async with self.session_manager() as session:
             return await self.enqueue_many(session, inputs)
 
@@ -223,17 +219,11 @@ class InputBufferService:
         to_session_id: str,
     ) -> int:
         """Move pending input buffers between sessions."""
-        moved = await self.input_buffer_repository.move_by_session_id(
+        return await self.input_buffer_repository.move_by_session_id(
             session,
             from_session_id=from_session_id,
             to_session_id=to_session_id,
         )
-        if moved:
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                to_session_id,
-            )
-        return moved
 
     async def has_pending_session_input_buffers(self, session_id: str) -> bool:
         """Check whether session still has unflushed InputBuffer."""

@@ -42,7 +42,10 @@ from azents.engine.events.types import (
     TurnMarkerPayload,
     UnknownAdapterOutputPayload,
 )
-from azents.engine.run.errors import ModelCallError, UserVisibleRuntimeError
+from azents.engine.run.errors import (
+    ModelCallError,
+    UserVisibleRuntimeError,
+)
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.repos.agent_execution import (
     AgentRunRepository,
@@ -55,7 +58,17 @@ logger = logging.getLogger(__name__)
 
 CheckStop = Callable[[], Awaitable[bool]]
 PhaseSink = Callable[[AgentRunPhase], Awaitable[None]]
-InputPoller = Callable[[AsyncSession, str], Awaitable[list[Event]]]
+
+
+@dataclass(frozen=True)
+class InputPollResult:
+    """Input events polled at a model-call turn boundary."""
+
+    events: list[Event]
+    context_invalidated: bool = False
+
+
+InputPoller = Callable[[AsyncSession, str], Awaitable[InputPollResult]]
 TurnEndReason = Literal["completed", "error", "cancelled", "unknown"]
 TurnEndCallback = Callable[[TurnEndReason], Awaitable[None]]
 
@@ -191,11 +204,19 @@ class AgentRunExecution:
                     return AgentRunStatus.INTERRUPTED
 
                 if poll_input_events is not None:
-                    polled_events = await poll_input_events(
+                    poll_result = await poll_input_events(
                         session,
                         request.session_id,
                     )
-                    if polled_events:
+                    if poll_result.context_invalidated:
+                        await self._mark_terminal(
+                            session,
+                            request.run_id,
+                            AgentRunStatus.CANCELLED,
+                        )
+                        await session.commit()
+                        return AgentRunStatus.CANCELLED
+                    if poll_result.events:
                         await session.commit()
 
                 head_event_id = await self._model_input_head_event_id(

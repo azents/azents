@@ -156,6 +156,10 @@ class ChatWriteService:
                     file_parts=file_parts,
                 ),
             )
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                session_id,
+            )
             input_buffer = result.input_buffer
 
         return AcceptedEditInput(

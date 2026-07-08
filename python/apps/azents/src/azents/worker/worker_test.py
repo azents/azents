@@ -53,7 +53,7 @@ from azents.repos.agent_session.data import PendingSessionCommand
 from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
-from azents.worker.run.executor import RunExecutor
+from azents.worker.run.executor import OperationActionProcessResult, RunExecutor
 from azents.worker.run.helpers import (
     apply_active_tool_call_event,
     observed_terminal_run_event,
@@ -1136,16 +1136,27 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
         has_actionable_model_input,
     )
 
-    poll = executor.make_boundary_poll(
-        agent_id="agent-1",
-        session_id="session-1",
-        model="gpt-test",
-        poll_fn=None,
+    async def process_operation_actions(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return OperationActionProcessResult(context_invalidated=False)
+
+    monkeypatch.setattr(
+        executor,
+        "_process_operation_actions",
+        process_operation_actions,
     )
 
-    messages = await poll()
+    poll = executor.make_boundary_poll(
+        message=_wake_up(session_id="session-1", agent_id="agent-1"),
+        model="gpt-test",
+        poll_fn=None,
+        mark_context_invalidated=lambda: None,
+    )
 
-    assert messages == [user_message]
+    poll_result = await poll()
+
+    assert poll_result.user_messages == [user_message]
+    assert poll_result.context_invalidated is False
     assert promotion.calls == [("session-1", "gpt-test")]
     assert scheduled_title_events == ["session-1:1123456789abcdef0123456789abcdeb"]
     event_types = [event.get("type") for _, event in broadcast.events]

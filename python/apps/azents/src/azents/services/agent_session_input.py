@@ -148,6 +148,10 @@ class AgentSessionInputService:
                 user_id=user_id,
                 client_request_id=client_request_id,
             )
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                agent_session.id,
+            )
 
         return Success(
             BufferedAgentSessionInputResult(
@@ -195,6 +199,10 @@ class AgentSessionInputService:
                     attachments=message.attachments,
                     file_parts=message.file_parts,
                 ),
+            )
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                agent_session.id,
             )
 
         return Success(
@@ -283,6 +291,10 @@ class AgentSessionInputService:
                 message=message,
                 user_id=user_id,
                 client_request_id=client_request_id,
+            )
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                agent_session.id,
             )
 
         return Success(

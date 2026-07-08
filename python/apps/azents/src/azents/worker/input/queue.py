@@ -9,6 +9,7 @@ from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import InputBufferKind
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 
 
@@ -73,6 +74,7 @@ class DatabaseWorkerInputQueue:
     broker: SessionBroker
     session_manager: SessionManager[AsyncSession]
     agent_runtime_repository: AgentRuntimeRepository
+    agent_session_repository: AgentSessionRepository
     input_buffer_service: InputBufferService
 
     async def enqueue_background_completion(
@@ -108,6 +110,10 @@ class DatabaseWorkerInputQueue:
             )
             if not result.created:
                 return False
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                item.parent_session_id,
+            )
 
         await self.broker.send_message(
             SessionWakeUp(

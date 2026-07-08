@@ -234,8 +234,17 @@ class TokenUsage(BaseModel):
 # Message Queueing
 # ---------------------------------------------------------------------------
 
-PollMessages: TypeAlias = Callable[[], Awaitable[list[RunUserMessage]]]
-"""Poll callback injected into engine.run(); returns new event user input."""
+
+@dataclasses.dataclass(frozen=True)
+class PollMessagesResult:
+    """Input polled at a model-call turn boundary."""
+
+    user_messages: list[RunUserMessage]
+    context_invalidated: bool = False
+
+
+PollMessages: TypeAlias = Callable[[], Awaitable[PollMessagesResult]]
+"""Poll callback injected into engine.run(); returns turn-boundary input."""
 
 CheckStop: TypeAlias = Callable[[], Awaitable[bool]]
 """Stop check callback injected into engine.run(). Stops execution when True."""

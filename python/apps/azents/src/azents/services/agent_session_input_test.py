@@ -6,6 +6,7 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStartReason,
@@ -97,6 +98,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
             workspace_id="workspace-1",
             agent_id="agent-1",
             handle="test-session-handle",
+            session_kind=AgentSessionKind.ROOT,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,
             title=None,
@@ -108,6 +110,15 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
             created_at=now,
             updated_at=now,
         )
+
+    async def mark_running_for_input_wakeup(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> None:
+        """Record wake transition."""
+        del session, session_id
+        self.calls.append("mark_running_for_input_wakeup")
 
 
 class _InputBufferServiceDouble(InputBufferService):
@@ -299,6 +310,7 @@ class TestAgentSessionInputService:
             "get_by_id",
             "ensure_for_agent",
             "enqueue_input_buffer",
+            "mark_running_for_input_wakeup",
         ]
         assert input_buffer_service.enqueued is not None
         assert input_buffer_service.enqueued.session_id == "session-1"

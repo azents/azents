@@ -330,12 +330,17 @@ class ChatSessionService:
                     return Failure(error)
                 case _:
                     assert_never(workspace_result)
-            await self._enqueue_setup_actions(
+            setup_input_created = await self._enqueue_setup_actions(
                 session,
                 agent_session=created,
                 workspace_items=workspace_items,
                 user_id=user_id,
             )
+            if setup_input_created:
+                await self.agent_session_repository.mark_running_for_input_wakeup(
+                    session,
+                    created.id,
+                )
             await session.commit()
         return Success(created)
 
@@ -465,12 +470,13 @@ class ChatSessionService:
         agent_session: AgentSession,
         workspace_items: list[NewSessionWorkspaceItem],
         user_id: str,
-    ) -> None:
+    ) -> bool:
         """Enqueue ordered setup TurnActions for a newly created session."""
         metadata = {
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "source": "chat",
         }
+        created = False
         for item in workspace_items:
             match item:
                 case ExistingProjectWorkspaceItem():
@@ -483,7 +489,7 @@ class ChatSessionService:
                         source_project_path=source_project_path,
                         starting_ref=starting_ref,
                     )
-                    await self.input_buffer_service.enqueue(
+                    result = await self.input_buffer_service.enqueue(
                         session,
                         InputBufferEnqueue(
                             session_id=agent_session.id,
@@ -497,8 +503,10 @@ class ChatSessionService:
                             file_parts=[],
                         ),
                     )
+                    created = created or result.created
                 case _:
                     assert_never(item)
+        return created
 
     async def _create_session_projects(
         self,

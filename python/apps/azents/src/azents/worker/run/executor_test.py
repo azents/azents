@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 import datetime
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import Any, cast
 
@@ -16,6 +16,7 @@ from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.tools import ToolkitProvider
+from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.engine_events import RunComplete, RunPhaseChanged
 from azents.engine.events.types import (
     Event,
@@ -23,13 +24,18 @@ from azents.engine.events.types import (
     SystemErrorPayload,
     UserMessagePayload,
 )
+from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequest
 from azents.engine.run.emit import Emit, ephemeral
-from azents.engine.run.errors import ModelCallError, UserVisibleRuntimeError
+from azents.engine.run.errors import (
+    ModelCallError,
+    UserVisibleRuntimeError,
+)
 from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
+from azents.engine.run.types import PollMessagesResult
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
@@ -44,13 +50,14 @@ from azents.repos.llm_provider_integration import LLMProviderIntegrationReposito
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.input_buffer import InputBufferService
+from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
 from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_title import SessionTitleService
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import (
+    OperationActionProcessResult,
     RunExecutor,
     RunInputPollResult,
     has_actionable_tail,
@@ -631,6 +638,179 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
 
     assert result.no_actionable_work is True
     assert lifecycle.wake_ups == [message]
+
+
+@pytest.mark.asyncio
+async def test_boundary_poll_processes_turn_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Model-call boundary polling processes TurnActions, not only messages."""
+    executor = _executor()
+    message = _message()
+    process_actions_values: list[bool] = []
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args
+        process_actions_values.append(cast(bool, kwargs["process_actions"]))
+        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+
+    poll = executor.make_boundary_poll(
+        message=message,
+        model="gpt-test",
+        poll_fn=None,
+        mark_context_invalidated=lambda: None,
+    )
+
+    assert await poll() == PollMessagesResult(user_messages=[])
+    assert process_actions_values == [True]
+
+
+@pytest.mark.asyncio
+async def test_boundary_poll_stops_after_context_invalidating_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project-mutating TurnActions stop the current run and wake fresh context."""
+    lifecycle = _SessionLifecycle()
+    executor = _executor(session_lifecycle=lifecycle)
+    message = _message()
+
+    class PendingInputBufferService:
+        """InputBufferService double with pending follow-up work."""
+
+        async def has_pending_session_input_buffers(self, session_id: str) -> bool:
+            """Return pending follow-up work for the session."""
+            assert session_id == message.session_id
+            return True
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            user_messages=[],
+            has_actionable_work=False,
+            context_invalidated=True,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        executor,
+        "input_buffer_service",
+        cast(InputBufferService, PendingInputBufferService()),
+    )
+
+    context_invalidated = False
+
+    def mark_context_invalidated() -> None:
+        nonlocal context_invalidated
+        context_invalidated = True
+
+    poll = executor.make_boundary_poll(
+        message=message,
+        model="gpt-test",
+        poll_fn=None,
+        mark_context_invalidated=mark_context_invalidated,
+    )
+
+    assert await poll() == PollMessagesResult(
+        user_messages=[],
+        context_invalidated=True,
+    )
+    assert context_invalidated is True
+    assert lifecycle.wake_ups == [message]
+
+
+@pytest.mark.asyncio
+async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failed TurnActions are marked failed and the next FIFO input is promoted."""
+    executor = _executor()
+    user_message = make_run_user_message(
+        content="continue after failed action",
+        metadata={},
+        attachments=[],
+        external_id="buffer-user",
+        attachment_source="input_buffer",
+    )
+    promoted_batches = [
+        PromotedInputBuffers(
+            user_messages=[],
+            events=[
+                Event(
+                    id="1123456789abcdef0123456789abcdf0",
+                    session_id="session-1",
+                    kind=EventKind.ACTION_MESSAGE,
+                    payload=ActionMessagePayload(action=GoalAction(), message=""),
+                    created_at=run_executor_module.tznow(),
+                )
+            ],
+            deleted_buffer_ids=["buffer-action"],
+            claimed_count=1,
+            inserted_count=1,
+            deduped_count=0,
+        ),
+        PromotedInputBuffers(
+            user_messages=[user_message],
+            events=[
+                Event(
+                    id="1123456789abcdef0123456789abcdf1",
+                    session_id="session-1",
+                    kind=EventKind.USER_MESSAGE,
+                    payload=user_message.payload,
+                    created_at=run_executor_module.tznow(),
+                )
+            ],
+            deleted_buffer_ids=["buffer-user"],
+            claimed_count=1,
+            inserted_count=1,
+            deduped_count=0,
+        ),
+    ]
+    processed_event_kinds: list[EventKind] = []
+
+    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+        del args, kwargs
+        return promoted_batches.pop(0)
+
+    async def process_operation_actions(
+        *args: object,
+        **kwargs: object,
+    ) -> OperationActionProcessResult:
+        del args
+        events = cast(Sequence[Event], kwargs["events"])
+        processed_event_kinds.extend(event.kind for event in events)
+        return OperationActionProcessResult(context_invalidated=False)
+
+    async def has_actionable_model_input(session_id: str) -> bool:
+        del session_id
+        return False
+
+    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+    monkeypatch.setattr(
+        executor,
+        "_process_operation_actions",
+        process_operation_actions,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+
+    result = await executor.poll_run_inputs(
+        agent_id="agent-1",
+        session_id="session-1",
+        model="gpt-test",
+        poll_fn=None,
+        process_actions=True,
+    )
+
+    assert result.user_messages == [user_message]
+    assert result.has_actionable_work is True
+    assert result.context_invalidated is False
+    assert processed_event_kinds == [EventKind.ACTION_MESSAGE, EventKind.USER_MESSAGE]
+    assert promoted_batches == []
 
 
 @pytest.mark.asyncio

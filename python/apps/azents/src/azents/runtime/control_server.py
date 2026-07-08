@@ -121,6 +121,7 @@ async def runtime_control_server_lifespan(
         broker=broker,
         session_manager=session_manager,
         agent_runtime_repository=runtime_repository,
+        agent_session_repository=session_repository,
         input_buffer_service=input_buffer_service,
     )
     provider_sink = RuntimeProviderReportRepositorySink(

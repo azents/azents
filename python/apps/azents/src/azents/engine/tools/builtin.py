@@ -113,10 +113,21 @@ logger = logging.getLogger(__name__)
 # Memory prompt
 # ---------------------------------------------------------------------------
 
-_MEMORY_RULES_PROMPT = dedent("""\
+_MEMORY_READ_RULES_PROMPT = dedent("""\
     ### Memory Rules
 
-    You have a persistent memory system with dedicated tools. Use `save_memory` to store, `list_memories` / `get_memory` / `search_memories` to retrieve, and `delete_memory` to remove.
+    You have access to persistent memories. Memories persist across conversations.
+
+    Use `list_memories` or `search_memories` to discover relevant memories. Use `get_memory` to retrieve full content when a memory looks relevant.
+
+    Memories can be scoped to the Agent or to the current User. When Agent and User memories conflict on the same topic, follow the User memory because it represents this user's specific preference.
+
+    Memories are snapshots from when they were written. Before acting on a memory, verify it against current state. If stale, avoid relying on it.""")  # noqa: E501
+
+_MEMORY_WRITE_RULES_PROMPT = dedent("""\
+    ### Memory Write Rules
+
+    Use `save_memory` to store durable information and `delete_memory` to remove stale or unwanted memories.
 
     If the user explicitly asks you to remember something, save it immediately as whichever type fits best. If they ask you to forget something, use `delete_memory` to remove the relevant entry.
 
@@ -149,14 +160,6 @@ _MEMORY_RULES_PROMPT = dedent("""\
     - `agent` scope: shared with ALL users of this agent. Only save universally applicable knowledge.
     - `user` scope: only this specific user. Save personal preferences and context.
 
-    #### Conflict resolution
-
-    When agent and user memories conflict on the same topic, follow the user memory — it represents this user's specific preference.
-
-    #### Stale memories
-
-    Memories are snapshots from when they were written. Before acting on a memory, verify it against current state. If stale, update or delete it silently.
-
     #### Duplicate prevention
 
     Do not save duplicate memories. Use `list_memories` or `search_memories` to check if a similar memory already exists. Use the same `name` to update an existing memory (upsert).""")  # noqa: E501
@@ -169,6 +172,7 @@ async def collect_memory_prompt(
     session: AsyncSession,
     agent_id: str,
     user_id: str,
+    rules_prompt: str,
 ) -> str:
     """Look up memory summaries from DB and create prompt string.
 
@@ -218,7 +222,7 @@ async def collect_memory_prompt(
             )
         parts.append("")
 
-    parts.append(_MEMORY_RULES_PROMPT)
+    parts.append(rules_prompt)
     return "\n".join(parts)
 
 
@@ -355,6 +359,140 @@ class WriteStdinInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
+    """Auto-bound memory read capability."""
+
+    def __init__(
+        self,
+        config: ShellToolkitConfig,
+        agent_id: str,
+        session_manager: SessionManager[AsyncSession],
+        memory_repo: MemoryRepository,
+    ) -> None:
+        self._config = config
+        self._agent_id = agent_id
+        self._session_id = ""
+        self._session_manager = session_manager
+        self._memory_repo = memory_repo
+
+    def set_agent_id(self, agent_id: str) -> None:
+        """Inject agent_id.
+
+        :param agent_id: Agent ID
+        """
+        self._agent_id = agent_id
+
+    def set_session_id(self, session_id: str) -> None:
+        """Inject session ID.
+
+        :param session_id: Current session ID
+        """
+        self._session_id = session_id
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return memory read tools."""
+        user_id = context.user_id
+        tools: list[FunctionTool] = []
+        if self._config.memory_enabled:
+            tools.extend(
+                [
+                    make_list_memories_tool(
+                        self._memory_repo,
+                        self._agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                    make_get_memory_tool(
+                        self._memory_repo,
+                        self._agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                    make_search_memories_tool(
+                        self._memory_repo,
+                        self._agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                ]
+            )
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+    async def get_dynamic_prompt(self, context: TurnContext) -> str:
+        """Return dynamic memory read prompt for the current turn."""
+        if not self._config.memory_enabled:
+            return ""
+        async with self._session_manager() as mem_session:
+            return await collect_memory_prompt(
+                self._memory_repo,
+                mem_session,
+                self._agent_id,
+                context.user_id or "",
+                _MEMORY_READ_RULES_PROMPT,
+            )
+
+
+class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
+    """Auto-bound memory write capability."""
+
+    def __init__(
+        self,
+        config: ShellToolkitConfig,
+        agent_id: str,
+        session_manager: SessionManager[AsyncSession],
+        memory_repo: MemoryRepository,
+    ) -> None:
+        self._config = config
+        self._agent_id = agent_id
+        self._session_id = ""
+        self._session_manager = session_manager
+        self._memory_repo = memory_repo
+
+    def set_agent_id(self, agent_id: str) -> None:
+        """Inject agent_id.
+
+        :param agent_id: Agent ID
+        """
+        self._agent_id = agent_id
+
+    def set_session_id(self, session_id: str) -> None:
+        """Inject session ID.
+
+        :param session_id: Current session ID
+        """
+        self._session_id = session_id
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return memory write tools."""
+        user_id = context.user_id
+        tools: list[FunctionTool] = []
+        if self._config.memory_enabled:
+            tools.extend(
+                [
+                    make_save_memory_tool(
+                        self._memory_repo,
+                        self._agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                    make_delete_memory_tool(
+                        self._memory_repo,
+                        self._agent_id,
+                        user_id,
+                        self._session_manager,
+                    ),
+                ]
+            )
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+    async def get_dynamic_prompt(self, context: TurnContext) -> str:
+        """Return memory write rules for the current turn."""
+        del context
+        if not self._config.memory_enabled:
+            return ""
+        return _MEMORY_WRITE_RULES_PROMPT
+
+
 class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
     """Default builtin tool execution instance independent of Runtime Runner.
 
@@ -446,6 +584,7 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
                 mem_session,
                 self._agent_id,
                 context.user_id or "",
+                f"{_MEMORY_READ_RULES_PROMPT}\n\n{_MEMORY_WRITE_RULES_PROMPT}",
             )
 
 
@@ -871,6 +1010,32 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         :return: BuiltinToolkit instance
         """
         return BuiltinToolkit(
+            config=config,
+            agent_id=context.agent_id,
+            session_manager=self._session_manager,
+            memory_repo=self._memory_repo,
+        )
+
+    async def resolve_memory_read(
+        self,
+        config: ShellToolkitConfig,
+        context: ResolveContext,
+    ) -> Toolkit[ShellToolkitConfig]:
+        """Return the auto-bound memory read capability."""
+        return MemoryReadToolkit(
+            config=config,
+            agent_id=context.agent_id,
+            session_manager=self._session_manager,
+            memory_repo=self._memory_repo,
+        )
+
+    async def resolve_memory_write(
+        self,
+        config: ShellToolkitConfig,
+        context: ResolveContext,
+    ) -> Toolkit[ShellToolkitConfig]:
+        """Return the auto-bound memory write capability."""
+        return MemoryWriteToolkit(
             config=config,
             agent_id=context.agent_id,
             session_manager=self._session_manager,
