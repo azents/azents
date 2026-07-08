@@ -2,7 +2,13 @@
 
 from pydantic import BaseModel, Field
 
-from azents.services.workspace.data import CreateWithOwnerOutput, WorkspaceOutput
+from azents.services.workspace.data import (
+    BootstrapFirstOwnerInput,
+    BootstrapFirstOwnerOutput,
+    BootstrapStatusOutput,
+    CreateWithOwnerOutput,
+    WorkspaceOutput,
+)
 
 
 class WorkspaceResponse(WorkspaceOutput):
@@ -28,5 +34,23 @@ class CreateWorkspaceRequest(BaseModel):
 
 class CreateWorkspaceResponse(CreateWithOwnerOutput):
     """Workspace creation response."""
+
+    pass
+
+
+class BootstrapStatusResponse(BootstrapStatusOutput):
+    """First owner bootstrap status response."""
+
+    pass
+
+
+class BootstrapFirstOwnerRequest(BootstrapFirstOwnerInput):
+    """First owner bootstrap request."""
+
+    pass
+
+
+class BootstrapFirstOwnerResponse(BootstrapFirstOwnerOutput):
+    """First owner bootstrap response."""
 
     pass

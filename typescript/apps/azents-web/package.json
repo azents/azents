@@ -15,7 +15,6 @@
     "format:check": "prettier --check --cache 'src/**/*.{ts,tsx}' '.storybook/**/*.{ts,tsx}'"
   },
   "dependencies": {
-    "@azents/admin-client": "workspace:*",
     "@azents/public-client": "workspace:*",
     "@mantine/core": "^9.0.0",
     "@mantine/form": "^9.0.0",
