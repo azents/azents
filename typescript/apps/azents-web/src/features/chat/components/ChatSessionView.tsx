@@ -22,12 +22,9 @@ import { IconGitBranch } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
-import {
-  SubagentTreePanel,
-  type SubagentTreePanelState,
-} from "@/features/agents/components/SubagentTreePanel";
+import { SubagentTreePanel } from "@/features/agents/components/SubagentTreePanel";
+import { useSubagentTreePanelContainer } from "@/features/agents/containers/useSubagentTreePanelContainer";
 import { formatModelSelectionSummary } from "@/features/agents/model-selection";
-import { trpc } from "@/trpc/client";
 import { useChatSessionContainer } from "../containers/useChatSessionContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
@@ -82,17 +79,10 @@ export function ChatSessionView({
     sessionId,
     autoRefreshVisible: isWorkspacePanelDocked || runtimeDrawerOpened,
   });
-  const subagentTreeQuery = trpc.chat.getSubagentTree.useQuery({
+  const subagentTreePanel = useSubagentTreePanelContainer({
     agentId: agent.id,
     sessionId,
   });
-  const subagentTreeState: SubagentTreePanelState = subagentTreeQuery.isPending
-    ? { type: "LOADING" }
-    : subagentTreeQuery.isError
-      ? { type: "ERROR", message: subagentTreeQuery.error.message }
-      : typeof subagentTreeQuery.data === "undefined"
-        ? { type: "LOADING" }
-        : { type: "LOADED", tree: subagentTreeQuery.data };
   const effectiveContextWindowTokens =
     agent.effective_context_window_tokens ?? null;
   const modelName = formatModelSelectionSummary(agent.model_selection);
@@ -196,7 +186,7 @@ export function ChatSessionView({
           handle={handle}
           agentId={agent.id}
           activeSessionId={sessionId}
-          state={subagentTreeState}
+          state={subagentTreePanel.state}
           onNavigate={() => setSubagentDrawerOpened(false)}
         />
       </Drawer>

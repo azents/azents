@@ -1743,10 +1743,7 @@ export function useChatSessionContainer(
       }
 
       if ("type" in event && event.type === "subagent_tree_changed") {
-        void utils.chat.getSubagentTree.invalidate({
-          agentId: agent.id,
-          sessionId,
-        });
+        void utils.chat.getSubagentTree.invalidate();
         return;
       }
 
