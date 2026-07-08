@@ -870,16 +870,17 @@ async def stop_session_run(
     )
     match result:
         case Success(agent_session):
-            await chat_write_service.request_session_stop(
+            stop_result = await chat_write_service.request_session_stop(
                 session_id=agent_session.id,
                 user_id=current_user.user_id,
             )
-            await broker.send_message(
-                SessionStopSignal(
-                    session_id=agent_session.id,
-                    user_id=current_user.user_id,
+            for stopped_session_id in stop_result.stopped_session_ids:
+                await broker.send_message(
+                    SessionStopSignal(
+                        session_id=stopped_session_id,
+                        user_id=current_user.user_id,
+                    )
                 )
-            )
             return ChatStopResponse(session_id=agent_session.id)
         case Failure(error):
             match error:

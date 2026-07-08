@@ -89,6 +89,7 @@ def _agent_session(
     session_id: str = "session-001",
     agent_id: str = "agent-001",
     workspace_id: str = "workspace-001",
+    session_kind: AgentSessionKind = AgentSessionKind.ROOT,
 ) -> AgentSession:
     """Create AgentSession for tests."""
     now = datetime.datetime.now(datetime.UTC)
@@ -97,7 +98,7 @@ def _agent_session(
         workspace_id=workspace_id,
         agent_id=agent_id,
         handle="test-session-handle",
-        session_kind=AgentSessionKind.ROOT,
+        session_kind=session_kind,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,
@@ -189,3 +190,32 @@ async def test_recover_once_continues_after_record_failure() -> None:
 
     assert lifecycle.running_session_ids == ["session-002"]
     assert [message.session_id for message in broker.sent_messages] == ["session-002"]
+
+
+@pytest.mark.asyncio
+async def test_recover_once_treats_root_and_subagent_sessions_independently() -> None:
+    """Root and subagent stuck sessions are recovered as independent sessions."""
+    repository = _AgentSessionRepository(
+        [
+            _agent_session(session_id="root-session", agent_id="agent-001"),
+            _agent_session(
+                session_id="child-session",
+                agent_id="agent-001",
+                session_kind=AgentSessionKind.SUBAGENT,
+            ),
+        ]
+    )
+    broker = _Broker()
+    lifecycle = _SessionLifecycle()
+
+    await _recovery(
+        repository=repository,
+        broker=broker,
+        lifecycle=lifecycle,
+    ).recover_once()
+
+    assert lifecycle.running_session_ids == ["root-session", "child-session"]
+    assert [message.session_id for message in broker.sent_messages] == [
+        "root-session",
+        "child-session",
+    ]

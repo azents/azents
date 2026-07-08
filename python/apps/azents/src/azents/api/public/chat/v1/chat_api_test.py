@@ -456,6 +456,7 @@ class _StopWriteService:
     def __init__(self) -> None:
         self.session_ids: list[str] = []
         self.user_ids: list[str] = []
+        self.stopped_session_ids = ["1123456789abcdef0123456789abcdef"]
 
     async def request_session_stop(
         self,
@@ -470,6 +471,7 @@ class _StopWriteService:
             session_id=session_id,
             stop_request_id="stop-request-1",
             runtime_was_running=True,
+            stopped_session_ids=self.stopped_session_ids,
         )
 
 
@@ -1132,6 +1134,31 @@ class TestStopSessionRun:
         assert isinstance(message, SessionStopSignal)
         assert message.session_id == "1123456789abcdef0123456789abcdef"
         assert message.user_id == "user-1"
+
+    async def test_sends_stop_signal_for_each_subtree_session(self) -> None:
+        """REST stop endpoint publishes stop signals for the requested subtree."""
+        broker = _MemoryBroker()
+        chat_service = _StopChatService()
+        chat_write_service = _StopWriteService()
+        chat_write_service.stopped_session_ids = [
+            "1123456789abcdef0123456789abcdef",
+            "2123456789abcdef0123456789abcdef",
+            "3123456789abcdef0123456789abcdef",
+        ]
+
+        await stop_session_run(
+            "1123456789abcdef0123456789abcdef",
+            CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_write_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+        )
+
+        assert [
+            message.session_id
+            for message in broker.messages
+            if isinstance(message, SessionStopSignal)
+        ] == chat_write_service.stopped_session_ids
 
     async def test_denies_stop_without_session_access(self) -> None:
         """Do not issue stop request without session access."""

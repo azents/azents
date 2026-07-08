@@ -70,6 +70,8 @@ class _RunRepo:
         self.phases: list[AgentRunPhase] = []
         self.terminal: AgentRunStatus | None = None
         self.active_tool_calls: list[ActiveToolCall] = []
+        self.terminal_result_event_id: str | None = None
+        self.terminal_result_message: str | None = None
 
     async def get_by_id(
         self,
@@ -112,10 +114,14 @@ class _RunRepo:
         *,
         ended_at: object,
         last_completed_event_id: str | None = None,
+        terminal_result_event_id: str | None = None,
+        terminal_result_message: str | None = None,
     ) -> object:
         """Record terminal status."""
         del session, run_id, ended_at, last_completed_event_id
         self.terminal = status
+        self.terminal_result_event_id = terminal_result_event_id
+        self.terminal_result_message = terminal_result_message
         self.active_tool_calls = []
         return object()
 
@@ -588,6 +594,8 @@ async def test_text_run_completes() -> None:
 
     assert status == AgentRunStatus.COMPLETED
     assert run_repo.terminal == AgentRunStatus.COMPLETED
+    assert run_repo.terminal_result_message == "done"
+    assert run_repo.terminal_result_event_id == transcript_repo.events[0].id
     assert AgentRunPhase.STREAMING_MODEL in run_repo.phases
     assert emitted_phases == run_repo.phases
 

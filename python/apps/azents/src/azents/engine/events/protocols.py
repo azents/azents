@@ -166,6 +166,8 @@ class AgentRunCreateRepository(Protocol):
         *,
         ended_at: datetime.datetime,
         last_completed_event_id: str | None = None,
+        terminal_result_event_id: str | None = None,
+        terminal_result_message: str | None = None,
     ) -> object:
         """Record run terminal state."""
         ...
@@ -210,6 +212,8 @@ class RunStateRepository(Protocol):
         *,
         ended_at: datetime.datetime,
         last_completed_event_id: str | None = None,
+        terminal_result_event_id: str | None = None,
+        terminal_result_message: str | None = None,
     ) -> object:
         """Record run terminal state."""
         ...
