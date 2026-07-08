@@ -26,6 +26,8 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.message import MessageRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.user import UserRepository
+from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -52,19 +54,21 @@ async def _add_workspace_user(
     session: AsyncSession,
     *,
     workspace_id: str,
-    user_id: str,
-) -> None:
-    """Create WorkspaceUser for tests."""
+    email: str,
+) -> str:
+    """Create User and WorkspaceUser for tests."""
+    user = await UserRepository().create(session, UserCreate(email=email))
     result = await WorkspaceUserRepository().create(
         session,
         WorkspaceUserCreate(
             workspace_id=workspace_id,
-            user_id=user_id,
+            user_id=user.id,
             name="Subagent Tree user",
             role=WorkspaceUserRole.OWNER,
         ),
     )
     assert isinstance(result, Success)
+    return user.id
 
 
 async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
@@ -127,13 +131,12 @@ class TestSubagentTreeProjection:
         """Build a reconnect-safe tree projection from durable DB state."""
         repo = AgentSessionRepository()
         run_repo = AgentRunRepository()
-        user_id = "subagent-tree-user"
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(session, "subagent-tree-projection")
-            await _add_workspace_user(
+            user_id = await _add_workspace_user(
                 session,
                 workspace_id=workspace_id,
-                user_id=user_id,
+                email="subagent-tree-user@example.com",
             )
             agent_id = await _create_agent(session, workspace_id, "subagent-tree")
             root_session = await repo.create(
