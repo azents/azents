@@ -94,6 +94,16 @@ class RDBAgentRun(RDBModel):
         nullable=True,
         default=None,
     )
+    terminal_result_event_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    terminal_result_message: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
     stop_requested_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
         init=False,

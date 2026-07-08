@@ -427,10 +427,14 @@ class TestEventExecutionRepositories:
             run.id,
             AgentRunStatus.COMPLETED,
             ended_at=datetime.datetime.now(datetime.UTC),
+            terminal_result_event_id="0123456789abcdef0123456789abcdef",
+            terminal_result_message="Completed subtask summary",
         )
         assert completed.status == AgentRunStatus.COMPLETED
         assert completed.phase == AgentRunPhase.IDLE
         assert completed.active_tool_calls == []
+        assert completed.terminal_result_event_id == "0123456789abcdef0123456789abcdef"
+        assert completed.terminal_result_message == "Completed subtask summary"
         assert (
             await repo.get_running_by_session_id(
                 rdb_session,

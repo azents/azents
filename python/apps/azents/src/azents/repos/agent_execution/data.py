@@ -64,6 +64,14 @@ class AgentRunPatch(BaseModel):
         default=None,
         description="Last completed event ID",
     )
+    terminal_result_event_id: str | None = Field(
+        default=None,
+        description="Terminal result source event ID",
+    )
+    terminal_result_message: str | None = Field(
+        default=None,
+        description="Terminal result message projected for parent observation",
+    )
     stop_requested_at: datetime.datetime | None = Field(
         default=None,
         description="Stop requested time",

@@ -12,6 +12,7 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
+    SessionAgentKind,
 )
 
 
@@ -101,6 +102,31 @@ class AgentSession(BaseModel):
         default=None, description="Stop request correlation ID"
     )
     ended_at: datetime.datetime | None = Field(default=None, description="End time")
+    created_at: datetime.datetime = Field(description="Created time")
+    updated_at: datetime.datetime = Field(description="Updated time")
+
+
+class SessionAgent(BaseModel):
+    """SessionAgent domain model."""
+
+    id: str = Field(description="SessionAgent ID")
+    context_id: str = Field(description="SessionAgentContext ID")
+    root_session_agent_id: str = Field(description="Root SessionAgent ID")
+    agent_session_id: str = Field(description="Linked AgentSession ID")
+    kind: SessionAgentKind = Field(description="SessionAgent tree node kind")
+    name: str = Field(description="Tree-local name")
+    path: str = Field(description="Canonical absolute tree path")
+    agent_type: str = Field(description="Agent type identifier")
+    parent_session_agent_id: str | None = Field(
+        description="Parent SessionAgent ID",
+    )
+    last_task_message: str | None = Field(description="Latest delegated task preview")
+    parent_observed_run_index: int | None = Field(
+        description="Latest terminal run index observed by parent",
+    )
+    parent_observed_event_id: str | None = Field(
+        description="Latest terminal event ID observed by parent",
+    )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 
