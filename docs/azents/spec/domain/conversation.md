@@ -78,7 +78,6 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}
-  - /chat/v1/agents/{agent_id}/sessions/{session_id}/project-registration-requests
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/sessions/{session_id}/history
@@ -88,8 +87,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-06
-spec_version: 86
+last_verified_at: 2026-07-07
+spec_version: 87
 ---
 
 # Conversation & Events
@@ -231,9 +230,8 @@ selected.
 ### SessionWorkspaceProject
 
 `rdb/models/session_workspace_project.py` stores the project registry used as session working
-context. `SessionWorkspaceProject` and `SessionWorkspaceProjectRegistrationRequest` rows are owned by
-`AgentSession` through `session_id`. Runtime owns only the physical workspace where project paths
-exist.
+context. `SessionWorkspaceProject` rows are owned by `AgentSession` through `session_id`.
+Runtime owns only the physical workspace where project paths exist.
 
 Project and context inspector routes are session-scoped under
 `/chat/v1/agents/{agent_id}/sessions/{session_id}/...`. They validate that the selected session
@@ -588,3 +586,5 @@ Current verification:
 - **2026-07-03** — v80. Reflected explicit Project path session creation and separated Agent Project catalog UI projection from session Project prompt ownership.
 - **2026-07-05** — v84. Added failed-run retry attempt history, live-run update/clear WebSocket actions, and manual failed-run retry write semantics.
 - **2026-06-13** — v54. Added session todo snapshot and `todo_state_changed` WebSocket event to Chat live state. Todo is side state stored in `toolkit_states`, not durable transcript/compaction state.
+
+- **2026-07-07 (spec_version=87)** — Removed unimplemented Project registration request API and storage from current conversation/session behavior.

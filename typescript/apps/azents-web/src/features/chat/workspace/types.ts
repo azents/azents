@@ -8,7 +8,6 @@ import type {
   GitRefEntryResponse,
   ProjectBrowserEntryResponse,
   ProjectBrowserManifestResponse,
-  SessionWorkspaceProjectRegistrationRequestResponse,
   SessionWorkspaceProjectResponse,
 } from "@azents/public-client";
 
@@ -125,13 +124,10 @@ export type WorkspaceProjectPanelState =
   | {
       type: "READY";
       projects: SessionWorkspaceProjectResponse[];
-      registrationRequests: SessionWorkspaceProjectRegistrationRequestResponse[];
       registrationDialog: ProjectRegistrationDialogState;
       isRegisteringProject: boolean;
       isCreatingWorktree: boolean;
       registerProjectError: string | null;
-      pendingApproveRequestId: string | null;
-      pendingRejectRequestId: string | null;
       pendingDeleteProjectId: string | null;
     };
 

@@ -63,8 +63,6 @@ export interface WorkspacePanelContainerOutput {
   onSetProjectRegistrationMode: (mode: ProjectRegistrationMode) => void;
   onSetProjectRegistrationStartingRef: (ref: string | null) => void;
   onSubmitProjectRegistration: () => void;
-  onApproveRegistrationRequest: (requestId: string) => void;
-  onRejectRegistrationRequest: (requestId: string) => void;
   onDeleteProject: (projectId: string) => void;
   onRemoveProjectEntry: (entry: WorkspaceEntry) => void;
   onDeleteWorktreeProjectEntry: (entry: WorkspaceEntry) => void;
@@ -150,12 +148,6 @@ export function useWorkspacePanelContainer({
   const [registerProjectError, setRegisterProjectError] = useState<
     string | null
   >(null);
-  const [pendingApproveRequestId, setPendingApproveRequestId] = useState<
-    string | null
-  >(null);
-  const [pendingRejectRequestId, setPendingRejectRequestId] = useState<
-    string | null
-  >(null);
   const [pendingDeleteProjectId, setPendingDeleteProjectId] = useState<
     string | null
   >(null);
@@ -211,11 +203,6 @@ export function useWorkspacePanelContainer({
   });
   const projectBrowserManifestQuery =
     trpc.chat.getSessionProjectBrowserManifest.useQuery({
-      agentId,
-      sessionId,
-    });
-  const registrationRequestsQuery =
-    trpc.chat.listAgentProjectRegistrationRequests.useQuery({
       agentId,
       sessionId,
     });
@@ -523,37 +510,6 @@ export function useWorkspacePanelContainer({
       onError: (error) => setRegistrationSubmitError(error.message),
     });
 
-  const approveRegistrationRequestMutation =
-    trpc.chat.approveAgentProjectRegistrationRequest.useMutation({
-      onSuccess: async () => {
-        setPendingApproveRequestId(null);
-        await Promise.all([
-          utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
-          utils.chat.getSessionProjectBrowserManifest.invalidate({
-            agentId,
-            sessionId,
-          }),
-          utils.chat.listAgentProjectRegistrationRequests.invalidate({
-            agentId,
-            sessionId,
-          }),
-        ]);
-      },
-      onError: () => setPendingApproveRequestId(null),
-    });
-
-  const rejectRegistrationRequestMutation =
-    trpc.chat.rejectAgentProjectRegistrationRequest.useMutation({
-      onSuccess: async () => {
-        setPendingRejectRequestId(null);
-        await utils.chat.listAgentProjectRegistrationRequests.invalidate({
-          agentId,
-          sessionId,
-        });
-      },
-      onError: () => setPendingRejectRequestId(null),
-    });
-
   const deleteProjectMutation = trpc.chat.deleteAgentProject.useMutation({
     onSuccess: async () => {
       setPendingDeleteProjectId(null);
@@ -698,17 +654,12 @@ export function useWorkspacePanelContainer({
         agentId,
         sessionId,
       }),
-      utils.chat.listAgentProjectRegistrationRequests.invalidate({
-        agentId,
-        sessionId,
-      }),
     ]).finally(() => setIsManualRefreshing(false));
   }, [
     agentId,
     sessionId,
     utils.chat.getAgentWorkspace,
     utils.chat.getSessionProjectBrowserManifest,
-    utils.chat.listAgentProjectRegistrationRequests,
     utils.chat.listAgentProjects,
     utils.chat.readAgentWorkspacePath,
   ]);
@@ -821,30 +772,6 @@ export function useWorkspacePanelContainer({
     registrationStartingRef,
     sessionId,
   ]);
-
-  const onApproveRegistrationRequest = useCallback(
-    (requestId: string) => {
-      setPendingApproveRequestId(requestId);
-      approveRegistrationRequestMutation.mutate({
-        agentId,
-        sessionId,
-        requestId,
-      });
-    },
-    [agentId, approveRegistrationRequestMutation, sessionId],
-  );
-
-  const onRejectRegistrationRequest = useCallback(
-    (requestId: string) => {
-      setPendingRejectRequestId(requestId);
-      rejectRegistrationRequestMutation.mutate({
-        agentId,
-        sessionId,
-        requestId,
-      });
-    },
-    [agentId, rejectRegistrationRequestMutation, sessionId],
-  );
 
   const onDeleteProject = useCallback(
     (projectId: string) => {
@@ -1178,22 +1105,15 @@ export function useWorkspacePanelContainer({
   ]);
 
   const projectState = useMemo<WorkspaceProjectPanelState>(() => {
-    if (projectsQuery.isLoading || registrationRequestsQuery.isLoading) {
+    if (projectsQuery.isLoading) {
       return { type: "LOADING" };
     }
     if (projectsQuery.isError) {
       return { type: "ERROR", message: getErrorMessage(projectsQuery.error) };
     }
-    if (registrationRequestsQuery.isError) {
-      return {
-        type: "ERROR",
-        message: getErrorMessage(registrationRequestsQuery.error),
-      };
-    }
     return {
       type: "READY",
       projects: projectsQuery.data?.items ?? [],
-      registrationRequests: registrationRequestsQuery.data?.items ?? [],
       registrationDialog:
         registrationPath === null
           ? { type: "CLOSED" }
@@ -1212,16 +1132,12 @@ export function useWorkspacePanelContainer({
       isRegisteringProject: registerProjectMutation.isPending,
       isCreatingWorktree: createWorktreeProjectMutation.isPending,
       registerProjectError,
-      pendingApproveRequestId,
-      pendingRejectRequestId,
       pendingDeleteProjectId,
     };
   }, [
-    pendingApproveRequestId,
     createWorktreeProjectMutation.isPending,
     gitRefPreviewState,
     pendingDeleteProjectId,
-    pendingRejectRequestId,
     projectsQuery.data?.items,
     projectsQuery.error,
     projectsQuery.isError,
@@ -1233,10 +1149,6 @@ export function useWorkspacePanelContainer({
     registrationRepositoryType,
     registrationStartingRef,
     registrationSubmitError,
-    registrationRequestsQuery.data?.items,
-    registrationRequestsQuery.error,
-    registrationRequestsQuery.isError,
-    registrationRequestsQuery.isLoading,
   ]);
 
   return {
@@ -1275,8 +1187,6 @@ export function useWorkspacePanelContainer({
     onSetProjectRegistrationMode: setRegistrationMode,
     onSetProjectRegistrationStartingRef: setRegistrationStartingRef,
     onSubmitProjectRegistration,
-    onApproveRegistrationRequest,
-    onRejectRegistrationRequest,
     onDeleteProject,
     onRemoveProjectEntry,
     onDeleteWorktreeProjectEntry,

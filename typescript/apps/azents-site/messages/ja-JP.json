@@ -4,8 +4,6 @@
     "description": "自分のクラウドでマネージドエージェントを実行するためのオープンソースのコントロールプレーン。"
   },
   "nav": {
-    "architecture": "アーキテクチャ",
-    "roadmap": "ロードマップ",
     "github": "GitHub",
     "docs": "ドキュメント",
     "changeLanguage": "言語を変更"
@@ -15,16 +13,19 @@
     "headline": "自分たちのクラウドで動く managed agents。",
     "subheadline": "Azents は agent session と Runtime をチームのインフラで運用するための open-source control plane です。",
     "supporting": "Repo、files、credential、internal system の近くで実行できます。",
-    "discussion": "未解決の Issue を見る",
     "cta": {
       "github": "GitHub で Star",
       "docs": "ドキュメントを読む"
     }
   },
+  "productScreenshot": {
+    "label": "Azents の製品画面",
+    "imageAlt": "チャット、tool call、workspace files を表示している Azents の session 画面。"
+  },
   "architecture": {
-    "eyebrow": "アーキテクチャ",
-    "title": "所有するインフラのためのコントロールプレーン。",
-    "body": "エンジンはエージェントセッションを調整します。ランタイムは境界内でコード、ツール、ファイル操作を実行します。",
+    "eyebrow": "仕組み",
+    "title": "ひとつの control plane。Runtime は自分たちの境界内に。",
+    "body": "Azents は session を control plane で扱い、workspace 操作は自分たちのインフラ内の Runtime で実行します。",
     "diagram": {
       "label": "ユーザーとチームが Azents Engine に接続し、Azents Engine がクラウドまたはオンプレミス環境内のランタイムを調整します。",
       "path": "azents/コントロールプレーン",
@@ -79,6 +80,93 @@
       "toolkit": {
         "title": "ツールキット",
         "body": "プライベートな機能への制御されたアクセス。"
+      }
+    }
+  },
+  "architectureDeepDive": {
+    "eyebrow": "Architecture",
+    "title": "Remote agent を長く動かすための設計。",
+    "body": "Azents は session loop、Runtime boundary、provider ごとの実行を分け、実インフラ上でも agent の作業が続くようにします。",
+    "controls": {
+      "goToSlide": "Architecture slide {slide} へ移動",
+      "keyboardLabel": "Architecture carousel。左右の矢印キー、Home、End で slide を移動できます。"
+    },
+    "gestureHint": "スクロール、スワイプ、矢印キーで切り替えます。{current} / {total}",
+    "slides": {
+      "decoupledLoop": {
+        "tab": "Loop 分離",
+        "imageAlt": "Durable session loop と Runtime 実行境界の分離を示す抽象 architecture diagram。",
+        "eyebrow": "01 / session loop",
+        "title": "Runtime execution から decouple された独立 session loop。",
+        "mobileTitle": "独立した session loop。",
+        "body": "Engine が agent loop と durable events を扱い、Runtime は files、tools、shell、compute が必要なときだけ呼び出されます。",
+        "diagram": {
+          "sessionLabel": "durable session",
+          "sessionTitle": "Append-only event log",
+          "sessionBody": "Run は特定の Runtime に縛られず、replay、inspection、resume できます。",
+          "eventFlow": "events in, actions out",
+          "loopLabel": "control plane",
+          "loopTitle": "Session loop",
+          "loopBody": "Events を読み、次の動きを決め、次の event を記録します。",
+          "runtimeLabel": "execution boundary",
+          "runtimeTitle": "Runtime",
+          "runtimeBody": "Workspace 操作を実行し、session を失わずに入れ替えられます。"
+        }
+      },
+      "providers": {
+        "tab": "Providers",
+        "imageAlt": "Runtime adapter が複数の provider backend へ分岐する様子を示す抽象 architecture diagram。",
+        "eyebrow": "02 / runtime adapter",
+        "title": "Provider はひとつの Runtime adapter の後ろに置きます。",
+        "mobileTitle": "ひとつの adapter、複数の provider。",
+        "body": "まずは Kubernetes からです。同じ adapter 形状で local machine、E2B、custom backend へ広げられるようにします。",
+        "diagram": {
+          "adapterLabel": "stable interface",
+          "adapterTitle": "Runtime adapter",
+          "adapterBody": "Engine は workspace-scoped execution を要求し、Provider が実行環境の用意方法を決めます。",
+          "providerFlow": "provider choice",
+          "providers": {
+            "kubernetes": "Kubernetes",
+            "local": "Local machine",
+            "e2b": "E2B",
+            "custom": "Custom provider"
+          }
+        }
+      },
+      "longRunning": {
+        "tab": "Long runs",
+        "imageAlt": "Long-running agent の timeline、durable state、handoff を示す抽象 architecture diagram。",
+        "eyebrow": "03 / long-running agent",
+        "title": "Long-running agent には durable state が必要です。",
+        "mobileTitle": "長い run に durable state を。",
+        "body": "Tab が閉じても、worker が移っても、実行環境が再作成されても、history、progress、handoff point は残るべきです。",
+        "diagram": {
+          "railLabel": "run timeline",
+          "events": {
+            "start": {
+              "time": "t0",
+              "title": "Start",
+              "body": "実際の workspace に対して session が始まります。"
+            },
+            "disconnect": {
+              "time": "t1",
+              "title": "Disconnect",
+              "body": "Client が離れても run は終わりません。"
+            },
+            "handover": {
+              "time": "t2",
+              "title": "Handoff",
+              "body": "別の Engine worker が event log から引き継ぎます。"
+            },
+            "resume": {
+              "time": "t3",
+              "title": "Resume",
+              "body": "進捗が見え、durable state から続行します。"
+            }
+          },
+          "state": "session state survives",
+          "replay": "events can replay"
+        }
       }
     }
   },
@@ -182,10 +270,10 @@
     }
   },
   "roadmap": {
-    "eyebrow": "公開しながら開発中",
-    "title": "マネージドエージェントを自分たちで制御したいチームへ。",
-    "body": "プラットフォームエンジニア、インフラチーム、AI プロダクトビルダー、セルフホスト組織のためのプロジェクトです。",
-    "currentFocus": "現在の注力領域",
+    "eyebrow": "現在の注力",
+    "title": "実システムの近くで agent を運用するチームへ。",
+    "body": "Platform engineer、infra team、AI product builder、self-hosted control が必要な組織のためのプロジェクトです。",
+    "currentFocus": "注力領域",
     "audience": {
       "platform": "プラットフォームエンジニア",
       "devops": "インフラ / DevOps チーム",
@@ -210,9 +298,7 @@
     "docs": "ドキュメントを読む"
   },
   "footer": {
-    "tagline": "Azents はセルフホストされたマネージドエージェントのためのオープンソースインフラです。",
-    "github": "GitHub",
-    "discussion": "Issue"
+    "tagline": "Azents はセルフホストされたマネージドエージェントのためのオープンソースインフラです。"
   },
   "fontPreview": {
     "notes": {

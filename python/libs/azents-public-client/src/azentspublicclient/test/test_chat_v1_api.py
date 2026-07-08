@@ -26,13 +26,6 @@ class TestChatV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
-    def test_chat_v1_approve_agent_project_registration_request(self) -> None:
-        """Test case for chat_v1_approve_agent_project_registration_request
-
-        Approve Agent Project Registration Request
-        """
-        pass
-
     def test_chat_v1_archive_agent_session(self) -> None:
         """Test case for chat_v1_archive_agent_session
 
@@ -208,13 +201,6 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
-    def test_chat_v1_list_agent_project_registration_requests(self) -> None:
-        """Test case for chat_v1_list_agent_project_registration_requests
-
-        List Agent Project Registration Requests
-        """
-        pass
-
     def test_chat_v1_list_agent_projects(self) -> None:
         """Test case for chat_v1_list_agent_projects
 
@@ -289,13 +275,6 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_register_agent_project
 
         Register Agent Project
-        """
-        pass
-
-    def test_chat_v1_reject_agent_project_registration_request(self) -> None:
-        """Test case for chat_v1_reject_agent_project_registration_request
-
-        Reject Agent Project Registration Request
         """
         pass
 

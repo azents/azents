@@ -14,10 +14,13 @@
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
+    "@mantine/carousel": "^9.2.0",
     "@mantine/core": "^9.0.0",
     "@mantine/hooks": "^9.0.0",
     "@mantine/modals": "^9.0.0",
     "@tabler/icons-react": "^3.36.1",
+    "embla-carousel": "^8.6.0",
+    "embla-carousel-react": "^8.6.0",
     "next": "^16.0.10",
     "next-intl": "^4.8.2",
     "react": "^19.2.3",

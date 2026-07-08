@@ -261,8 +261,6 @@ __all__ = [
     "SessionContextSystemPromptResponse",
     "SessionWorkspaceProjectListResponse",
     "SessionWorkspaceProjectRegisterRequest",
-    "SessionWorkspaceProjectRegistrationRequestListResponse",
-    "SessionWorkspaceProjectRegistrationRequestResponse",
     "SessionWorkspaceProjectResponse",
     "SetPasswordRequest",
     "SignupStatusResponse",
@@ -548,8 +546,6 @@ from azentspublicclient.models.session_context_system_prompt_fragment_response i
 from azentspublicclient.models.session_context_system_prompt_response import SessionContextSystemPromptResponse as SessionContextSystemPromptResponse
 from azentspublicclient.models.session_workspace_project_list_response import SessionWorkspaceProjectListResponse as SessionWorkspaceProjectListResponse
 from azentspublicclient.models.session_workspace_project_register_request import SessionWorkspaceProjectRegisterRequest as SessionWorkspaceProjectRegisterRequest
-from azentspublicclient.models.session_workspace_project_registration_request_list_response import SessionWorkspaceProjectRegistrationRequestListResponse as SessionWorkspaceProjectRegistrationRequestListResponse
-from azentspublicclient.models.session_workspace_project_registration_request_response import SessionWorkspaceProjectRegistrationRequestResponse as SessionWorkspaceProjectRegistrationRequestResponse
 from azentspublicclient.models.session_workspace_project_response import SessionWorkspaceProjectResponse as SessionWorkspaceProjectResponse
 from azentspublicclient.models.set_password_request import SetPasswordRequest as SetPasswordRequest
 from azentspublicclient.models.signup_status_response import SignupStatusResponse as SignupStatusResponse

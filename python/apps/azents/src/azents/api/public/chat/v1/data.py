@@ -27,10 +27,7 @@ from azents.repos.action_execution.data import (
 )
 from azents.repos.agent_project_preset.data import AgentProjectPreset
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.session_workspace_project.data import (
-    SessionWorkspaceProject,
-    SessionWorkspaceProjectRegistrationRequest,
-)
+from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.chat.context import (
     SessionContext,
     SessionContextBreakdownSegment,
@@ -713,42 +710,9 @@ class AgentSessionProjectDefaultsResponse(BaseModel):
 
 
 class SessionWorkspaceProjectRegisterRequest(BaseModel):
-    """Existing Agent Workspace folder Project registration request."""
+    """Existing Agent Workspace folder Project registration payload."""
 
     path: str = Field(description="Existing directory path under /workspace/agent")
-
-
-class SessionWorkspaceProjectRegistrationRequestResponse(BaseModel):
-    """Agent Workspace Project registration request response."""
-
-    id: str = Field(description="Request ID")
-    path: str = Field(description="Requested Project path")
-    reason: str = Field(description="Request reason provided by the Agent")
-    status: str = Field(description="Request status")
-    project_id: str | None = Field(default=None, description="Approved Project ID")
-    created_at: datetime.datetime = Field(description="Created time")
-    updated_at: datetime.datetime = Field(description="Updated time")
-
-    @classmethod
-    def from_domain(cls, request: SessionWorkspaceProjectRegistrationRequest) -> Self:
-        """Convert from service model."""
-        return cls(
-            id=request.id,
-            path=request.path,
-            reason=request.reason,
-            status=request.status.value,
-            project_id=request.project_id,
-            created_at=request.created_at,
-            updated_at=request.updated_at,
-        )
-
-
-class SessionWorkspaceProjectRegistrationRequestListResponse(BaseModel):
-    """Agent Workspace Project registration request list response."""
-
-    items: list[SessionWorkspaceProjectRegistrationRequestResponse] = Field(
-        description="Project registration request list"
-    )
 
 
 class ProjectBrowserManifestPreviewRequest(BaseModel):

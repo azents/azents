@@ -14,7 +14,6 @@ from azents.core.enums import (
     AgentProjectCatalogStatus,
     AgentSessionStatus,
     RuntimeRunnerState,
-    SessionWorkspaceProjectRegistrationRequestStatus,
 )
 from azents.engine.tools.deps import get_skill_state_store
 from azents.engine.tools.skill import SkillProjectionService, SkillStateStore
@@ -30,7 +29,6 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import (
     SessionWorkspaceProject,
     SessionWorkspaceProjectCreate,
-    SessionWorkspaceProjectRegistrationRequest,
 )
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
@@ -68,16 +66,6 @@ class ProjectNotFound:
 
 
 @dataclasses.dataclass(frozen=True)
-class RegistrationRequestNotFound:
-    """Project registration request not found."""
-
-
-@dataclasses.dataclass(frozen=True)
-class RegistrationRequestAlreadyResolved:
-    """Project registration request already processed."""
-
-
-@dataclasses.dataclass(frozen=True)
 class AgentNotFound:
     """Agent not found."""
 
@@ -98,14 +86,6 @@ class AccessibleProjectContext:
 ProjectCreateError = InvalidProjectPath | ProjectPathConflict
 ProjectAccessError = AgentNotFound | ProjectAccessDenied
 ProjectFolderRegistrationError = ProjectAccessError | ProjectCreateError
-ProjectRegistrationRequestError = (
-    AgentNotFound
-    | ProjectAccessDenied
-    | InvalidProjectPath
-    | ProjectPathConflict
-    | RegistrationRequestNotFound
-    | RegistrationRequestAlreadyResolved
-)
 
 
 def normalize_session_workspace_path(path: str) -> str:
@@ -307,178 +287,6 @@ class SessionWorkspaceProjectService:
             session_id=context.session_id,
         )
         return Success(project)
-
-    async def list_registration_requests_for_session(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-        user_id: str,
-    ) -> Result[list[SessionWorkspaceProjectRegistrationRequest], ProjectAccessError]:
-        """Fetch Project registration requests of AgentSession accessible by user."""
-        async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context_for_session(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-            )
-            match context_result:
-                case Success(context):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-            requests = await self.repository.list_registration_requests(
-                session,
-                session_id=context.session_id,
-            )
-            return Success(requests)
-
-    async def approve_registration_request_for_session(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-        user_id: str,
-        request_id: str,
-    ) -> Result[SessionWorkspaceProject, ProjectRegistrationRequestError]:
-        """User approves AgentSession Project registration request."""
-        async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context_for_session(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-            )
-            match context_result:
-                case Success(context):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-            request = await self.repository.get_registration_request_by_id_for_update(
-                session,
-                request_id,
-            )
-            if request is None or request.session_id != context.session_id:
-                return Failure(RegistrationRequestNotFound())
-            if (
-                request.status
-                is not SessionWorkspaceProjectRegistrationRequestStatus.PENDING
-            ):
-                return Failure(RegistrationRequestAlreadyResolved())
-            validation = await self._validate_project_path_in_session(
-                session,
-                session_id=context.session_id,
-                path=request.path,
-            )
-            match validation:
-                case Success(normalized_path):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-            runtime_result = await self._get_runtime_for_project_context(
-                session,
-                context,
-            )
-            match runtime_result:
-                case Success(runtime):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-            exists_result = await _ensure_real_directory_in_runtime(
-                self.runner_operations,
-                runtime=runtime,
-                path=normalized_path,
-            )
-            match exists_result:
-                case Success():
-                    pass
-                case Failure(error):
-                    return Failure(error)
-            project = await self.repository.create_project(
-                session,
-                SessionWorkspaceProjectCreate(
-                    session_id=context.session_id,
-                    path=normalized_path,
-                ),
-            )
-            updated = await self.repository.mark_registration_request_approved(
-                session,
-                request_id,
-                session_id=context.session_id,
-                project_id=project.id,
-            )
-            if not updated:
-                await self.repository.delete_project(
-                    session,
-                    project.id,
-                    session_id=context.session_id,
-                )
-                return Failure(RegistrationRequestAlreadyResolved())
-            await self.agent_project_preset_repository.upsert_preset(
-                session,
-                agent_id=context.agent_id,
-                path=normalized_path,
-            )
-            await self.agent_project_catalog_repository.update_status(
-                session,
-                agent_id=context.agent_id,
-                path=normalized_path,
-                patch=_available_project_status_patch(),
-            )
-            await session.commit()
-        await self._sync_skill_projection_for_project_change(
-            agent_id=context.agent_id,
-            session_id=context.session_id,
-        )
-        return Success(project)
-
-    async def reject_registration_request_for_session(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-        user_id: str,
-        request_id: str,
-    ) -> Result[
-        None,
-        ProjectAccessError
-        | RegistrationRequestNotFound
-        | RegistrationRequestAlreadyResolved,
-    ]:
-        """User rejects AgentSession Project registration request."""
-        async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context_for_session(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-            )
-            match context_result:
-                case Success(context):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-            request = await self.repository.get_registration_request_by_id_for_update(
-                session,
-                request_id,
-            )
-            if request is None or request.session_id != context.session_id:
-                return Failure(RegistrationRequestNotFound())
-            if (
-                request.status
-                is not SessionWorkspaceProjectRegistrationRequestStatus.PENDING
-            ):
-                return Failure(RegistrationRequestAlreadyResolved())
-            updated = await self.repository.mark_registration_request_rejected(
-                session,
-                request_id,
-                session_id=context.session_id,
-            )
-            if not updated:
-                return Failure(RegistrationRequestAlreadyResolved())
-            await session.commit()
-            return Success(None)
 
     async def list_projects(
         self,

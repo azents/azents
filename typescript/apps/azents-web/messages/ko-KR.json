@@ -553,6 +553,10 @@
           "shellDisabled": "Shell 꺼짐"
         }
       },
+      "settingsLayout": {
+        "backToAgent": "에이전트로 돌아가기",
+        "backToSettings": "설정으로 돌아가기"
+      },
       "detail": {
         "tabs": {
           "chat": "채팅",
@@ -1107,10 +1111,6 @@
       "defaultRef": "기본",
       "noLocalBranches": "선택 가능한 로컬 브랜치가 없습니다.",
       "createWorktree": "Worktree 생성",
-      "requestsTitle": "Registration requests",
-      "requestsEmpty": "대기 중인 registration request가 없습니다.",
-      "approveRequest": "승인",
-      "rejectRequest": "거절",
       "restoringRuntime": "Runtime 준비 중…",
       "resetRuntime": "Runtime 초기화",
       "resetRuntimeConfirm": "Agent Workspace 파일과 보존된 Runtime 상태를 버리고 빈 Runtime을 새로 시작합니다. 이 작업은 되돌릴 수 없습니다.",

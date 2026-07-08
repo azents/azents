@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, type ReactNode, useContext, useMemo } from "react";
-import { LOCALE_COOKIE, type SupportedLocale } from "@/shared/lib/locale";
+import { type SupportedLocale } from "@/shared/lib/locale";
 
 interface LocaleContextType {
   locale: SupportedLocale;
@@ -20,15 +20,12 @@ interface LocaleProviderProps {
   locale: SupportedLocale;
 }
 
-function setCookie(name: string, value: string, days: number = 365): void {
-  if (typeof document === "undefined") {
-    return;
+function getLocaleHref(locale: SupportedLocale): string {
+  if (typeof window === "undefined") {
+    return `/${locale}/`;
   }
 
-  const expires = new Date(
-    Date.now() + days * 24 * 60 * 60 * 1000,
-  ).toUTCString();
-  document.cookie = `${name}=${value}; expires=${expires}; path=/; SameSite=Lax`;
+  return `/${locale}/${window.location.hash}`;
 }
 
 export function LocaleProvider({
@@ -39,8 +36,7 @@ export function LocaleProvider({
     () => ({
       locale,
       setLocale: (newLocale: SupportedLocale) => {
-        setCookie(LOCALE_COOKIE, newLocale);
-        window.location.reload();
+        window.location.href = getLocaleHref(newLocale);
       },
     }),
     [locale],

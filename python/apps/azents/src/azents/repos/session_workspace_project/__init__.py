@@ -3,17 +3,13 @@
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import SessionWorkspaceProjectRegistrationRequestStatus
 from azents.rdb.models.session_workspace_project import (
     RDBSessionWorkspaceProject,
-    RDBSessionWorkspaceProjectRegistrationRequest,
 )
 
 from .data import (
     SessionWorkspaceProject,
     SessionWorkspaceProjectCreate,
-    SessionWorkspaceProjectRegistrationRequest,
-    SessionWorkspaceProjectRegistrationRequestCreate,
 )
 
 
@@ -96,135 +92,6 @@ class SessionWorkspaceProjectRepository:
         await session.flush()
         return result.rowcount > 0  # pyright: ignore[reportAttributeAccessIssue]  # SQLAlchemy CursorResult.rowcount returns int at runtime.
 
-    async def create_registration_request(
-        self,
-        session: AsyncSession,
-        create: SessionWorkspaceProjectRegistrationRequestCreate,
-    ) -> SessionWorkspaceProjectRegistrationRequest:
-        """Create Project registration request row."""
-        rdb = RDBSessionWorkspaceProjectRegistrationRequest(
-            session_id=create.session_id,
-            path=create.path,
-            reason=create.reason,
-        )
-        session.add(rdb)
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build_registration_request(rdb)
-
-    async def get_registration_request_by_id(
-        self,
-        session: AsyncSession,
-        request_id: str,
-    ) -> SessionWorkspaceProjectRegistrationRequest | None:
-        """Fetch Project registration request by ID."""
-        rdb = await session.get(
-            RDBSessionWorkspaceProjectRegistrationRequest,
-            request_id,
-        )
-        if rdb is None:
-            return None
-        return self._build_registration_request(rdb)
-
-    async def get_registration_request_by_id_for_update(
-        self,
-        session: AsyncSession,
-        request_id: str,
-    ) -> SessionWorkspaceProjectRegistrationRequest | None:
-        """Fetch registration request by ID with row lock."""
-        result = await session.execute(
-            sa.select(RDBSessionWorkspaceProjectRegistrationRequest)
-            .where(RDBSessionWorkspaceProjectRegistrationRequest.id == request_id)
-            .with_for_update()
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        return self._build_registration_request(rdb)
-
-    async def get_pending_registration_request_by_path(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        path: str,
-    ) -> SessionWorkspaceProjectRegistrationRequest | None:
-        """Fetch pending registration request with same path."""
-        result = await session.execute(
-            sa.select(RDBSessionWorkspaceProjectRegistrationRequest).where(
-                RDBSessionWorkspaceProjectRegistrationRequest.session_id == session_id,
-                RDBSessionWorkspaceProjectRegistrationRequest.path == path,
-                RDBSessionWorkspaceProjectRegistrationRequest.status
-                == SessionWorkspaceProjectRegistrationRequestStatus.PENDING,
-            )
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        return self._build_registration_request(rdb)
-
-    async def list_registration_requests(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-    ) -> list[SessionWorkspaceProjectRegistrationRequest]:
-        """Fetch Project registration request list for AgentSession."""
-        result = await session.execute(
-            sa.select(RDBSessionWorkspaceProjectRegistrationRequest)
-            .where(
-                RDBSessionWorkspaceProjectRegistrationRequest.session_id == session_id
-            )
-            .order_by(RDBSessionWorkspaceProjectRegistrationRequest.created_at)
-        )
-        return [self._build_registration_request(rdb) for rdb in result.scalars()]
-
-    async def mark_registration_request_approved(
-        self,
-        session: AsyncSession,
-        request_id: str,
-        *,
-        session_id: str,
-        project_id: str,
-    ) -> bool:
-        """Transition Registration request to approved state."""
-        result = await session.execute(
-            sa.update(RDBSessionWorkspaceProjectRegistrationRequest)
-            .where(
-                RDBSessionWorkspaceProjectRegistrationRequest.id == request_id,
-                RDBSessionWorkspaceProjectRegistrationRequest.session_id == session_id,
-                RDBSessionWorkspaceProjectRegistrationRequest.status
-                == SessionWorkspaceProjectRegistrationRequestStatus.PENDING,
-            )
-            .values(
-                status=SessionWorkspaceProjectRegistrationRequestStatus.APPROVED,
-                project_id=project_id,
-            )
-        )
-        await session.flush()
-        return result.rowcount > 0  # pyright: ignore[reportAttributeAccessIssue]  # SQLAlchemy CursorResult.rowcount returns int at runtime.
-
-    async def mark_registration_request_rejected(
-        self,
-        session: AsyncSession,
-        request_id: str,
-        *,
-        session_id: str,
-    ) -> bool:
-        """Transition Registration request to rejected state."""
-        result = await session.execute(
-            sa.update(RDBSessionWorkspaceProjectRegistrationRequest)
-            .where(
-                RDBSessionWorkspaceProjectRegistrationRequest.id == request_id,
-                RDBSessionWorkspaceProjectRegistrationRequest.session_id == session_id,
-                RDBSessionWorkspaceProjectRegistrationRequest.status
-                == SessionWorkspaceProjectRegistrationRequestStatus.PENDING,
-            )
-            .values(status=SessionWorkspaceProjectRegistrationRequestStatus.REJECTED)
-        )
-        await session.flush()
-        return result.rowcount > 0  # pyright: ignore[reportAttributeAccessIssue]  # SQLAlchemy CursorResult.rowcount returns int at runtime.
-
     def _build_project(
         self,
         rdb: RDBSessionWorkspaceProject,
@@ -234,22 +101,6 @@ class SessionWorkspaceProjectRepository:
             id=rdb.id,
             session_id=rdb.session_id,
             path=rdb.path,
-            created_at=rdb.created_at,
-            updated_at=rdb.updated_at,
-        )
-
-    def _build_registration_request(
-        self,
-        rdb: RDBSessionWorkspaceProjectRegistrationRequest,
-    ) -> SessionWorkspaceProjectRegistrationRequest:
-        """Convert RDB registration request row to domain model."""
-        return SessionWorkspaceProjectRegistrationRequest(
-            id=rdb.id,
-            session_id=rdb.session_id,
-            path=rdb.path,
-            reason=rdb.reason,
-            status=rdb.status,
-            project_id=rdb.project_id,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )

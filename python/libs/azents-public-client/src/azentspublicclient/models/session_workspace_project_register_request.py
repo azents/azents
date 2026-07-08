@@ -24,7 +24,7 @@ from typing_extensions import Self
 
 class SessionWorkspaceProjectRegisterRequest(BaseModel):
     """
-    Existing Agent Workspace folder Project registration request.
+    Existing Agent Workspace folder Project registration payload.
     """ # noqa: E501
     path: StrictStr = Field(description="Existing directory path under /workspace/agent")
     additional_properties: Dict[str, Any] = {}

@@ -553,6 +553,10 @@
           "shellDisabled": "Shell off"
         }
       },
+      "settingsLayout": {
+        "backToAgent": "Back to agent",
+        "backToSettings": "Back to settings"
+      },
       "detail": {
         "tabs": {
           "chat": "Chat",
@@ -1107,10 +1111,6 @@
       "defaultRef": "default",
       "noLocalBranches": "No selectable local branches found.",
       "createWorktree": "Create worktree",
-      "requestsTitle": "Registration requests",
-      "requestsEmpty": "No pending registration requests.",
-      "approveRequest": "Approve",
-      "rejectRequest": "Reject",
       "restoringRuntime": "Preparing runtime…",
       "resetRuntime": "Reset runtime",
       "resetRuntimeConfirm": "This will discard agent workspace files and any preserved runtime state, then start an empty runtime. This action cannot be undone.",

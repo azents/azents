@@ -553,6 +553,10 @@
           "shellDisabled": "Shell off"
         }
       },
+      "settingsLayout": {
+        "backToAgent": "Retour à l’agent",
+        "backToSettings": "Retour aux paramètres"
+      },
       "detail": {
         "tabs": {
           "chat": "Discussion",
@@ -1107,10 +1111,6 @@
       "defaultRef": "par défaut",
       "noLocalBranches": "Aucune branche locale sélectionnable.",
       "createWorktree": "Créer le worktree",
-      "requestsTitle": "Registration requests",
-      "requestsEmpty": "Aucune registration request en attente.",
-      "approveRequest": "Approve",
-      "rejectRequest": "Reject",
       "restoringRuntime": "Préparation du runtime…",
       "resetRuntime": "Réinitialiser le runtime",
       "resetRuntimeConfirm": "Cette action supprimera les fichiers de l'agent workspace et l'état runtime conservé, puis démarrera un runtime vide. Elle est irréversible.",
