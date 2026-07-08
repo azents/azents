@@ -3,61 +3,74 @@
 /**
  * Compaction summary divider.
  *
- * previous conversation summarytext notify and, collapse/expand with summary content display.
- * TurnDividerand similar dotted line style use.
+ * Shows when previous conversation turns were summarized and lets users expand
+ * or collapse the generated summary inline.
  */
 
-import { Box, Collapse, Group, Text, UnstyledButton } from "@mantine/core";
+import { Box, Collapse, Group, rem, Text, UnstyledButton } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { MarkdownContent } from "./MarkdownContent";
 
-/** dotted line style */
 const dashedLineStyle: React.CSSProperties = {
   flex: 1,
-  borderBottom: "1px dashed var(--mantine-color-default-border)",
+  borderBottom: `${rem(1)} dashed var(--mantine-color-default-border)`,
 };
 
+interface SummaryToggleButtonProps {
+  opened: boolean;
+  onToggle: () => void;
+}
+
+function SummaryToggleButton({
+  opened,
+  onToggle,
+}: SummaryToggleButtonProps): React.ReactElement {
+  const t = useTranslations("chat");
+
+  return (
+    <UnstyledButton aria-expanded={opened} onClick={onToggle}>
+      <Group gap={rem(2)} align="center">
+        <Text size="xs" c="dimmed" td="underline">
+          {opened ? t("compaction.collapse") : t("compaction.expand")}
+        </Text>
+        {opened ? (
+          <IconChevronDown size={rem(12)} color="var(--mantine-color-dimmed)" />
+        ) : (
+          <IconChevronRight
+            size={rem(12)}
+            color="var(--mantine-color-dimmed)"
+          />
+        )}
+      </Group>
+    </UnstyledButton>
+  );
+}
+
 interface CompactionDividerProps {
-  /** summary text (markdown) */
+  /** Summary text rendered as Markdown. */
   content: string | null;
+  /** Whether the summary starts expanded. */
+  initialOpened?: boolean;
 }
 
 export function CompactionDivider({
   content,
+  initialOpened = false,
 }: CompactionDividerProps): React.ReactElement {
   const t = useTranslations("chat");
-  const [opened, { toggle }] = useDisclosure(false);
+  const [opened, { toggle }] = useDisclosure(initialOpened);
 
   return (
     <Box mb="md">
       <Group gap="xs" align="center">
         <Box style={dashedLineStyle} />
-        <Group gap={4} align="center">
+        <Group gap="xs" align="center">
           <Text size="xs" c="dimmed">
             {t("compaction.summary")}
           </Text>
-          {content && (
-            <UnstyledButton onClick={toggle}>
-              <Group gap={2} align="center">
-                <Text size="xs" c="dimmed" td="underline">
-                  {opened ? t("compaction.collapse") : t("compaction.expand")}
-                </Text>
-                {opened ? (
-                  <IconChevronDown
-                    size={12}
-                    color="var(--mantine-color-dimmed)"
-                  />
-                ) : (
-                  <IconChevronRight
-                    size={12}
-                    color="var(--mantine-color-dimmed)"
-                  />
-                )}
-              </Group>
-            </UnstyledButton>
-          )}
+          {content && <SummaryToggleButton opened={opened} onToggle={toggle} />}
         </Group>
         <Box style={dashedLineStyle} />
       </Group>
@@ -69,10 +82,13 @@ export function CompactionDivider({
             style={{
               borderRadius: "var(--mantine-radius-sm)",
               background: "var(--mantine-color-default)",
-              border: "1px dashed var(--mantine-color-default-border)",
+              border: `${rem(1)} dashed var(--mantine-color-default-border)`,
             }}
           >
             <MarkdownContent>{content}</MarkdownContent>
+            <Group justify="center" mt="sm">
+              <SummaryToggleButton opened={opened} onToggle={toggle} />
+            </Group>
           </Box>
         </Collapse>
       )}

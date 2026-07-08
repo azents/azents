@@ -24,6 +24,15 @@ export const WithSummary = {
   },
 } satisfies Story;
 
+export const ExpandedSummary = {
+  args: {
+    content:
+      "The previous conversation covered setup, provider configuration, and initial chat UI stories.\n\n" +
+      "The summary stays readable when it grows long, and the lower collapse control remains available after scrolling through the content.",
+    initialOpened: true,
+  },
+} satisfies Story;
+
 export const WithoutSummary = {
   args: {
     content: null,
