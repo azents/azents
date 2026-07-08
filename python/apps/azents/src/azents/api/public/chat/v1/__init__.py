@@ -224,6 +224,7 @@ from .data import (
     SessionWorkspaceProjectListResponse,
     SessionWorkspaceProjectRegisterRequest,
     SessionWorkspaceProjectResponse,
+    SubagentTreeResponse,
     TodoStateResponse,
     UploadResponse,
     WsTicketResponse,
@@ -1821,6 +1822,34 @@ async def get_agent_session(
         case Failure(error):
             match error:
                 case SessionNotFound():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/agents/{agent_id}/sessions/{session_id}/subagents/tree")
+async def get_subagent_tree(
+    agent_id: str,
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> SubagentTreeResponse:
+    """Get the durable Subagent Tree projection for a session tree."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_session_id(session_id)
+    result = await chat_service.get_subagent_tree(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(tree):
+            return SubagentTreeResponse.from_domain(tree)
+        case Failure(error):
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case _:
                     assert_never(error)

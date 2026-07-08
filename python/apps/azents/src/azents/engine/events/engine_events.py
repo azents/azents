@@ -161,6 +161,16 @@ class TodoStateChanged(BaseModel):
     todo: dict[str, object]
 
 
+class SubagentTreeChanged(BaseModel):
+    """Subagent Tree invalidation event."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["subagent_tree_changed"] = "subagent_tree_changed"
+    root_session_agent_id: str
+    changed_session_agent_id: str
+
+
 EngineEvent: TypeAlias = Annotated[
     ContentDelta
     | ReasoningDelta
@@ -177,6 +187,7 @@ EngineEvent: TypeAlias = Annotated[
     | AccountLinkNudgeEvent
     | CompactionStarted
     | TodoStateChanged
+    | SubagentTreeChanged
     | CompactionComplete,
     Field(discriminator="type"),
 ]

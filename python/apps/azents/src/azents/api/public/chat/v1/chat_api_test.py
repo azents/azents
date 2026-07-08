@@ -21,6 +21,7 @@ from azents.api.public.chat.v1 import (
     create_team_agent_session,
     delete_input_buffer,
     get_agent_session,
+    get_subagent_tree,
     get_team_primary_agent_session,
     list_agent_sessions,
     list_history_events,
@@ -88,6 +89,8 @@ from azents.services.chat.data import (
     RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionNotFound,
+    SubagentTreeNode,
+    SubagentTreeProjection,
     UpdateGoalResult,
     UpdateGoalStatusInput,
 )
@@ -399,6 +402,72 @@ class _StopChatService:
         """Return session access validation result."""
         del user_id
         self.session_ids.append(session_id)
+        return self.result
+
+
+class _SubagentTreeChatService:
+    """Subagent Tree service double for route tests."""
+
+    def __init__(self) -> None:
+        self.result: Success[SubagentTreeProjection] | Failure[SessionNotFound] = (
+            Success(
+                SubagentTreeProjection(
+                    root_session_agent_id="root-agent",
+                    root_agent_session_id="1123456789abcdef0123456789abcdef",
+                    current_session_agent_id="root-agent",
+                    nodes=[
+                        SubagentTreeNode(
+                            session_agent_id="root-agent",
+                            agent_session_id="1123456789abcdef0123456789abcdef",
+                            parent_session_agent_id=None,
+                            name="root",
+                            path="/root",
+                            agent_type="default",
+                            status="running",
+                            last_task_message=None,
+                            unread_result=False,
+                            latest_run_id=None,
+                            latest_run_index=None,
+                            latest_run_status=None,
+                            terminal_result_event_id=None,
+                            terminal_result_message=None,
+                            children=[
+                                SubagentTreeNode(
+                                    session_agent_id="child-agent",
+                                    agent_session_id=(
+                                        "2123456789abcdef0123456789abcdef"
+                                    ),
+                                    parent_session_agent_id="root-agent",
+                                    name="child",
+                                    path="/root/child",
+                                    agent_type="default",
+                                    status="completed",
+                                    last_task_message="work",
+                                    unread_result=True,
+                                    latest_run_id=("3123456789abcdef0123456789abcdef"),
+                                    latest_run_index=1,
+                                    latest_run_status=AgentRunStatus.COMPLETED,
+                                    terminal_result_event_id=(
+                                        "4123456789abcdef0123456789abcdef"
+                                    ),
+                                    terminal_result_message="done",
+                                )
+                            ],
+                        )
+                    ],
+                )
+            )
+        )
+
+    async def get_subagent_tree(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Success[SubagentTreeProjection] | Failure[SessionNotFound]:
+        """Return configured Subagent Tree projection."""
+        del agent_id, session_id, user_id
         return self.result
 
 
@@ -1106,6 +1175,56 @@ class TestUpdateSessionGoalStatus:
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
         assert len(broadcast.events) == 2
+
+
+class TestGetSubagentTree:
+    """Tests for GET /chat/v1/.../subagents/tree."""
+
+    async def test_returns_subagent_tree_projection(self) -> None:
+        """Return nested Subagent Tree projection."""
+        response = await get_subagent_tree(
+            "1123456789abcdef0123456789abcdef",
+            "1123456789abcdef0123456789abcdef",
+            CurrentUser(user_id="user-1", session_id="auth-session"),
+            _SubagentTreeChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+        )
+
+        dumped = response.model_dump(mode="json")
+        assert dumped["root_session_agent_id"] == "root-agent"
+        assert dumped["nodes"][0]["children"][0] == {
+            "session_agent_id": "child-agent",
+            "agent_session_id": "2123456789abcdef0123456789abcdef",
+            "parent_session_agent_id": "root-agent",
+            "name": "child",
+            "path": "/root/child",
+            "agent_type": "default",
+            "status": "completed",
+            "last_task_message": "work",
+            "unread_result": True,
+            "latest_run_id": "3123456789abcdef0123456789abcdef",
+            "latest_run_index": 1,
+            "latest_run_status": "completed",
+            "terminal_result_event_id": "4123456789abcdef0123456789abcdef",
+            "terminal_result_message": "done",
+            "children": [],
+        }
+
+    async def test_denies_subagent_tree_without_session_access(self) -> None:
+        """Do not expose Subagent Tree without session access."""
+        service = _SubagentTreeChatService()
+        service.result = Failure(SessionNotFound())
+
+        try:
+            await get_subagent_tree(
+                "1123456789abcdef0123456789abcdef",
+                "1123456789abcdef0123456789abcdef",
+                CurrentUser(user_id="user-1", session_id="auth-session"),
+                service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+            )
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 404
+        else:
+            raise AssertionError("Expected HTTPException")
 
 
 class TestStopSessionRun:

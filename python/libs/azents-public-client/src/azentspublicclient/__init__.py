@@ -265,6 +265,8 @@ __all__ = [
     "SetPasswordRequest",
     "SignupStatusResponse",
     "SkillAction",
+    "SubagentTreeNodeResponse",
+    "SubagentTreeResponse",
     "TestConnectionRequest",
     "TestConnectionResponse",
     "TodoItemResponse",
@@ -550,6 +552,8 @@ from azentspublicclient.models.session_workspace_project_response import Session
 from azentspublicclient.models.set_password_request import SetPasswordRequest as SetPasswordRequest
 from azentspublicclient.models.signup_status_response import SignupStatusResponse as SignupStatusResponse
 from azentspublicclient.models.skill_action import SkillAction as SkillAction
+from azentspublicclient.models.subagent_tree_node_response import SubagentTreeNodeResponse as SubagentTreeNodeResponse
+from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse as SubagentTreeResponse
 from azentspublicclient.models.test_connection_request import TestConnectionRequest as TestConnectionRequest
 from azentspublicclient.models.test_connection_response import TestConnectionResponse as TestConnectionResponse
 from azentspublicclient.models.todo_item_response import TodoItemResponse as TodoItemResponse
