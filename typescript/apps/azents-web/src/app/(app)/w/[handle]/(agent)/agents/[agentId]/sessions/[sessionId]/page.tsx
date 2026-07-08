@@ -2,17 +2,19 @@ import { TRPCError } from "@trpc/server";
 import { notFound, redirect } from "next/navigation";
 import { AgentChatTabPage } from "@/features/agents/AgentChatTabPage";
 import { AgentContextPage } from "@/features/agents/AgentContextPage";
+import { AgentSubagentsPage } from "@/features/agents/AgentSubagentsPage";
 import { trpc } from "@/trpc/server";
 import type { AgentContextPageView } from "@/features/agents/AgentContextPage";
 
-type SessionPageView = "chat" | AgentContextPageView;
+type SessionPageView = "chat" | "subagents" | AgentContextPageView;
 
 function parsePageView(value?: string | string[]): SessionPageView {
   const rawValue = Array.isArray(value) ? value[0] : value;
   if (
     rawValue === "context" ||
     rawValue === "system-prompt" ||
-    rawValue === "raw-events"
+    rawValue === "raw-events" ||
+    rawValue === "subagents"
   ) {
     return rawValue;
   }
@@ -40,6 +42,15 @@ export default async function Page({
       trpc.chat.getAgentSession({ agentId, sessionId }),
     ]);
     const view = parsePageView(query.page);
+    if (view === "subagents") {
+      return (
+        <AgentSubagentsPage
+          handle={handle}
+          agent={agent}
+          sessionId={sessionId}
+        />
+      );
+    }
     if (view !== "chat") {
       return (
         <AgentContextPage
