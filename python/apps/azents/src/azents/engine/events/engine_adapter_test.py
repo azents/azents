@@ -173,9 +173,18 @@ class _RunRepo:
         *,
         ended_at: datetime.datetime,
         last_completed_event_id: str | None = None,
+        terminal_result_event_id: str | None = None,
+        terminal_result_message: str | None = None,
     ) -> object:
         """Record terminal update call."""
-        del session, run_id, ended_at, last_completed_event_id
+        del (
+            session,
+            run_id,
+            ended_at,
+            last_completed_event_id,
+            terminal_result_event_id,
+            terminal_result_message,
+        )
         self.terminal_status = status
         return object()
 

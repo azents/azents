@@ -39,7 +39,9 @@ class _RunRepository:
     """RunStateRepository test double."""
 
     def __init__(self) -> None:
-        self.terminal_calls: list[tuple[str, AgentRunStatus, str | None]] = []
+        self.terminal_calls: list[
+            tuple[str, AgentRunStatus, str | None, str | None, str | None]
+        ] = []
 
     async def mark_terminal_if_running(
         self,
@@ -49,10 +51,20 @@ class _RunRepository:
         *,
         ended_at: datetime.datetime,
         last_completed_event_id: str | None = None,
+        terminal_result_event_id: str | None = None,
+        terminal_result_message: str | None = None,
     ) -> object:
         """Record terminal transition request."""
         del session, ended_at
-        self.terminal_calls.append((run_id, status, last_completed_event_id))
+        self.terminal_calls.append(
+            (
+                run_id,
+                status,
+                last_completed_event_id,
+                terminal_result_event_id,
+                terminal_result_message,
+            )
+        )
         return object()
 
 
@@ -129,5 +141,11 @@ async def test_failed_run_event_store_appends_terminal_failed_run() -> None:
     assert marker_payload.run_id == "run-001".rjust(32, "0")
     assert marker_payload.status == "failed"
     assert run_repo.terminal_calls == [
-        ("run-001".rjust(32, "0"), AgentRunStatus.FAILED, result.run_marker.id)
+        (
+            "run-001".rjust(32, "0"),
+            AgentRunStatus.FAILED,
+            result.run_marker.id,
+            result.error_event.id,
+            "temporary failure",
+        )
     ]

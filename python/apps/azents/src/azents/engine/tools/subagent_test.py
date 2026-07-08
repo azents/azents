@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
 from azents.core.enums import (
+    AgentRunPhase,
+    AgentRunStatus,
     AgentSessionKind,
     AgentSessionRunState,
     AgentSessionStartReason,
@@ -18,6 +20,7 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.tools import ToolkitStatus, TurnContext
+from azents.engine.events.types import AgentRunState
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
@@ -127,6 +130,7 @@ class _AgentSessionRepository:
         self.sessions = {"child-session": _agent_session(id="child-session")}
         self.marked_running: list[str] = []
         self.last_task_updates: list[tuple[str, str | None]] = []
+        self.observation_updates: list[tuple[str, int | None, str | None]] = []
 
     async def get_session_agent_by_session_id(
         self,
@@ -166,6 +170,38 @@ class _AgentSessionRepository:
         self.last_task_updates.append((session_agent_id, last_task_message))
         return self.target
 
+    async def list_descendant_session_agents(
+        self,
+        session: AsyncSession,
+        *,
+        session_agent_id: str,
+        include_self: bool,
+    ) -> list[SessionAgent]:
+        """Return the child fixture as the only descendant."""
+        del session, session_agent_id, include_self
+        return [self.target]
+
+    async def update_session_agent_observation_cursor(
+        self,
+        session: AsyncSession,
+        *,
+        session_agent_id: str,
+        parent_observed_run_index: int | None,
+        parent_observed_event_id: str | None,
+    ) -> SessionAgent | None:
+        """Record terminal result observation cursor updates."""
+        del session
+        self.observation_updates.append(
+            (
+                session_agent_id,
+                parent_observed_run_index,
+                parent_observed_event_id,
+            )
+        )
+        self.target.parent_observed_run_index = parent_observed_run_index
+        self.target.parent_observed_event_id = parent_observed_event_id
+        return self.target
+
     async def mark_running_for_input_wakeup(
         self,
         session: AsyncSession,
@@ -183,6 +219,41 @@ class _AgentSessionRepository:
         """Return linked child AgentSession fixture."""
         del session
         return self.sessions.get(agent_session_id)
+
+
+class _AgentRunRepository:
+    """AgentRunRepository fake for subagent tool tests."""
+
+    def __init__(self) -> None:
+        """Initialize latest child run fixture."""
+        self.latest_by_session_id = {
+            "child-session": AgentRunState(
+                id="run".rjust(32, "0"),
+                session_id="child-session",
+                run_index=1,
+                phase=AgentRunPhase.IDLE,
+                status=AgentRunStatus.COMPLETED,
+                terminal_result_event_id="event".rjust(32, "0"),
+                terminal_result_message="child result",
+                started_at=_NOW,
+                ended_at=_NOW,
+                updated_at=_NOW,
+            )
+        }
+
+    async def list_latest_by_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: list[str],
+    ) -> dict[str, AgentRunState]:
+        """Return latest runs for requested sessions."""
+        del session
+        return {
+            session_id: self.latest_by_session_id[session_id]
+            for session_id in session_ids
+            if session_id in self.latest_by_session_id
+        }
 
 
 class _InputBufferService:
@@ -228,7 +299,7 @@ async def _make_toolkit() -> tuple[
     toolkit = SubagentToolkit(
         session_manager=_session_manager,
         agent_session_repository=cast(AgentSessionRepository, agent_session_repository),
-        agent_run_repository=cast(AgentRunRepository, object()),
+        agent_run_repository=cast(AgentRunRepository, _AgentRunRepository()),
         event_transcript_repository=cast(EventTranscriptRepository, object()),
         input_buffer_service=cast(InputBufferService, input_buffer_service),
         broker=cast(SessionBroker, broker),
@@ -308,3 +379,35 @@ async def test_followup_task_wakes_target_child() -> None:
     wake = broker.messages[0]
     assert isinstance(wake, SessionWakeUp)
     assert wake.session_id == "child-session"
+
+
+async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
+    """wait_agent observes unread child terminal results once."""
+    toolkit, repo, _input_service, _broker = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, object()),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
+
+    result = await tool.handler(json.dumps({"agent_name": "child"}))
+
+    assert json.loads(cast(str, result)) == {
+        "message": "child result",
+        "timed_out": False,
+    }
+    assert repo.observation_updates == [("child-agent", 1, "event".rjust(32, "0"))]
+
+    second_result = await tool.handler(json.dumps({"agent_name": "child"}))
+
+    assert json.loads(cast(str, second_result)) == {
+        "message": "No unread terminal result.",
+        "timed_out": False,
+    }
+    assert repo.observation_updates == [("child-agent", 1, "event".rjust(32, "0"))]

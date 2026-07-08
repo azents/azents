@@ -439,6 +439,26 @@ class AgentSessionRepository:
             return None
         return self._build(rdb)
 
+    async def list_session_agent_subtree_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        agent_session_id: str,
+    ) -> list[str]:
+        """Fetch AgentSession IDs for the linked SessionAgent subtree."""
+        linked_agent = await self.get_session_agent_by_session_id(
+            session,
+            agent_session_id,
+        )
+        if linked_agent is None:
+            return [agent_session_id]
+        descendants = await self.list_descendant_session_agents(
+            session,
+            session_agent_id=linked_agent.id,
+            include_self=True,
+        )
+        return [agent.agent_session_id for agent in descendants]
+
     async def delete_by_id(
         self,
         session: AsyncSession,

@@ -233,6 +233,67 @@ class TestChatWriteService:
         else:
             raise AssertionError("Expected ValueError")
 
+    async def test_stop_request_targets_session_agent_subtree(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Stop requests cover the requested SessionAgent subtree."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "chat-write-stop-subtree",
+            )
+            user_id = await _create_user(
+                session,
+                "chat-write-stop-subtree@example.com",
+            )
+            agent_id = await _create_agent(session, workspace_id, "chat-write-stop")
+            session_repo = AgentSessionRepository()
+            root_session = await session_repo.ensure_team_primary_for_agent(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+            root_agent = await session_repo.get_session_agent_by_session_id(
+                session,
+                root_session.id,
+            )
+            assert root_agent is not None
+            child_agent = await session_repo.create_child_session_agent(
+                session,
+                parent_session_agent_id=root_agent.id,
+                name="child",
+                agent_type="default",
+                title="child",
+                last_task_message="work",
+            )
+            await session_repo.mark_running(session, root_session.id)
+            await session_repo.mark_running(session, child_agent.agent_session_id)
+
+        result = await _service(rdb_session_manager).request_session_stop(
+            session_id=root_session.id,
+            user_id=user_id,
+        )
+
+        assert result.runtime_was_running is True
+        assert result.stopped_session_ids == [
+            root_session.id,
+            child_agent.agent_session_id,
+        ]
+        async with rdb_session_manager() as session:
+            root_after = await AgentSessionRepository().get_by_id(
+                session,
+                root_session.id,
+            )
+            child_after = await AgentSessionRepository().get_by_id(
+                session,
+                child_agent.agent_session_id,
+            )
+            assert root_after is not None
+            assert child_after is not None
+            assert root_after.stop_request_id == result.stop_request_id
+            assert child_after.stop_request_id == result.stop_request_id
+
     async def test_edit_allows_rewriting_message_at_model_input_head(
         self,
         rdb_session_manager: SessionManager[AsyncSession],

@@ -353,10 +353,15 @@ class AgentRunExecution:
                             request.run_id,
                             "completed",
                         )
+                        terminal_event_id, terminal_message = (
+                            _terminal_result_from_events(appended)
+                        )
                         await self._mark_terminal(
                             session,
                             request.run_id,
                             AgentRunStatus.COMPLETED,
+                            terminal_result_event_id=terminal_event_id,
+                            terminal_result_message=terminal_message,
                         )
                         await session.commit()
                         if self._output_sink is not None:
@@ -482,10 +487,13 @@ class AgentRunExecution:
             request.run_id,
             "interrupted",
         )
+        terminal_event_id, terminal_message = _terminal_result_from_events(appended)
         await self._mark_terminal(
             session,
             request.run_id,
             AgentRunStatus.INTERRUPTED,
+            terminal_result_event_id=terminal_event_id,
+            terminal_result_message=terminal_message,
         )
         await session.commit()
         if self._output_sink is not None:
@@ -765,6 +773,9 @@ class AgentRunExecution:
         session: AsyncSession,
         run_id: str,
         status: AgentRunStatus,
+        *,
+        terminal_result_event_id: str | None = None,
+        terminal_result_message: str | None = None,
     ) -> None:
         """Record run terminal state."""
         await self._run_repo.mark_terminal(
@@ -772,6 +783,8 @@ class AgentRunExecution:
             run_id,
             status,
             ended_at=datetime.datetime.now(datetime.UTC),
+            terminal_result_event_id=terminal_result_event_id,
+            terminal_result_message=terminal_result_message,
         )
         if self._model_file_pin_repo is not None:
             await self._model_file_pin_repo.release_run(session, run_id=run_id)
@@ -848,6 +861,33 @@ def _log_model_token_usage(
             "raw_hidden_params": usage.raw_hidden_params,
         },
     )
+
+
+def _terminal_result_from_events(
+    events: Sequence[Event],
+) -> tuple[str | None, str | None]:
+    """Project the latest assistant text from terminal run events."""
+    for event in reversed(events):
+        payload = event.payload
+        if isinstance(payload, AssistantMessagePayload):
+            text = _assistant_content_text(payload.content)
+            if text is not None:
+                return event.id, text
+    return None, None
+
+
+def _assistant_content_text(content: object) -> str | None:
+    """Extract text from assistant content for terminal result projection."""
+    if isinstance(content, str):
+        stripped = content.strip()
+        return stripped or None
+    if isinstance(content, list):
+        parts = [
+            part.text.strip() for part in content if isinstance(part, OutputTextPart)
+        ]
+        text = "\n".join(part for part in parts if part)
+        return text or None
+    return None
 
 
 def _turn_range(max_turns: int | None) -> Iterable[int]:

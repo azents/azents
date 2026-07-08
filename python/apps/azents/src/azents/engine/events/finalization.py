@@ -84,5 +84,7 @@ class FailedRunEventStore:
             AgentRunStatus.FAILED,
             ended_at=datetime.datetime.now(datetime.UTC),
             last_completed_event_id=run_marker.id,
+            terminal_result_event_id=error_event.id,
+            terminal_result_message=user_message,
         )
         return FailedRunEventStoreResult(error_event=error_event, run_marker=run_marker)

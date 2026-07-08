@@ -65,6 +65,7 @@ class AcceptedStopRequest:
     session_id: str
     stop_request_id: str
     runtime_was_running: bool
+    stopped_session_ids: list[str]
 
 
 @dataclasses.dataclass
@@ -337,17 +338,28 @@ class ChatWriteService:
     ) -> AcceptedStopRequest:
         """Record Session stop intent in durable state."""
         stop_request_id = uuid7().hex
+        runtime_was_running = False
         async with self.session_manager() as session:
-            updated = await self.agent_session_repository.request_stop(
-                session,
-                session_id=session_id,
-                stop_request_id=stop_request_id,
-                user_id=user_id,
+            list_subtree_session_ids = (
+                self.agent_session_repository.list_session_agent_subtree_session_ids
             )
+            stopped_session_ids = await list_subtree_session_ids(
+                session,
+                agent_session_id=session_id,
+            )
+            for target_session_id in stopped_session_ids:
+                updated = await self.agent_session_repository.request_stop(
+                    session,
+                    session_id=target_session_id,
+                    stop_request_id=stop_request_id,
+                    user_id=user_id,
+                )
+                runtime_was_running = runtime_was_running or updated is not None
         return AcceptedStopRequest(
             session_id=session_id,
             stop_request_id=stop_request_id,
-            runtime_was_running=updated is not None,
+            runtime_was_running=runtime_was_running,
+            stopped_session_ids=stopped_session_ids,
         )
 
     def _validate_failed_run_retry_target(
