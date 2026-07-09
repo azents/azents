@@ -343,7 +343,7 @@ class KubernetesRuntimeProvider:
             return False
         if dict(pod.spec.node_selector) != dict(self._config.pod_node_selector):
             return False
-        if tuple(pod.spec.tolerations) != self._config.pod_tolerations:
+        if not set(self._config.pod_tolerations).issubset(set(pod.spec.tolerations)):
             return False
         env = {item.name: item.value for item in container.env}
         for key, value in self._stable_env(command).items():
