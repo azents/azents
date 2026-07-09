@@ -67,7 +67,7 @@ server:
     lifecycleRetryDelaySeconds: 15
     startTimeoutSeconds: 300
     auth:
-      enabled: true
+      enabled: false
       existingSecret: ""
       tokenKey: runtime-control-token
     runnerImage:
