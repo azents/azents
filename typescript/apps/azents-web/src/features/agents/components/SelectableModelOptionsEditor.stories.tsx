@@ -75,7 +75,7 @@ const meta = {
   ],
   args: {
     handle: "acme",
-    title: "Selectable model options",
+    title: "Selectable models",
     description:
       "Define an ordered model list. Main and lightweight selections reference labels from this list.",
     options,

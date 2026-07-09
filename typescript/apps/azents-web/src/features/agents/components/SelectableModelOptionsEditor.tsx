@@ -1,15 +1,36 @@
 "use client";
 
 import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  ActionIcon,
   Alert,
   Button,
-  Card,
   Group,
+  rem,
   Select,
   Stack,
+  Table,
   Text,
   TextInput,
+  Tooltip,
 } from "@mantine/core";
+import { IconGripVertical, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import {
@@ -24,6 +45,7 @@ import type {
   SelectableModelCandidate,
   SelectableModelOptionFormValue,
 } from "../model-selection";
+import type { DragEndEvent } from "@dnd-kit/core";
 
 export interface SelectableModelOptionsEditorProps {
   handle: string;
@@ -38,6 +60,16 @@ export interface SelectableModelOptionsEditorProps {
   onChangeOptions: (options: SelectableModelOptionFormValue[]) => void;
   onChangeMainModelLabel: (label: string | null) => void;
   onChangeLightweightModelLabel: (label: string | null) => void;
+}
+
+interface SelectableModelRowProps {
+  option: SelectableModelOptionFormValue;
+  duplicate: boolean;
+  canEdit: boolean;
+  canRemove: boolean;
+  onChangeLabel: (value: string) => void;
+  onChangeModel: () => void;
+  onRemove: () => void;
 }
 
 function createOptionId(): string {
@@ -77,21 +109,95 @@ function updateOption(
   return options.map((option) => (option.id === id ? update(option) : option));
 }
 
-function moveOption(
-  options: SelectableModelOptionFormValue[],
-  fromIndex: number,
-  toIndex: number,
-): SelectableModelOptionFormValue[] {
-  const option = options[fromIndex];
-  if (option == null || toIndex < 0 || toIndex >= options.length) {
-    return options;
-  }
-  const withoutOption = options.filter((_, index) => index !== fromIndex);
-  return [
-    ...withoutOption.slice(0, toIndex),
-    option,
-    ...withoutOption.slice(toIndex),
-  ];
+function SelectableModelRow({
+  option,
+  duplicate,
+  canEdit,
+  canRemove,
+  onChangeLabel,
+  onChangeModel,
+  onRemove,
+}: SelectableModelRowProps): React.ReactElement {
+  const t = useTranslations("workspace.agents.selectableModelOptions");
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ disabled: !canEdit, id: option.id });
+
+  return (
+    <Table.Tr
+      ref={setNodeRef}
+      style={{
+        opacity: isDragging ? 0.6 : 1,
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      <Table.Td w="0">
+        <Tooltip label={t("dragHandleLabel")}>
+          <ActionIcon
+            ref={setActivatorNodeRef}
+            aria-label={t("dragHandleLabel")}
+            color="gray"
+            disabled={!canEdit}
+            variant="subtle"
+            {...attributes}
+            {...listeners}
+          >
+            <IconGripVertical size="1rem" />
+          </ActionIcon>
+        </Tooltip>
+      </Table.Td>
+      <Table.Td>
+        <TextInput
+          aria-label={t("optionLabel")}
+          value={option.label}
+          disabled={!canEdit}
+          error={
+            option.label.trim() === ""
+              ? t("emptyLabel")
+              : duplicate
+                ? t("duplicateLabel")
+                : null
+          }
+          onChange={(event) => onChangeLabel(event.currentTarget.value)}
+        />
+      </Table.Td>
+      <Table.Td>
+        <Stack gap={0}>
+          <Text fw={600} size="sm">
+            {option.model_display_name ?? t("noModelSelected")}
+          </Text>
+          <Text size="sm" c="dimmed">
+            {option.model_identifier ?? t("chooseModel")}
+          </Text>
+        </Stack>
+      </Table.Td>
+      <Table.Td>
+        <Group justify="flex-end" gap="xs" wrap="nowrap">
+          <Button variant="light" disabled={!canEdit} onClick={onChangeModel}>
+            {t("changeModel")}
+          </Button>
+          <Tooltip label={t("remove")}>
+            <ActionIcon
+              aria-label={t("remove")}
+              color="red"
+              disabled={!canEdit || !canRemove}
+              variant="subtle"
+              onClick={onRemove}
+            >
+              <IconTrash size="1rem" />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      </Table.Td>
+    </Table.Tr>
+  );
 }
 
 export function SelectableModelOptionsEditor({
@@ -110,6 +216,13 @@ export function SelectableModelOptionsEditor({
 }: SelectableModelOptionsEditorProps): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");
   const [pickerOptionId, setPickerOptionId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(MouseSensor),
+    useSensor(TouchSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
 
   const enabledProviderOptions = useMemo(
     () => providerOptions.filter((option) => !option.disabled),
@@ -117,6 +230,10 @@ export function SelectableModelOptionsEditor({
   );
   const labelOptions = useMemo(
     () => selectableModelLabelSelectData(options),
+    [options],
+  );
+  const optionIds = useMemo(
+    () => options.map((option) => option.id),
     [options],
   );
   const activeOption =
@@ -163,6 +280,21 @@ export function SelectableModelOptionsEditor({
       },
     ];
     handleChangeOptions(nextOptions);
+  };
+
+  const handleDragEnd = (event: DragEndEvent): void => {
+    const { active, over } = event;
+    if (over == null || active.id === over.id) {
+      return;
+    }
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    const activeIndex = options.findIndex((option) => option.id === activeId);
+    const overIndex = options.findIndex((option) => option.id === overId);
+    if (activeIndex === -1 || overIndex === -1) {
+      return;
+    }
+    handleChangeOptions(arrayMove(options, activeIndex, overIndex));
   };
 
   return (
@@ -254,92 +386,56 @@ export function SelectableModelOptionsEditor({
         />
       </Group>
 
-      <Stack gap="sm">
-        {options.map((option, index) => {
-          const duplicate = rowHasDuplicateLabel(options, index);
-          return (
-            <Card key={option.id} withBorder padding="sm">
-              <Stack gap="sm">
-                <Group align="flex-end" grow>
-                  <TextInput
-                    label={t("optionLabel")}
-                    value={option.label}
-                    disabled={!canEdit}
-                    error={
-                      option.label.trim() === ""
-                        ? t("emptyLabel")
-                        : duplicate
-                          ? t("duplicateLabel")
-                          : null
-                    }
-                    onChange={(event) => {
-                      handleChangeOptions(
-                        updateOption(options, option.id, (current) => ({
-                          ...current,
-                          label: event.currentTarget.value,
-                        })),
-                      );
-                    }}
-                  />
-                  <Group justify="flex-end" gap="xs">
-                    <Button
-                      variant="subtle"
-                      disabled={!canEdit || index === 0}
-                      onClick={() =>
+      {options.length > 0 && (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={optionIds}
+            strategy={verticalListSortingStrategy}
+          >
+            <Table.ScrollContainer minWidth={rem(672)}>
+              <Table verticalSpacing="sm" withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th w="0" />
+                    <Table.Th>{t("modelLabelColumn")}</Table.Th>
+                    <Table.Th>{t("selectedModelColumn")}</Table.Th>
+                    <Table.Th ta="right">{t("actionsColumn")}</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {options.map((option, index) => (
+                    <SelectableModelRow
+                      key={option.id}
+                      option={option}
+                      duplicate={rowHasDuplicateLabel(options, index)}
+                      canEdit={canEdit}
+                      canRemove={options.length > 1}
+                      onChangeLabel={(value) => {
                         handleChangeOptions(
-                          moveOption(options, index, index - 1),
-                        )
-                      }
-                    >
-                      {t("moveUp")}
-                    </Button>
-                    <Button
-                      variant="subtle"
-                      disabled={!canEdit || index === options.length - 1}
-                      onClick={() =>
-                        handleChangeOptions(
-                          moveOption(options, index, index + 1),
-                        )
-                      }
-                    >
-                      {t("moveDown")}
-                    </Button>
-                    <Button
-                      color="red"
-                      variant="subtle"
-                      disabled={!canEdit || options.length <= 1}
-                      onClick={() => {
+                          updateOption(options, option.id, (current) => ({
+                            ...current,
+                            label: value,
+                          })),
+                        );
+                      }}
+                      onChangeModel={() => setPickerOptionId(option.id)}
+                      onRemove={() => {
                         handleChangeOptions(
                           options.filter((item) => item.id !== option.id),
                         );
                       }}
-                    >
-                      {t("remove")}
-                    </Button>
-                  </Group>
-                </Group>
-                <Group justify="space-between" align="center">
-                  <Stack gap="xs">
-                    <Text fw={600}>
-                      {option.model_display_name ?? t("noModelSelected")}
-                    </Text>
-                    <Text size="sm" c="dimmed">
-                      {option.model_identifier ?? t("chooseModel")}
-                    </Text>
-                  </Stack>
-                  <Button
-                    variant="light"
-                    disabled={!canEdit}
-                    onClick={() => setPickerOptionId(option.id)}
-                  >
-                    {t("changeModel")}
-                  </Button>
-                </Group>
-              </Stack>
-            </Card>
-          );
-        })}
-      </Stack>
+                    />
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </SortableContext>
+        </DndContext>
+      )}
     </Stack>
   );
 }

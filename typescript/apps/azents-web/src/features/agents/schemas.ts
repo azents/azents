@@ -14,15 +14,15 @@ const selectableModelOptionFormValueSchema = z.object({
   normalized_capabilities: z.custom<ModelCapabilities>().nullable(),
 });
 
-/** Agent form schema. Agent model selections reference labels from a bounded selectable model option list. */
+/** Agent form schema. Agent model selections reference labels from a bounded selectable model list. */
 export const agentFormSchema = z
   .object({
     name: z.string().min(1).max(100),
     description: z.string().optional(),
     selectable_model_options: z
       .array(selectableModelOptionFormValueSchema)
-      .min(1, "Add at least one model option")
-      .max(MAX_SELECTABLE_MODEL_OPTIONS, "Add at most 10 model options"),
+      .min(1, "Add at least one model")
+      .max(MAX_SELECTABLE_MODEL_OPTIONS, "Add at most 10 models"),
     main_model_label: z.string().nullable(),
     lightweight_model_label: z.string().nullable(),
     system_prompt: z.string().optional(),
@@ -46,14 +46,14 @@ export const agentFormSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["selectable_model_options", index, "label"],
-          message: "Model option label is required",
+          message: "Model label is required",
         });
       }
       if (labels.has(label)) {
         ctx.addIssue({
           code: "custom",
           path: ["selectable_model_options", index, "label"],
-          message: "Model option labels must be unique",
+          message: "Model labels must be unique",
         });
       }
       labels.add(label);
