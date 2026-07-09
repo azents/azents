@@ -41,6 +41,13 @@ export const CodeReadability = {
   },
 } satisfies Story;
 
+export const SingleLineScrollableCode = {
+  args: {
+    children:
+      "```\nYou may also see them addressed as to=/root/very/long/path/that/keeps/scrolling/without/moving/the/copy/button\n```",
+  },
+} satisfies Story;
+
 export const MermaidDiagram = {
   args: {
     children: mermaidMarkdownSample,
