@@ -28,6 +28,7 @@ from azents.runtime.control_protocol.data import (
     RuntimeRunnerRegistration,
     RuntimeRunnerRegistrationAccepted,
 )
+from azents.runtime.control_protocol.grpc.auth import RuntimeControlGrpcAuth
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
@@ -70,6 +71,7 @@ class RuntimeRunnerControlGrpcServicer(
         state_sink: RuntimeRunnerStateSink,
         owner_replica_id: str,
         consumer_id: str,
+        control_auth_token: str | None,
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
         """Initialize the Runner Control gRPC servicer."""
@@ -78,6 +80,7 @@ class RuntimeRunnerControlGrpcServicer(
         self._state_sink = state_sink
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
+        self._auth = RuntimeControlGrpcAuth(control_auth_token)
         self._operation_block_ms = operation_block_ms
 
     async def ConnectRunner(
@@ -89,6 +92,7 @@ class RuntimeRunnerControlGrpcServicer(
         ],
     ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
         """Register a Runner, then bridge heartbeat/state/operation messages."""
+        await self._auth.authorize(context, subject="Runner")
         first_message = await _first_register_message(request_iterator, context)
         registration = _registration(
             first_message,
@@ -369,6 +373,7 @@ def add_runtime_runner_control_servicer(
     state_sink: RuntimeRunnerStateSink,
     owner_replica_id: str,
     consumer_id: str,
+    control_auth_token: str | None,
     operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Runner Control servicer to a gRPC server."""
@@ -379,6 +384,7 @@ def add_runtime_runner_control_servicer(
             state_sink=state_sink,
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
+            control_auth_token=control_auth_token,
             operation_block_ms=operation_block_ms,
         ),
         server,

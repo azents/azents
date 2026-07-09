@@ -266,6 +266,7 @@ def _command(command_type: RuntimeLifecycleCommandType) -> RuntimeLifecycleComma
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
             runner_auth_token="runner-token",
+            control_token="control-token",
         ),
         reset_final_desired_state=RuntimeDesiredState.RUNNING,
     )

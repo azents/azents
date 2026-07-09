@@ -50,6 +50,7 @@ class RuntimeContainerAuth:
 
     control_endpoint: str
     runner_auth_token: str
+    control_token: str | None
 
 
 @dataclasses.dataclass(frozen=True)

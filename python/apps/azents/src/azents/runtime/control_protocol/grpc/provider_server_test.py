@@ -72,6 +72,16 @@ class QueueIterator:
 class FakeGrpcContext:
     """Minimal gRPC context for tests."""
 
+    def __init__(
+        self,
+        metadata: tuple[tuple[str, str], ...] = (),
+    ) -> None:
+        self._metadata = metadata
+
+    def invocation_metadata(self) -> tuple[tuple[str, str], ...]:
+        """Return fake request metadata."""
+        return self._metadata
+
     async def abort(
         self,
         code: grpc.StatusCode,
@@ -177,15 +187,76 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
     await stream.aclose()
 
 
+@pytest.mark.asyncio
+async def test_provider_grpc_rejects_missing_control_token() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    servicer = _servicer(
+        RuntimeControlProtocolService(store),
+        FakeReportSink(),
+        control_auth_token="control-token",
+    )
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+
+    with pytest.raises(RuntimeError, match="UNAUTHENTICATED"):
+        await anext(stream)
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_rejects_wrong_control_token() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    servicer = _servicer(
+        RuntimeControlProtocolService(store),
+        FakeReportSink(),
+        control_auth_token="control-token",
+    )
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(
+        inbound,
+        FakeGrpcContext((("x-azents-runtime-control-token", "wrong"),)),
+    )
+
+    with pytest.raises(RuntimeError, match="UNAUTHENTICATED"):
+        await anext(stream)
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_accepts_control_token_metadata() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    servicer = _servicer(
+        RuntimeControlProtocolService(store),
+        FakeReportSink(),
+        control_auth_token="control-token",
+    )
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(
+        inbound,
+        FakeGrpcContext((("x-azents-runtime-control-token", "control-token"),)),
+    )
+    accepted = await anext(stream)
+    await stream.aclose()
+
+    assert accepted.register_accepted.provider_id == "provider-1"
+
+
 def _servicer(
     service: RuntimeControlProtocolService,
     sink: FakeReportSink,
+    *,
+    control_auth_token: str | None = None,
 ) -> RuntimeProviderControlGrpcServicer:
     return RuntimeProviderControlGrpcServicer(
         control_protocol=service,
         report_sink=sink,
         owner_replica_id="control-a",
         consumer_id="provider-consumer-a",
+        control_auth_token=control_auth_token,
         command_block_ms=1,
     )
 

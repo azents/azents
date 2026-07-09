@@ -5,9 +5,9 @@
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
-from typing import cast
+from typing import Protocol, cast
 
 import grpc
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
@@ -32,10 +32,19 @@ from azents_runtime_control.provider import (
     RuntimeProviderReport,
 )
 
-ProviderControlStream = Callable[
-    [AsyncIterator[runtime_provider_control_pb2.ProviderMessage]],
-    AsyncIterator[runtime_provider_control_pb2.ControlMessage],
-]
+
+class ProviderControlStream(Protocol):
+    """Callable gRPC stream constructor."""
+
+    def __call__(
+        self,
+        request_iterator: AsyncIterator[runtime_provider_control_pb2.ProviderMessage],
+        /,
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_provider_control_pb2.ControlMessage]:
+        """Open a bidirectional Runtime Control stream."""
+        ...
 
 
 class RuntimeProviderControlStreamClosed(RuntimeError):
@@ -51,11 +60,13 @@ class GrpcProviderControlClient(ProviderControlClient):
         *,
         channel: grpc.aio.Channel | None = None,
         heartbeat_ack_timeout_seconds: float = 10.0,
+        control_auth_token: str | None = None,
     ) -> None:
         """Initialize the gRPC client with a stream callable."""
         self._stream = stream
         self._channel = channel
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
+        self._metadata = _auth_metadata(control_auth_token)
         self._outbound: asyncio.Queue[runtime_provider_control_pb2.ProviderMessage] = (
             asyncio.Queue()
         )
@@ -73,6 +84,7 @@ class GrpcProviderControlClient(ProviderControlClient):
         endpoint: str,
         *,
         heartbeat_ack_timeout_seconds: float = 10.0,
+        control_auth_token: str | None = None,
     ) -> "GrpcProviderControlClient":
         """Create a client using an insecure gRPC channel."""
         channel = grpc.aio.insecure_channel(endpoint)
@@ -81,6 +93,7 @@ class GrpcProviderControlClient(ProviderControlClient):
             stub.ConnectProvider,
             channel=channel,
             heartbeat_ack_timeout_seconds=heartbeat_ack_timeout_seconds,
+            control_auth_token=control_auth_token,
         )
 
     async def register_provider(
@@ -95,15 +108,17 @@ class GrpcProviderControlClient(ProviderControlClient):
             raise RuntimeError("Provider Control stream is already registered")
         self._connection_id = connection_id
         self._accepted = asyncio.get_running_loop().create_future()
-        responses = self._stream(
-            self._outbound_messages(
-                _register_message(
-                    registration,
-                    connection_id=connection_id,
-                    request_id="register",
-                )
+        outbound = self._outbound_messages(
+            _register_message(
+                registration,
+                connection_id=connection_id,
+                request_id="register",
             )
         )
+        if self._metadata is None:
+            responses = self._stream(outbound)
+        else:
+            responses = self._stream(outbound, metadata=self._metadata)
         self._receiver_task = asyncio.create_task(self._receive(responses))
         return await self._accepted
 
@@ -285,6 +300,12 @@ class GrpcProviderControlClient(ProviderControlClient):
         return self._connection_id
 
 
+def _auth_metadata(token: str | None) -> tuple[tuple[str, str], ...] | None:
+    if token is None or not token:
+        return None
+    return (("authorization", f"Bearer {token}"),)
+
+
 def _register_message(
     registration: ProviderRegistration,
     *,
@@ -322,6 +343,7 @@ def _accepted(
 def _command(
     message: runtime_provider_control_pb2.ProviderCommand,
 ) -> RuntimeLifecycleCommand:
+    payload = json_value_from_struct(message.payload)
     return RuntimeLifecycleCommand(
         command_type=RuntimeLifecycleCommandType(message.command_type),
         identity=RuntimeIdentity(
@@ -335,6 +357,7 @@ def _command(
         auth=RuntimeContainerAuth(
             control_endpoint=message.control_endpoint,
             runner_auth_token=message.runner_auth_token,
+            control_token=_optional_control_token(payload),
         ),
         reset_final_desired_state=_optional_desired_state(
             message.reset_final_desired_state
@@ -346,6 +369,17 @@ def _optional_desired_state(value: str) -> RuntimeDesiredState | None:
     if not value:
         return None
     return RuntimeDesiredState(value)
+
+
+def _optional_control_token(payload: dict[str, JsonValue]) -> str | None:
+    auth = payload.get("auth")
+    if not isinstance(auth, dict):
+        return None
+    token = auth.get("control_token")
+    if not isinstance(token, str):
+        return None
+    normalized = token.strip()
+    return normalized or None
 
 
 def _report_message(
