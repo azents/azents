@@ -189,7 +189,8 @@ def _command(
         runner_image=runner_image,
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runner-token",
+            runner_auth_token="runtime-runner:runtime-1:1",
+            control_token="control-token",
         ),
         reset_final_desired_state=final_desired_state,
     )
@@ -210,7 +211,8 @@ def _control_command(
         runner_image="runner:latest",
         auth=ControlRuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runner-token",
+            runner_auth_token="runtime-runner:runtime-1:1",
+            control_token="control-token",
         ),
     )
 
@@ -236,8 +238,8 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
         claims=None,
     )
     assert env["AZ_AGENT_WORKSPACE_PATH"] == "/workspace/agent"
-    assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runner-token"
-    assert "AZ_RUNTIME_RUNNER_AUTH_TOKEN" not in env
+    assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runtime-runner:runtime-1:1"
+    assert env["AZ_RUNTIME_CONTROL_AUTH_TOKEN"] == "control-token"
     assert pod.metadata.annotations == {
         "azents/workspace-path": "/workspace/agent",
     }
@@ -693,7 +695,8 @@ async def test_observe_known_runtimes_reports_pod_and_pvc() -> None:
         runner_image="runner:latest",
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runner-token",
+            runner_auth_token="runtime-runner:runtime-2:1",
+            control_token="control-token",
         ),
     )
     await provider.start(command_2)

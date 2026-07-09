@@ -83,6 +83,8 @@ class RuntimeControlSettings(BaseSettings):
     )
     runtime_control_start_timeout_seconds: float = _DEFAULT_START_TIMEOUT_SECONDS
     runtime_control_completion_interval_seconds: float = 1.0
+    runtime_control_auth_enabled: bool = False
+    runtime_control_auth_token: str | None = None
     runtime_runner_image: str
     runtime_runner_control_endpoint: str
     rdb_host: str = "localhost"
@@ -105,6 +107,7 @@ async def runtime_control_server_lifespan(
     coordination_store = RedisRuntimeCoordinationStore(redis)
     broker = RedisBroker(redis)
     control_protocol = RuntimeControlProtocolService(coordination_store)
+    control_token = runtime_control_auth_token(settings)
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
     runtime_repository = AgentRuntimeRepository()
@@ -140,6 +143,7 @@ async def runtime_control_server_lifespan(
         config=RuntimeLifecycleDispatchConfig(
             runner_image=settings.runtime_runner_image,
             runner_control_endpoint=settings.runtime_runner_control_endpoint,
+            runner_control_auth_token=control_token,
             start_timeout=timedelta(
                 seconds=settings.runtime_control_start_timeout_seconds
             ),
@@ -180,6 +184,7 @@ async def runtime_control_server_lifespan(
         report_sink=provider_sink,
         owner_replica_id=settings.runtime_control_instance_id,
         consumer_id=f"{settings.runtime_control_instance_id}:provider",
+        control_auth_token=control_token,
     )
     add_runtime_runner_control_servicer(
         server,
@@ -188,6 +193,7 @@ async def runtime_control_server_lifespan(
         state_sink=runner_sink,
         owner_replica_id=settings.runtime_control_instance_id,
         consumer_id=f"{settings.runtime_control_instance_id}:runner",
+        control_auth_token=control_token,
     )
     server.add_insecure_port(f"0.0.0.0:{settings.runtime_control_port}")
     await server.start()
@@ -206,6 +212,7 @@ async def runtime_control_server_lifespan(
             "lifecycle_retry_delay_seconds": (
                 settings.runtime_control_lifecycle_retry_delay_seconds
             ),
+            "auth_enabled": settings.runtime_control_auth_enabled,
         },
     )
     try:
@@ -272,6 +279,24 @@ async def _run_background_completion_publisher(
             await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
         except TimeoutError:
             continue
+
+
+def runtime_control_auth_token(settings: RuntimeControlSettings) -> str | None:
+    if not settings.runtime_control_auth_enabled:
+        return None
+    token = settings.runtime_control_auth_token
+    if token is None:
+        raise RuntimeError(
+            "AZ_RUNTIME_CONTROL_AUTH_TOKEN is required when "
+            "AZ_RUNTIME_CONTROL_AUTH_ENABLED is true"
+        )
+    normalized = token.strip()
+    if not normalized:
+        raise RuntimeError(
+            "AZ_RUNTIME_CONTROL_AUTH_TOKEN is required when "
+            "AZ_RUNTIME_CONTROL_AUTH_ENABLED is true"
+        )
+    return normalized
 
 
 def _postgres_config(settings: RuntimeControlSettings) -> PostgreSQLConfig:

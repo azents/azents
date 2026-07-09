@@ -23,6 +23,7 @@ def _helm_template(*values: str) -> str:
         "adminWeb.image.repository=repo/admin-web",
         "adminWeb.image.tag=sha",
         "secrets.existingSecrets.redis=azents-redis",
+        "server.runtimeControl.auth.existingSecret=azents-runtime-control-auth",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])
@@ -57,6 +58,8 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "repo/provider:sha" in rendered
     assert "repo/runner:sha" in rendered
     assert "AZ_RUNTIME_CONTROL_ENDPOINT" in rendered
+    assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" in rendered
+    assert "azents-runtime-control-auth" in rendered
     assert "AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_STORAGE_CLASS" in rendered

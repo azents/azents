@@ -29,6 +29,7 @@ from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeProviderRegistration,
 )
+from azents.runtime.control_protocol.grpc.auth import RuntimeControlGrpcAuth
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
@@ -67,6 +68,7 @@ class RuntimeProviderControlGrpcServicer(
         report_sink: RuntimeProviderReportSink,
         owner_replica_id: str,
         consumer_id: str,
+        control_auth_token: str | None,
         command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
     ) -> None:
         """Initialize the Provider Control gRPC servicer."""
@@ -74,6 +76,7 @@ class RuntimeProviderControlGrpcServicer(
         self._report_sink = report_sink
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
+        self._auth = RuntimeControlGrpcAuth(control_auth_token)
         self._command_block_ms = command_block_ms
 
     async def ConnectProvider(
@@ -85,6 +88,7 @@ class RuntimeProviderControlGrpcServicer(
         ],
     ) -> AsyncIterator[runtime_provider_control_pb2.ControlMessage]:
         """Register a Provider, then bridge heartbeat/report/command messages."""
+        await self._auth.authorize(context, subject="Provider")
         first_message = await _first_register_message(request_iterator, context)
         now = datetime.now(UTC)
         accepted = await self._control_protocol.register_provider(
@@ -349,6 +353,7 @@ def add_runtime_provider_control_servicer(
     report_sink: RuntimeProviderReportSink,
     owner_replica_id: str,
     consumer_id: str,
+    control_auth_token: str | None,
     command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Provider Control servicer to a gRPC server."""
@@ -358,6 +363,7 @@ def add_runtime_provider_control_servicer(
             report_sink=report_sink,
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
+            control_auth_token=control_auth_token,
             command_block_ms=command_block_ms,
         ),
         server,

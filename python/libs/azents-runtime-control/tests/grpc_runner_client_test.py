@@ -4,7 +4,7 @@
 # protobuf generated modules expose dynamic message attributes.
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 
 import pytest
@@ -28,7 +28,10 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
 
     async def stream(
         requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
     ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
         register = await anext(requests)
         sent.append(register)
         yield runtime_runner_control_pb2.RunnerControlMessage(
@@ -145,7 +148,10 @@ async def test_grpc_client_close_suppresses_completed_stream_failure() -> None:
 
     async def stream(
         requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
     ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
         register = await anext(requests)
         yield runtime_runner_control_pb2.RunnerControlMessage(
             request_id=register.request_id,
@@ -172,6 +178,40 @@ async def test_grpc_client_close_suppresses_completed_stream_failure() -> None:
     await client.close()
 
 
+@pytest.mark.asyncio
+async def test_grpc_client_sends_control_token_metadata() -> None:
+    """The client sends the shared Runtime Control token as bearer metadata."""
+    observed_metadata: list[tuple[str, str]] = []
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del requests
+        observed_metadata.extend(metadata or ())
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id="register",
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id="runtime-1",
+                runner_id="runner-1",
+                connection_id="connection-1",
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+
+    client = GrpcRunnerControlClient(stream, control_auth_token="control-token")
+    await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    await client.close()
+
+    assert ("authorization", "Bearer control-token") in observed_metadata
+
+
 def _registration() -> RunnerRegistration:
     return RunnerRegistration(
         runtime_id="runtime-1",
@@ -196,7 +236,10 @@ async def test_grpc_client_maps_git_operation_payloads_and_results() -> None:
 
     async def stream(
         requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
     ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
         register = await anext(requests)
         yield runtime_runner_control_pb2.RunnerControlMessage(
             request_id=register.request_id,

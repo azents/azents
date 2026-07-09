@@ -22,8 +22,8 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-07-06
-spec_version: 7
+last_verified_at: 2026-07-09
+spec_version: 8
 ---
 
 # Agent Runtime Control
@@ -92,6 +92,14 @@ The store owns:
 - generation fencing data used to reject stale provider/runner messages
 
 The store is not a source of product truth. Losing store data may interrupt in-flight commands but must not make a Control replica infer that a Runtime does not exist or that workspace data can be discarded.
+
+## Control Stream Authentication
+
+Runtime Control gRPC streams support a shared-token authentication gate for Provider and Runner connections. When `AZ_RUNTIME_CONTROL_AUTH_ENABLED` is true, Control requires a non-empty `AZ_RUNTIME_CONTROL_AUTH_TOKEN` at startup and rejects Provider or Runner streams that do not provide the matching token before stream registration is processed. Clients may present the token with `authorization: Bearer ...` metadata or `x-azents-runtime-control-token` metadata.
+
+The Helm chart wires Runtime Control auth from an existing Kubernetes Secret only. It must not place token literals in default values or rendered manifests. When Runtime Control auth is enabled for the chart, `server.runtimeControl.auth.existingSecret` and `server.runtimeControl.auth.tokenKey` identify the Secret key used by the Control server and Kubernetes Provider deployment. Providers propagate the same token to Runtime Runner containers through `AZ_RUNTIME_CONTROL_AUTH_TOKEN` so Runner streams authenticate back to Control.
+
+Auth token values are secret material. Logs, test evidence, and user-visible diagnostics may mention auth being enabled, disabled, missing, or invalid, but must not include raw token values.
 
 ## Provider Contract
 
@@ -181,5 +189,6 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-09** (spec_version 8) — Added Runtime Control shared-token authentication for Provider and Runner gRPC streams and documented the Helm Secret-based wiring contract.
 - **2026-07-04** (spec_version 6) — Added typed Runner Git operations for ref preview, worktree creation, worktree removal, and branch deletion.
 - **2026-06-28** (spec_version 5) — Promoted Runtime Runner process operations and runner-owned process lifecycle/buffer semantics for `exec_command` and `write_stdin`.

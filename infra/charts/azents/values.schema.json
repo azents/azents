@@ -361,6 +361,151 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "server": {
+            "properties": {
+              "runtimeControl": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  },
+                  "auth": {
+                    "properties": {
+                      "enabled": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "enabled"
+                    ]
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "auth"
+                ]
+              }
+            },
+            "required": [
+              "runtimeControl"
+            ]
+          }
+        },
+        "required": [
+          "server"
+        ]
+      },
+      "then": {
+        "properties": {
+          "server": {
+            "properties": {
+              "runtimeControl": {
+                "properties": {
+                  "auth": {
+                    "properties": {
+                      "existingSecret": {
+                        "minLength": 1
+                      },
+                      "tokenKey": {
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "existingSecret",
+                      "tokenKey"
+                    ]
+                  }
+                },
+                "required": [
+                  "auth"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "server"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtimeProviderKubernetes": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "server": {
+            "properties": {
+              "runtimeControl": {
+                "properties": {
+                  "auth": {
+                    "properties": {
+                      "enabled": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "enabled"
+                    ]
+                  }
+                },
+                "required": [
+                  "auth"
+                ]
+              }
+            },
+            "required": [
+              "runtimeControl"
+            ]
+          }
+        },
+        "required": [
+          "runtimeProviderKubernetes",
+          "server"
+        ]
+      },
+      "then": {
+        "properties": {
+          "server": {
+            "properties": {
+              "runtimeControl": {
+                "properties": {
+                  "auth": {
+                    "properties": {
+                      "existingSecret": {
+                        "minLength": 1
+                      },
+                      "tokenKey": {
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "existingSecret",
+                      "tokenKey"
+                    ]
+                  }
+                },
+                "required": [
+                  "auth"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "server"
+        ]
+      }
     }
   ],
   "properties": {
@@ -764,6 +909,44 @@
               }
             }
           }
+        },
+        "runtimeControl": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "endpoint": {
+              "type": "string"
+            },
+            "replicas": {
+              "type": "integer"
+            },
+            "reconcileIntervalSeconds": {
+              "type": "number"
+            },
+            "lifecycleRetryDelaySeconds": {
+              "type": "number"
+            },
+            "startTimeoutSeconds": {
+              "type": "number"
+            },
+            "auth": {
+              "$ref": "#/definitions/runtimeControlAuth"
+            },
+            "runnerImage": {
+              "$ref": "#/definitions/image"
+            },
+            "resources": {
+              "type": "object"
+            },
+            "autoscaling": {
+              "type": "object"
+            },
+            "pdb": {
+              "type": "object"
+            }
+          }
         }
       }
     },
@@ -871,6 +1054,20 @@
         },
         "tls": {
           "type": "array"
+        }
+      }
+    },
+    "runtimeControlAuth": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "tokenKey": {
+          "type": "string"
         }
       }
     }

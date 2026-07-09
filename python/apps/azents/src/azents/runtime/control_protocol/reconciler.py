@@ -39,6 +39,7 @@ class RuntimeLifecycleDispatchConfig:
 
     runner_image: str
     runner_control_endpoint: str
+    runner_control_auth_token: str | None
     start_timeout: timedelta = _DEFAULT_START_TIMEOUT
     provider_command_deadline: timedelta = _DEFAULT_PROVIDER_COMMAND_DEADLINE
     observe_interval: timedelta = _DEFAULT_OBSERVE_INTERVAL
@@ -211,6 +212,7 @@ class RuntimeLifecycleReconciler:
                     "auth": {
                         "control_endpoint": self._config.runner_control_endpoint,
                         "runner_auth_token": _runner_auth_credential_id(runtime),
+                        "control_token": self._config.runner_control_auth_token,
                     },
                 },
                 deadline_at=created_at + self._config.provider_command_deadline,

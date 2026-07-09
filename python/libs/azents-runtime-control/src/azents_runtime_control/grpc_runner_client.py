@@ -5,8 +5,9 @@
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
+from typing import Protocol
 
 import grpc
 from google.protobuf import timestamp_pb2
@@ -28,10 +29,19 @@ from azents_runtime_control.runner import (
     RuntimeRunnerState,
 )
 
-RunnerControlStream = Callable[
-    [AsyncIterator[runtime_runner_control_pb2.RunnerMessage]],
-    AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage],
-]
+
+class RunnerControlStream(Protocol):
+    """Callable gRPC stream constructor."""
+
+    def __call__(
+        self,
+        request_iterator: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        /,
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        """Open a bidirectional Runtime Control stream."""
+        ...
 
 
 class RuntimeRunnerControlStreamClosed(RuntimeError):
@@ -47,11 +57,13 @@ class GrpcRunnerControlClient(RunnerControlClient):
         *,
         channel: grpc.aio.Channel | None = None,
         heartbeat_ack_timeout_seconds: float = 10.0,
+        control_auth_token: str | None = None,
     ) -> None:
         """Initialize the gRPC client with a stream callable."""
         self._stream = stream
         self._channel = channel
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
+        self._metadata = _auth_metadata(control_auth_token)
         self._outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerMessage] = (
             asyncio.Queue()
         )
@@ -68,6 +80,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
         endpoint: str,
         *,
         heartbeat_ack_timeout_seconds: float = 10.0,
+        control_auth_token: str | None = None,
     ) -> "GrpcRunnerControlClient":
         """Create a client using an insecure gRPC channel."""
         channel = grpc.aio.insecure_channel(endpoint)
@@ -76,6 +89,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
             stub.ConnectRunner,
             channel=channel,
             heartbeat_ack_timeout_seconds=heartbeat_ack_timeout_seconds,
+            control_auth_token=control_auth_token,
         )
 
     async def register_runner(
@@ -91,15 +105,17 @@ class GrpcRunnerControlClient(RunnerControlClient):
             raise RuntimeError("Runner Control stream is already registered")
         self._connection_id = connection_id
         self._accepted = asyncio.get_running_loop().create_future()
-        responses = self._stream(
-            self._outbound_messages(
-                _register_message(
-                    registration,
-                    connection_id=connection_id,
-                    request_id="register",
-                )
+        outbound = self._outbound_messages(
+            _register_message(
+                registration,
+                connection_id=connection_id,
+                request_id="register",
             )
         )
+        if self._metadata is None:
+            responses = self._stream(outbound)
+        else:
+            responses = self._stream(outbound, metadata=self._metadata)
         self._receiver_task = asyncio.create_task(self._receive(responses))
         return await self._accepted
 
@@ -253,6 +269,12 @@ class GrpcRunnerControlClient(RunnerControlClient):
         if self._connection_id is None:
             raise RuntimeError("Runner Control stream is not registered")
         return self._connection_id
+
+
+def _auth_metadata(token: str | None) -> tuple[tuple[str, str], ...] | None:
+    if token is None or not token:
+        return None
+    return (("authorization", f"Bearer {token}"),)
 
 
 def _register_message(
