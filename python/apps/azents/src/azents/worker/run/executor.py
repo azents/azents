@@ -309,10 +309,7 @@ class RunExecutor:
                 process_actions=True,
             )
             if initial_input.context_invalidated:
-                if await self.input_buffer_service.has_pending_session_input_buffers(
-                    message.session_id
-                ):
-                    await self.session_lifecycle.send_session_wake_up(message)
+                await self.session_lifecycle.send_session_wake_up(message)
                 return RunExecutionResult(
                     toolkits=[],
                     terminal_event_observed=False,

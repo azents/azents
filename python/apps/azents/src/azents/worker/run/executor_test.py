@@ -603,14 +603,6 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
     executor = _executor(session_lifecycle=lifecycle)
     message = _message()
 
-    class PendingInputBufferService:
-        """InputBufferService double with pending follow-up work."""
-
-        async def has_pending_session_input_buffers(self, session_id: str) -> bool:
-            """Return pending follow-up work for the session."""
-            assert session_id == message.session_id
-            return True
-
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
@@ -624,11 +616,6 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
         raise AssertionError("resolve_invoke_input should not be called")
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
-    monkeypatch.setattr(
-        executor,
-        "input_buffer_service",
-        cast(InputBufferService, PendingInputBufferService()),
-    )
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input",
