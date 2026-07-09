@@ -271,6 +271,11 @@ class ProviderRunLoop:
             registered_at=self._clock(),
         )
         self._accepted = accepted
+        # Refresh the connection before the potentially slow backend resync.
+        # The Control registration TTL starts when register_provider completes,
+        # so delaying the first heartbeat until after observe_known_runtimes can
+        # let a slow Kubernetes API scan expire an otherwise healthy Provider.
+        await self.heartbeat(force=True)
         reports = await self._lifecycle.observe_known_runtimes()
         _LOGGER.info(
             "Runtime Provider registered",
@@ -283,7 +288,6 @@ class ProviderRunLoop:
         )
         for report in reports:
             await self._client.report_provider_state(report)
-        await self.heartbeat(force=True)
         return accepted
 
     async def heartbeat(self, *, force: bool = False) -> bool:
