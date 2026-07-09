@@ -1,7 +1,9 @@
 """Subagent collaboration Toolkit tests."""
 
+import asyncio
 import datetime
 import json
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -292,12 +294,14 @@ async def _make_toolkit() -> tuple[
     _AgentSessionRepository,
     _InputBufferService,
     _Broker,
+    _AgentRunRepository,
     list[SubagentTreeChanged],
 ]:
     """Create an initialized SubagentToolkit fixture."""
     agent_session_repository = _AgentSessionRepository()
     input_buffer_service = _InputBufferService()
     broker = _Broker()
+    run_repository = _AgentRunRepository()
     published_events: list[SubagentTreeChanged] = []
 
     async def publish_event(event: SubagentTreeChanged) -> None:
@@ -306,7 +310,7 @@ async def _make_toolkit() -> tuple[
     toolkit = SubagentToolkit(
         session_manager=_session_manager,
         agent_session_repository=cast(AgentSessionRepository, agent_session_repository),
-        agent_run_repository=cast(AgentRunRepository, _AgentRunRepository()),
+        agent_run_repository=cast(AgentRunRepository, run_repository),
         event_transcript_repository=cast(EventTranscriptRepository, object()),
         input_buffer_service=cast(InputBufferService, input_buffer_service),
         broker=cast(SessionBroker, broker),
@@ -327,13 +331,21 @@ async def _make_toolkit() -> tuple[
         agent_session_repository,
         input_buffer_service,
         broker,
+        run_repository,
         published_events,
     )
 
 
 async def test_send_message_is_queue_only() -> None:
     """send_message writes mailbox input without waking the target child."""
-    toolkit, repo, input_service, broker, published_events = await _make_toolkit()
+    (
+        toolkit,
+        repo,
+        input_service,
+        broker,
+        _run_repo,
+        published_events,
+    ) = await _make_toolkit()
 
     async def publish_event(event: SubagentTreeChanged) -> None:
         published_events.append(event)
@@ -368,7 +380,14 @@ async def test_send_message_is_queue_only() -> None:
 
 async def test_followup_task_wakes_target_child() -> None:
     """followup_task writes mailbox input and wakes the target child."""
-    toolkit, repo, input_service, broker, published_events = await _make_toolkit()
+    (
+        toolkit,
+        repo,
+        input_service,
+        broker,
+        _run_repo,
+        published_events,
+    ) = await _make_toolkit()
 
     async def publish_event(event: SubagentTreeChanged) -> None:
         published_events.append(event)
@@ -406,7 +425,14 @@ async def test_followup_task_wakes_target_child() -> None:
 
 async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
     """wait_agent observes unread child terminal results once."""
-    toolkit, repo, _input_service, _broker, published_events = await _make_toolkit()
+    (
+        toolkit,
+        repo,
+        _input_service,
+        _broker,
+        _run_repo,
+        published_events,
+    ) = await _make_toolkit()
 
     async def publish_event(event: SubagentTreeChanged) -> None:
         published_events.append(event)
@@ -440,3 +466,108 @@ async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
     }
     assert repo.observation_updates == [("child-agent", 1, "event".rjust(32, "0"))]
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
+
+
+async def test_wait_agent_waits_for_running_child_result() -> None:
+    """wait_agent waits for a running child before timing out."""
+    (
+        toolkit,
+        repo,
+        _input_service,
+        _broker,
+        run_repo,
+        published_events,
+    ) = await _make_toolkit()
+    running = run_repo.latest_by_session_id["child-session"].model_copy(
+        update={"status": AgentRunStatus.RUNNING, "ended_at": None}
+    )
+    run_repo.latest_by_session_id["child-session"] = running
+    repo.sessions["child-session"] = _agent_session(
+        id="child-session",
+        run_state=AgentSessionRunState.RUNNING,
+    )
+
+    async def publish_event(event: SubagentTreeChanged) -> None:
+        published_events.append(event)
+
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, publish_event),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
+
+    async def complete_child() -> None:
+        await asyncio.sleep(0.01)
+        run_repo.latest_by_session_id["child-session"] = running.model_copy(
+            update={
+                "status": AgentRunStatus.COMPLETED,
+                "terminal_result_event_id": "done".rjust(32, "0"),
+                "terminal_result_message": "child completed after wait",
+                "ended_at": _NOW,
+            }
+        )
+        repo.sessions["child-session"] = _agent_session(id="child-session")
+
+    completion = asyncio.create_task(complete_child())
+    try:
+        result = await tool.handler(
+            json.dumps({"agent_name": "child", "timeout_seconds": 1})
+        )
+    finally:
+        await completion
+
+    assert json.loads(cast(str, result)) == {
+        "message": "child completed after wait",
+        "timed_out": False,
+    }
+    assert repo.observation_updates == [("child-agent", 1, "done".rjust(32, "0"))]
+    assert [event.type for event in published_events] == ["subagent_tree_changed"]
+
+
+async def test_wait_agent_timeout_waits_until_deadline() -> None:
+    """wait_agent reports timeout only after the requested wait window."""
+    (
+        toolkit,
+        repo,
+        _input_service,
+        _broker,
+        run_repo,
+        _published_events,
+    ) = await _make_toolkit()
+    run_repo.latest_by_session_id["child-session"] = run_repo.latest_by_session_id[
+        "child-session"
+    ].model_copy(update={"status": AgentRunStatus.RUNNING, "ended_at": None})
+    repo.sessions["child-session"] = _agent_session(
+        id="child-session",
+        run_state=AgentSessionRunState.RUNNING,
+    )
+
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, lambda _event: None),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
+
+    started = time.monotonic()
+    result = await tool.handler(
+        json.dumps({"agent_name": "child", "timeout_seconds": 1})
+    )
+
+    assert time.monotonic() - started >= 0.9
+    assert json.loads(cast(str, result)) == {
+        "message": "Still running: /root/child",
+        "timed_out": True,
+    }
+    assert repo.observation_updates == []

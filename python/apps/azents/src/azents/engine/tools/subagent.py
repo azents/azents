@@ -1,7 +1,9 @@
 """Subagent collaboration Toolkit."""
 
+import asyncio
 import dataclasses
 import json
+import time
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -106,6 +108,7 @@ _TERMINAL_STATUSES = {
     AgentRunStatus.INTERRUPTED,
     AgentRunStatus.CANCELLED,
 }
+_WAIT_AGENT_POLL_INTERVAL_SECONDS = 0.1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -318,62 +321,85 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     def _wait_agent_tool(self) -> FunctionTool:
         async def wait_agent(input: WaitAgentInput) -> str:
             """Observe unread terminal child results."""
-            changed_targets: list[SessionAgent] = []
-            async with self.session_manager() as session:
-                current = await self._current_session_agent(session)
-                targets = await self._wait_targets(session, current, input.agent_name)
-                if input.agent_name is not None and not targets:
-                    return _json({"message": "not_found", "timed_out": False})
-                latest_runs = (
-                    await self.agent_run_repository.list_latest_by_session_ids(
-                        session,
-                        session_ids=[target.agent_session_id for target in targets],
+            deadline = (
+                None
+                if input.timeout_seconds is None
+                else time.monotonic() + input.timeout_seconds
+            )
+            while True:
+                changed_targets: list[SessionAgent] = []
+                async with self.session_manager() as session:
+                    current = await self._current_session_agent(session)
+                    targets = await self._wait_targets(
+                        session, current, input.agent_name
                     )
-                )
-                messages: list[str] = []
-                running: list[str] = []
-                for target in targets:
-                    run = latest_runs.get(target.agent_session_id)
-                    if run is None:
-                        continue
-                    if run.status == AgentRunStatus.RUNNING:
-                        running.append(target.path)
-                        continue
-                    if run.status not in _TERMINAL_STATUSES:
-                        continue
-                    if target.parent_observed_run_index is not None and (
-                        run.run_index <= target.parent_observed_run_index
-                    ):
-                        continue
-                    text = (
-                        run.terminal_result_message
-                        or f"{target.path}: {run.status.value}"
+                    if input.agent_name is not None and not targets:
+                        return _json({"message": "not_found", "timed_out": False})
+                    latest_runs = (
+                        await self.agent_run_repository.list_latest_by_session_ids(
+                            session,
+                            session_ids=[target.agent_session_id for target in targets],
+                        )
                     )
-                    messages.append(text)
-                    repo = self.agent_session_repository
-                    updated = await repo.update_session_agent_observation_cursor(
-                        session,
-                        session_agent_id=target.id,
-                        parent_observed_run_index=run.run_index,
-                        parent_observed_event_id=run.terminal_result_event_id,
+                    messages: list[str] = []
+                    running: list[str] = []
+                    for target in targets:
+                        run = latest_runs.get(target.agent_session_id)
+                        target_session = await self.agent_session_repository.get_by_id(
+                            session,
+                            target.agent_session_id,
+                        )
+                        session_running = (
+                            target_session is not None
+                            and target_session.run_state == AgentSessionRunState.RUNNING
+                        )
+                        if run is None:
+                            if session_running:
+                                running.append(target.path)
+                            continue
+                        terminal_unread = run.status in _TERMINAL_STATUSES and (
+                            target.parent_observed_run_index is None
+                            or run.run_index > target.parent_observed_run_index
+                        )
+                        if terminal_unread:
+                            text = (
+                                run.terminal_result_message
+                                or f"{target.path}: {run.status.value}"
+                            )
+                            messages.append(text)
+                            repo = self.agent_session_repository
+                            update_cursor = repo.update_session_agent_observation_cursor
+                            updated = await update_cursor(
+                                session,
+                                session_agent_id=target.id,
+                                parent_observed_run_index=run.run_index,
+                                parent_observed_event_id=run.terminal_result_event_id,
+                            )
+                            changed_targets.append(updated or target)
+                            continue
+                        if run.status == AgentRunStatus.RUNNING or session_running:
+                            running.append(target.path)
+                for target in changed_targets:
+                    await self._publish_tree_changed(target)
+                if messages:
+                    return _json({"message": "\n\n".join(messages), "timed_out": False})
+                if not running:
+                    return _json(
+                        {"message": "No unread terminal result.", "timed_out": False}
                     )
-                    changed_targets.append(updated or target)
-            for target in changed_targets:
-                await self._publish_tree_changed(target)
-            if messages:
-                return _json({"message": "\n\n".join(messages), "timed_out": False})
-            if (
-                running
-                and input.timeout_seconds is not None
-                and input.timeout_seconds > 0
-            ):
-                return _json(
-                    {
-                        "message": "Still running: " + ", ".join(running),
-                        "timed_out": True,
-                    }
-                )
-            return _json({"message": "No unread terminal result.", "timed_out": False})
+                if deadline is None:
+                    return _json(
+                        {"message": "No unread terminal result.", "timed_out": False}
+                    )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return _json(
+                        {
+                            "message": "Still running: " + ", ".join(running),
+                            "timed_out": True,
+                        }
+                    )
+                await asyncio.sleep(min(_WAIT_AGENT_POLL_INTERVAL_SECONDS, remaining))
 
         return make_tool(wait_agent, name="wait_agent")
 
