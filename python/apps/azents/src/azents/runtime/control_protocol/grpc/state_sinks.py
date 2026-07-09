@@ -51,10 +51,11 @@ class RuntimeProviderReportRepositorySink:
                 workspace_path=report.workspace_path,
                 desired_generation=runtime.desired_generation,
             )
-            await self.runtime_repository.record_provider_observed_state(
+            persisted = await self.runtime_repository.record_provider_observed_state(
                 session,
                 report.runtime_id,
                 _provider_observed_state(report.observed_state),
+                report.provider_generation,
                 report.observed_desired_generation,
                 workspace_path=report.workspace_path or None,
                 failure=failure,
@@ -63,6 +64,8 @@ class RuntimeProviderReportRepositorySink:
                     desired_generation=runtime.desired_generation,
                 ),
             )
+            if persisted is None:
+                return
             await self.runtime_repository.record_provider_connection_state(
                 session,
                 report.runtime_id,

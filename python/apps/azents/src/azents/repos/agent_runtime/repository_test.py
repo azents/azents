@@ -227,6 +227,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.RUNNING,
+            1,
             3,
             workspace_path="/workspace/agent",
         )
@@ -250,6 +251,163 @@ class TestAgentRuntimeRepository:
         assert runner_runtime.runner_state == RuntimeRunnerState.READY
         assert runner_runtime.runner_generation == 4
         assert runner_runtime.failure_code == "runner_failed"
+
+    async def test_stale_provider_report_is_ignored(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Older Provider report generations do not overwrite Runtime state."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-stale-provider-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "agent-runtime-stale-provider"
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        command = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        current = await repo.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            2,
+            command.desired_generation,
+            workspace_path="/workspace/current",
+        )
+        assert current is not None
+
+        stale = await repo.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.FAILED,
+            1,
+            command.desired_generation - 1,
+            workspace_path="/workspace/stale",
+            failure=AgentRuntimeFailurePatch(
+                generation=command.desired_generation,
+                code="STALE_PROVIDER_FAILURE",
+                message="Stale provider failure",
+            ),
+        )
+
+        reloaded = await repo.get_by_id(rdb_session, runtime.id)
+        assert stale is None
+        assert reloaded is not None
+        assert reloaded.provider_generation == 2
+        assert reloaded.provider_observed_generation == command.desired_generation
+        assert reloaded.provider_observed_state == RuntimeProviderObservedState.RUNNING
+        assert reloaded.workspace_path == "/workspace/current"
+        assert reloaded.failure_code is None
+
+    async def test_current_provider_report_is_accepted(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Current Provider report generations can update Runtime state."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-current-provider-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "agent-runtime-current-provider"
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        command = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+
+        updated = await repo.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            1,
+            command.desired_generation,
+            workspace_path="/workspace/current",
+        )
+
+        assert updated is not None
+        assert updated.provider_generation == 1
+        assert updated.provider_observed_generation == command.desired_generation
+        assert updated.provider_observed_state == RuntimeProviderObservedState.RUNNING
+        assert updated.workspace_path == "/workspace/current"
+
+    async def test_stale_runner_report_is_ignored(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Older Runner generations do not overwrite Runtime availability."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-stale-runner-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "agent-runtime-stale-runner"
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        current = await repo.record_runner_state(
+            rdb_session,
+            runtime.id,
+            RuntimeRunnerState.READY,
+            2,
+        )
+        assert current is not None
+
+        stale = await repo.record_runner_state(
+            rdb_session,
+            runtime.id,
+            RuntimeRunnerState.DISCONNECTED,
+            1,
+            failure=AgentRuntimeFailurePatch(
+                generation=runtime.desired_generation,
+                code="STALE_RUNNER_FAILURE",
+                message="Stale runner failure",
+            ),
+        )
+
+        reloaded = await repo.get_by_id(rdb_session, runtime.id)
+        assert stale is None
+        assert reloaded is not None
+        assert reloaded.runner_generation == 2
+        assert reloaded.runner_state == RuntimeRunnerState.READY
+        assert reloaded.failure_code is None
+
+    async def test_same_runner_generation_report_is_accepted(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Same Runner generation can update state for stream-close reports."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-same-runner-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "agent-runtime-same-runner"
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        current = await repo.record_runner_state(
+            rdb_session,
+            runtime.id,
+            RuntimeRunnerState.READY,
+            2,
+        )
+        assert current is not None
+
+        disconnected = await repo.record_runner_state(
+            rdb_session,
+            runtime.id,
+            RuntimeRunnerState.DISCONNECTED,
+            2,
+        )
+
+        assert disconnected is not None
+        assert disconnected.runner_generation == 2
+        assert disconnected.runner_state == RuntimeRunnerState.DISCONNECTED
 
     async def test_lifecycle_dispatch_candidates_track_generation(
         self, rdb_session: AsyncSession
@@ -348,6 +506,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.STOPPED,
+            1,
             0,
         )
         assert runtime is not None
@@ -411,6 +570,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.STOPPED,
+            1,
             0,
         )
         assert runtime is not None
@@ -479,6 +639,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.STOPPED,
+            1,
             0,
         )
         assert runtime is not None
@@ -525,6 +686,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.STOPPED,
+            1,
             0,
         )
         assert runtime is not None
@@ -572,6 +734,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.STOPPED,
+            1,
             0,
         )
         assert runtime is not None
@@ -639,6 +802,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.STARTING,
+            1,
             command.desired_generation,
         )
         assert runtime is not None
@@ -692,6 +856,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.STOPPING,
+            1,
             command.desired_generation,
         )
         assert runtime is not None
@@ -747,6 +912,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.STARTING,
+            1,
             command.desired_generation,
         )
         assert runtime is not None
@@ -763,6 +929,7 @@ class TestAgentRuntimeRepository:
             rdb_session,
             runtime.id,
             RuntimeProviderObservedState.STARTING,
+            1,
             command.desired_generation,
         )
         candidates = await repo.find_lifecycle_dispatch_candidates(

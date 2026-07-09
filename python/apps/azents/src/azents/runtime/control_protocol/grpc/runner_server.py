@@ -207,6 +207,20 @@ class RuntimeRunnerControlGrpcServicer(
     ) -> None:
         async for message in request_iterator:
             payload = message.WhichOneof("payload")
+            if message.generation != generation:
+                _LOGGER.warning(
+                    "Runtime Runner message rejected",
+                    extra={
+                        "runtime_id": runtime_id,
+                        "runner_generation": generation,
+                        "message_generation": message.generation,
+                        "request_id": message.request_id,
+                    },
+                )
+                await outbound.put(
+                    _error(message.request_id, "STALE_RUNNER_GENERATION")
+                )
+                return
             if payload == "heartbeat":
                 ok = await self._control_protocol.heartbeat_runner(
                     runtime_id=runtime_id,
@@ -236,6 +250,18 @@ class RuntimeRunnerControlGrpcServicer(
                 )
                 continue
             if payload == "state_report":
+                if message.state_report.runner_generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_RUNNER_GENERATION")
+                    )
+                    return
+                if not await self._runner_generation_current(
+                    runtime_id=runtime_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
                 report = runner_state_report_from_message(message.state_report)
                 await self._state_sink.record_runner_state(report)
                 _LOGGER.info(
@@ -250,7 +276,37 @@ class RuntimeRunnerControlGrpcServicer(
                 )
                 continue
             if payload == "operation_event":
+                if message.operation_event.generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_RUNNER_GENERATION")
+                    )
+                    return
+                if not await self._runner_generation_current(
+                    runtime_id=runtime_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
                 await self._append_runner_event(message)
+
+    async def _runner_generation_current(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+        request_id: str,
+        outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage],
+    ) -> bool:
+        ok = await self._control_protocol.heartbeat_runner(
+            runtime_id=runtime_id,
+            generation=generation,
+            heartbeat_at=datetime.now(UTC),
+        )
+        if ok:
+            return True
+        await outbound.put(_error(request_id, "STALE_RUNNER_GENERATION"))
+        return False
 
     async def _relay_runner_operations(
         self,

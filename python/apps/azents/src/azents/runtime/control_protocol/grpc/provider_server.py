@@ -166,6 +166,11 @@ class RuntimeProviderControlGrpcServicer(
     ) -> None:
         async for message in request_iterator:
             payload = message.WhichOneof("payload")
+            if message.generation != generation:
+                await outbound.put(
+                    _error(message.request_id, "STALE_PROVIDER_GENERATION")
+                )
+                return
             if payload == "heartbeat":
                 ok = await self._control_protocol.heartbeat_provider(
                     provider_id=provider_id,
@@ -187,11 +192,44 @@ class RuntimeProviderControlGrpcServicer(
                 )
                 continue
             if payload == "report":
+                if message.report.provider_generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_PROVIDER_GENERATION")
+                    )
+                    return
+                if not await self._provider_generation_current(
+                    provider_id=provider_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
                 await self._report_sink.record_provider_report(
                     _shared_report(message.report)
                 )
                 continue
             if payload == "command_completion":
+                if message.command_completion.generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_PROVIDER_GENERATION")
+                    )
+                    return
+                if (
+                    message.command_completion.report.runtime_id
+                    and message.command_completion.report.provider_generation
+                    != generation
+                ):
+                    await outbound.put(
+                        _error(message.request_id, "STALE_PROVIDER_GENERATION")
+                    )
+                    return
+                if not await self._provider_generation_current(
+                    provider_id=provider_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
                 await self._complete_provider_command(
                     message.command_completion,
                     provider_id=provider_id,
@@ -200,6 +238,24 @@ class RuntimeProviderControlGrpcServicer(
                     await self._report_sink.record_provider_report(
                         _shared_report(message.command_completion.report)
                     )
+
+    async def _provider_generation_current(
+        self,
+        *,
+        provider_id: str,
+        generation: int,
+        request_id: str,
+        outbound: asyncio.Queue[runtime_provider_control_pb2.ControlMessage],
+    ) -> bool:
+        ok = await self._control_protocol.heartbeat_provider(
+            provider_id=provider_id,
+            generation=generation,
+            heartbeat_at=datetime.now(UTC),
+        )
+        if ok:
+            return True
+        await outbound.put(_error(request_id, "STALE_PROVIDER_GENERATION"))
+        return False
 
     async def _relay_provider_commands(
         self,
