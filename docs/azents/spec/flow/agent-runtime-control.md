@@ -23,7 +23,7 @@ code_paths:
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
 last_verified_at: 2026-07-10
-spec_version: 12
+spec_version: 13
 ---
 
 # Agent Runtime Control
@@ -122,6 +122,8 @@ Provider is lifecycle-only. It implements:
 
 Provider reports backend observed state and metadata. The Agent Workspace absolute path is provider metadata and is stored on `agent_runtimes.workspace_path`. Runner registration can validate that it mounted the same path, but Runner is not the authority for choosing the Agent Workspace path.
 
+Kubernetes Runtime Pod reuse compares Provider-managed configuration while allowing additive fields injected by Kubernetes admission and defaulting. In particular, configured tolerations must remain present, but built-in `NoExecute` tolerations added by Kubernetes do not make an otherwise reusable Pod stale or trigger replacement during repeated start reconciliation.
+
 If Provider is disconnected or reports no workspace path for a Runtime that needs workspace access, Control records an explicit failure/unavailable state. It must not invent a fallback path. `PROVIDER_WORKSPACE_PATH_MISSING` is the explicit error for a missing provider path.
 
 Kubernetes and Docker Providers are external components. They must not import Azents server modules, DB sessions, repositories, or in-process managers. They communicate with Control only via the runtime-control protocol and their backend APIs.
@@ -198,6 +200,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-10** (spec_version 13) — Allowed Kubernetes admission-defaulted tolerations during Runtime Pod reuse so repeated start reconciliation does not delete a healthy Pod.
 - **2026-07-10** (spec_version 12) — Required Provider-side report generation rebasing after reconnect or leader failover so historical backend labels cannot close the current Control stream.
 - **2026-07-09** (spec_version 11) — Added generation-fenced connection heartbeat/revoke semantics and stale Runner stream-close handling.
 - **2026-07-09** (spec_version 10) — Added Provider/Runner request claim/ack/reclaim semantics, operation metadata deadline buffering, and background completion context propagation.

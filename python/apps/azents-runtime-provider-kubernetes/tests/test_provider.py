@@ -312,6 +312,60 @@ async def test_start_preserves_generic_runner_resource_requirements() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_reuses_pod_with_kubernetes_default_tolerations() -> None:
+    """Admission-added tolerations do not make an existing Runtime Pod stale."""
+    api = FakeKubernetesApi()
+    configured_toleration = Toleration(
+        key="runtime",
+        operator="Equal",
+        value="azents",
+        effect="NoSchedule",
+    )
+    provider = KubernetesRuntimeProvider(
+        api,
+        KubernetesRuntimeProviderConfig(
+            provider_id="system-kubernetes",
+            namespace="azents-runtime",
+            storage_class_name="gp3",
+            pvc_storage_request="20Gi",
+            runner_resources=None,
+            pod_tolerations=(configured_toleration,),
+        ),
+    )
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    default_tolerations = (
+        Toleration(
+            key="node.kubernetes.io/not-ready",
+            operator="Exists",
+            effect="NoExecute",
+        ),
+        Toleration(
+            key="node.kubernetes.io/unreachable",
+            operator="Exists",
+            effect="NoExecute",
+        ),
+    )
+    api.pods[pod_key] = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(
+            pod.spec,
+            tolerations=(configured_toleration, *default_tolerations),
+        ),
+    )
+
+    await provider.start(command)
+
+    assert api.deleted_pods == []
+    assert tuple(api.pods[pod_key].spec.tolerations) == (
+        configured_toleration,
+        *default_tolerations,
+    )
+
+
+@pytest.mark.asyncio
 async def test_runtime_control_adapter_reports_provider_workspace_path() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
