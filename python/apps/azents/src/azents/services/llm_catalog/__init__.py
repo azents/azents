@@ -5,10 +5,9 @@ import datetime
 import hashlib
 import json
 import re
-from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
-import httpx
+import litellm
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import BaseModel, Field
@@ -66,13 +65,6 @@ _LITELLM_SOURCE_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/"
     "model_prices_and_context_window.json"
 )
-_LITELLM_SOURCE_TIMEOUT_SECONDS = 20.0
-
-
-async def _get_litellm_source_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Create LiteLLM source HTTP client and close it after request."""
-    async with httpx.AsyncClient(timeout=_LITELLM_SOURCE_TIMEOUT_SECONDS) as client:
-        yield client
 
 
 def _get_integration_repository(
@@ -371,11 +363,10 @@ class LiteLLMSourceSyncService:
     snapshot_repository: Annotated[
         LiteLLMSourceSnapshotRepository, Depends(LiteLLMSourceSnapshotRepository)
     ]
-    http_client: Annotated[httpx.AsyncClient, Depends(_get_litellm_source_http_client)]
 
     async def sync_current_source(self) -> LiteLLMSourceSnapshot:
-        """Store remote LiteLLM model cost catalog as a source snapshot."""
-        payload = await fetch_remote_litellm_model_cost_payload(self.http_client)
+        """Store current LiteLLM model cost map as a source snapshot."""
+        payload = current_litellm_model_cost_payload()
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         source_hash = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         async with self.session_manager() as session:
@@ -385,8 +376,8 @@ class LiteLLMSourceSyncService:
                 source_url=_LITELLM_SOURCE_URL,
                 source_hash=source_hash,
                 model_count=len(payload),
-                litellm_version=None,
-                loaded_source="litellm_remote",
+                litellm_version=getattr(litellm, "__version__", None),
+                loaded_source="litellm_runtime",
                 payload=payload,
             )
 
@@ -733,16 +724,12 @@ class IntegrationCatalogProjectionService:
         )
 
 
-async def fetch_remote_litellm_model_cost_payload(
-    http_client: httpx.AsyncClient,
-) -> dict[str, Any]:
-    """Fetch the current remote LiteLLM model cost catalog payload."""
-    response = await http_client.get(_LITELLM_SOURCE_URL)
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise RuntimeError("Remote LiteLLM model cost catalog is not a JSON object.")
-    return {str(key): value for key, value in payload.items()}
+def current_litellm_model_cost_payload() -> dict[str, Any]:
+    """Return the current LiteLLM model cost map payload."""
+    model_cost = getattr(litellm, "model_cost", None)
+    if not isinstance(model_cost, dict):
+        raise RuntimeError("LiteLLM model cost map is unavailable")
+    return {str(key): value for key, value in model_cost.items()}
 
 
 def _deterministic_listing_failure(
