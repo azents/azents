@@ -2,6 +2,7 @@
 title: "Agent Model Selection Options Design"
 created: 2026-07-09
 updated: 2026-07-09
+implemented: 2026-07-09
 tags: [backend, frontend, engine]
 ---
 

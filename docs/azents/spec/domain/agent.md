@@ -45,12 +45,12 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
 last_verified_at: 2026-07-09
-spec_version: 40
+spec_version: 41
 ---
 
 # Agent Domain Spec
 
-Agent is central execution unit of azents. Within Workspace, it bundles model selection snapshot, system prompt, model parameters, and toolkit access; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop. Session-scoped subagents do not create a separate persistent Agent role; they are represented by `SessionAgent` tree nodes linked to hidden child `AgentSession` rows under the same Agent.
+Agent is central execution unit of azents. Within Workspace, it bundles an ordered selectable model option list, effective model selection snapshots, system prompt, model parameters, and toolkit access; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop. Session-scoped subagents do not create a separate persistent Agent role; they are represented by `SessionAgent` tree nodes linked to hidden child `AgentSession` rows under the same Agent.
 
 ## 1. Core Model
 
@@ -62,8 +62,11 @@ Agent is central execution unit of azents. Within Workspace, it bundles model se
 |---|---|
 | `workspace_id` | owning Workspace. cascades on Workspace deletion |
 | `name`, `description` | display name and description |
-| `model_selection` | main runtime model selection snapshot. required for every Agent |
-| `lightweight_model_selection` | compaction/lightweight model selection snapshot. required for every Agent |
+| `selectable_model_options` | ordered JSONB array of selectable model options. Each option has a unique label and resolved `AgentModelSelection` snapshot |
+| `main_model_label` | selected label from `selectable_model_options` for normal model turns |
+| `lightweight_model_label` | selected label from `selectable_model_options` for compaction/lightweight model turns |
+| `model_selection` | denormalized effective main runtime model selection snapshot resolved from `main_model_label`. required for every Agent |
+| `lightweight_model_selection` | denormalized effective compaction/lightweight model selection snapshot resolved from `lightweight_model_label`. required for every Agent |
 | `model_parameters` | Agent-local advanced model parameters. Only this value is used without default/preset merge |
 | `system_prompt` | Agent system prompt |
 | `enabled` | when false, runtime resolve blocks run start with `AgentDisabled` |
@@ -77,7 +80,20 @@ Agent is central execution unit of azents. Within Workspace, it bundles model se
 
 `subagent_settings.max_subagents` is the maximum active subagent count under one root session. It is equivalent to Codex `max_concurrent_threads_per_session - 1`; the root/current agent is not counted in the stored value. `subagent_settings.max_depth` is the maximum `SessionAgent` tree depth below `/root`, where `1` allows root-to-child spawning only. Both values are non-negative integers.
 
-`model_selection` and `lightweight_model_selection` are `AgentModelSelection` JSONB snapshots and are not FK targets.
+`selectable_model_options` is a JSONB array rather than a separate table because option order is part of the fallback contract. The list invariants are:
+
+- at least one option;
+- at most 10 options;
+- labels are trimmed, non-empty, case-sensitive, and unique within the list;
+- labels are at most 80 characters;
+- selected labels are normalized against the final list, and an absent selected label falls back to the first ordered option.
+
+`model_selection` and `lightweight_model_selection` are `AgentModelSelection` JSONB snapshots and are not FK targets. They are effective runtime snapshots owned by Agent service consistency logic:
+
+- `model_selection = selectable_model_options[main_model_label].model_selection`
+- `lightweight_model_selection = selectable_model_options[lightweight_model_label].model_selection`
+
+Runtime reads only these effective snapshots. It does not resolve labels, query Workspace defaults, or query model catalogs during run start.
 
 Required snapshot fields:
 
@@ -92,7 +108,7 @@ Required snapshot fields:
 - `source_metadata`
 - `last_refreshed_at`
 
-Snapshot is created by model listing service re-querying integration-scoped listing at submit time. Runtime does not query latest listing again and uses snapshot in Agent row as source of truth.
+Snapshot is created by resolving submitted model identifiers through stored model catalog projection at submit time. Runtime does not query latest listing again and uses snapshot in Agent row as source of truth.
 
 ### 1.2 WorkspaceModelSettings
 
@@ -101,38 +117,55 @@ Snapshot is created by model listing service re-querying integration-scoped list
 | Field | Meaning |
 |---|---|
 | `workspace_id` | Workspace PK/FK |
-| `default_model_selection` | default main model snapshot. may be null initially |
-| `default_lightweight_model_selection` | optional default lightweight snapshot |
+| `default_selectable_model_options` | ordered default selectable model option list copied by new Agents. may be null before Workspace defaults are configured |
+| `default_main_model_label` | selected default main model label. may be null before Workspace defaults are configured |
+| `default_lightweight_model_label` | selected default lightweight model label. may be null before Workspace defaults are configured |
+| `default_model_selection` | denormalized effective default main model snapshot. may be null initially |
+| `default_lightweight_model_selection` | denormalized effective default lightweight snapshot. may be null initially |
 
-`effective_default_lightweight_model_selection` is not stored column; it is computed as `default_lightweight_model_selection ?? default_model_selection`.
+`effective_default_lightweight_model_selection` is not stored column; it is computed as `default_lightweight_model_selection ?? default_model_selection` for consumers that need the fallback projection.
 
 Rules:
 
-- If Workspace default main model is absent, creating Agent without model fails.
-- If Workspace default main model is absent and Agent is created with explicit main model, server bootstraps that snapshot as workspace default main model.
-- Once configured, default main model cannot be reverted to null and can only be changed.
-- default lightweight model can be cleared to null.
-- Workspace default change does not change existing Agent snapshot.
+- If Workspace default selectable model options are absent, creating Agent without explicit model options fails.
+- Once Workspace defaults are configured, the default selectable model list cannot be cleared to empty.
+- Workspace default selectable model list uses the same label, order, cap, and fallback invariants as Agent selectable model options.
+- Updating Workspace defaults recomputes the denormalized effective default snapshots from default labels.
+- Workspace default change does not change existing Agent selectable model options or effective snapshots.
+- During the direct-model transition, explicit legacy `default_model_selection` inputs are still accepted and converted into an equivalent default selectable option list.
 
 ### 1.3 Provider integration and model listing
 
 `LLMProviderIntegration` is workspace-scoped credential/config. `/models` endpoint returns normalized model candidates selectable with that integration.
 
-Agent/Workspace settings API re-queries listing on server for client-sent `{ llm_provider_integration_id, model_identifier }` and normalizes it into `AgentModelSelection` snapshot.
+Agent/Workspace settings API resolves each client-sent `{ llm_provider_integration_id, model_identifier }` through the stored model catalog projection and normalizes it into an `AgentModelSelection` snapshot. This applies both to direct transition fields and to every selectable model option entry.
 
 ## 2. API Contract
 
 ### 2.1 Agent create/update
 
-Create/update request receives only following model-related fields.
+Create/update requests accept selectable model options as the current model contract:
 
 ```json
 {
-  "model_selection": {
-    "llm_provider_integration_id": "int_...",
-    "model_identifier": "gpt-4o"
-  },
-  "lightweight_model_selection": null,
+  "selectable_model_options": [
+    {
+      "label": "default",
+      "model_selection": {
+        "llm_provider_integration_id": "int_...",
+        "model_identifier": "gpt-5"
+      }
+    },
+    {
+      "label": "lightweight",
+      "model_selection": {
+        "llm_provider_integration_id": "int_...",
+        "model_identifier": "gpt-5.5-mini"
+      }
+    }
+  ],
+  "main_model_label": "default",
+  "lightweight_model_label": "lightweight",
   "model_parameters": {
     "temperature": 0.7,
     "context_window_tokens": 128000,
@@ -147,13 +180,17 @@ Create/update request receives only following model-related fields.
 }
 ```
 
-- `model_selection` omitted/null: copy workspace default main snapshot into Agent.
-- `lightweight_model_selection` omitted/null: copy workspace default lightweight if exists; otherwise copy Agent main snapshot.
+- `selectable_model_options` omitted on create: copy Workspace default selectable model options into Agent.
+- `selectable_model_options` supplied: whole-list replacement. Every entry is resolved through stored catalog projection at submit time.
+- Empty lists, more than 10 entries, empty labels, duplicate labels, and unresolved model selections are rejected.
+- `main_model_label` / `lightweight_model_label` omitted, null, or absent from the final list: fallback to the first ordered option label.
+- Effective `model_selection` and `lightweight_model_selection` are recomputed from the final labels and returned in responses.
+- During transition, legacy direct `model_selection` and `lightweight_model_selection` inputs remain accepted. They are converted into compatible selectable model options and effective snapshots. These fields are compatibility for the direct snapshot API, not the removed `ModelConfig` API.
 - `model_parameters` is whole-object replace. Unknown keys are rejected.
 - `model_parameters.context_window_tokens` is an optional Agent-level input budget cap. It is stored as user intent even when larger than current model limits, and runtime/API effective context calculation clamps it with model limits.
 - `model_parameters.max_output_tokens` is an optional output generation cap. When omitted/null, runtime does not set provider `max_output_tokens` and provider/model defaults apply.
 - `subagent_settings` is a whole-object replace when supplied. Omitted create requests use the default `{ "max_subagents": 3, "max_depth": 1 }`; omitted update requests leave the stored settings unchanged.
-- Response returns stored `model_selection`, `lightweight_model_selection`, `model_parameters`, `subagent_settings`, and effective context window value.
+- Response returns stored `selectable_model_options`, `main_model_label`, `lightweight_model_label`, effective `model_selection`, effective `lightweight_model_selection`, `model_parameters`, `subagent_settings`, and effective context window value.
 
 ### 2.2 Workspace model settings
 
@@ -162,7 +199,30 @@ GET /workspace-model-settings/v1/workspaces/{handle}
 PUT /workspace-model-settings/v1/workspaces/{handle}
 ```
 
-PUT receives `default_model_selection` and `default_lightweight_model_selection` input. Each input is same selection key as Agent, and response returns snapshot.
+PUT accepts Workspace default selectable model options and labels:
+
+```json
+{
+  "default_selectable_model_options": [
+    {
+      "label": "default",
+      "model_selection": {
+        "llm_provider_integration_id": "int_...",
+        "model_identifier": "gpt-5"
+      }
+    }
+  ],
+  "default_main_model_label": "default",
+  "default_lightweight_model_label": "default"
+}
+```
+
+- `default_selectable_model_options` is whole-list replacement.
+- Once configured, the Workspace default list cannot be cleared to empty.
+- Labels and option count use the same invariants as Agent selectable model options.
+- Default labels normalize to the first option when omitted, null, or absent from the final list.
+- Response returns default selectable options, default labels, and denormalized effective default snapshots.
+- During transition, legacy direct `default_model_selection` and `default_lightweight_model_selection` inputs remain accepted and are converted into compatible default selectable options.
 
 ### 2.3 LLM provider integration models
 
@@ -184,13 +244,9 @@ DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
 
 These routes are Agent-scoped because Memory belongs to Agent. The Agent settings UI also updates `memory_enabled` through the normal Agent update endpoint. Detailed Memory visibility, conflict, and scope semantics are defined in [`memory.md`](memory.md).
 
-Public integration model listing API does not use materialized DB catalog cache. Even in production, request path calls integration-scoped dynamic listing adapter. Providers for which public catalog is enough, such as OpenAI, Anthropic, Google Gemini, ChatGPT OAuth, can use Models.dev based adapter; providers where exposed models differ by account/project/region, such as AWS Bedrock and Google Vertex AI, use integration credential/config-based provider API adapter. Listing result is not saved to DB and is used only for snapshot normalization at Agent/Workspace submit time.
+Public integration model listing uses stored model catalog projections. The picker reads catalog entries for the selected integration, falling back to provider system catalog entries where applicable. Submit normalization resolves direct transition inputs and selectable model option entries through stored catalog projection and must not refetch dynamic provider listing as a fallback.
 
-Deterministic fixture in local/test environment is development/QA support path activated only by integration name marker. General integration listing fetch failure is not modeled as service result failure variant and is propagated as original exception. Route code does not directly raise 5xx `HTTPException`; FastAPI/server error handling treats unexpected/internal failure as 500.
-
-Models.dev backed listing excludes candidates where adapter `available` value is false. Adapter excludes models with source `status=deprecated` and models included in internal custom deprecated model policy from user-visible listing. OpenAI custom deprecated list is managed as provider-specific hardcoded set from intersection of Deprecated badge in OpenAI API All models doc and Models.dev OpenAI `gpt-*` response; later, non-GPT provider/model can be added with same structure.
-
-When Models.dev does not provide provider-hosted tool capability, internal capability policy supplements it. OpenAI `gpt-*` text models include `web_search` in `normalized_capabilities.built_in_tools.supported`. GPT Image models (`gpt-image-*`) are not LLM text hosted search targets, so they are excluded from this supplement.
+Deterministic fixture in local/test environment is development/QA support path activated only by integration name marker. It can sync deterministic catalog entries for product tests.
 
 ## 3. Runtime Resolve
 
@@ -198,7 +254,7 @@ When Models.dev does not provide provider-hosted tool capability, internal capab
 
 1. Load Agent with `AgentRepository.get_by_id()`.
 2. Return `AgentNotFound` if Agent absent, `AgentDisabled` if disabled.
-3. Read Agent `model_selection` and `lightweight_model_selection` snapshots.
+3. Read Agent effective `model_selection` and `lightweight_model_selection` snapshots. These snapshots were resolved from selectable model labels before run start.
 4. Load integration including secrets by `llm_provider_integration_id` of each snapshot.
 5. Return `IntegrationNotFound` if integration absent, `IntegrationDisabled` if disabled.
 6. ChatGPT OAuth integration refreshes near-expiry token with `ensure_runtime_tokens()`.
@@ -252,6 +308,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-09 | 41 | Added selectable model option lists, label-based Agent/Workspace model selection, and effective snapshot semantics |
 | 2026-07-09 | 40 | Added Agent `subagent_settings` persistence/API contract for subagent concurrency and depth limits |
 | 2026-07-08 | 39 | Clarified that current subagents are session-scoped `SessionAgent` participants, not persistent Agent roles |
 | 2026-07-06 | 38 | Removed legacy subagent role, junction, API, runtime delegation, and living spec surfaces |

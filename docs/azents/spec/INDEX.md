@@ -12,11 +12,11 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-09 | 40 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-09 | 41 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-09 | 91 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-01 | 8 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-09 | 4 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-06-21 | 1 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-09 | 2 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-09 | 50 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-08 | 6 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-08 | 36 |

@@ -15,11 +15,11 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-09 | 40 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-09 | 41 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-09 | 91 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-09 | 4 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-09 | 2 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-09 | 50 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-08 | 6 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-08 | 36 |
@@ -150,8 +150,9 @@ _13 documents_
 - [ADR-0097: Continue FIFO Processing After Failed TurnActions](adr/0097-turn-action-fifo-continuation.md)
 - [ADR-0098: Subagent Human Write Boundary](adr/0098-subagent-human-write-boundary.md)
 - [ADR-0099: Codex-Compatible Subagent Concurrency](adr/0099-codex-compatible-subagent-concurrency.md)
+- [ADR-0100: Label-Based Model Targets](adr/0100-label-based-model-targets.md)
 
-_102 documents_
+_103 documents_
 
 ## Issues (Bug Tracking)
 
@@ -184,4 +185,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 362
+- Total documents: 363
