@@ -125,6 +125,20 @@
   text-shadow: none;
 }
 
+@media (max-width: 48em) {
+  .codeBlockScroller,
+  .codeBlockScroller code,
+  .highlightedCode {
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+  }
+
+  .codeBlockScroller {
+    overflow-x: hidden !important;
+  }
+}
+
 /* inline code */
 .markdown :not(pre) > code {
   --azents-chat-code-background: var(--mantine-color-gray-0);
