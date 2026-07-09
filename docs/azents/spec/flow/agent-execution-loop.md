@@ -38,7 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-09
-spec_version: 63
+spec_version: 64
 ---
 
 # Agent Execution Loop
@@ -257,10 +257,14 @@ while keeping the subagent collaboration toolkit available.
 
 Subagent collaboration tools communicate through target child input buffers:
 
-- `spawn_agent` creates a child `SessionAgent` plus hidden child `AgentSession`, forks the parent's
-  current model-visible context by default, appends that selected context to the child transcript,
-  writes an initial `agent_message`, marks the child running, and sends a broker wake-up. The caller
-  may still explicitly select no context or a bounded number of recent turns through `fork_turns`.
+- `spawn_agent` first enforces the Agent's active subagent and depth limits while holding a root
+  `SessionAgent` row lock for the tree. It fails with a tool error instead of queueing when the root
+  tree already has `subagent_settings.max_subagents` active subagents or the requested child would
+  exceed `subagent_settings.max_depth`. If allowed, it creates
+  a child `SessionAgent` plus hidden child `AgentSession`, forks the parent's current model-visible
+  context by default, appends that selected context to the child transcript, writes an initial
+  `agent_message`, marks the child running, and sends a broker wake-up. The caller may still
+  explicitly select no context or a bounded number of recent turns through `fork_turns`.
 - `send_message` writes an `agent_message` to the target child without waking it.
 - `followup_task` writes an `agent_message`, marks the child running, and sends a broker wake-up.
 
@@ -476,6 +480,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-09** — v64. Documented `spawn_agent` active subagent and depth limit enforcement before child-session side effects.
 - **2026-07-09** — v63. Documented default subagent context forking and child-session human write rejection before side effects.
 - **2026-07-08** — v62. Documented subagent worker scheduling through normal session runs, `agent_message` mailbox promotion, subagent execution-mode tool resolution, terminal result projections, and subtree stop behavior.
 - **2026-07-08** — v61. Process TurnActions at every model-call turn boundary; failed actions are marked failed and FIFO processing continues, while context invalidation exits through a follow-up wake-up without a completed run marker.

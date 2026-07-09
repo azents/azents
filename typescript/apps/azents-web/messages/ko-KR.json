@@ -550,7 +550,12 @@
           "enabled": "사용 중",
           "disabled": "사용 안 함",
           "shellEnabled": "Shell 켜짐",
-          "shellDisabled": "Shell 꺼짐"
+          "shellDisabled": "Shell 꺼짐",
+          "subagents": "최대 {count}개 · 깊이 {depth}"
+        },
+        "subagents": {
+          "label": "서브에이전트",
+          "description": "위임된 에이전트의 동시 실행 및 중첩 제한"
         }
       },
       "settingsLayout": {
@@ -706,7 +711,12 @@
         "emptyDescription": "메모리를 만들거나 검색 조건을 조정하세요.",
         "deleteConfirm": "메모리 \"{name}\"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다."
       },
-      "shellEnabledDescription": "이 에이전트가 Shell 명령어를 실행할 수 있도록 허용"
+      "shellEnabledDescription": "이 에이전트가 Shell 명령어를 실행할 수 있도록 허용",
+      "subagentsSectionLabel": "서브에이전트",
+      "subagentMaxSubagentsLabel": "최대 서브에이전트 수",
+      "subagentMaxSubagentsDescription": "하나의 루트 세션 아래에서 동시에 활성화될 수 있는 서브에이전트 수입니다. 루트 에이전트는 포함하지 않습니다.",
+      "subagentMaxDepthLabel": "최대 깊이",
+      "subagentMaxDepthDescription": "루트 에이전트 아래 서브에이전트 트리의 최대 깊이입니다. 1은 root → child만 허용합니다."
     },
     "toolkits": {
       "headline": "툴킷",

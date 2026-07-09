@@ -277,6 +277,10 @@ export function useAgentFormContainer(
           shell_enabled: values.shell_enabled,
           memory_enabled: values.memory_enabled,
           max_turns: values.max_turns ?? null,
+          subagent_settings: {
+            max_subagents: values.subagent_max_subagents,
+            max_depth: values.subagent_max_depth,
+          },
         });
       } else {
         createMutation.mutate({
@@ -292,6 +296,10 @@ export function useAgentFormContainer(
           shell_enabled: values.shell_enabled,
           memory_enabled: values.memory_enabled,
           max_turns: values.max_turns ?? null,
+          subagent_settings: {
+            max_subagents: values.subagent_max_subagents,
+            max_depth: values.subagent_max_depth,
+          },
         });
       }
     },

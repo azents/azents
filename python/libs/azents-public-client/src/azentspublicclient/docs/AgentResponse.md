@@ -6,24 +6,25 @@ Agent response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  | 
-**name** | **str** |  | 
-**description** | **str** |  | 
-**model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | 
-**lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | 
-**effective_context_window_tokens** | **int** |  | 
-**effective_auto_compaction_threshold_tokens** | **int** |  | 
-**model_parameters** | [**ModelParameters**](ModelParameters.md) |  | 
-**system_prompt** | **str** |  | 
-**enabled** | **bool** |  | 
-**type** | [**AgentType**](AgentType.md) |  | 
-**runtime_provider_id** | **str** |  | 
-**shell_enabled** | **bool** |  | 
-**memory_enabled** | **bool** |  | 
-**max_turns** | **int** |  | 
-**avatar** | [**UploadedImage**](UploadedImage.md) |  | [optional] 
-**created_at** | **datetime** |  | 
-**updated_at** | **datetime** |  | 
+**id** | **str** |  |
+**name** | **str** |  |
+**description** | **str** |  |
+**model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  |
+**lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  |
+**effective_context_window_tokens** | **int** |  |
+**effective_auto_compaction_threshold_tokens** | **int** |  |
+**model_parameters** | [**ModelParameters**](ModelParameters.md) |  |
+**system_prompt** | **str** |  |
+**enabled** | **bool** |  |
+**type** | [**AgentType**](AgentType.md) |  |
+**runtime_provider_id** | **str** |  |
+**shell_enabled** | **bool** |  |
+**memory_enabled** | **bool** |  |
+**max_turns** | **int** |  |
+**subagent_settings** | [**SubagentSettings**](SubagentSettings.md) |  |
+**avatar** | [**UploadedImage**](UploadedImage.md) |  | [optional]
+**created_at** | **datetime** |  |
+**updated_at** | **datetime** |  |
 
 ## Example
 

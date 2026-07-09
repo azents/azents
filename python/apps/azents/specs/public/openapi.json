@@ -8183,6 +8183,10 @@
             ],
             "title": "Max Turns",
             "description": "Maximum agent turn count"
+          },
+          "subagent_settings": {
+            "$ref": "#/components/schemas/SubagentSettings",
+            "description": "Subagent execution settings"
           }
         },
         "type": "object",
@@ -8493,6 +8497,9 @@
             ],
             "title": "Max Turns"
           },
+          "subagent_settings": {
+            "$ref": "#/components/schemas/SubagentSettings"
+          },
           "avatar": {
             "anyOf": [
               {
@@ -8531,6 +8538,7 @@
           "shell_enabled",
           "memory_enabled",
           "max_turns",
+          "subagent_settings",
           "created_at",
           "updated_at"
         ],
@@ -9307,6 +9315,10 @@
             ],
             "title": "Max Turns",
             "description": "Maximum agent turn count"
+          },
+          "subagent_settings": {
+            "$ref": "#/components/schemas/SubagentSettings",
+            "description": "Subagent execution settings"
           }
         },
         "type": "object",
@@ -15425,6 +15437,28 @@
         ],
         "title": "SkillAction",
         "description": "Skill invocation turn action."
+      },
+      "SubagentSettings": {
+        "properties": {
+          "max_subagents": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Max Subagents",
+            "description": "Maximum active subagents per root session",
+            "default": 3
+          },
+          "max_depth": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Max Depth",
+            "description": "Maximum subagent tree depth below the root agent",
+            "default": 1
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SubagentSettings",
+        "description": "Subagent execution settings."
       },
       "SubagentTreeNodeResponse": {
         "properties": {

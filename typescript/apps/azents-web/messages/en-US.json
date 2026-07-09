@@ -550,7 +550,12 @@
           "enabled": "Enabled",
           "disabled": "Disabled",
           "shellEnabled": "Shell on",
-          "shellDisabled": "Shell off"
+          "shellDisabled": "Shell off",
+          "subagents": "{count} max · depth {depth}"
+        },
+        "subagents": {
+          "label": "Subagents",
+          "description": "Concurrency and nesting limits for delegated agents"
         }
       },
       "settingsLayout": {
@@ -706,7 +711,12 @@
         "emptyDescription": "Create a memory or adjust the search filter.",
         "deleteConfirm": "Delete memory \"{name}\"? This cannot be undone."
       },
-      "shellEnabledDescription": "Allow this agent to execute shell commands"
+      "shellEnabledDescription": "Allow this agent to execute shell commands",
+      "subagentsSectionLabel": "Subagents",
+      "subagentMaxSubagentsLabel": "Max subagents",
+      "subagentMaxSubagentsDescription": "Maximum number of active subagents under one root session. The root agent is not counted.",
+      "subagentMaxDepthLabel": "Max depth",
+      "subagentMaxDepthDescription": "Maximum subagent tree depth below the root agent. 1 allows root → child only."
     },
     "toolkits": {
       "headline": "Toolkits",

@@ -235,6 +235,7 @@ from azentspublicclient.models.session_workspace_project_response import Session
 from azentspublicclient.models.set_password_request import SetPasswordRequest
 from azentspublicclient.models.signup_status_response import SignupStatusResponse
 from azentspublicclient.models.skill_action import SkillAction
+from azentspublicclient.models.subagent_settings import SubagentSettings
 from azentspublicclient.models.subagent_tree_node_response import SubagentTreeNodeResponse
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse
 from azentspublicclient.models.test_connection_request import TestConnectionRequest

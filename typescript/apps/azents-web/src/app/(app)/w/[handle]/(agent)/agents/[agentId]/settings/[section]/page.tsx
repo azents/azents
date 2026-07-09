@@ -13,6 +13,7 @@ function parseSection(value: string): SettingsSection | null {
     case "model":
     case "capabilities":
     case "admins":
+    case "subagents":
     case "memory":
     case "danger":
       return value;

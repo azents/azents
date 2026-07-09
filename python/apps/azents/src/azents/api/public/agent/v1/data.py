@@ -10,6 +10,7 @@ from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
     ModelParameters,
+    SubagentSettings,
 )
 from azents.core.enums import AgentType
 from azents.repos.memory.data import MemoryScope
@@ -40,6 +41,7 @@ class AgentResponse(BaseModel):
     shell_enabled: bool
     memory_enabled: bool
     max_turns: int | None
+    subagent_settings: SubagentSettings
     avatar: UploadedImage | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -65,6 +67,7 @@ class AgentResponse(BaseModel):
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
             max_turns=data.max_turns,
+            subagent_settings=data.subagent_settings,
             avatar=data.avatar,
             created_at=data.created_at,
             updated_at=data.updated_at,
@@ -104,6 +107,9 @@ class AgentCreateRequest(BaseModel):
     max_turns: int | None = Field(
         default=None, gt=0, description="Maximum agent turn count"
     )
+    subagent_settings: SubagentSettings = Field(
+        default_factory=SubagentSettings, description="Subagent execution settings"
+    )
 
 
 class AgentUpdateRequest(TypedDict, total=False):
@@ -132,6 +138,9 @@ class AgentUpdateRequest(TypedDict, total=False):
     memory_enabled: Annotated[bool, Field(description="Memory enabled state")]
     max_turns: Annotated[
         int | None, Field(gt=0, description="Maximum agent turn count")
+    ]
+    subagent_settings: Annotated[
+        SubagentSettings, Field(description="Subagent execution settings")
     ]
 
 

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
+from azents.core.agent import SubagentSettings
 from azents.core.enums import AgentRunStatus, AgentSessionRunState, InputBufferKind
 from azents.core.tools import (
     PublishEventFn,
@@ -29,11 +30,12 @@ from azents.engine.events.fork_context import (
     parse_fork_turns,
     select_fork_events,
 )
-from azents.engine.events.types import Event
+from azents.engine.events.types import AgentRunState, Event
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -131,6 +133,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         event_transcript_repository: EventTranscriptRepository,
         input_buffer_service: InputBufferService,
         broker: SessionBroker,
+        subagent_settings: SubagentSettings,
     ) -> None:
         self.session_manager = session_manager
         self.agent_session_repository = agent_session_repository
@@ -138,6 +141,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.event_transcript_repository = event_transcript_repository
         self.input_buffer_service = input_buffer_service
         self.broker = broker
+        self.subagent_settings = subagent_settings
         self.session_id: str | None = None
         self.user_id: str | None = None
         self.publish_event: PublishEventFn | None = None
@@ -166,14 +170,20 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Return subagent collaboration guidance."""
         del context
+        max_concurrency = self.subagent_settings.max_subagents + 1
+        max_depth = self.subagent_settings.max_depth
         return dedent(
-            """\
+            f"""\
             You are an agent in a team of agents collaborating to fulfill the
             user's goals.
 
             At the start of your turn, you are the active agent.
+            There are {max_concurrency} available concurrency slots, meaning
+            that up to {max_concurrency} agents can be active at once,
+            including you. The maximum subagent depth below the root agent is
+            {max_depth}.
             You can spawn sub-agents to handle subtasks, and those sub-agents
-            can spawn their own sub-agents.
+            can spawn their own sub-agents when depth allows.
             All agents in the team are similarly capable and have access to
             almost the same set of tools, except for Azents root/user-facing
             capabilities that are not available in subagent mode.
@@ -208,6 +218,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
             async with self.session_manager() as session:
                 current = await self._current_session_agent(session)
+                await self._enforce_spawn_limits(session, current)
                 try:
                     child = (
                         await self.agent_session_repository.create_child_session_agent(
@@ -544,6 +555,56 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         )
         return descendants
 
+    async def _enforce_spawn_limits(
+        self,
+        session: AsyncSession,
+        current: SessionAgent,
+    ) -> None:
+        """Raise a tool error when spawning would exceed configured limits."""
+        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
+            session,
+            current.root_session_agent_id,
+        )
+        if locked_root is None:
+            raise FunctionToolError("Root SessionAgent was not found")
+        next_depth = _session_agent_depth(current) + 1
+        max_depth = self.subagent_settings.max_depth
+        if next_depth > max_depth:
+            raise FunctionToolError(
+                "Cannot spawn subagent: max_depth "
+                f"{max_depth} would be exceeded by child depth {next_depth}."
+            )
+
+        max_subagents = self.subagent_settings.max_subagents
+        tree = await self.agent_session_repository.list_session_agent_tree(
+            session,
+            root_session_agent_id=current.root_session_agent_id,
+        )
+        subagents = [
+            agent for agent in tree if agent.id != current.root_session_agent_id
+        ]
+        sessions = await self.agent_session_repository.list_by_ids(
+            session,
+            agent_session_ids=[agent.agent_session_id for agent in subagents],
+        )
+        latest_runs = await self.agent_run_repository.list_latest_by_session_ids(
+            session,
+            session_ids=[agent.agent_session_id for agent in subagents],
+        )
+        active_count = sum(
+            1
+            for agent in subagents
+            if _session_agent_active(
+                sessions.get(agent.agent_session_id),
+                latest_runs.get(agent.agent_session_id),
+            )
+        )
+        if active_count >= max_subagents:
+            raise FunctionToolError(
+                "Cannot spawn subagent: max_subagents "
+                f"{max_subagents} is already reached for this root session."
+            )
+
     async def _enqueue_agent_message(
         self,
         session: AsyncSession,
@@ -698,6 +759,10 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
     ) -> SubagentToolkit:
         """Resolve per-session subagent collaboration tools."""
         del config
+        agent = await AgentRepository().get_by_id(context.session, context.agent_id)
+        subagent_settings = (
+            agent.subagent_settings if agent is not None else SubagentSettings()
+        )
         toolkit = SubagentToolkit(
             session_manager=self.session_manager,
             agent_session_repository=AgentSessionRepository(),
@@ -705,9 +770,29 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
             event_transcript_repository=EventTranscriptRepository(),
             input_buffer_service=self.input_buffer_service,
             broker=self.broker,
+            subagent_settings=subagent_settings,
         )
         toolkit.set_session_id(context.session_id)
         return toolkit
+
+
+def _session_agent_depth(agent: SessionAgent) -> int:
+    """Return depth below /root for a SessionAgent path."""
+    if agent.path == "/root":
+        return 0
+    return len([segment for segment in agent.path.split("/") if segment]) - 1
+
+
+def _session_agent_active(
+    session: AgentSession | None,
+    latest_run: AgentRunState | None,
+) -> bool:
+    """Return whether a SessionAgent should count against active capacity."""
+    if session is None:
+        return False
+    return session.run_state == AgentSessionRunState.RUNNING or (
+        latest_run is not None and latest_run.status == AgentRunStatus.RUNNING
+    )
 
 
 def _json(value: dict[str, object]) -> str:

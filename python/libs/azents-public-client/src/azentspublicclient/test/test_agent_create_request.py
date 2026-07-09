@@ -46,7 +46,8 @@ class TestAgentCreateRequest(unittest.TestCase):
                 runtime_provider_id = '',
                 shell_enabled = True,
                 memory_enabled = True,
-                max_turns = 56
+                max_turns = 56,
+                subagent_settings = { }
             )
         else:
             return AgentCreateRequest(

@@ -447,6 +447,7 @@ Class | Method | HTTP request | Description
  - [SetPasswordRequest](azentspublicclient/docs/SetPasswordRequest.md)
  - [SignupStatusResponse](azentspublicclient/docs/SignupStatusResponse.md)
  - [SkillAction](azentspublicclient/docs/SkillAction.md)
+ - [SubagentSettings](azentspublicclient/docs/SubagentSettings.md)
  - [SubagentTreeNodeResponse](azentspublicclient/docs/SubagentTreeNodeResponse.md)
  - [SubagentTreeResponse](azentspublicclient/docs/SubagentTreeResponse.md)
  - [TestConnectionRequest](azentspublicclient/docs/TestConnectionRequest.md)

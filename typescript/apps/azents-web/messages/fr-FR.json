@@ -550,7 +550,12 @@
           "enabled": "Enabled",
           "disabled": "Disabled",
           "shellEnabled": "Shell on",
-          "shellDisabled": "Shell off"
+          "shellDisabled": "Shell off",
+          "subagents": "{count} max · profondeur {depth}"
+        },
+        "subagents": {
+          "label": "Sous-agents",
+          "description": "Limites de concurrence et d’imbrication des agents délégués"
         }
       },
       "settingsLayout": {
@@ -706,7 +711,12 @@
         "emptyDescription": "Créez une mémoire ou ajustez le filtre de recherche.",
         "deleteConfirm": "Supprimer la mémoire « {name} » ? Cette action est irréversible."
       },
-      "shellEnabledDescription": "Autoriser cet agent à exécuter des commandes shell"
+      "shellEnabledDescription": "Autoriser cet agent à exécuter des commandes shell",
+      "subagentsSectionLabel": "Sous-agents",
+      "subagentMaxSubagentsLabel": "Nombre maximal de sous-agents",
+      "subagentMaxSubagentsDescription": "Nombre maximal de sous-agents actifs sous une session racine. L’agent racine n’est pas compté.",
+      "subagentMaxDepthLabel": "Profondeur maximale",
+      "subagentMaxDepthDescription": "Profondeur maximale de l’arbre de sous-agents sous l’agent racine. 1 autorise seulement root → child."
     },
     "toolkits": {
       "headline": "Toolkits",

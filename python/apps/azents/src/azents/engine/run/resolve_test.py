@@ -215,6 +215,7 @@ class TestResolveAgentTools:
     async def test_auto_binds_claude_rules_when_runtime_tools_enabled(self) -> None:
         """Claude rules Toolkit is auto-bound after runtime shell Toolkit."""
         session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
         agent_toolkit_repository.list_by_agent.return_value = []
 
@@ -267,6 +268,7 @@ class TestResolveAgentTools:
     ) -> None:
         """Claude rules Toolkit is not auto-bound without runtime tools."""
         session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
         agent_toolkit_repository.list_by_agent.return_value = []
 
@@ -298,6 +300,7 @@ class TestResolveAgentTools:
     async def test_auto_binds_subagent_toolkit_in_root_mode(self) -> None:
         """Root sessions receive the coherent subagent collaboration bundle."""
         session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
         agent_toolkit_repository.list_by_agent.return_value = []
 
@@ -335,6 +338,7 @@ class TestResolveAgentTools:
     async def test_subagent_mode_filters_root_only_auto_bound_toolkits(self) -> None:
         """Subagent mode keeps read/runtime capabilities and excludes root-only ones."""
         session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
         agent_toolkit_repository.list_by_agent.return_value = []
 

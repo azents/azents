@@ -23,6 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_model_selection import AgentModelSelection
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
+from azentspublicclient.models.subagent_settings import SubagentSettings
 from azentspublicclient.models.uploaded_image import UploadedImage
 from typing import Optional, Set
 from typing_extensions import Self
@@ -46,11 +47,12 @@ class AgentResponse(BaseModel):
     shell_enabled: StrictBool
     memory_enabled: StrictBool
     max_turns: Optional[StrictInt]
+    subagent_settings: SubagentSettings
     avatar: Optional[UploadedImage] = None
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "max_turns", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "max_turns", "subagent_settings", "avatar", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -102,6 +104,9 @@ class AgentResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of model_parameters
         if self.model_parameters:
             _dict['model_parameters'] = self.model_parameters.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of subagent_settings
+        if self.subagent_settings:
+            _dict['subagent_settings'] = self.subagent_settings.to_dict()
         # override the default output from pydantic by calling `to_dict()` of avatar
         if self.avatar:
             _dict['avatar'] = self.avatar.to_dict()
@@ -187,6 +192,7 @@ class AgentResponse(BaseModel):
             "shell_enabled": obj.get("shell_enabled"),
             "memory_enabled": obj.get("memory_enabled"),
             "max_turns": obj.get("max_turns"),
+            "subagent_settings": SubagentSettings.from_dict(obj["subagent_settings"]) if obj.get("subagent_settings") is not None else None,
             "avatar": UploadedImage.from_dict(obj["avatar"]) if obj.get("avatar") is not None else None,
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")

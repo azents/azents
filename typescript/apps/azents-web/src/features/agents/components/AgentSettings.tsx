@@ -26,6 +26,7 @@ type AgentSettingsSection =
   | "profile"
   | "model"
   | "capabilities"
+  | "subagents"
   | "admins";
 
 interface AgentSettingsProps {

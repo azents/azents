@@ -5,7 +5,7 @@ from azcommon.result import Failure, Result, Success
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import AgentModelSelection, ModelParameters
+from azents.core.agent import AgentModelSelection, ModelParameters, SubagentSettings
 from azents.core.enums import AgentType
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
@@ -20,6 +20,7 @@ from .data import (
 )
 
 _params_adapter = TypeAdapter[ModelParameters](ModelParameters)
+_subagent_settings_adapter = TypeAdapter[SubagentSettings](SubagentSettings)
 _model_selection_adapter = TypeAdapter[AgentModelSelection](AgentModelSelection)
 
 
@@ -53,6 +54,7 @@ class AgentRepository:
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
             max_turns=create.max_turns,
+            subagent_settings=create.subagent_settings.model_dump(mode="json"),
         )
         session.add(rdb_agent)
         await session.flush()
@@ -155,6 +157,10 @@ class AgentRepository:
             db_values["memory_enabled"] = update["memory_enabled"]
         if "max_turns" in update:
             db_values["max_turns"] = update["max_turns"]
+        if "subagent_settings" in update:
+            db_values["subagent_settings"] = update["subagent_settings"].model_dump(
+                mode="json"
+            )
 
         await session.execute(
             sa.update(RDBAgent).where(RDBAgent.id == agent_id).values(**db_values)
@@ -179,6 +185,9 @@ class AgentRepository:
         lightweight_model_selection = _model_selection_adapter.validate_python(
             rdb.lightweight_model_selection
         )
+        subagent_settings = _subagent_settings_adapter.validate_python(
+            rdb.subagent_settings
+        )
         avatar = (
             StoredImage.model_validate(rdb.avatar) if rdb.avatar is not None else None
         )
@@ -197,6 +206,7 @@ class AgentRepository:
             shell_enabled=rdb.shell_enabled,
             memory_enabled=rdb.memory_enabled,
             max_turns=rdb.max_turns,
+            subagent_settings=subagent_settings,
             avatar=avatar,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,

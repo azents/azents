@@ -90,6 +90,7 @@ async def create_agent(
         shell_enabled=request_body.shell_enabled,
         memory_enabled=request_body.memory_enabled,
         max_turns=request_body.max_turns,
+        subagent_settings=request_body.subagent_settings,
     )
     result = await service.create(
         create_input, creator_workspace_user_id=member.workspace_user_id
@@ -228,6 +229,8 @@ def _build_agent_update_input(
         result["memory_enabled"] = request_body["memory_enabled"]
     if "max_turns" in request_body:
         result["max_turns"] = request_body["max_turns"]
+    if "subagent_settings" in request_body:
+        result["subagent_settings"] = request_body["subagent_settings"]
 
     return result
 

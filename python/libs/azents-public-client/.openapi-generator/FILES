@@ -251,6 +251,7 @@ azentspublicclient/docs/SessionWorkspaceProjectResponse.md
 azentspublicclient/docs/SetPasswordRequest.md
 azentspublicclient/docs/SignupStatusResponse.md
 azentspublicclient/docs/SkillAction.md
+azentspublicclient/docs/SubagentSettings.md
 azentspublicclient/docs/SubagentTreeNodeResponse.md
 azentspublicclient/docs/SubagentTreeResponse.md
 azentspublicclient/docs/TestConnectionRequest.md
@@ -514,6 +515,7 @@ azentspublicclient/models/session_workspace_project_response.py
 azentspublicclient/models/set_password_request.py
 azentspublicclient/models/signup_status_response.py
 azentspublicclient/models/skill_action.py
+azentspublicclient/models/subagent_settings.py
 azentspublicclient/models/subagent_tree_node_response.py
 azentspublicclient/models/subagent_tree_response.py
 azentspublicclient/models/test_connection_request.py
@@ -781,6 +783,7 @@ azentspublicclient/test/test_session_workspace_project_response.py
 azentspublicclient/test/test_set_password_request.py
 azentspublicclient/test/test_signup_status_response.py
 azentspublicclient/test/test_skill_action.py
+azentspublicclient/test/test_subagent_settings.py
 azentspublicclient/test/test_subagent_tree_node_response.py
 azentspublicclient/test/test_subagent_tree_response.py
 azentspublicclient/test/test_test_connection_request.py
