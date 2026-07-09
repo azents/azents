@@ -142,17 +142,17 @@ class RuntimeRunnerControlGrpcServicer(
                 generation=accepted.generation,
             )
         )
-        yield runtime_runner_control_pb2.RunnerControlMessage(
-            request_id=first_message.request_id,
-            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
-                runtime_id=accepted.runtime_id,
-                runner_id=accepted.runner_id,
-                connection_id=accepted.connection_id,
-                generation=accepted.generation,
-                heartbeat_interval_seconds=accepted.heartbeat_interval_seconds,
-            ),
-        )
         try:
+            yield runtime_runner_control_pb2.RunnerControlMessage(
+                request_id=first_message.request_id,
+                register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                    runtime_id=accepted.runtime_id,
+                    runner_id=accepted.runner_id,
+                    connection_id=accepted.connection_id,
+                    generation=accepted.generation,
+                    heartbeat_interval_seconds=accepted.heartbeat_interval_seconds,
+                ),
+            )
             async for message in _outbound_messages(
                 outbound,
                 inbound_task,
@@ -170,11 +170,26 @@ class RuntimeRunnerControlGrpcServicer(
                     "runner_generation": accepted.generation,
                 },
             )
-            await self._record_runner_stream_closed(accepted, registration)
             for task in (inbound_task, operation_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            revoked = await self._control_protocol.revoke_runner(
+                runtime_id=accepted.runtime_id,
+                generation=accepted.generation,
+            )
+            if revoked:
+                await self._record_runner_stream_closed(accepted, registration)
+            else:
+                _LOGGER.info(
+                    "Runtime Runner stream close ignored for stale generation",
+                    extra={
+                        "runtime_id": accepted.runtime_id,
+                        "runner_id": accepted.runner_id,
+                        "connection_id": accepted.connection_id,
+                        "runner_generation": accepted.generation,
+                    },
+                )
 
     async def _record_runner_stream_closed(
         self,

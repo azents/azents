@@ -17,6 +17,7 @@ from google.protobuf import timestamp_pb2
 
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
+    RuntimeProtocolRouteUnavailable,
     RuntimeRunnerOperation,
 )
 from azents.runtime.control_protocol.grpc.runner_server import (
@@ -120,6 +121,64 @@ async def test_runner_grpc_registers_and_acks_heartbeat() -> None:
     assert heartbeat_ack.heartbeat_ack.monotonic_sequence == 7
     assert sink.reports[-1].runner_state is SharedRunnerState.UNKNOWN
     assert sink.reports[-1].diagnostic["reason"] == "runner_stream_closed"
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_revoke_current_connection_on_close() -> None:
+    """Closing the current Runner stream removes it from operation routing."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    sink = FakeStateSink()
+    servicer = _servicer(service, store, sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    await stream.aclose()
+
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="process.start",
+            payload={"command": "echo ok"},
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=None,
+            background=False,
+        ),
+        created_at=datetime.now(UTC),
+    )
+
+    assert isinstance(result, RuntimeProtocolRouteUnavailable)
+    assert sink.reports[-1].diagnostic["reason"] == "runner_stream_closed"
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_ignores_stale_stream_close_after_reconnect() -> None:
+    """Old Runner stream closure must not overwrite newer generation state."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    sink = FakeStateSink()
+    servicer = _servicer(service, store, sink)
+    old_inbound = QueueIterator()
+    await old_inbound.put(_register_message("connection-1"))
+    old_stream = servicer.ConnectRunner(old_inbound, FakeGrpcContext())
+    old_accepted = await anext(old_stream)
+    new_inbound = QueueIterator()
+    await new_inbound.put(_register_message("connection-2"))
+    new_stream = servicer.ConnectRunner(new_inbound, FakeGrpcContext())
+    new_accepted = await anext(new_stream)
+
+    await old_stream.aclose()
+
+    assert old_accepted.register_accepted.generation == 1
+    assert new_accepted.register_accepted.generation == 2
+    assert sink.reports == []
+
+    await new_stream.aclose()
+    assert sink.reports[-1].runner_generation == 2
+    assert sink.reports[-1].diagnostic["connection_id"] == "connection-2"
 
 
 @pytest.mark.asyncio

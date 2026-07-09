@@ -156,6 +156,19 @@ class RuntimeControlProtocolService:
             ttl_seconds=self._connection_ttl_seconds,
         )
 
+    async def revoke_runner(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+    ) -> bool:
+        """Revoke a Runner connection only when its generation is current."""
+        return await self._store.revoke_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id=runtime_id,
+            generation=generation,
+        )
+
     async def dispatch_provider_command(
         self,
         command: RuntimeProviderCommand,
