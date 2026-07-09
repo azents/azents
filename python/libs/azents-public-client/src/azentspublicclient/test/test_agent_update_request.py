@@ -39,6 +39,11 @@ class TestAgentUpdateRequest(unittest.TestCase):
                 description = '',
                 model_selection = { },
                 lightweight_model_selection = { },
+                selectable_model_options = [
+                    { }
+                    ],
+                main_model_label = '',
+                lightweight_model_label = '',
                 model_parameters = { },
                 system_prompt = '',
                 enabled = True,

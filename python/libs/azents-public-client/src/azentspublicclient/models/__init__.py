@@ -219,6 +219,8 @@ from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState
 from azentspublicclient.models.runtime_summary import RuntimeSummary
 from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.secrets1 import Secrets1
+from azentspublicclient.models.selectable_model_option import SelectableModelOption
+from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput
 from azentspublicclient.models.send_code_request import SendCodeRequest
 from azentspublicclient.models.send_code_response import SendCodeResponse
 from azentspublicclient.models.send_elevation_code_response import SendElevationCodeResponse

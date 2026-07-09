@@ -38,6 +38,11 @@ class TestAgentCreateRequest(unittest.TestCase):
                 name = '',
                 model_selection = { },
                 lightweight_model_selection = { },
+                selectable_model_options = [
+                    { }
+                    ],
+                main_model_label = '',
+                lightweight_model_label = '',
                 description = '',
                 model_parameters = { },
                 system_prompt = '',

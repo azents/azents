@@ -4,7 +4,12 @@ import dataclasses
 
 from pydantic import BaseModel, Field
 
-from azents.core.agent import AgentModelSelection, AgentModelSelectionInput
+from azents.core.agent import (
+    AgentModelSelection,
+    AgentModelSelectionInput,
+    SelectableModelOption,
+    SelectableModelOptionInput,
+)
 
 
 class WorkspaceModelSettingsOutput(BaseModel):
@@ -15,6 +20,15 @@ class WorkspaceModelSettingsOutput(BaseModel):
     )
     default_lightweight_model_selection: AgentModelSelection | None = Field(
         default=None, description="Default lightweight model selection snapshot"
+    )
+    default_selectable_model_options: list[SelectableModelOption] | None = Field(
+        default=None, description="Ordered default selectable model options"
+    )
+    default_main_model_label: str | None = Field(
+        default=None, description="Default main model option label"
+    )
+    default_lightweight_model_label: str | None = Field(
+        default=None, description="Default lightweight model option label"
     )
     effective_default_lightweight_model_selection: AgentModelSelection | None = Field(
         default=None, description="Effective default lightweight model selection"
@@ -29,6 +43,15 @@ class WorkspaceModelSettingsUpdateInput(BaseModel):
     )
     default_lightweight_model_selection: AgentModelSelectionInput | None = Field(
         default=None, description="Default lightweight model selection input"
+    )
+    default_selectable_model_options: list[SelectableModelOptionInput] | None = Field(
+        default=None, description="Ordered default selectable model option inputs"
+    )
+    default_main_model_label: str | None = Field(
+        default=None, description="Default main model option label"
+    )
+    default_lightweight_model_label: str | None = Field(
+        default=None, description="Default lightweight model option label"
     )
 
 
@@ -45,3 +68,10 @@ class DefaultModelCannotBeCleared:
     """Default model cannot be deleted."""
 
     workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class InvalidSelectableModelOptions:
+    """Selectable model option payload is invalid."""
+
+    errors: list[str]

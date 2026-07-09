@@ -9,6 +9,7 @@ from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.services.workspace_model_settings import WorkspaceModelSettingsService
 from azents.services.workspace_model_settings.data import (
     DefaultModelCannotBeCleared,
+    InvalidSelectableModelOptions,
     ModelSelectionNotFound,
     WorkspaceModelSettingsUpdateInput,
 )
@@ -44,6 +45,13 @@ async def update_workspace_model_settings(
             default_lightweight_model_selection=(
                 request_body.default_lightweight_model_selection
             ),
+            default_selectable_model_options=(
+                request_body.default_selectable_model_options
+            ),
+            default_main_model_label=request_body.default_main_model_label,
+            default_lightweight_model_label=(
+                request_body.default_lightweight_model_label
+            ),
         ),
     )
     match result:
@@ -60,6 +68,14 @@ async def update_workspace_model_settings(
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Workspace default model cannot be cleared once set.",
+                    )
+                case InvalidSelectableModelOptions(errors=errors):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "message": "Invalid selectable model options.",
+                            "errors": errors,
+                        },
                     )
                 case _:
                     assert_never(error)

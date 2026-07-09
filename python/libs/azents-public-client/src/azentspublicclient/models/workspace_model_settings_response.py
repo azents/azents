@@ -17,9 +17,10 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_model_selection import AgentModelSelection
+from azentspublicclient.models.selectable_model_option import SelectableModelOption
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,9 +30,12 @@ class WorkspaceModelSettingsResponse(BaseModel):
     """ # noqa: E501
     default_model_selection: Optional[AgentModelSelection] = None
     default_lightweight_model_selection: Optional[AgentModelSelection] = None
+    default_selectable_model_options: Optional[List[SelectableModelOption]] = None
+    default_main_model_label: Optional[StrictStr] = None
+    default_lightweight_model_label: Optional[StrictStr] = None
     effective_default_lightweight_model_selection: Optional[AgentModelSelection] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["default_model_selection", "default_lightweight_model_selection", "effective_default_lightweight_model_selection"]
+    __properties: ClassVar[List[str]] = ["default_model_selection", "default_lightweight_model_selection", "default_selectable_model_options", "default_main_model_label", "default_lightweight_model_label", "effective_default_lightweight_model_selection"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,6 +84,13 @@ class WorkspaceModelSettingsResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of default_lightweight_model_selection
         if self.default_lightweight_model_selection:
             _dict['default_lightweight_model_selection'] = self.default_lightweight_model_selection.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of each item in default_selectable_model_options (list)
+        _items = []
+        if self.default_selectable_model_options:
+            for _item_default_selectable_model_options in self.default_selectable_model_options:
+                if _item_default_selectable_model_options:
+                    _items.append(_item_default_selectable_model_options.to_dict())
+            _dict['default_selectable_model_options'] = _items
         # override the default output from pydantic by calling `to_dict()` of effective_default_lightweight_model_selection
         if self.effective_default_lightweight_model_selection:
             _dict['effective_default_lightweight_model_selection'] = self.effective_default_lightweight_model_selection.to_dict()
@@ -97,6 +108,21 @@ class WorkspaceModelSettingsResponse(BaseModel):
         # and model_fields_set contains the field
         if self.default_lightweight_model_selection is None and "default_lightweight_model_selection" in self.model_fields_set:
             _dict['default_lightweight_model_selection'] = None
+
+        # set to None if default_selectable_model_options (nullable) is None
+        # and model_fields_set contains the field
+        if self.default_selectable_model_options is None and "default_selectable_model_options" in self.model_fields_set:
+            _dict['default_selectable_model_options'] = None
+
+        # set to None if default_main_model_label (nullable) is None
+        # and model_fields_set contains the field
+        if self.default_main_model_label is None and "default_main_model_label" in self.model_fields_set:
+            _dict['default_main_model_label'] = None
+
+        # set to None if default_lightweight_model_label (nullable) is None
+        # and model_fields_set contains the field
+        if self.default_lightweight_model_label is None and "default_lightweight_model_label" in self.model_fields_set:
+            _dict['default_lightweight_model_label'] = None
 
         # set to None if effective_default_lightweight_model_selection (nullable) is None
         # and model_fields_set contains the field
@@ -117,6 +143,9 @@ class WorkspaceModelSettingsResponse(BaseModel):
         _obj = cls.model_validate({
             "default_model_selection": AgentModelSelection.from_dict(obj["default_model_selection"]) if obj.get("default_model_selection") is not None else None,
             "default_lightweight_model_selection": AgentModelSelection.from_dict(obj["default_lightweight_model_selection"]) if obj.get("default_lightweight_model_selection") is not None else None,
+            "default_selectable_model_options": [SelectableModelOption.from_dict(_item) for _item in obj["default_selectable_model_options"]] if obj.get("default_selectable_model_options") is not None else None,
+            "default_main_model_label": obj.get("default_main_model_label"),
+            "default_lightweight_model_label": obj.get("default_lightweight_model_label"),
             "effective_default_lightweight_model_selection": AgentModelSelection.from_dict(obj["effective_default_lightweight_model_selection"]) if obj.get("effective_default_lightweight_model_selection") is not None else None
         })
         # store additional fields in additional_properties

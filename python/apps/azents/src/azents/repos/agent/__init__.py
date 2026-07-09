@@ -5,7 +5,12 @@ from azcommon.result import Failure, Result, Success
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import AgentModelSelection, ModelParameters, SubagentSettings
+from azents.core.agent import (
+    AgentModelSelection,
+    ModelParameters,
+    SelectableModelOption,
+    SubagentSettings,
+)
 from azents.core.enums import AgentType
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
@@ -22,6 +27,9 @@ from .data import (
 _params_adapter = TypeAdapter[ModelParameters](ModelParameters)
 _subagent_settings_adapter = TypeAdapter[SubagentSettings](SubagentSettings)
 _model_selection_adapter = TypeAdapter[AgentModelSelection](AgentModelSelection)
+_selectable_model_options_adapter = TypeAdapter[list[SelectableModelOption]](
+    list[SelectableModelOption]
+)
 
 
 class AgentRepository:
@@ -45,6 +53,12 @@ class AgentRepository:
             lightweight_model_selection=(
                 create.lightweight_model_selection.model_dump(mode="json")
             ),
+            selectable_model_options=[
+                option.model_dump(mode="json")
+                for option in create.selectable_model_options
+            ],
+            main_model_label=create.main_model_label,
+            lightweight_model_label=create.lightweight_model_label,
             description=create.description,
             model_parameters=params_dict,
             system_prompt=create.system_prompt,
@@ -136,6 +150,15 @@ class AgentRepository:
             db_values["lightweight_model_selection"] = update[
                 "lightweight_model_selection"
             ].model_dump(mode="json")
+        if "selectable_model_options" in update:
+            db_values["selectable_model_options"] = [
+                option.model_dump(mode="json")
+                for option in update["selectable_model_options"]
+            ]
+        if "main_model_label" in update:
+            db_values["main_model_label"] = update["main_model_label"]
+        if "lightweight_model_label" in update:
+            db_values["lightweight_model_label"] = update["lightweight_model_label"]
         if "model_parameters" in update:
             params = update["model_parameters"]
             db_values["model_parameters"] = (
@@ -185,6 +208,12 @@ class AgentRepository:
         lightweight_model_selection = _model_selection_adapter.validate_python(
             rdb.lightweight_model_selection
         )
+        selectable_model_options = _selectable_model_options_adapter.validate_python(
+            rdb.selectable_model_options
+        )
+        if rdb.main_model_label is None or rdb.lightweight_model_label is None:
+            msg = "Agent selectable model labels are missing"
+            raise ValueError(msg)
         subagent_settings = _subagent_settings_adapter.validate_python(
             rdb.subagent_settings
         )
@@ -198,6 +227,9 @@ class AgentRepository:
             description=rdb.description,
             model_selection=model_selection,
             lightweight_model_selection=lightweight_model_selection,
+            selectable_model_options=selectable_model_options,
+            main_model_label=rdb.main_model_label,
+            lightweight_model_label=rdb.lightweight_model_label,
             model_parameters=model_parameters,
             system_prompt=rdb.system_prompt,
             enabled=rdb.enabled,

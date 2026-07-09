@@ -11,6 +11,8 @@ from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
     ModelParameters,
+    SelectableModelOption,
+    SelectableModelOptionInput,
     SubagentSettings,
 )
 from azents.core.enums import AgentType
@@ -27,6 +29,9 @@ class AgentOutput(BaseModel):
     description: str | None
     model_selection: AgentModelSelection | None
     lightweight_model_selection: AgentModelSelection | None
+    selectable_model_options: list[SelectableModelOption]
+    main_model_label: str
+    lightweight_model_label: str
     effective_context_window_tokens: int | None
     effective_auto_compaction_threshold_tokens: int | None
     model_parameters: ModelParameters | None
@@ -59,6 +64,9 @@ class AgentOutput(BaseModel):
             description=data.description,
             model_selection=data.model_selection,
             lightweight_model_selection=data.lightweight_model_selection,
+            selectable_model_options=data.selectable_model_options,
+            main_model_label=data.main_model_label,
+            lightweight_model_label=data.lightweight_model_label,
             effective_context_window_tokens=effective_context_window_tokens,
             effective_auto_compaction_threshold_tokens=(
                 effective_auto_compaction_threshold_tokens
@@ -100,6 +108,15 @@ class AgentCreateInput(BaseModel):
         default=None,
         description="Lightweight model selection input. Copy default/main when None",
     )
+    selectable_model_options: list[SelectableModelOptionInput] | None = Field(
+        default=None, description="Ordered selectable model option inputs"
+    )
+    main_model_label: str | None = Field(
+        default=None, description="Selected main model option label"
+    )
+    lightweight_model_label: str | None = Field(
+        default=None, description="Selected lightweight model option label"
+    )
     description: str | None = Field(default=None, description="Agent description")
     model_parameters: ModelParameters | None = Field(
         default=None, description="Model parameters"
@@ -136,6 +153,16 @@ class AgentUpdateInput(TypedDict, total=False):
                 "Lightweight model selection input. Copy default/main when None"
             )
         ),
+    ]
+    selectable_model_options: Annotated[
+        list[SelectableModelOptionInput] | None,
+        Field(description="Ordered selectable model option inputs"),
+    ]
+    main_model_label: Annotated[
+        str | None, Field(description="Selected main model option label")
+    ]
+    lightweight_model_label: Annotated[
+        str | None, Field(description="Selected lightweight model option label")
     ]
     model_parameters: Annotated[
         ModelParameters | None, Field(description="Model parameters")
@@ -195,6 +222,13 @@ class ModelSelectionNotFound:
 
     llm_provider_integration_id: str
     model_identifier: str
+
+
+@dataclasses.dataclass(frozen=True)
+class InvalidSelectableModelOptions:
+    """Selectable model option payload is invalid."""
+
+    errors: list[str]
 
 
 @dataclasses.dataclass(frozen=True)

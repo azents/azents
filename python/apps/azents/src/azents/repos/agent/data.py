@@ -7,7 +7,12 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 from typing_extensions import Self, TypedDict
 
-from azents.core.agent import AgentModelSelection, ModelParameters, SubagentSettings
+from azents.core.agent import (
+    AgentModelSelection,
+    ModelParameters,
+    SelectableModelOption,
+    SubagentSettings,
+)
 from azents.core.enums import AgentType
 from azents.services.uploads.schema import StoredImage
 
@@ -24,6 +29,13 @@ class Agent(BaseModel):
     )
     lightweight_model_selection: AgentModelSelection = Field(
         description="Lightweight model selection snapshot"
+    )
+    selectable_model_options: list[SelectableModelOption] = Field(
+        description="Ordered selectable model options"
+    )
+    main_model_label: str = Field(description="Selected main model option label")
+    lightweight_model_label: str = Field(
+        description="Selected lightweight model option label"
     )
     model_parameters: ModelParameters | None = Field(
         default=None, description="Model parameters"
@@ -65,6 +77,13 @@ class AgentCreate(BaseModel):
     lightweight_model_selection: AgentModelSelection = Field(
         description="Lightweight model selection snapshot"
     )
+    selectable_model_options: list[SelectableModelOption] = Field(
+        description="Ordered selectable model options"
+    )
+    main_model_label: str = Field(description="Selected main model option label")
+    lightweight_model_label: str = Field(
+        description="Selected lightweight model option label"
+    )
     description: str | None = Field(default=None, description="Agent description")
     model_parameters: ModelParameters | None = Field(
         default=None, description="Model parameters"
@@ -94,6 +113,14 @@ class AgentUpdate(TypedDict, total=False):
     lightweight_model_selection: Annotated[
         AgentModelSelection,
         Field(description="Lightweight model selection snapshot"),
+    ]
+    selectable_model_options: Annotated[
+        list[SelectableModelOption],
+        Field(description="Ordered selectable model options"),
+    ]
+    main_model_label: Annotated[str, Field(description="Selected main model label")]
+    lightweight_model_label: Annotated[
+        str, Field(description="Selected lightweight model label")
     ]
     model_parameters: Annotated[
         ModelParameters | None, Field(description="Model parameters")
