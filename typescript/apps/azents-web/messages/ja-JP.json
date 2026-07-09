@@ -605,6 +605,10 @@
           "pathLabel": "現在: {path}",
           "parentLink": "親: {name}",
           "rootLink": "ルート: {name}",
+          "backToParent": "親エージェントに戻る: {name}",
+          "backToParentTooltip": "親エージェントに戻る: {name} ({path})",
+          "navigationMenu": "サブエージェントの移動オプション",
+          "readOnlyNotice": "サブエージェントセッションは読み取り専用です。新しい指示は親エージェントから送信してください。",
           "unread": "未読",
           "runIndex": "Run {index}",
           "status": {
