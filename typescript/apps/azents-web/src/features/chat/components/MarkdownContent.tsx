@@ -158,7 +158,7 @@ function CodeBlock({
   }
 
   return (
-    <Box className={classes.codeBlockFrame}>
+    <Box className={classes.codeBlock} component="pre" {...props}>
       <Box className={classes.codeBlockCopyButton}>
         <ChatCopyButton
           value={codeText}
@@ -171,32 +171,29 @@ function CodeBlock({
       </Box>
       {language ? (
         <SyntaxHighlighter
-          PreTag="pre"
+          PreTag="div"
           CodeTag="code"
-          className={classes.codeBlockScroller}
           language={language}
           style={codeTheme}
           useInlineStyles
           customStyle={{
-            background: "transparent",
-            color: "inherit",
+            background: "var(--azents-chat-code-background)",
+            color: "var(--azents-chat-code-foreground)",
             margin: 0,
-            padding: "0.6em 0.8em",
+            padding: 0,
           }}
           codeTagProps={{
             className: classes.highlightedCode,
             style: {
-              background: "transparent",
-              color: "inherit",
+              background: "var(--azents-chat-code-background)",
+              color: "var(--azents-chat-code-foreground)",
             },
           }}
         >
           {codeText}
         </SyntaxHighlighter>
       ) : (
-        <Box component="pre" {...props} className={classes.codeBlockScroller}>
-          {children}
-        </Box>
+        children
       )}
     </Box>
   );
