@@ -33,6 +33,30 @@ _BUSYGROUP_PREFIX = "BUSYGROUP"
 _PAYLOAD_FIELD = "payload"
 _DEFAULT_STREAM_TTL_SECONDS = 60 * 60
 _DEFAULT_CONNECTION_GENERATION_TTL_SECONDS = 7 * 24 * 60 * 60
+_GENERATION_FENCED_SET_CONNECTION_SCRIPT = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, payload = pcall(cjson.decode, raw)
+if not ok or tonumber(payload['generation']) ~= tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', tonumber(ARGV[3]))
+return 1
+"""
+_GENERATION_FENCED_DELETE_CONNECTION_SCRIPT = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, payload = pcall(cjson.decode, raw)
+if not ok or tonumber(payload['generation']) ~= tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+return 1
+"""
 
 
 class RedisRuntimeCoordinationStore:
@@ -349,7 +373,6 @@ class RedisRuntimeCoordinationStore:
             return None
         record = _connection_from_json(_decode_text(raw))
         if record.expires_at <= datetime.now(timezone.utc):
-            await self._redis.delete(key)
             return None
         return record
 
@@ -371,12 +394,14 @@ class RedisRuntimeCoordinationStore:
             heartbeat_at=heartbeat_at,
             expires_at=heartbeat_at + timedelta(seconds=ttl_seconds),
         )
-        await self._redis.set(
-            self._connection_key(kind, subject_id),
-            _connection_to_json(updated),
-            ex=ttl_seconds,
+        updated = await self._set_connection_if_generation(
+            kind=kind,
+            subject_id=subject_id,
+            generation=generation,
+            record=updated,
+            ttl_seconds=ttl_seconds,
         )
-        return True
+        return updated
 
     async def revoke_connection(
         self,
@@ -386,11 +411,11 @@ class RedisRuntimeCoordinationStore:
         generation: int,
     ) -> bool:
         """Revoke a connection if generation fencing matches."""
-        record = await self.get_connection(kind=kind, subject_id=subject_id)
-        if record is None or record.generation != generation:
-            return False
-        await self._redis.delete(self._connection_key(kind, subject_id))
-        return True
+        return await self._delete_connection_if_generation(
+            kind=kind,
+            subject_id=subject_id,
+            generation=generation,
+        )
 
     async def claim_background_completion(
         self,
@@ -463,6 +488,42 @@ class RedisRuntimeCoordinationStore:
     ) -> None:
         """Delete a background completion claim."""
         await self._redis.delete(self._completion_claim_key(operation_id))
+
+    async def _set_connection_if_generation(
+        self,
+        *,
+        kind: RuntimeConnectionKind,
+        subject_id: str,
+        generation: int,
+        record: RuntimeConnectionRecord,
+        ttl_seconds: int,
+    ) -> bool:
+        eval_script = cast(Any, self._redis).eval
+        result = await eval_script(
+            _GENERATION_FENCED_SET_CONNECTION_SCRIPT,
+            1,
+            self._connection_key(kind, subject_id),
+            generation,
+            _connection_to_json(record),
+            ttl_seconds,
+        )
+        return bool(result)
+
+    async def _delete_connection_if_generation(
+        self,
+        *,
+        kind: RuntimeConnectionKind,
+        subject_id: str,
+        generation: int,
+    ) -> bool:
+        eval_script = cast(Any, self._redis).eval
+        result = await eval_script(
+            _GENERATION_FENCED_DELETE_CONNECTION_SCRIPT,
+            1,
+            self._connection_key(kind, subject_id),
+            generation,
+        )
+        return bool(result)
 
     async def _ensure_group(self, stream_key: str, group_name: str) -> None:
         try:
