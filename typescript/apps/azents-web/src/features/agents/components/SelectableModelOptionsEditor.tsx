@@ -20,12 +20,12 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   ActionIcon,
   Alert,
+  Box,
   Button,
   Group,
-  rem,
   Select,
+  SimpleGrid,
   Stack,
-  Table,
   Text,
   TextInput,
   Tooltip,
@@ -40,6 +40,7 @@ import {
   selectableModelLabelSelectData,
 } from "../model-selection";
 import { ModelCatalogPicker } from "./ModelCatalogPicker";
+import classes from "./SelectableModelOptionsEditor.module.css";
 import type {
   ProviderIntegrationOption,
   SelectableModelCandidate,
@@ -133,15 +134,16 @@ function SelectableModelRow({
   } = useSortable({ disabled: !canEdit, id: option.id });
 
   return (
-    <Table.Tr
+    <Box
       ref={setNodeRef}
+      className={classes.row}
       style={{
         opacity: isDragging ? 0.6 : 1,
         transform: CSS.Transform.toString(transform),
         transition,
       }}
     >
-      <Table.Td w="0">
+      <Box className={classes.dragHandle}>
         <Tooltip label={t("dragHandleLabel")}>
           <ActionIcon
             ref={setActivatorNodeRef}
@@ -155,8 +157,8 @@ function SelectableModelRow({
             <IconGripVertical size="1rem" />
           </ActionIcon>
         </Tooltip>
-      </Table.Td>
-      <Table.Td>
+      </Box>
+      <Box className={classes.label}>
         <TextInput
           aria-label={t("optionLabel")}
           value={option.label}
@@ -172,36 +174,38 @@ function SelectableModelRow({
           }
           onChange={(event) => onChangeLabel(event.currentTarget.value)}
         />
-      </Table.Td>
-      <Table.Td>
-        <Stack gap={0}>
-          <Text fw={600} size="sm">
-            {option.model_display_name ?? t("noModelSelected")}
-          </Text>
-          <Text size="sm" c="dimmed">
-            {option.model_identifier ?? t("chooseModel")}
-          </Text>
-        </Stack>
-      </Table.Td>
-      <Table.Td>
-        <Group justify="flex-end" gap="xs" wrap="nowrap">
-          <Button variant="light" disabled={!canEdit} onClick={onChangeModel}>
-            {t("changeModel")}
-          </Button>
-          <Tooltip label={t("remove")}>
-            <ActionIcon
-              aria-label={t("remove")}
-              color="red"
-              disabled={!canEdit || !canRemove}
-              variant="subtle"
-              onClick={onRemove}
-            >
-              <IconTrash size="1rem" />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      </Table.Td>
-    </Table.Tr>
+      </Box>
+      <Stack className={classes.model} gap={0}>
+        <Text className={classes.modelText} fw={600} size="sm">
+          {option.model_display_name ?? t("noModelSelected")}
+        </Text>
+        <Text className={classes.modelText} size="sm" c="dimmed">
+          {option.model_identifier ?? t("chooseModel")}
+        </Text>
+      </Stack>
+      <Box className={classes.actions}>
+        <Button
+          className={classes.changeModel}
+          variant="light"
+          disabled={!canEdit}
+          onClick={onChangeModel}
+        >
+          {t("changeModel")}
+        </Button>
+        <Tooltip label={t("remove")}>
+          <ActionIcon
+            className={classes.remove}
+            aria-label={t("remove")}
+            color="red"
+            disabled={!canEdit || !canRemove}
+            variant="subtle"
+            onClick={onRemove}
+          >
+            <IconTrash size="1rem" />
+          </ActionIcon>
+        </Tooltip>
+      </Box>
+    </Box>
   );
 }
 
@@ -381,7 +385,7 @@ export function SelectableModelOptionsEditor({
         />
       )}
 
-      <Group align="flex-start" grow>
+      <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <Select
           label={t("mainLabel")}
           description={t("mainDescription")}
@@ -398,7 +402,7 @@ export function SelectableModelOptionsEditor({
           disabled={!canEdit || labelOptions.length === 0}
           onChange={onChangeLightweightModelLabel}
         />
-      </Group>
+      </SimpleGrid>
 
       {options.length > 0 && (
         <DndContext
@@ -410,44 +414,40 @@ export function SelectableModelOptionsEditor({
             items={optionIds}
             strategy={verticalListSortingStrategy}
           >
-            <Table.ScrollContainer minWidth={rem(672)}>
-              <Table verticalSpacing="sm" withTableBorder>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th w="0" />
-                    <Table.Th>{t("modelLabelColumn")}</Table.Th>
-                    <Table.Th>{t("selectedModelColumn")}</Table.Th>
-                    <Table.Th ta="right">{t("actionsColumn")}</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {options.map((option, index) => (
-                    <SelectableModelRow
-                      key={option.id}
-                      option={option}
-                      duplicate={rowHasDuplicateLabel(options, index)}
-                      canEdit={canEdit}
-                      canRemove={options.length > 1}
-                      showValidationErrors={showValidationErrors}
-                      onChangeLabel={(value) => {
-                        handleChangeOptions(
-                          updateOption(options, option.id, (current) => ({
-                            ...current,
-                            label: value,
-                          })),
-                        );
-                      }}
-                      onChangeModel={() => setPickerOptionId(option.id)}
-                      onRemove={() => {
-                        handleChangeOptions(
-                          options.filter((item) => item.id !== option.id),
-                        );
-                      }}
-                    />
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </Table.ScrollContainer>
+            <Box className={classes.optionsList}>
+              <Box className={classes.header}>
+                <Box />
+                <Text size="sm">{t("modelLabelColumn")}</Text>
+                <Text size="sm">{t("selectedModelColumn")}</Text>
+                <Text className={classes.actionsHeader} size="sm">
+                  {t("actionsColumn")}
+                </Text>
+              </Box>
+              {options.map((option, index) => (
+                <SelectableModelRow
+                  key={option.id}
+                  option={option}
+                  duplicate={rowHasDuplicateLabel(options, index)}
+                  canEdit={canEdit}
+                  canRemove={options.length > 1}
+                  showValidationErrors={showValidationErrors}
+                  onChangeLabel={(value) => {
+                    handleChangeOptions(
+                      updateOption(options, option.id, (current) => ({
+                        ...current,
+                        label: value,
+                      })),
+                    );
+                  }}
+                  onChangeModel={() => setPickerOptionId(option.id)}
+                  onRemove={() => {
+                    handleChangeOptions(
+                      options.filter((item) => item.id !== option.id),
+                    );
+                  }}
+                />
+              ))}
+            </Box>
           </SortableContext>
         </DndContext>
       )}
