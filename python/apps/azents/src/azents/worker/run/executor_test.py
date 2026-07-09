@@ -652,6 +652,63 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
 
 
 @pytest.mark.asyncio
+async def test_execute_wakes_promoted_input_after_context_invalidation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Context-invalidating actions wake already-promoted model input."""
+    lifecycle = _SessionLifecycle()
+    executor = _executor(session_lifecycle=lifecycle)
+    message = _message()
+
+    class NoPendingInputBufferService:
+        """InputBufferService double with no remaining buffers."""
+
+        async def has_pending_session_input_buffers(self, session_id: str) -> bool:
+            """Return whether any input buffer remains after promotion."""
+            assert session_id == message.session_id
+            return False
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            user_messages=[],
+            has_actionable_work=True,
+            context_invalidated=True,
+        )
+
+    async def resolve_failure(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("resolve_invoke_input should not be called")
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        executor,
+        "input_buffer_service",
+        cast(InputBufferService, NoPendingInputBufferService()),
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input",
+        resolve_failure,
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        message,
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=cast(asyncio.Event, object()),
+        dispatch_event=dispatch_event,
+    )
+
+    assert result.no_actionable_work is True
+    assert lifecycle.wake_ups == [message]
+
+
+@pytest.mark.asyncio
 async def test_boundary_poll_processes_turn_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -708,6 +765,59 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
         executor,
         "input_buffer_service",
         cast(InputBufferService, PendingInputBufferService()),
+    )
+
+    context_invalidated = False
+
+    def mark_context_invalidated() -> None:
+        nonlocal context_invalidated
+        context_invalidated = True
+
+    poll = executor.make_boundary_poll(
+        message=message,
+        model="gpt-test",
+        poll_fn=None,
+        mark_context_invalidated=mark_context_invalidated,
+    )
+
+    assert await poll() == PollMessagesResult(
+        user_messages=[],
+        context_invalidated=True,
+    )
+    assert context_invalidated is True
+    assert lifecycle.wake_ups == [message]
+
+
+@pytest.mark.asyncio
+async def test_boundary_poll_wakes_promoted_model_input_after_context_invalidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boundary actions wake fresh context when model input was already promoted."""
+    lifecycle = _SessionLifecycle()
+    executor = _executor(session_lifecycle=lifecycle)
+    message = _message()
+
+    class NoPendingInputBufferService:
+        """InputBufferService double with no remaining buffers."""
+
+        async def has_pending_session_input_buffers(self, session_id: str) -> bool:
+            """Return whether any input buffer remains after promotion."""
+            assert session_id == message.session_id
+            return False
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            user_messages=[],
+            has_actionable_work=True,
+            context_invalidated=True,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        executor,
+        "input_buffer_service",
+        cast(InputBufferService, NoPendingInputBufferService()),
     )
 
     context_invalidated = False

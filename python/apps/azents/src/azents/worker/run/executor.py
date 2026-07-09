@@ -309,9 +309,13 @@ class RunExecutor:
                 process_actions=True,
             )
             if initial_input.context_invalidated:
-                if await self.input_buffer_service.has_pending_session_input_buffers(
-                    message.session_id
-                ):
+                has_follow_up_input = initial_input.has_actionable_work
+                if not has_follow_up_input:
+                    has_pending_input = (
+                        self.input_buffer_service.has_pending_session_input_buffers
+                    )
+                    has_follow_up_input = await has_pending_input(message.session_id)
+                if has_follow_up_input:
                     await self.session_lifecycle.send_session_wake_up(message)
                 return RunExecutionResult(
                     toolkits=[],
@@ -1105,9 +1109,13 @@ class RunExecutor:
             )
             if result.context_invalidated:
                 mark_context_invalidated()
-                if await self.input_buffer_service.has_pending_session_input_buffers(
-                    message.session_id
-                ):
+                has_follow_up_input = result.has_actionable_work
+                if not has_follow_up_input:
+                    has_pending_input = (
+                        self.input_buffer_service.has_pending_session_input_buffers
+                    )
+                    has_follow_up_input = await has_pending_input(message.session_id)
+                if has_follow_up_input:
                     await self.session_lifecycle.send_session_wake_up(message)
             return PollMessagesResult(
                 user_messages=result.user_messages,
