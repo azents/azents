@@ -76,10 +76,6 @@
 .codeBlockFrame {
   --azents-chat-code-background: var(--mantine-color-gray-0);
   --azents-chat-code-foreground: var(--mantine-color-dark-9);
-  --azents-chat-code-copy-space: calc(
-    var(--mantine-spacing-xl) + var(--mantine-spacing-xs)
-  );
-
   position: relative;
   margin: 0.5em 0;
   border-radius: var(--mantine-radius-sm);
@@ -95,7 +91,7 @@
 
 .codeBlockScroller {
   margin: 0;
-  padding: 0.6em var(--azents-chat-code-copy-space) 0.6em 0.8em;
+  padding: 0.6em var(--mantine-spacing-lg) 0.6em 0.8em;
   background-color: transparent;
   color: inherit;
   overflow-x: auto;
