@@ -180,8 +180,8 @@ function CodeBlock({
           customStyle={{
             background: "transparent",
             color: "inherit",
-            margin: "0 var(--azents-chat-code-copy-space) 0 0",
-            padding: "0.6em var(--mantine-spacing-xs) 0.6em 0.8em",
+            margin: 0,
+            padding: "0.6em var(--azents-chat-code-copy-space) 0.6em 0.8em",
           }}
           codeTagProps={{
             className: classes.highlightedCode,
