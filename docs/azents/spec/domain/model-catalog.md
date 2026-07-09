@@ -17,8 +17,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-06-21
-spec_version: 1
+last_verified_at: 2026-07-09
+spec_version: 2
 ---
 
 # Model Catalog Domain Spec
@@ -94,9 +94,9 @@ System catalog sync is not user-triggered from the public picker. It is invoked 
 
 ## Submit normalization
 
-Agent creation/update and Workspace model settings update accept a model selection input containing an LLM provider integration id and provider model identifier. The services resolve that input through the stored catalog read service. The resolved catalog entry is copied into the stored Agent or Workspace model selection snapshot.
+Agent creation/update and Workspace model settings update accept selectable model option entries. Each entry contains a label plus a model selection input with an LLM provider integration id and provider model identifier. During submit normalization, services resolve every option entry through the stored catalog read service. The resolved catalog entry is copied into the stored Agent or Workspace `AgentModelSelection` snapshot inside that selectable option.
 
-If no selectable stored catalog entry matches the requested integration and model identifier, the service rejects the selection. Submit normalization must not refetch a dynamic provider listing as a fallback.
+Transition compatibility direct model selection inputs use the same normalization path. If no selectable stored catalog entry matches a requested integration and model identifier, the service rejects the selection. Submit normalization must not refetch a dynamic provider listing as a fallback.
 
 ## Snapshot semantics
 
@@ -111,6 +111,13 @@ The web picker is integration-first. The form displays the current model summary
 The picker shows catalog status and supports search plus infinite-scroll paged loading. It renders provider-independent catalog UI states for no integration selected, loading, never synced, syncing without snapshot, failed without snapshot, ready, ready with latest failed attempt, ready empty result, and loading next page. Failure state renders before empty result state.
 
 For user-scoped integration catalogs, the picker can trigger integration sync. For system catalog fallback entries, public users do not trigger system sync.
+
+## Change History
+
+| Date | Version | Change |
+|---|---:|---|
+| 2026-07-09 | 2 | Documented selectable model option submit normalization through stored catalog projection |
+| 2026-06-21 | 1 | Initial model catalog domain spec |
 
 ## Current implementation notes
 

@@ -200,6 +200,11 @@ The pre-lower order is significant. Event attachment/file availability filters r
 compaction. Scheduler-owned file cleanup does not run in run input preparation. The runtime does not omit old tool outputs in normal model input. If the lowered request
 is still too large, `NativeRequestSizeGuard` remains the final post-lower hard guard.
 
+`AgentWorker` resolves effective model snapshots before the engine starts. Agent selectable model labels
+are not a runtime concern: Agent and Workspace settings services resolve labels into saved
+`model_selection` and `lightweight_model_selection` snapshots before run start, and the execution loop
+receives only those effective snapshots in `RunRequest`.
+
 `LiteLLMResponsesLowerer` owns the full provider-native request surface for the Responses adapter:
 transport credential kwargs, generation kwargs, client function tool passthrough, and provider-hosted
 tool lowering. Agent `model_parameters.builtin_tools` stores semantic ids such as `web_search`; the
@@ -483,6 +488,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-09** — v65. Clarified that selectable model labels are resolved before run start and runtime receives effective model snapshots only.
 - **2026-07-09** — v64. Documented `spawn_agent` active subagent and depth limit enforcement before child-session side effects.
 - **2026-07-09** — v63. Documented default subagent context forking and child-session human write rejection before side effects.
 - **2026-07-08** — v62. Documented subagent worker scheduling through normal session runs, `agent_message` mailbox promotion, subagent execution-mode tool resolution, terminal result projections, and subtree stop behavior.
