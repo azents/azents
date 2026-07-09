@@ -287,8 +287,21 @@ class ProviderRunLoop:
             },
         )
         for report in reports:
-            await self._client.report_provider_state(report)
+            await self.report_provider_state(report)
         return accepted
+
+    async def report_provider_state(
+        self,
+        report: RuntimeProviderReport,
+    ) -> RuntimeProviderReport:
+        """Send backend state under the current Provider connection generation."""
+        accepted = self._require_accepted()
+        current_report = dataclasses.replace(
+            report,
+            provider_generation=accepted.generation,
+        )
+        await self._client.report_provider_state(current_report)
+        return current_report
 
     async def heartbeat(self, *, force: bool = False) -> bool:
         """Send a heartbeat when due and reject stale generations explicitly."""
@@ -360,9 +373,17 @@ class ProviderRunLoop:
             )
             return completion
         completion = await self._execute_command(envelope, accepted.generation)
+        if completion.report is not None:
+            completion = dataclasses.replace(
+                completion,
+                report=dataclasses.replace(
+                    completion.report,
+                    provider_generation=accepted.generation,
+                ),
+            )
         await self._client.complete_provider_command(completion)
         if completion.report is not None:
-            await self._client.report_provider_state(completion.report)
+            await self.report_provider_state(completion.report)
         _LOGGER.info(
             "Runtime Provider command finished provider_id=%s provider_generation=%s "
             "request_id=%s command=%s resource=runtime/%s desired_generation=%s "

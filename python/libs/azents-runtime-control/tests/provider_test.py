@@ -141,7 +141,10 @@ class FakeLifecycle(RuntimeProviderLifecycle):
 @pytest.mark.asyncio
 async def test_start_registers_heartbeats_and_reports_known_runtimes() -> None:
     client = FakeControlClient()
-    known = _report(_command(RuntimeLifecycleCommandType.OBSERVE))
+    known = dataclasses.replace(
+        _report(_command(RuntimeLifecycleCommandType.OBSERVE)),
+        provider_generation=7,
+    )
     lifecycle = FakeLifecycle(known_reports=(known,))
     loop = _loop(client, lifecycle)
 
@@ -149,7 +152,7 @@ async def test_start_registers_heartbeats_and_reports_known_runtimes() -> None:
 
     assert accepted.generation == 11
     assert client.registrations[0].provider_id == "provider-1"
-    assert client.reports == [known]
+    assert client.reports == [dataclasses.replace(known, provider_generation=11)]
     assert client.heartbeats == [("provider-1", 11)]
 
 
@@ -167,10 +170,30 @@ async def test_start_heartbeats_before_observing_known_runtimes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_report_provider_state_uses_current_connection_generation() -> None:
+    """Backend resource labels cannot fence reports after Provider reconnect."""
+    client = FakeControlClient()
+    loop = _loop(client, FakeLifecycle())
+    await loop.start()
+    stale_report = dataclasses.replace(
+        _report(_command(RuntimeLifecycleCommandType.OBSERVE)),
+        provider_generation=7,
+    )
+
+    current_report = await loop.report_provider_state(stale_report)
+
+    assert current_report.provider_generation == 11
+    assert client.reports == [current_report]
+
+
+@pytest.mark.asyncio
 async def test_process_next_command_dispatches_and_completes_success() -> None:
     client = FakeControlClient()
     lifecycle = FakeLifecycle()
-    command = _command(RuntimeLifecycleCommandType.START)
+    command = dataclasses.replace(
+        _command(RuntimeLifecycleCommandType.START),
+        provider_generation=7,
+    )
     client.commands.append(ProviderCommandEnvelope(request_id="req-1", command=command))
     loop = _loop(client, lifecycle)
     await loop.start()
@@ -180,6 +203,7 @@ async def test_process_next_command_dispatches_and_completes_success() -> None:
     assert completion is not None
     assert completion.success
     assert completion.report is not None
+    assert completion.report.provider_generation == 11
     assert completion.report.workspace_path == "/workspace/agent"
     assert lifecycle.commands == [command]
     assert client.completions == [completion]
