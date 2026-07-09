@@ -11,7 +11,6 @@ import {
   Alert,
   Anchor,
   Button,
-  Card,
   Checkbox,
   Container,
   Divider,
@@ -31,25 +30,27 @@ import { useForm } from "@mantine/form";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import {
-  modelSelectionProviderValue,
-  modelSelectionValue,
+  findSelectableModelOptionByLabel,
+  selectableModelOptionFormValuesFromStoredOptions,
 } from "../model-selection";
 import { agentFormSchema } from "../schemas";
 import { AgentAdminSection } from "./AgentAdminSection";
 import { AgentToolkitSection } from "./AgentToolkitSection";
-import { ModelCatalogPicker } from "./ModelCatalogPicker";
+import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
 import type { MemberItem } from "../containers/useAgentFormContainer";
 import type {
   ModelCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
-  SelectableModelCandidate,
 } from "../model-selection";
 import type { AgentFormValues } from "../schemas";
 import type { AdminListState, AgentFormState, MutationState } from "../types";
-import type { AgentAdminResponse } from "@azents/public-client";
+import type {
+  AgentAdminResponse,
+  WorkspaceModelSettingsResponse,
+} from "@azents/public-client";
 
 export type AgentFormSection =
   | "all"
@@ -66,6 +67,7 @@ interface AgentFormProps {
   adminListState: AdminListState;
   providerOptions: ProviderIntegrationOption[];
   modelOptions: ModelSelectionOption[];
+  workspaceModelSettings: WorkspaceModelSettingsResponse | null;
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];
@@ -100,6 +102,7 @@ export function AgentForm({
   modelsLoading,
   members,
   providerOptions,
+  workspaceModelSettings,
   onSyncCatalog,
   onSubmit,
   onAddAdmin,
@@ -112,22 +115,15 @@ export function AgentForm({
 
   const isEdit = formState.type === "EDIT";
   const backPath = cancelHref ?? `/w/${handle}/agents`;
-  const [mainPickerOpen, setMainPickerOpen] = useState(false);
-  const [lightweightPickerOpen, setLightweightPickerOpen] = useState(false);
-  const [mainModelPreview, setMainModelPreview] =
-    useState<SelectableModelCandidate | null>(null);
-  const [lightweightModelPreview, setLightweightModelPreview] =
-    useState<SelectableModelCandidate | null>(null);
 
   const form = useForm<AgentFormValues>({
     mode: "controlled",
     initialValues: {
       name: "",
       description: "",
-      model_provider_integration_id: null,
-      model_selection_value: null,
-      lightweight_model_provider_integration_id: null,
-      lightweight_model_selection_value: null,
+      selectable_model_options: [],
+      main_model_label: null,
+      lightweight_model_label: null,
       system_prompt: "",
       type: "public",
       enabled: true,
@@ -168,16 +164,12 @@ export function AgentForm({
       form.setValues({
         name: agent.name,
         description: agent.description ?? "",
-        model_provider_integration_id: modelSelectionProviderValue(
-          agent.model_selection,
-        ),
-        model_selection_value: modelSelectionValue(agent.model_selection),
-        lightweight_model_provider_integration_id: modelSelectionProviderValue(
-          agent.lightweight_model_selection,
-        ),
-        lightweight_model_selection_value: modelSelectionValue(
-          agent.lightweight_model_selection,
-        ),
+        selectable_model_options:
+          selectableModelOptionFormValuesFromStoredOptions(
+            agent.selectable_model_options,
+          ),
+        main_model_label: agent.main_model_label,
+        lightweight_model_label: agent.lightweight_model_label,
         system_prompt: agent.system_prompt ?? "",
         type: agent.type,
         enabled: agent.enabled,
@@ -198,26 +190,42 @@ export function AgentForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run only on initial load
   }, [formState.type]);
 
-  const selectedModelSnapshot =
-    formState.type === "EDIT" ? formState.agent.model_selection : null;
-  const selectedLightweightModelSnapshot =
-    formState.type === "EDIT"
-      ? formState.agent.lightweight_model_selection
-      : null;
+  useEffect(() => {
+    if (formState.type !== "CREATE" || workspaceModelSettings == null) {
+      return;
+    }
+    if (form.isDirty()) {
+      return;
+    }
+    form.setValues({
+      selectable_model_options:
+        selectableModelOptionFormValuesFromStoredOptions(
+          workspaceModelSettings.default_selectable_model_options ?? [],
+        ),
+      main_model_label: workspaceModelSettings.default_main_model_label ?? null,
+      lightweight_model_label:
+        workspaceModelSettings.default_lightweight_model_label ?? null,
+    });
+    form.resetDirty();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Resynchronize create defaults before user edits.
+  }, [formState.type, workspaceModelSettings]);
+
+  const selectedMainModelOption = findSelectableModelOptionByLabel(
+    form.values.selectable_model_options,
+    form.values.main_model_label,
+  );
   const selectedModelCapabilities =
-    mainModelPreview?.normalized_capabilities ??
-    selectedModelSnapshot?.normalized_capabilities ??
-    null;
+    selectedMainModelOption?.normalized_capabilities ?? null;
 
   const selectedModelSupportsReasoning =
     selectedModelCapabilities?.reasoning?.supported ?? false;
 
   const selectedModelBuiltinTools = useMemo(() => {
-    if (!form.values.model_selection_value) {
+    if (selectedMainModelOption == null) {
       return [];
     }
     return selectedModelCapabilities?.built_in_tools?.supported ?? [];
-  }, [form.values.model_selection_value, selectedModelCapabilities]);
+  }, [selectedMainModelOption, selectedModelCapabilities]);
 
   const reasoningEffortOptions = useMemo(() => {
     const supported = selectedModelCapabilities?.reasoning?.effort_levels ?? [];
@@ -227,48 +235,6 @@ export function AgentForm({
       label: value.charAt(0).toUpperCase() + value.slice(1),
     }));
   }, [selectedModelCapabilities]);
-
-  const handleMainProviderChange = useCallback(
-    (value: string | null): void => {
-      form.setFieldValue("model_provider_integration_id", value);
-      form.setFieldValue("model_selection_value", null);
-      form.setFieldValue("builtin_tools", []);
-      form.setFieldValue("reasoning_effort", null);
-      setMainModelPreview(null);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- form is stable ref
-    [],
-  );
-
-  const handleModelChange = useCallback(
-    (model: SelectableModelCandidate): void => {
-      const integrationId = form.values.model_provider_integration_id;
-      if (integrationId == null) {
-        return;
-      }
-      form.setFieldValue(
-        "model_selection_value",
-        `${integrationId}:${model.model_identifier}`,
-      );
-      form.setFieldValue("builtin_tools", []);
-      setMainModelPreview(model);
-      if (!model.normalized_capabilities.reasoning?.supported) {
-        form.setFieldValue("reasoning_effort", null);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- form is stable ref
-    [form.values.model_provider_integration_id],
-  );
-
-  const handleLightweightProviderChange = useCallback(
-    (value: string | null): void => {
-      form.setFieldValue("lightweight_model_provider_integration_id", value);
-      form.setFieldValue("lightweight_model_selection_value", null);
-      setLightweightModelPreview(null);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- form is stable ref
-    [],
-  );
 
   if (formState.type === "LOADING") {
     return (
@@ -325,48 +291,6 @@ export function AgentForm({
         </Alert>
       )}
 
-      {showModel && (
-        <ModelCatalogPicker
-          opened={mainPickerOpen}
-          title={t("modelCatalogPicker.selectMainTitle")}
-          handle={handle}
-          integrations={enabledProviderOptions}
-          selectedIntegrationId={form.values.model_provider_integration_id}
-          selectedValue={form.values.model_selection_value}
-          onClose={() => setMainPickerOpen(false)}
-          onSelectIntegration={handleMainProviderChange}
-          onSelectModel={handleModelChange}
-          onSyncCatalog={onSyncCatalog}
-        />
-      )}
-      {showModel && (
-        <ModelCatalogPicker
-          opened={lightweightPickerOpen}
-          title={t("modelCatalogPicker.selectLightweightTitle")}
-          handle={handle}
-          integrations={enabledProviderOptions}
-          selectedIntegrationId={
-            form.values.lightweight_model_provider_integration_id
-          }
-          selectedValue={form.values.lightweight_model_selection_value}
-          onClose={() => setLightweightPickerOpen(false)}
-          onSelectIntegration={handleLightweightProviderChange}
-          onSelectModel={(model) => {
-            const integrationId =
-              form.values.lightweight_model_provider_integration_id;
-            if (integrationId == null) {
-              return;
-            }
-            form.setFieldValue(
-              "lightweight_model_selection_value",
-              `${integrationId}:${model.model_identifier}`,
-            );
-            setLightweightModelPreview(model);
-          }}
-          onSyncCatalog={onSyncCatalog}
-        />
-      )}
-
       <form onSubmit={handleSubmit}>
         <Stack gap="md">
           {showProfile && (
@@ -389,77 +313,28 @@ export function AgentForm({
           )}
 
           {showModel && (
-            <Stack gap="xs">
-              <Text fw={500}>{t("mainModelLabel")}</Text>
-              <Text size="sm" c="dimmed">
-                {t("mainModelDescription")}
-              </Text>
-              <Card withBorder padding="sm">
-                <Group justify="space-between" align="center">
-                  <Stack gap={2}>
-                    <Text fw={600}>
-                      {mainModelPreview?.model_display_name ??
-                        selectedModelSnapshot?.model_display_name ??
-                        t("noModelSelected")}
-                    </Text>
-                    <Text size="sm" c="dimmed">
-                      {mainModelPreview?.model_identifier ??
-                        selectedModelSnapshot?.model_identifier ??
-                        t("chooseModelDescription")}
-                    </Text>
-                  </Stack>
-                  <Button
-                    variant="light"
-                    onClick={() => setMainPickerOpen(true)}
-                  >
-                    {t("changeModel")}
-                  </Button>
-                </Group>
-              </Card>
-              {form.values.model_selection_value != null &&
-                mainModelPreview == null &&
-                selectedModelSnapshot == null && (
-                  <Alert color="yellow" title={t("selectedModelMissingTitle")}>
-                    {t("selectedModelMissingDescription")}
-                  </Alert>
-                )}
-              {form.errors.model_selection_value && (
-                <Text size="sm" c="red">
-                  {form.errors.model_selection_value}
-                </Text>
-              )}
-            </Stack>
-          )}
-
-          {showModel && (
-            <Stack gap="xs">
-              <Text fw={500}>{t("lightweightModelLabel")}</Text>
-              <Text size="sm" c="dimmed">
-                {t("lightweightModelDescription")}
-              </Text>
-              <Card withBorder padding="sm">
-                <Group justify="space-between" align="center">
-                  <Stack gap={2}>
-                    <Text fw={600}>
-                      {lightweightModelPreview?.model_display_name ??
-                        selectedLightweightModelSnapshot?.model_display_name ??
-                        t("useMainOrWorkspaceDefault")}
-                    </Text>
-                    <Text size="sm" c="dimmed">
-                      {lightweightModelPreview?.model_identifier ??
-                        selectedLightweightModelSnapshot?.model_identifier ??
-                        t("optionalLightweightModel")}
-                    </Text>
-                  </Stack>
-                  <Button
-                    variant="light"
-                    onClick={() => setLightweightPickerOpen(true)}
-                  >
-                    {t("changeModel")}
-                  </Button>
-                </Group>
-              </Card>
-            </Stack>
+            <SelectableModelOptionsEditor
+              handle={handle}
+              title={t("selectableModelOptions.title")}
+              description={t("selectableModelOptions.description")}
+              options={form.values.selectable_model_options}
+              mainModelLabel={form.values.main_model_label}
+              lightweightModelLabel={form.values.lightweight_model_label}
+              providerOptions={providerOptions}
+              canEdit
+              onSyncCatalog={onSyncCatalog}
+              onChangeOptions={(options) =>
+                form.setFieldValue("selectable_model_options", options)
+              }
+              onChangeMainModelLabel={(label) => {
+                form.setFieldValue("main_model_label", label);
+                form.setFieldValue("builtin_tools", []);
+                form.setFieldValue("reasoning_effort", null);
+              }}
+              onChangeLightweightModelLabel={(label) =>
+                form.setFieldValue("lightweight_model_label", label)
+              }
+            />
           )}
 
           {showModel && selectedModelSupportsReasoning && (
