@@ -120,6 +120,93 @@ async def test_provider_grpc_registers_and_acks_heartbeat() -> None:
 
 
 @pytest.mark.asyncio
+async def test_provider_grpc_rejects_stream_generation_mismatch() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    sink = FakeReportSink()
+    servicer = _servicer(RuntimeControlProtocolService(store), sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+    await inbound.put(
+        runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="report-1",
+            generation=2,
+            report=_report_message(),
+        )
+    )
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    error = await anext(stream)
+    await stream.aclose()
+
+    assert accepted.register_accepted.generation == 1
+    assert error.error.code == "STALE_PROVIDER_GENERATION"
+    assert sink.reports == []
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_rejects_report_after_newer_registration() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    sink = FakeReportSink()
+    servicer = _servicer(service, sink)
+    old_inbound = QueueIterator()
+    await old_inbound.put(_register_message("connection-1"))
+    old_stream = servicer.ConnectProvider(old_inbound, FakeGrpcContext())
+    old_accepted = await anext(old_stream)
+    new_inbound = QueueIterator()
+    await new_inbound.put(_register_message("connection-2"))
+    new_stream = servicer.ConnectProvider(new_inbound, FakeGrpcContext())
+    new_accepted = await anext(new_stream)
+    await old_inbound.put(
+        runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="report-1",
+            generation=old_accepted.register_accepted.generation,
+            report=_report_message(),
+        )
+    )
+
+    error = await anext(old_stream)
+    await old_stream.aclose()
+    await new_stream.aclose()
+
+    assert old_accepted.register_accepted.generation == 1
+    assert new_accepted.register_accepted.generation == 2
+    assert error.error.code == "STALE_PROVIDER_GENERATION"
+    assert sink.reports == []
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_rejects_report_generation_mismatch() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    sink = FakeReportSink()
+    servicer = _servicer(RuntimeControlProtocolService(store), sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+    report = _report_message()
+    report.provider_generation = 2
+    await inbound.put(
+        runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="report-1",
+            generation=1,
+            report=report,
+        )
+    )
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    error = await anext(stream)
+    await stream.aclose()
+
+    assert accepted.register_accepted.generation == 1
+    assert error.error.code == "STALE_PROVIDER_GENERATION"
+    assert sink.reports == []
+
+
+@pytest.mark.asyncio
 async def test_provider_grpc_relays_commands_and_records_completion() -> None:
     store = InMemoryRuntimeCoordinationStore()
     service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
@@ -261,9 +348,11 @@ def _servicer(
     )
 
 
-def _register_message() -> runtime_provider_control_pb2.ProviderMessage:
+def _register_message(
+    connection_id: str = "connection-1",
+) -> runtime_provider_control_pb2.ProviderMessage:
     return runtime_provider_control_pb2.ProviderMessage(
-        connection_id="connection-1",
+        connection_id=connection_id,
         request_id="register",
         register=runtime_provider_control_pb2.ProviderRegister(
             provider_id="provider-1",

@@ -208,15 +208,17 @@ class AgentRuntimeRepository:
         session: AsyncSession,
         runtime_id: str,
         observed_state: RuntimeProviderObservedState,
+        provider_generation: int,
         observed_generation: int,
         *,
         workspace_path: str | None = None,
         failure: AgentRuntimeFailurePatch | None = None,
         clear_failure: bool = False,
     ) -> AgentRuntime | None:
-        """Store Provider observed state."""
+        """Store Provider observed state when report generations are current."""
         changed = sa.or_(
             RDBAgentRuntime.provider_observed_state != observed_state,
+            RDBAgentRuntime.provider_generation != provider_generation,
             RDBAgentRuntime.provider_observed_generation != observed_generation,
         )
         if workspace_path is not None:
@@ -240,6 +242,7 @@ class AgentRuntimeRepository:
             )
         values: dict[str, object | None] = {
             "provider_observed_state": observed_state,
+            "provider_generation": provider_generation,
             "provider_observed_generation": observed_generation,
             "provider_observed_at": sa.func.now(),
             "last_state_change_at": sa.case(
@@ -259,7 +262,12 @@ class AgentRuntimeRepository:
             values["failure_message"] = None
         result = await session.execute(
             sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime_id)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.provider_generation <= provider_generation,
+                RDBAgentRuntime.provider_observed_generation <= observed_generation,
+                RDBAgentRuntime.desired_generation <= observed_generation,
+            )
             .values(**values)
             .returning(RDBAgentRuntime)
         )
@@ -494,10 +502,24 @@ class AgentRuntimeRepository:
         failure: AgentRuntimeFailurePatch | None = None,
     ) -> AgentRuntime | None:
         """Store Runner state."""
+        changed = sa.or_(
+            RDBAgentRuntime.runner_state != runner_state,
+            RDBAgentRuntime.runner_generation != runner_generation,
+        )
+        if failure is not None:
+            changed = sa.or_(
+                changed,
+                RDBAgentRuntime.failure_generation.is_distinct_from(failure.generation),
+                RDBAgentRuntime.failure_code.is_distinct_from(failure.code),
+                RDBAgentRuntime.failure_message.is_distinct_from(failure.message),
+            )
         values: dict[str, object | None] = {
             "runner_state": runner_state,
             "runner_generation": runner_generation,
-            "last_state_change_at": sa.func.now(),
+            "last_state_change_at": sa.case(
+                (changed, sa.func.now()),
+                else_=RDBAgentRuntime.last_state_change_at,
+            ),
         }
         if failure is not None:
             values["failure_generation"] = failure.generation
@@ -505,7 +527,10 @@ class AgentRuntimeRepository:
             values["failure_message"] = failure.message
         result = await session.execute(
             sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime_id)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.runner_generation <= runner_generation,
+            )
             .values(**values)
             .returning(RDBAgentRuntime)
         )
@@ -638,6 +663,7 @@ class AgentRuntimeRepository:
             last_lifecycle_command=rdb.last_lifecycle_command,
             reset_final_desired_state=rdb.reset_final_desired_state,
             provider_observed_state=rdb.provider_observed_state,
+            provider_generation=rdb.provider_generation,
             provider_observed_generation=rdb.provider_observed_generation,
             provider_observed_at=rdb.provider_observed_at,
             provider_observe_requested_at=rdb.provider_observe_requested_at,

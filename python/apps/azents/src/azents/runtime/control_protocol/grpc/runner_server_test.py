@@ -123,6 +123,99 @@ async def test_runner_grpc_registers_and_acks_heartbeat() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_grpc_rejects_stream_generation_mismatch() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    sink = FakeStateSink()
+    servicer = _servicer(RuntimeControlProtocolService(store), store, sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="state-1",
+            generation=2,
+            state_report=_state_report_message(),
+        )
+    )
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    error = await anext(stream)
+    await stream.aclose()
+
+    assert accepted.register_accepted.generation == 1
+    assert error.error.code == "STALE_RUNNER_GENERATION"
+    assert all(
+        report.runner_state is not SharedRunnerState.READY for report in sink.reports
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_rejects_state_report_after_newer_registration() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    sink = FakeStateSink()
+    servicer = _servicer(service, store, sink)
+    old_inbound = QueueIterator()
+    await old_inbound.put(_register_message("connection-1"))
+    old_stream = servicer.ConnectRunner(old_inbound, FakeGrpcContext())
+    old_accepted = await anext(old_stream)
+    new_inbound = QueueIterator()
+    await new_inbound.put(_register_message("connection-2"))
+    new_stream = servicer.ConnectRunner(new_inbound, FakeGrpcContext())
+    new_accepted = await anext(new_stream)
+    await old_inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="state-1",
+            generation=old_accepted.register_accepted.generation,
+            state_report=_state_report_message(),
+        )
+    )
+
+    error = await anext(old_stream)
+    await old_stream.aclose()
+    await new_stream.aclose()
+
+    assert old_accepted.register_accepted.generation == 1
+    assert new_accepted.register_accepted.generation == 2
+    assert error.error.code == "STALE_RUNNER_GENERATION"
+    assert all(
+        report.runner_state is not SharedRunnerState.READY for report in sink.reports
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_rejects_state_report_generation_mismatch() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    sink = FakeStateSink()
+    servicer = _servicer(RuntimeControlProtocolService(store), store, sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+    state_report = _state_report_message()
+    state_report.runner_generation = 2
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="state-1",
+            generation=1,
+            state_report=state_report,
+        )
+    )
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    error = await anext(stream)
+    await stream.aclose()
+
+    assert accepted.register_accepted.generation == 1
+    assert error.error.code == "STALE_RUNNER_GENERATION"
+    assert all(
+        report.runner_state is not SharedRunnerState.READY for report in sink.reports
+    )
+
+
+@pytest.mark.asyncio
 async def test_runner_grpc_relays_operations_and_appends_events() -> None:
     store = InMemoryRuntimeCoordinationStore()
     service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
@@ -320,9 +413,11 @@ def _servicer(
     )
 
 
-def _register_message() -> runtime_runner_control_pb2.RunnerMessage:
+def _register_message(
+    connection_id: str = "connection-1",
+) -> runtime_runner_control_pb2.RunnerMessage:
     return runtime_runner_control_pb2.RunnerMessage(
-        connection_id="connection-1",
+        connection_id=connection_id,
         request_id="register",
         register=runtime_runner_control_pb2.RunnerRegister(
             runtime_id="runtime-1",
@@ -333,6 +428,19 @@ def _register_message() -> runtime_runner_control_pb2.RunnerMessage:
             workspace_path="/workspace/agent",
             auth_credential_id="credential-1",
         ),
+    )
+
+
+def _state_report_message() -> runtime_runner_control_pb2.RunnerStateReport:
+    return runtime_runner_control_pb2.RunnerStateReport(
+        runtime_id="runtime-1",
+        runner_id="runner-1",
+        runner_generation=1,
+        runner_state="ready",
+        capabilities=("bash", "file.read"),
+        health="ok",
+        workspace_path="/workspace/agent",
+        reported_at=_timestamp(_now()),
     )
 
 
