@@ -12,15 +12,22 @@
 import {
   ActionIcon,
   Box,
-  Button,
   Drawer,
   Group,
+  Menu,
   rem,
   Text,
+  Tooltip,
   useMantineTheme,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
-import { IconGitBranch } from "@tabler/icons-react";
+import {
+  IconArrowLeft,
+  IconArrowUp,
+  IconDotsVertical,
+  IconGitBranch,
+  IconHome,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -53,9 +60,10 @@ interface ChatSessionViewProps {
 }
 
 interface SubagentNavigationLinks {
+  currentName: string;
   currentPath: string;
+  parent: SubagentTreeNodeResponse;
   root: SubagentTreeNodeResponse;
-  parent: SubagentTreeNodeResponse | null;
 }
 
 function flattenSubagentNodes(
@@ -128,17 +136,20 @@ export function ChatSessionView({
     const nodes = flattenSubagentNodes(tree.nodes);
     const current = findSubagentNode(nodes, tree.current_session_agent_id);
     const root = findSubagentNode(nodes, tree.root_session_agent_id);
+    const parent = findSubagentNode(nodes, current?.parent_session_agent_id);
     if (
       current === null ||
       root === null ||
+      parent === null ||
       current.session_agent_id === root.session_agent_id
     ) {
       return null;
     }
     return {
+      currentName: current.name,
       currentPath: current.path,
+      parent,
       root,
-      parent: findSubagentNode(nodes, current.parent_session_agent_id),
     };
   }, [subagentTreePanel.state]);
   const effectiveContextWindowTokens =
@@ -184,42 +195,79 @@ export function ChatSessionView({
             backgroundColor: "var(--mantine-color-body)",
           }}
         >
-          <Group gap="xs" wrap="nowrap" style={{ overflowX: "auto" }}>
-            <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-              {tAgentDetail("subagents.pathLabel", {
-                path: subagentNavigation.currentPath,
+          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+            <Tooltip
+              label={tAgentDetail("subagents.backToParentTooltip", {
+                name: subagentNavigation.parent.name,
+                path: subagentNavigation.parent.path,
               })}
-            </Text>
-            {subagentNavigation.parent !== null && (
-              <Button
+              withArrow
+            >
+              <ActionIcon
                 component={Link}
                 href={sessionHref(
                   handle,
                   agent.id,
                   subagentNavigation.parent.agent_session_id,
                 )}
-                size="xs"
-                variant="light"
-              >
-                {tAgentDetail("subagents.parentLink", {
+                size="sm"
+                variant="subtle"
+                aria-label={tAgentDetail("subagents.backToParent", {
                   name: subagentNavigation.parent.name,
                 })}
-              </Button>
-            )}
-            <Button
-              component={Link}
-              href={sessionHref(
-                handle,
-                agent.id,
-                subagentNavigation.root.agent_session_id,
-              )}
-              size="xs"
-              variant="subtle"
-            >
-              {tAgentDetail("subagents.rootLink", {
-                name: subagentNavigation.root.name,
-              })}
-            </Button>
+              >
+                <IconArrowLeft size={rem(18)} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label={subagentNavigation.currentPath} withArrow>
+              <Text
+                size="sm"
+                fw={600}
+                truncate
+                style={{ minWidth: 0, flex: 1 }}
+              >
+                {subagentNavigation.currentName}
+              </Text>
+            </Tooltip>
+            <Menu position="bottom-end" withinPortal>
+              <Menu.Target>
+                <ActionIcon
+                  size="sm"
+                  variant="subtle"
+                  aria-label={tAgentDetail("subagents.navigationMenu")}
+                >
+                  <IconDotsVertical size={rem(18)} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item
+                  component={Link}
+                  href={sessionHref(
+                    handle,
+                    agent.id,
+                    subagentNavigation.parent.agent_session_id,
+                  )}
+                  leftSection={<IconArrowUp size={rem(14)} />}
+                >
+                  {tAgentDetail("subagents.parentLink", {
+                    name: subagentNavigation.parent.name,
+                  })}
+                </Menu.Item>
+                <Menu.Item
+                  component={Link}
+                  href={sessionHref(
+                    handle,
+                    agent.id,
+                    subagentNavigation.root.agent_session_id,
+                  )}
+                  leftSection={<IconHome size={rem(14)} />}
+                >
+                  {tAgentDetail("subagents.rootLink", {
+                    name: subagentNavigation.root.name,
+                  })}
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
           </Group>
         </Box>
       )}
@@ -264,6 +312,11 @@ export function ChatSessionView({
           workspacePanel={workspacePanel}
           goal={output.goal}
           todo={output.todo}
+          readOnlyNotice={
+            subagentNavigation === null
+              ? null
+              : tAgentDetail("subagents.readOnlyNotice")
+          }
         />
       </Box>
       <Drawer

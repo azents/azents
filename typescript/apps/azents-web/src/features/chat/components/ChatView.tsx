@@ -20,6 +20,7 @@ import {
   Center,
   Group,
   Loader,
+  Paper,
   rem,
   ScrollArea,
   Stack,
@@ -425,6 +426,8 @@ interface ChatViewProps {
   goal: GoalStateSnapshot;
   /** current session todo snapshot */
   todo: TodoStateSnapshot;
+  /** read-only notice shown instead of the composer */
+  readOnlyNotice?: string | null;
 }
 
 export function ChatView({
@@ -466,6 +469,7 @@ export function ChatView({
   workspacePanel,
   goal,
   todo,
+  readOnlyNotice = null,
 }: ChatViewProps): React.ReactElement {
   const t = useTranslations("chat");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -1154,6 +1158,7 @@ export function ChatView({
                     editingMessageIndex !== null &&
                     index >= editingMessageIndex;
                   const editableUserMessage =
+                    readOnlyNotice === null &&
                     msg.role === "user" &&
                     Boolean(msg.content) &&
                     msg.status !== "partial" &&
@@ -1289,36 +1294,46 @@ export function ChatView({
           {/* input area */}
           <Box px="md" py="sm">
             <Box maw={rem(920)} mx="auto">
-              <ChatInput
-                agentId={activeAgent?.id ?? null}
-                sessionId={sessionId}
-                isMobile={isMobile}
-                isUploading={isUploading || isWritePending}
-                pendingFiles={pendingFiles}
-                goal={editingMessage === null ? goal : null}
-                todo={editingMessage === null ? todo : null}
-                onClearGoal={onClearGoal}
-                onUpdateGoal={onUpdateGoal}
-                onPauseGoal={onPauseGoal}
-                onResumeGoal={onResumeGoal}
-                uploadAll={uploadAll}
-                onSendInput={handleSubmitInput}
-                clearFiles={clearFiles}
-                resetDoneFiles={resetDoneFiles}
-                addFiles={addFiles}
-                removeFile={removeFile}
-                onAfterSend={handleAfterSend}
-                onFocus={handleInputFocus}
-                wasCommandBlocked={wasCommandBlocked}
-                isStopAvailable={isStopAvailable}
-                isStopPending={isStopPending}
-                onStopRequest={onStopRequest}
-                inputActions={inputActions}
-                editingMessageId={editingMessage?.messageId ?? null}
-                editingInitialValue={editingMessage?.content ?? null}
-                onCancelEdit={handleCancelEdit}
-                editSendDisabled={editingMessage !== null && isResponsePending}
-              />
+              {readOnlyNotice === null ? (
+                <ChatInput
+                  agentId={activeAgent?.id ?? null}
+                  sessionId={sessionId}
+                  isMobile={isMobile}
+                  isUploading={isUploading || isWritePending}
+                  pendingFiles={pendingFiles}
+                  goal={editingMessage === null ? goal : null}
+                  todo={editingMessage === null ? todo : null}
+                  onClearGoal={onClearGoal}
+                  onUpdateGoal={onUpdateGoal}
+                  onPauseGoal={onPauseGoal}
+                  onResumeGoal={onResumeGoal}
+                  uploadAll={uploadAll}
+                  onSendInput={handleSubmitInput}
+                  clearFiles={clearFiles}
+                  resetDoneFiles={resetDoneFiles}
+                  addFiles={addFiles}
+                  removeFile={removeFile}
+                  onAfterSend={handleAfterSend}
+                  onFocus={handleInputFocus}
+                  wasCommandBlocked={wasCommandBlocked}
+                  isStopAvailable={isStopAvailable}
+                  isStopPending={isStopPending}
+                  onStopRequest={onStopRequest}
+                  inputActions={inputActions}
+                  editingMessageId={editingMessage?.messageId ?? null}
+                  editingInitialValue={editingMessage?.content ?? null}
+                  onCancelEdit={handleCancelEdit}
+                  editSendDisabled={
+                    editingMessage !== null && isResponsePending
+                  }
+                />
+              ) : (
+                <Paper withBorder radius="md" px="sm" py="xs">
+                  <Text size="sm" c="dimmed" ta="center">
+                    {readOnlyNotice}
+                  </Text>
+                </Paper>
+              )}
             </Box>
           </Box>
         </Box>

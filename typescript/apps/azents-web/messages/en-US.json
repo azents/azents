@@ -605,6 +605,10 @@
           "pathLabel": "Current: {path}",
           "parentLink": "Parent: {name}",
           "rootLink": "Root: {name}",
+          "backToParent": "Back to parent: {name}",
+          "backToParentTooltip": "Back to parent: {name} ({path})",
+          "navigationMenu": "Subagent navigation options",
+          "readOnlyNotice": "Subagent sessions are read-only. Send new instructions from the parent agent.",
           "unread": "Unread",
           "runIndex": "Run {index}",
           "status": {

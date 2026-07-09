@@ -596,41 +596,59 @@ function AgentMailboxMessage({
   const sourcePath = message.metadata?.source_path || "/";
 
   return (
-    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
-      <MessageSurface>
-        <Paper
-          withBorder
-          radius="lg"
-          p="sm"
-          bg="var(--mantine-color-body)"
-          style={{ maxWidth: rem(680), overflow: "hidden" }}
-        >
-          <Stack gap="xs">
-            <Group gap={rem(6)} c="dimmed" wrap="nowrap">
-              <IconGitBranch aria-hidden="true" size={14} stroke={1.8} />
-              <Text size="xs" fw={600} lineClamp={1} style={{ minWidth: 0 }}>
-                {sourcePath}
-              </Text>
-            </Group>
-            <Box style={{ overflowWrap: "anywhere" }}>
-              <TextMessageContent
-                message={message}
-                hasContent={hasContent}
-                hasReasoning={hasReasoning}
-              />
-            </Box>
-          </Stack>
-        </Paper>
+    <Group
+      align="flex-start"
+      gap="sm"
+      justify="flex-end"
+      wrap="nowrap"
+      mb="md"
+      w="100%"
+      style={{ minWidth: 0 }}
+    >
+      <Box maw="75%" style={{ minWidth: 0 }}>
+        <MessageSurface>
+          <Paper
+            withBorder
+            px="sm"
+            py="2xs"
+            radius="lg"
+            bg="var(--mantine-color-gray-light)"
+            style={{
+              width: "fit-content",
+              maxWidth: "100%",
+              minWidth: 0,
+              overflowWrap: "anywhere",
+              borderTopRightRadius: rem(4),
+              marginLeft: "auto",
+            }}
+          >
+            <Stack gap={rem(6)}>
+              <Group gap={rem(6)} c="dimmed" wrap="nowrap">
+                <IconGitBranch aria-hidden="true" size={14} stroke={1.8} />
+                <Text size="xs" fw={600} lineClamp={1} style={{ minWidth: 0 }}>
+                  {sourcePath}
+                </Text>
+              </Group>
+              <Box style={{ overflowWrap: "anywhere" }}>
+                <TextMessageContent
+                  message={message}
+                  hasContent={hasContent}
+                  hasReasoning={hasReasoning}
+                />
+              </Box>
+            </Stack>
+          </Paper>
 
-        {message.content && message.status !== "partial" && (
-          <MessageActionRow
-            content={message.content}
-            createdAt={message.createdAt}
-            align="assistant"
-          />
-        )}
-      </MessageSurface>
-    </Box>
+          {message.content && message.status !== "partial" && (
+            <MessageActionRow
+              content={message.content}
+              createdAt={message.createdAt}
+              align="user"
+            />
+          )}
+        </MessageSurface>
+      </Box>
+    </Group>
   );
 }
 

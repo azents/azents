@@ -605,6 +605,10 @@
           "pathLabel": "Actuel : {path}",
           "parentLink": "Parent : {name}",
           "rootLink": "Racine : {name}",
+          "backToParent": "Retour au parent : {name}",
+          "backToParentTooltip": "Retour au parent : {name} ({path})",
+          "navigationMenu": "Options de navigation du sous-agent",
+          "readOnlyNotice": "Les sessions de sous-agent sont en lecture seule. Envoyez les nouvelles instructions depuis l’agent parent.",
           "unread": "Non lu",
           "runIndex": "Run {index}",
           "status": {
