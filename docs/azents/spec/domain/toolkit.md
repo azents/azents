@@ -32,8 +32,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-08
-spec_version: 47
+last_verified_at: 2026-07-09
+spec_version: 48
 ---
 
 # Toolkit
@@ -325,9 +325,13 @@ and subagent execution modes and exposes the coherent collaboration bundle as un
 The toolkit stores inter-agent delivery as target session `agent_message` input buffers. `send_message`
 queues without waking the target, while `spawn_agent` and `followup_task` mark the target session
 running and send normal broker wake-up signals. `wait_agent` reads unread terminal run projections and
-advances the child observation cursor only for returned results. `interrupt_agent` records stop intent
-only for the named target session and returns its previous projected status; it does not close, delete,
-or recursively stop descendants.
+advances the child observation cursor only for returned results. When no unread result is available but
+one or more selected targets are still running, `wait_agent` polls until the requested timeout expires or
+a terminal result becomes available; timeout responses are emitted only after that wait window. A target
+is considered running when either its latest run is running or its linked `AgentSession` is still marked
+running before the latest run row is available. `interrupt_agent` records stop intent only for the named
+target session and returns its previous projected status; it does not close, delete, or recursively stop
+descendants.
 
 The toolkit emits non-durable `subagent_tree_changed` events as invalidation signals. Durable tree
 state remains in `SessionAgent`, linked `AgentSession`, and latest `agent_runs` rows.
@@ -520,6 +524,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-09** (spec_version 48) — Corrected `wait_agent` timeout behavior to wait for running child results until the requested timeout expires before returning a timeout response.
 - **2026-07-08** (spec_version 47) — Added the auto-bound Subagent collaboration toolkit and updated execution-mode filtering from future subagent mode to current root/subagent resolution.
 - **2026-07-08** (spec_version 46) — Split auto-bound memory resolution into Memory Read and Memory Write capabilities, renamed the auto-bound runtime binding from shell to runtime, and documented root/subagent execution-mode filtering for Memory Write and Goal Toolkit.
 - **2026-07-01** (spec_version 43) — Added Goal compaction summary enrichment behavior.
