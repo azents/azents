@@ -73,38 +73,38 @@
 }
 
 /* code block */
-.codeBlockFrame {
+.markdown pre,
+.codeBlock {
   --azents-chat-code-background: var(--mantine-color-gray-0);
   --azents-chat-code-foreground: var(--mantine-color-dark-9);
+
   position: relative;
   margin: 0.5em 0;
+  padding: 0.6em var(--mantine-spacing-lg) 0.6em 0.8em;
   border-radius: var(--mantine-radius-sm);
   background-color: var(--azents-chat-code-background);
   color: var(--azents-chat-code-foreground);
-  max-width: 100%;
-}
-
-:where([data-mantine-color-scheme="dark"]) .codeBlockFrame {
-  --azents-chat-code-background: var(--mantine-color-dark-8);
-  --azents-chat-code-foreground: var(--mantine-color-gray-0);
-}
-
-.codeBlockScroller {
-  margin: 0;
-  padding: 0.6em 0.8em;
-  background-color: transparent;
-  color: inherit;
   overflow-x: auto;
   font-size: var(--mantine-font-size-xs);
   line-height: 1.55;
   max-width: 100%;
 }
 
+:where([data-mantine-color-scheme="dark"]) .markdown pre,
+:where([data-mantine-color-scheme="dark"]) .codeBlock {
+  --azents-chat-code-background: var(--mantine-color-dark-8);
+  --azents-chat-code-foreground: var(--mantine-color-gray-0);
+}
+
 .codeBlockCopyButton {
-  position: absolute;
+  position: sticky;
   top: calc(var(--mantine-spacing-xs) / 2);
   right: calc(var(--mantine-spacing-xs) / 2);
   z-index: 1;
+  float: right;
+  height: 0;
+  background-color: var(--azents-chat-code-background);
+  border-radius: var(--mantine-radius-xs);
 }
 
 .markdown pre code,
