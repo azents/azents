@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Get Agent Runtime
@@ -431,6 +431,8 @@ Class | Method | HTTP request | Description
  - [RuntimeSummary](azentspublicclient/docs/RuntimeSummary.md)
  - [Secrets](azentspublicclient/docs/Secrets.md)
  - [Secrets1](azentspublicclient/docs/Secrets1.md)
+ - [SelectableModelOption](azentspublicclient/docs/SelectableModelOption.md)
+ - [SelectableModelOptionInput](azentspublicclient/docs/SelectableModelOptionInput.md)
  - [SendCodeRequest](azentspublicclient/docs/SendCodeRequest.md)
  - [SendCodeResponse](azentspublicclient/docs/SendCodeResponse.md)
  - [SendElevationCodeResponse](azentspublicclient/docs/SendElevationCodeResponse.md)

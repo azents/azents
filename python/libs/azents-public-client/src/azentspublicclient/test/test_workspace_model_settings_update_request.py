@@ -36,7 +36,12 @@ class TestWorkspaceModelSettingsUpdateRequest(unittest.TestCase):
         if include_optional:
             return WorkspaceModelSettingsUpdateRequest(
                 default_model_selection = { },
-                default_lightweight_model_selection = { }
+                default_lightweight_model_selection = { },
+                default_selectable_model_options = [
+                    { }
+                    ],
+                default_main_model_label = '',
+                default_lightweight_model_label = ''
             )
         else:
             return WorkspaceModelSettingsUpdateRequest(

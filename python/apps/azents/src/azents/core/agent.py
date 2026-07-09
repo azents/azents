@@ -43,6 +43,38 @@ class AgentModelSelection(BaseModel):
     )
 
 
+MAX_SELECTABLE_MODEL_OPTIONS = 10
+MAX_SELECTABLE_MODEL_LABEL_LENGTH = 80
+DEFAULT_MAIN_MODEL_OPTION_LABEL = "default"
+DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL = "lightweight"
+
+
+class SelectableModelOptionInput(BaseModel):
+    """Selectable model option input keyed by label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(
+        min_length=1,
+        max_length=MAX_SELECTABLE_MODEL_LABEL_LENGTH,
+        description="Selectable model label",
+    )
+    model_selection: AgentModelSelectionInput = Field(
+        description="Selectable model selection input"
+    )
+
+
+class SelectableModelOption(BaseModel):
+    """Stored selectable model option keyed by label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(description="Selectable model label")
+    model_selection: AgentModelSelection = Field(
+        description="Selectable model selection snapshot"
+    )
+
+
 class BuiltinToolConfig(BaseModel):
     """Built-in tool setting to enable on an Agent."""
 

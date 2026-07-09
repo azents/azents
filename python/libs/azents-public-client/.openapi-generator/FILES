@@ -235,6 +235,8 @@ azentspublicclient/docs/RuntimeSummary.md
 azentspublicclient/docs/Secrets.md
 azentspublicclient/docs/Secrets1.md
 azentspublicclient/docs/SecurityV1Api.md
+azentspublicclient/docs/SelectableModelOption.md
+azentspublicclient/docs/SelectableModelOptionInput.md
 azentspublicclient/docs/SendCodeRequest.md
 azentspublicclient/docs/SendCodeResponse.md
 azentspublicclient/docs/SendElevationCodeResponse.md
@@ -499,6 +501,8 @@ azentspublicclient/models/runtime_runner_state.py
 azentspublicclient/models/runtime_summary.py
 azentspublicclient/models/secrets.py
 azentspublicclient/models/secrets1.py
+azentspublicclient/models/selectable_model_option.py
+azentspublicclient/models/selectable_model_option_input.py
 azentspublicclient/models/send_code_request.py
 azentspublicclient/models/send_code_response.py
 azentspublicclient/models/send_elevation_code_response.py
@@ -767,6 +771,8 @@ azentspublicclient/test/test_runtime_summary.py
 azentspublicclient/test/test_secrets.py
 azentspublicclient/test/test_secrets1.py
 azentspublicclient/test/test_security_v1_api.py
+azentspublicclient/test/test_selectable_model_option.py
+azentspublicclient/test/test_selectable_model_option_input.py
 azentspublicclient/test/test_send_code_request.py
 azentspublicclient/test/test_send_code_response.py
 azentspublicclient/test/test_send_elevation_code_response.py

@@ -11,9 +11,12 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
+    DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
+    DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
     AgentModelSelectionInput,
     ModelParameters,
+    SelectableModelOptionInput,
 )
 from azents.core.builtin_tools import (
     BuiltinToolCapabilities,
@@ -41,6 +44,12 @@ from azents.repos.toolkit import AgentToolkitRepository
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.llm_catalog import ModelCatalogReadService
+from azents.services.model_options import (
+    NormalizedSelectableModelOptions,
+    build_legacy_selectable_model_options,
+    normalize_selectable_model_options,
+    normalize_stored_selectable_model_options,
+)
 from azents.services.uploads import UploadService, UploadValidationError
 from azents.services.uploads.deps import get_upload_service
 from azents.services.uploads.handlers.avatar import AvatarUploadHandler
@@ -65,6 +74,7 @@ from .data import (
     BuiltinToolValidationFailed,
     DuplicateAdmin,
     InvalidModelParameters,
+    InvalidSelectableModelOptions,
     LastAdminCannotBeRemoved,
     ModelRequired,
     ModelSelectionNotFound,
@@ -225,19 +235,71 @@ class AgentService:
             case _:
                 assert_never(result)
 
-    async def _resolve_create_model_selections(
+    async def _normalize_option_inputs(
+        self,
+        workspace_id: str,
+        option_inputs: list[SelectableModelOptionInput],
+        *,
+        main_model_label: str | None,
+        lightweight_model_label: str | None,
+    ) -> Result[
+        NormalizedSelectableModelOptions,
+        InvalidSelectableModelOptions | ModelSelectionNotFound,
+    ]:
+        """Normalize selectable option inputs into stored model snapshots."""
+
+        async def resolve_option(
+            option_input: SelectableModelOptionInput,
+        ) -> Result[AgentModelSelection, ModelSelectionNotFound]:
+            return await self._resolve_model_selection_input(
+                workspace_id,
+                option_input.model_selection,
+            )
+
+        result = await normalize_selectable_model_options(
+            option_inputs=option_inputs,
+            main_model_label=main_model_label,
+            lightweight_model_label=lightweight_model_label,
+            resolve_model_selection=resolve_option,
+        )
+        match result:
+            case Success(value):
+                return Success(value)
+            case Failure(error):
+                if isinstance(error, list):
+                    return Failure(InvalidSelectableModelOptions(errors=error))
+                return Failure(error)
+            case _:
+                assert_never(result)
+
+    async def _resolve_create_model_options(
         self,
         create: AgentCreateInput,
     ) -> Result[
-        tuple[AgentModelSelection, AgentModelSelection],
-        ModelRequired | ModelSelectionNotFound,
+        NormalizedSelectableModelOptions,
+        ModelRequired | ModelSelectionNotFound | InvalidSelectableModelOptions,
     ]:
-        """Decide main/lightweight snapshots for Agent creation."""
+        """Decide selectable model options for Agent creation."""
         async with self.session_manager() as session:
             settings = await self.workspace_model_settings_repository.get_or_create(
                 session,
                 create.workspace_id,
             )
+
+        if create.selectable_model_options is not None:
+            options_result = await self._normalize_option_inputs(
+                create.workspace_id,
+                create.selectable_model_options,
+                main_model_label=create.main_model_label,
+                lightweight_model_label=create.lightweight_model_label,
+            )
+            match options_result:
+                case Success(value):
+                    return Success(value)
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(options_result)
 
         if create.model_selection is not None:
             main_result = await self._resolve_model_selection_input(
@@ -251,29 +313,77 @@ class AgentService:
                     return Failure(error)
                 case _:
                     assert_never(main_result)
-        elif settings.default_model_selection is not None:
-            main_selection = settings.default_model_selection
-        else:
-            return Failure(ModelRequired(workspace_id=create.workspace_id))
-
-        if create.lightweight_model_selection is not None:
-            lw_result = await self._resolve_model_selection_input(
-                create.workspace_id,
-                create.lightweight_model_selection,
+            if create.lightweight_model_selection is not None:
+                lw_result = await self._resolve_model_selection_input(
+                    create.workspace_id,
+                    create.lightweight_model_selection,
+                )
+                match lw_result:
+                    case Success(value):
+                        lightweight_selection = value
+                    case Failure(error):
+                        return Failure(error)
+                    case _:
+                        assert_never(lw_result)
+            elif settings.default_lightweight_model_selection is not None:
+                lightweight_selection = settings.default_lightweight_model_selection
+            else:
+                lightweight_selection = main_selection
+            return Success(
+                build_legacy_selectable_model_options(
+                    model_selection=main_selection,
+                    lightweight_model_selection=lightweight_selection,
+                    main_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+                    lightweight_label=DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
+                )
             )
-            match lw_result:
-                case Success(value):
-                    lightweight_selection = value
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(lw_result)
-        elif settings.default_lightweight_model_selection is not None:
-            lightweight_selection = settings.default_lightweight_model_selection
-        else:
-            lightweight_selection = main_selection
 
-        return Success((main_selection, lightweight_selection))
+        if settings.default_selectable_model_options is not None:
+            labels = {
+                option.label for option in settings.default_selectable_model_options
+            }
+            main_label = (
+                settings.default_main_model_label
+                if settings.default_main_model_label in labels
+                else settings.default_selectable_model_options[0].label
+            )
+            lightweight_label = (
+                settings.default_lightweight_model_label
+                if settings.default_lightweight_model_label in labels
+                else settings.default_selectable_model_options[0].label
+            )
+            option_by_label = {
+                option.label: option
+                for option in settings.default_selectable_model_options
+            }
+            return Success(
+                NormalizedSelectableModelOptions(
+                    selectable_model_options=list(
+                        settings.default_selectable_model_options
+                    ),
+                    main_model_label=main_label,
+                    lightweight_model_label=lightweight_label,
+                    model_selection=option_by_label[main_label].model_selection,
+                    lightweight_model_selection=option_by_label[
+                        lightweight_label
+                    ].model_selection,
+                )
+            )
+
+        if settings.default_model_selection is not None:
+            return Success(
+                build_legacy_selectable_model_options(
+                    model_selection=settings.default_model_selection,
+                    lightweight_model_selection=(
+                        settings.default_lightweight_model_selection
+                        or settings.default_model_selection
+                    ),
+                    main_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+                    lightweight_label=DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
+                )
+            )
+
+        return Failure(ModelRequired(workspace_id=create.workspace_id))
 
     async def create(
         self,
@@ -284,18 +394,21 @@ class AgentService:
         AgentOutput,
         ModelRequired
         | ModelSelectionNotFound
+        | InvalidSelectableModelOptions
         | InvalidModelParameters
         | BuiltinToolValidationFailed,
     ]:
         """Create Agent and add creator as first admin."""
-        selections_result = await self._resolve_create_model_selections(create)
+        selections_result = await self._resolve_create_model_options(create)
         match selections_result:
-            case Success((main_selection, lightweight_selection)):
-                pass
+            case Success(value):
+                model_options = value
             case Failure(error):
                 return Failure(error)
             case _:
                 assert_never(selections_result)
+        main_selection = model_options.model_selection
+        lightweight_selection = model_options.lightweight_model_selection
 
         params_result = self._parse_model_parameters(create.model_parameters)
         match params_result:
@@ -330,6 +443,9 @@ class AgentService:
             name=create.name,
             model_selection=main_selection,
             lightweight_model_selection=lightweight_selection,
+            selectable_model_options=model_options.selectable_model_options,
+            main_model_label=model_options.main_model_label,
+            lightweight_model_label=model_options.lightweight_model_label,
             description=create.description,
             model_parameters=create.model_parameters,
             system_prompt=create.system_prompt,
@@ -419,6 +535,7 @@ class AgentService:
         | NotAdmin
         | ModelRequired
         | ModelSelectionNotFound
+        | InvalidSelectableModelOptions
         | InvalidModelParameters
         | BuiltinToolValidationFailed,
     ]:
@@ -442,62 +559,100 @@ class AgentService:
         if "description" in update:
             repo_update["description"] = update["description"]
 
-        main_selection = existing.model_selection
-        if "model_selection" in update:
-            selection_input = update["model_selection"]
-            if selection_input is None:
-                async with self.session_manager() as session:
-                    settings = await self.workspace_model_settings_repository.get(
-                        session,
-                        workspace_id,
-                    )
-                if settings is None or settings.default_model_selection is None:
-                    return Failure(ModelRequired(workspace_id=workspace_id))
-                main_selection = settings.default_model_selection
-            else:
-                main_result = await self._resolve_model_selection_input(
-                    workspace_id,
-                    selection_input,
-                )
-                match main_result:
-                    case Success(value):
-                        main_selection = value
-                    case Failure(error):
-                        return Failure(error)
-                    case _:
-                        assert_never(main_result)
-            repo_update["model_selection"] = main_selection
-
-        if "lightweight_model_selection" in update:
-            selection_input = update["lightweight_model_selection"]
-            if selection_input is None:
-                async with self.session_manager() as session:
-                    settings = await self.workspace_model_settings_repository.get(
-                        session,
-                        workspace_id,
-                    )
-                default_lightweight = (
-                    settings.default_lightweight_model_selection
-                    if settings is not None
-                    else None
-                )
-                if default_lightweight is not None:
-                    lightweight_selection = default_lightweight
+        model_options = normalize_stored_selectable_model_options(
+            selectable_model_options=existing.selectable_model_options,
+            main_model_label=existing.main_model_label,
+            lightweight_model_label=existing.lightweight_model_label,
+        )
+        if "selectable_model_options" in update:
+            option_inputs = update["selectable_model_options"]
+            if option_inputs is None:
+                return Failure(ModelRequired(workspace_id=workspace_id))
+            options_result = await self._normalize_option_inputs(
+                workspace_id,
+                option_inputs,
+                main_model_label=update.get(
+                    "main_model_label", existing.main_model_label
+                ),
+                lightweight_model_label=update.get(
+                    "lightweight_model_label", existing.lightweight_model_label
+                ),
+            )
+            match options_result:
+                case Success(value):
+                    model_options = value
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(options_result)
+        elif "model_selection" in update or "lightweight_model_selection" in update:
+            main_selection = existing.model_selection
+            if "model_selection" in update:
+                selection_input = update["model_selection"]
+                if selection_input is None:
+                    async with self.session_manager() as session:
+                        settings = await self.workspace_model_settings_repository.get(
+                            session,
+                            workspace_id,
+                        )
+                    if settings is None or settings.default_model_selection is None:
+                        return Failure(ModelRequired(workspace_id=workspace_id))
+                    main_selection = settings.default_model_selection
                 else:
+                    main_result = await self._resolve_model_selection_input(
+                        workspace_id,
+                        selection_input,
+                    )
+                    match main_result:
+                        case Success(value):
+                            main_selection = value
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(main_result)
+
+            lightweight_selection = existing.lightweight_model_selection
+            if "lightweight_model_selection" in update:
+                selection_input = update["lightweight_model_selection"]
+                if selection_input is None:
                     lightweight_selection = main_selection
-            else:
-                lw_result = await self._resolve_model_selection_input(
-                    workspace_id,
-                    selection_input,
-                )
-                match lw_result:
-                    case Success(value):
-                        lightweight_selection = value
-                    case Failure(error):
-                        return Failure(error)
-                    case _:
-                        assert_never(lw_result)
-            repo_update["lightweight_model_selection"] = lightweight_selection
+                else:
+                    lw_result = await self._resolve_model_selection_input(
+                        workspace_id,
+                        selection_input,
+                    )
+                    match lw_result:
+                        case Success(value):
+                            lightweight_selection = value
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(lw_result)
+            model_options = build_legacy_selectable_model_options(
+                model_selection=main_selection,
+                lightweight_model_selection=lightweight_selection,
+                main_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+                lightweight_label=DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL,
+            )
+        elif "main_model_label" in update or "lightweight_model_label" in update:
+            model_options = normalize_stored_selectable_model_options(
+                selectable_model_options=existing.selectable_model_options,
+                main_model_label=update.get(
+                    "main_model_label", existing.main_model_label
+                ),
+                lightweight_model_label=update.get(
+                    "lightweight_model_label", existing.lightweight_model_label
+                ),
+            )
+
+        repo_update["model_selection"] = model_options.model_selection
+        repo_update["lightweight_model_selection"] = (
+            model_options.lightweight_model_selection
+        )
+        repo_update["selectable_model_options"] = model_options.selectable_model_options
+        repo_update["main_model_label"] = model_options.main_model_label
+        repo_update["lightweight_model_label"] = model_options.lightweight_model_label
+        main_selection = model_options.model_selection
 
         model_parameters = update.get("model_parameters", existing.model_parameters)
         params_result = self._parse_model_parameters(model_parameters)

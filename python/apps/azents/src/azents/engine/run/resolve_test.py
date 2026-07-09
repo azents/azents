@@ -28,7 +28,10 @@ from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.repos.agent.data import Agent
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.runtime.types import RuntimeDomainConfig
-from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_selectable_model_options,
+)
 
 from .resolve import resolve_agent_tools, resolve_invoke_input
 
@@ -45,6 +48,9 @@ def _make_agent() -> Agent:
         description=None,
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_options(selection),
+        main_model_label="default",
+        lightweight_model_label="default",
         model_parameters=None,
         system_prompt="You are helpful.",
         enabled=True,

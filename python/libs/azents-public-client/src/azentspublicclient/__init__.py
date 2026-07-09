@@ -249,6 +249,8 @@ __all__ = [
     "RuntimeSummary",
     "Secrets",
     "Secrets1",
+    "SelectableModelOption",
+    "SelectableModelOptionInput",
     "SendCodeRequest",
     "SendCodeResponse",
     "SendElevationCodeResponse",
@@ -537,6 +539,8 @@ from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState as
 from azentspublicclient.models.runtime_summary import RuntimeSummary as RuntimeSummary
 from azentspublicclient.models.secrets import Secrets as Secrets
 from azentspublicclient.models.secrets1 import Secrets1 as Secrets1
+from azentspublicclient.models.selectable_model_option import SelectableModelOption as SelectableModelOption
+from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput as SelectableModelOptionInput
 from azentspublicclient.models.send_code_request import SendCodeRequest as SendCodeRequest
 from azentspublicclient.models.send_code_response import SendCodeResponse as SendCodeResponse
 from azentspublicclient.models.send_elevation_code_response import SendElevationCodeResponse as SendElevationCodeResponse

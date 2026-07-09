@@ -12,7 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import AgentType, WorkspaceUserRole
 from azents.repos.agent.data import Agent
 from azents.repos.memory.data import Memory, MemoryScope
-from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_selectable_model_options,
+)
 
 from . import MemoryService
 from .data import DuplicateMemory, MemoryCreateInput, MemoryUpdateInput
@@ -30,6 +33,9 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         description=None,
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_options(selection),
+        main_model_label="default",
+        lightweight_model_label="default",
         model_parameters=None,
         system_prompt=None,
         enabled=True,

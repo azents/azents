@@ -11,6 +11,9 @@ Name | Type | Description | Notes
 **description** | **str** |  |
 **model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  |
 **lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  |
+**selectable_model_options** | [**List[SelectableModelOption]**](SelectableModelOption.md) |  |
+**main_model_label** | **str** |  |
+**lightweight_model_label** | **str** |  |
 **effective_context_window_tokens** | **int** |  |
 **effective_auto_compaction_threshold_tokens** | **int** |  |
 **model_parameters** | [**ModelParameters**](ModelParameters.md) |  |

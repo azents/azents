@@ -8101,6 +8101,45 @@
             ],
             "description": "Lightweight model selection. Copies default/main when None"
           },
+          "selectable_model_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SelectableModelOptionInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selectable Model Options",
+            "description": "Ordered selectable model option inputs"
+          },
+          "main_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Model Label",
+            "description": "Selected main model option label"
+          },
+          "lightweight_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lightweight Model Label",
+            "description": "Selected lightweight model option label"
+          },
           "description": {
             "anyOf": [
               {
@@ -8417,6 +8456,21 @@
               }
             ]
           },
+          "selectable_model_options": {
+            "items": {
+              "$ref": "#/components/schemas/SelectableModelOption"
+            },
+            "type": "array",
+            "title": "Selectable Model Options"
+          },
+          "main_model_label": {
+            "type": "string",
+            "title": "Main Model Label"
+          },
+          "lightweight_model_label": {
+            "type": "string",
+            "title": "Lightweight Model Label"
+          },
           "effective_context_window_tokens": {
             "anyOf": [
               {
@@ -8528,6 +8582,9 @@
           "description",
           "model_selection",
           "lightweight_model_selection",
+          "selectable_model_options",
+          "main_model_label",
+          "lightweight_model_label",
           "effective_context_window_tokens",
           "effective_auto_compaction_threshold_tokens",
           "model_parameters",
@@ -9248,6 +9305,45 @@
               }
             ],
             "description": "Lightweight model selection. Copies default/main when None"
+          },
+          "selectable_model_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SelectableModelOptionInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selectable Model Options",
+            "description": "Ordered selectable model option inputs"
+          },
+          "main_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Model Label",
+            "description": "Selected main model option label"
+          },
+          "lightweight_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lightweight Model Label",
+            "description": "Selected lightweight model option label"
           },
           "model_parameters": {
             "anyOf": [
@@ -14865,6 +14961,50 @@
         "title": "RuntimeSummary",
         "description": "Server-computed Agent Runtime summary status."
       },
+      "SelectableModelOption": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Selectable model label"
+          },
+          "model_selection": {
+            "$ref": "#/components/schemas/AgentModelSelection",
+            "description": "Selectable model selection snapshot"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "model_selection"
+        ],
+        "title": "SelectableModelOption",
+        "description": "Stored selectable model option keyed by label."
+      },
+      "SelectableModelOptionInput": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "description": "Selectable model label"
+          },
+          "model_selection": {
+            "$ref": "#/components/schemas/AgentModelSelectionInput",
+            "description": "Selectable model selection input"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "model_selection"
+        ],
+        "title": "SelectableModelOptionInput",
+        "description": "Selectable model option input keyed by label."
+      },
       "SendCodeRequest": {
         "properties": {
           "email": {
@@ -16429,6 +16569,45 @@
             ],
             "description": "Default lightweight model selection snapshot"
           },
+          "default_selectable_model_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SelectableModelOption"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Selectable Model Options",
+            "description": "Ordered default selectable model options"
+          },
+          "default_main_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Main Model Label",
+            "description": "Default main model option label"
+          },
+          "default_lightweight_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Lightweight Model Label",
+            "description": "Default lightweight model option label"
+          },
           "effective_default_lightweight_model_selection": {
             "anyOf": [
               {
@@ -16468,6 +16647,45 @@
               }
             ],
             "description": "Default lightweight model selection input"
+          },
+          "default_selectable_model_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SelectableModelOptionInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Selectable Model Options",
+            "description": "Ordered default selectable model option inputs"
+          },
+          "default_main_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Main Model Label",
+            "description": "Default main model option label"
+          },
+          "default_lightweight_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Lightweight Model Label",
+            "description": "Default lightweight model option label"
           }
         },
         "type": "object",
