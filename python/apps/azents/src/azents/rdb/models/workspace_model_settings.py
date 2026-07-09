@@ -60,7 +60,7 @@ class RDBWorkspaceModelSettings(RDBModel):
         "default_selectable_model_options IS NULL OR "
         "(jsonb_typeof(default_selectable_model_options) = 'array' "
         "AND jsonb_array_length(default_selectable_model_options) BETWEEN 1 AND 10)",
-        name="ck_workspace_model_settings_default_selectable_model_options_shape",
+        name="ck_ws_model_settings_selectable_options_shape",
     )
 
     __table_args__ = (CK_DEFAULT_SELECTABLE_MODEL_OPTIONS_SHAPE,)

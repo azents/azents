@@ -144,7 +144,7 @@ def upgrade() -> None:
         """
     )
     op.create_check_constraint(
-        "ck_workspace_model_settings_default_selectable_model_options_shape",
+        "ck_ws_model_settings_selectable_options_shape",
         "workspace_model_settings",
         "default_selectable_model_options IS NULL OR "
         "(jsonb_typeof(default_selectable_model_options) = 'array' "
@@ -155,7 +155,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_constraint(
-        "ck_workspace_model_settings_default_selectable_model_options_shape",
+        "ck_ws_model_settings_selectable_options_shape",
         "workspace_model_settings",
         type_="check",
     )
