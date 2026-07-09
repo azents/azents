@@ -49,6 +49,7 @@ from azents.core.auth.jwt import (
 )
 from azents.core.config import AuthConfig, Config
 from azents.core.deps import get_appctx, get_auth_config
+from azents.core.enums import AgentSessionKind
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import (
     CommandAction,
@@ -75,6 +76,7 @@ from azents.services.agent_session_input import (
     AgentSessionInputInactiveSession,
     AgentSessionInputService,
     AgentSessionInputSessionNotFound,
+    AgentSessionInputSubagentReadOnly,
     AgentSessionInputWrongAgent,
     BufferedAgentSessionInputResult,
     CreatedAgentSessionInputResult,
@@ -92,6 +94,7 @@ from azents.services.chat.data import (
     RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionNotFound,
+    SubagentSessionReadOnly,
     UpdateGoalStatusInput,
 )
 from azents.services.chat.live_events import (
@@ -140,10 +143,12 @@ from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionAccessDenied,
     GitWorktreeActionExecutionNotFound,
     GitWorktreeActionExecutionSessionNotFound,
+    GitWorktreeActionExecutionSubagentReadOnly,
     GitWorktreeActionExecutionUnavailable,
     GitWorktreeCleanupAccessDenied,
     GitWorktreeCleanupNotFound,
     GitWorktreeCleanupSessionNotFound,
+    GitWorktreeCleanupSubagentReadOnly,
     SessionGitWorktreeService,
 )
 from azents.services.session_storage import guess_media_type
@@ -680,6 +685,11 @@ def _handle_created_agent_session_input_result(
                         status_code=409,
                         detail="Session is not active.",
                     )
+                case AgentSessionInputSubagentReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
+                    )
                 case InvalidProjectPath():
                     raise HTTPException(status_code=400, detail=error.reason)
                 case _:
@@ -706,6 +716,11 @@ def _handle_agent_session_input_result(
                         status_code=409,
                         detail="Session is not active.",
                     )
+                case AgentSessionInputSubagentReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
+                    )
                 case InvalidProjectPath():
                     raise HTTPException(status_code=400, detail=error.reason)
                 case _:
@@ -729,6 +744,11 @@ async def _validate_rest_session(
     )
     match result:
         case Success(agent_session):
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
             return agent_session.id
         case Failure(error):
             match error:
@@ -789,6 +809,11 @@ async def update_session_goal(
                         status_code=409,
                         detail="Invalid goal status transition.",
                     )
+                case SubagentSessionReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
+                    )
                 case _:
                     assert_never(error)
         case _:
@@ -848,6 +873,11 @@ async def update_session_goal_status(
                     raise HTTPException(
                         status_code=409,
                         detail="Invalid goal status transition.",
+                    )
+                case SubagentSessionReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
                     )
                 case _:
                     assert_never(error)
@@ -1642,6 +1672,11 @@ async def archive_agent_session(
             match error:
                 case SessionNotFound() | SessionAccessDenied():
                     raise HTTPException(status_code=404, detail="Session not found.")
+                case SubagentSessionReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
+                    )
                 case PrimarySessionArchiveBlocked():
                     raise HTTPException(
                         status_code=409,
@@ -1796,6 +1831,11 @@ async def cleanup_session_git_worktree(
                         status_code=403,
                         detail="Session access denied.",
                     )
+                case GitWorktreeCleanupSubagentReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
+                    )
                 case _:
                     assert_never(error)
         case _:
@@ -1884,6 +1924,11 @@ async def update_agent_session_title(
                     raise HTTPException(
                         status_code=403,
                         detail="Session access denied.",
+                    )
+                case SubagentSessionReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
                     )
                 case _:
                     assert_never(error)
@@ -2339,6 +2384,11 @@ async def delete_input_buffer(
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case SessionAccessDenied():
                     raise HTTPException(status_code=404, detail="Session not found.")
+                case SubagentSessionReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
+                    )
                 case _:
                     assert_never(error)
         case _:
@@ -2661,6 +2711,11 @@ async def delete_session(
             match error:
                 case SessionAccessDenied():
                     raise HTTPException(status_code=404, detail="Session not found.")
+                case SubagentSessionReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
+                    )
                 case _:
                     assert_never(error)
         case _:
@@ -2818,6 +2873,7 @@ def _raise_action_execution_mutation_error(
     error: (
         GitWorktreeActionExecutionSessionNotFound
         | GitWorktreeActionExecutionAccessDenied
+        | GitWorktreeActionExecutionSubagentReadOnly
         | GitWorktreeActionExecutionNotFound
         | GitWorktreeActionExecutionUnavailable
     ),
@@ -2831,6 +2887,11 @@ def _raise_action_execution_mutation_error(
             raise HTTPException(status_code=404, detail="Action execution not found.")
         case GitWorktreeActionExecutionAccessDenied():
             raise HTTPException(status_code=403, detail="Session access denied.")
+        case GitWorktreeActionExecutionSubagentReadOnly():
+            raise HTTPException(
+                status_code=409,
+                detail="Subagent sessions are read-only.",
+            )
         case GitWorktreeActionExecutionUnavailable():
             raise HTTPException(status_code=409, detail=error.reason)
         case _:

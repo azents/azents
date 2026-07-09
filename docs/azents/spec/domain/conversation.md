@@ -91,8 +91,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-08
-spec_version: 89
+last_verified_at: 2026-07-09
+spec_version: 90
 ---
 
 # Conversation & Events
@@ -300,7 +300,8 @@ records such as step start, command start/completion, stdout/stderr text, warnin
 request, failed-final discard, and completion. `GET /chat/v1/sessions/{session_id}/live` and REST
 write snapshots expose `action_executions` as execution state plus event log so reconnect can rebuild
 the current action card without reading chat history. Retry and discard APIs mutate only failed action
-executions and return the updated action execution projection.
+executions and return the updated action execution projection. They reject child subagent sessions
+before mutating action execution state because direct human operation writes are root-session only.
 
 `session_git_worktrees` is the cleanup authority for Azents-owned worktrees. It stores the source
 Project path, starting ref, generated worktree path, generated branch name, base commit, status,
@@ -534,11 +535,17 @@ Web chat message/edit/command writes use REST commit endpoints instead of WebSoc
 primary session and returns its `session_id`.
 `GET /chat/v1/agents/{agent_id}/sessions/{session_id}` validates that a URL-selected session belongs
 to the path agent and is visible to the requester; session missing, agent/session mismatch, and access
-denied all return 404.
-`POST /chat/v1/sessions/{session_id}/messages` appends a user message input to an existing session.
+denied all return 404. Child subagent sessions are directly readable through this route and through
+history/live routes, but they are read-only for human chat writes.
+`POST /chat/v1/sessions/{session_id}/messages` appends a user message input to an existing root
+session and rejects `session_kind = subagent` before creating a chat write request, input buffer, live
+projection, or broker wake-up.
 `POST /chat/v1/sessions/{session_id}/edit-message`,
 `POST /chat/v1/sessions/{session_id}/commands`, and
-`POST /chat/v1/sessions/{session_id}/retry-failed-run` are idle-only control boundaries. All REST write
+`POST /chat/v1/sessions/{session_id}/retry-failed-run` are idle-only control boundaries. Message,
+edit, command, and failed-run retry write paths reject `session_kind = subagent` before write side
+effects; new subagent instructions must enter through parent-agent collaboration tools as
+`agent_message` input. All REST write
 requests require `client_request_id`; accepted writes are recorded in `chat_write_requests` so
 retries with the same key return the same accepted target instead of creating duplicate side effects.
 REST write idempotency is scoped to `(session_id, user_id, client_request_id)`. The same
@@ -616,6 +623,7 @@ storage JSON dump.
 - Input buffers are session-bound and must not store or require `agent_runtime_id`.
 - `SessionAgent` is the subagent tree source of truth; `AgentSession` remains the transcript/run/input boundary.
 - Child sessions are hidden from ordinary Agent session lists by `session_kind = subagent`, not by access-control bypass.
+- Child subagent sessions are human read-only: REST message/edit/command/failed-run retry and direct operation retry/discard writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
 - `wait_agent` observes terminal child run projections once by advancing `parent_observed_run_index`; it must not infer results by scanning child transcript history.
 - Any service path that enqueues input buffers must mark `agent_sessions.run_state` as `running` in
   the same transaction.
@@ -624,6 +632,7 @@ storage JSON dump.
 
 Current verification:
 
+- `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/api/public/chat/v1/chat_api_test.py::TestRestMessageWriteContract::test_validate_rest_session_rejects_subagent_before_write src/azents/services/agent_session_input_test.py::TestAgentSessionInputService::test_create_buffered_agent_input_rejects_subagent_before_wake src/azents/services/chat/subagent_tree_test.py::TestSubagentTreeProjection::test_finalize_tree_propagates_interrupted_to_all_descendants src/azents/services/chat_write_test.py::TestChatWriteService::test_pending_command_rejects_subagent_session_before_write src/azents/services/session_git_worktree/service_test.py::TestSessionGitWorktreeService::test_action_execution_retry_rejects_subagent_session src/azents/services/session_git_worktree/service_test.py::TestSessionGitWorktreeService::test_action_execution_discard_rejects_subagent_session src/azents/services/session_git_worktree/service_test.py::TestSessionGitWorktreeService::test_manual_cleanup_rejects_subagent_session -q`
 - `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/services/chat/subagent_tree_test.py src/azents/worker/run/executor_test.py -q`
 - `cd testenv/azents/e2e && uv run pytest ./src/tests/azents/public/test_subagents.py -q` in Docker-enabled deterministic E2E environments
 
@@ -637,6 +646,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-09** — v90. Documented child subagent human-write rejection before REST, input-buffer, command, and operation side effects.
 - **2026-07-08** — v89. Added the current `SessionAgent` subagent tree, `agent_message` mailbox input, terminal child run projection, Subagent Tree API, hidden child session semantics, and subtree stop behavior.
 - **2026-07-08** — v88. Clarified TurnAction FIFO behavior: failed operation actions are marked failed and later input continues, while successful Project mutation rebuilds context at the next boundary.
 - **2026-07-06** — v86. Removed SessionInitialization from current conversation state and added durable `action_execution_result` terminal history events.

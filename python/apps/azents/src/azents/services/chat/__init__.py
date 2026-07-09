@@ -12,6 +12,7 @@ from azents.core.enums import (
     ActionExecutionStatus,
     AgentProjectDefaultItemType,
     AgentRunStatus,
+    AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStatus,
@@ -86,6 +87,7 @@ from .data import (
     SessionAccessDenied,
     SessionAccessError,
     SessionNotFound,
+    SubagentSessionReadOnly,
     SubagentTreeNode,
     SubagentTreeProjection,
     UpdateGoalError,
@@ -151,6 +153,47 @@ def _project_subagent_status(
     }:
         return "interrupted"
     return latest_run_status.value
+
+
+def _subagent_status_sort_rank(status: str) -> int:
+    """Return Subagent Tree display order rank for a projected status."""
+    match status:
+        case "running":
+            return 0
+        case "failed" | "errored" | "completed":
+            return 1
+        case "interrupted":
+            return 2
+        case "pending" | "idle" | "not_found":
+            return 3
+        case _:
+            return 4
+
+
+def _finalize_subagent_tree_nodes(
+    nodes: list[SubagentTreeNode],
+    *,
+    ancestor_interrupted: bool = False,
+) -> list[SubagentTreeNode]:
+    """Sort tree nodes and propagate interrupted status to descendants."""
+    finalized: list[SubagentTreeNode] = []
+    for node in nodes:
+        effective_status = "interrupted" if ancestor_interrupted else node.status
+        node_interrupted = ancestor_interrupted or effective_status == "interrupted"
+        finalized.append(
+            dataclasses.replace(
+                node,
+                status=effective_status,
+                children=_finalize_subagent_tree_nodes(
+                    node.children,
+                    ancestor_interrupted=node_interrupted,
+                ),
+            )
+        )
+    return sorted(
+        finalized,
+        key=lambda node: (_subagent_status_sort_rank(node.status), node.name),
+    )
 
 
 def _has_unread_subagent_result(
@@ -401,7 +444,7 @@ class ChatSessionService:
                     root_session_agent_id=root_agent.id,
                     root_agent_session_id=root_agent.agent_session_id,
                     current_session_agent_id=current_agent.id,
-                    nodes=roots,
+                    nodes=_finalize_subagent_tree_nodes(roots),
                 )
             )
 
@@ -731,6 +774,8 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(SessionAccessDenied())
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(SubagentSessionReadOnly())
             if agent_session.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY:
                 return Failure(PrimarySessionArchiveBlocked())
             if agent_session.run_state == AgentSessionRunState.RUNNING:
@@ -799,6 +844,8 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(SessionAccessDenied())
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(SubagentSessionReadOnly())
             updated = await self.agent_session_repository.update_title(
                 session,
                 session_id=session_id,
@@ -1003,7 +1050,8 @@ class ChatSessionService:
         get_result = await self.get_session(session_id, user_id=user_id)
         match get_result:
             case Success(agent_session):
-                pass
+                if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                    return Failure(SubagentSessionReadOnly())
             case Failure(error):
                 match error:
                     case SessionNotFound():
@@ -1083,7 +1131,8 @@ class ChatSessionService:
         get_result = await self.get_session(session_id, user_id=user_id)
         match get_result:
             case Success(agent_session):
-                pass
+                if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                    return Failure(SubagentSessionReadOnly())
             case Failure(error):
                 match error:
                     case SessionNotFound() | SessionAccessDenied():
@@ -1148,7 +1197,8 @@ class ChatSessionService:
         get_result = await self.get_session(session_id, user_id=user_id)
         match get_result:
             case Success(agent_session):
-                pass
+                if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                    return Failure(SubagentSessionReadOnly())
             case Failure(error):
                 match error:
                     case SessionNotFound() | SessionAccessDenied():
@@ -1228,8 +1278,9 @@ class ChatSessionService:
         """
         get_result = await self.get_session(session_id, user_id=user_id)
         match get_result:
-            case Success():
-                pass
+            case Success(agent_session):
+                if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                    return Failure(SubagentSessionReadOnly())
             case Failure(error):
                 match error:
                     case SessionNotFound() | SessionAccessDenied():

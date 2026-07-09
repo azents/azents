@@ -1,6 +1,9 @@
 """SessionGitWorktreeService tests."""
 
 import datetime
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import cast
 
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentProjectCatalogStatus,
+    AgentSessionKind,
+    AgentSessionStartReason,
+    AgentSessionStatus,
     EventKind,
     LLMProvider,
     RuntimeRunnerState,
@@ -35,7 +41,7 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -55,6 +61,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeGitRefsResult,
     RuntimeGitRemoveWorktreeResult,
     RuntimeOperationTextCallback,
+    RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
 )
 from azents.services.agent_project_catalog import AgentProjectCatalogService
@@ -63,11 +70,70 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import (
+    GitWorktreeActionExecutionSubagentReadOnly,
     GitWorktreeCleanupNotFound,
+    GitWorktreeCleanupSubagentReadOnly,
     SessionGitWorktreeService,
 )
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
+
+
+@asynccontextmanager
+async def _session_manager_double() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a placeholder DB session for service-double tests."""
+    yield cast(AsyncSession, object())
+
+
+class _ReadonlyAgentSessionRepository(AgentSessionRepository):
+    """AgentSession repository double returning a child subagent session."""
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Return a subagent session before other collaborators are touched."""
+        del session
+        now = datetime.datetime.now(datetime.UTC)
+        return AgentSession(
+            id=agent_session_id,
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            handle="subagent-session",
+            session_kind=AgentSessionKind.SUBAGENT,
+            status=AgentSessionStatus.ACTIVE,
+            start_reason=AgentSessionStartReason.INITIAL,
+            title=None,
+            title_source=None,
+            title_generated_at=None,
+            title_generation_event_id=None,
+            last_user_input_at=now,
+            started_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+
+
+def _readonly_service() -> SessionGitWorktreeService:
+    """Build a service that can test read-only checks without DB fixtures."""
+    return SessionGitWorktreeService(
+        agent_repository=cast(AgentRepository, object()),
+        agent_session_repository=_ReadonlyAgentSessionRepository(),
+        workspace_user_repository=cast(WorkspaceUserRepository, object()),
+        agent_runtime_repository=cast(AgentRuntimeRepository, object()),
+        session_git_worktree_repository=cast(SessionGitWorktreeRepository, object()),
+        session_workspace_project_repository=cast(
+            SessionWorkspaceProjectRepository,
+            object(),
+        ),
+        agent_project_catalog_repository=cast(AgentProjectCatalogRepository, object()),
+        agent_project_catalog_service=cast(AgentProjectCatalogService, object()),
+        action_execution_repository=cast(ActionExecutionRepository, object()),
+        event_transcript_repository=cast(EventTranscriptRepository, object()),
+        session_manager=_session_manager_double,
+        runner_operations=cast(RuntimeRunnerOperationClient, object()),
+    )
 
 
 class _RuntimeRepository(AgentRuntimeRepository):
@@ -534,6 +600,42 @@ async def _create_ready_worktree_session(
 
 class TestSessionGitWorktreeService:
     """Session Git worktree service tests."""
+
+    async def test_action_execution_retry_rejects_subagent_session(self) -> None:
+        """Do not allow direct retry mutations from child subagent detail views."""
+        result = await _readonly_service().request_action_execution_retry(
+            agent_id="agent-1",
+            session_id="subagent-session",
+            action_execution_id="action-1".rjust(32, "0"),
+            user_id="user-1",
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, GitWorktreeActionExecutionSubagentReadOnly)
+
+    async def test_action_execution_discard_rejects_subagent_session(self) -> None:
+        """Do not allow direct discard mutations from child subagent detail views."""
+        result = await _readonly_service().request_action_execution_discard(
+            agent_id="agent-1",
+            session_id="subagent-session",
+            action_execution_id="action-1".rjust(32, "0"),
+            user_id="user-1",
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, GitWorktreeActionExecutionSubagentReadOnly)
+
+    async def test_manual_cleanup_rejects_subagent_session(self) -> None:
+        """Do not allow direct worktree cleanup mutations for child subagents."""
+        result = await _readonly_service().request_manual_cleanup(
+            agent_id="agent-1",
+            session_id="subagent-session",
+            user_id="user-1",
+            session_workspace_project_id=None,
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, GitWorktreeCleanupSubagentReadOnly)
 
     async def test_run_git_worktree_action_registers_project_and_catalog(
         self,
