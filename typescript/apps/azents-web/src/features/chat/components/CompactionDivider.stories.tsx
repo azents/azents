@@ -28,7 +28,7 @@ export const ExpandedSummary = {
   args: {
     content:
       "The previous conversation covered setup, provider configuration, and initial chat UI stories.\n\n" +
-      "The summary stays readable when it grows long, and the lower collapse control remains available after scrolling through the content.",
+      "The summary stays readable when it grows long, and tapping the expanded body collapses it before returning the top toggle into view.",
     initialOpened: true,
   },
 } satisfies Story;
