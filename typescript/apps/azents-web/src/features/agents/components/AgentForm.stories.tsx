@@ -89,6 +89,9 @@ const baseAgent: AgentResponse = {
   description: "Exercises model selection snapshot settings.",
   model_selection: mainSelection,
   lightweight_model_selection: lightweightSelection,
+  selectable_model_options: [],
+  main_model_label: "default",
+  lightweight_model_label: "default",
   effective_context_window_tokens: 1_000_000,
   effective_auto_compaction_threshold_tokens: 900_000,
   model_parameters: {
