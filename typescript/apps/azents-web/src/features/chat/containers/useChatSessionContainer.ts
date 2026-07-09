@@ -760,6 +760,25 @@ function mapEvents(
           },
         ];
       }
+      case "agent_message": {
+        return [
+          ...messages,
+          {
+            id: event.id,
+            role: "user",
+            content: stringField(payload, "content") ?? "",
+            createdAt: event.created_at,
+            status: "complete",
+            metadata: {
+              ...eventMetadata(event),
+              source: "agent_mailbox",
+              message_kind: stringField(payload, "message_kind") ?? "",
+              source_path: stringField(payload, "source_path") ?? "",
+              target_path: stringField(payload, "target_path") ?? "",
+            },
+          },
+        ];
+      }
       case "assistant_message": {
         const content = contentText(payload.content);
         const attachments = [

@@ -48,6 +48,22 @@ export const EditableUserText = {
   },
 } satisfies Story;
 
+export const AgentMailboxMessage = {
+  args: {
+    message: createChatMessage({
+      id: "agent-mailbox",
+      role: "user",
+      content: "Check the deployment logs and summarize the failure.",
+      metadata: {
+        source: "agent_mailbox",
+        message_kind: "spawn_agent",
+        source_path: "/",
+        target_path: "/deploy-check",
+      },
+    }),
+  },
+} satisfies Story;
+
 export const DimmedAfterEdit = {
   args: {
     message: createChatMessage({

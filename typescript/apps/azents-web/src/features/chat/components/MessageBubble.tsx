@@ -25,6 +25,7 @@ import {
   IconCheck,
   IconChevronRight,
   IconClock,
+  IconGitBranch,
   IconPencil,
   IconTargetArrow,
 } from "@tabler/icons-react";
@@ -583,6 +584,56 @@ function UserTextMessage({
   );
 }
 
+function isAgentMailboxMessage(message: ChatMessage): boolean {
+  return message.metadata?.source === "agent_mailbox";
+}
+
+function AgentMailboxMessage({
+  message,
+  hasContent,
+  hasReasoning,
+}: TextMessageProps): React.ReactElement {
+  const sourcePath = message.metadata?.source_path || "/";
+
+  return (
+    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
+      <MessageSurface>
+        <Paper
+          withBorder
+          radius="lg"
+          p="sm"
+          bg="var(--mantine-color-body)"
+          style={{ maxWidth: rem(680), overflow: "hidden" }}
+        >
+          <Stack gap="xs">
+            <Group gap={rem(6)} c="dimmed" wrap="nowrap">
+              <IconGitBranch aria-hidden="true" size={14} stroke={1.8} />
+              <Text size="xs" fw={600} lineClamp={1} style={{ minWidth: 0 }}>
+                {sourcePath}
+              </Text>
+            </Group>
+            <Box style={{ overflowWrap: "anywhere" }}>
+              <TextMessageContent
+                message={message}
+                hasContent={hasContent}
+                hasReasoning={hasReasoning}
+              />
+            </Box>
+          </Stack>
+        </Paper>
+
+        {message.content && message.status !== "partial" && (
+          <MessageActionRow
+            content={message.content}
+            createdAt={message.createdAt}
+            align="assistant"
+          />
+        )}
+      </MessageSurface>
+    </Box>
+  );
+}
+
 function AssistantTextMessage({
   message,
   hasContent,
@@ -945,6 +996,18 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <Box opacity={dimmed ? 0.45 : 1}>
         <AssistantToolCallMessage message={message} />
+      </Box>
+    );
+  }
+
+  if (message.role === "user" && isAgentMailboxMessage(message)) {
+    return (
+      <Box opacity={dimmed ? 0.45 : 1}>
+        <AgentMailboxMessage
+          message={message}
+          hasContent={hasContent}
+          hasReasoning={hasReasoning}
+        />
       </Box>
     );
   }

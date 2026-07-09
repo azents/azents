@@ -176,6 +176,21 @@ class TestSubagentTreeProjection:
                 parent_observed_run_index=1,
                 parent_observed_event_id="observed-event",
             )
+            root_run = await run_repo.create(
+                session,
+                AgentRunCreate(
+                    session_id=root_agent.agent_session_id,
+                    run_index=1,
+                ),
+            )
+            await run_repo.mark_terminal(
+                session,
+                root_run.id,
+                AgentRunStatus.COMPLETED,
+                ended_at=datetime.datetime.now(datetime.UTC),
+                terminal_result_event_id="root-terminal-event",
+                terminal_result_message="Root complete",
+            )
             child_run = await run_repo.create(
                 session,
                 AgentRunCreate(
@@ -213,7 +228,8 @@ class TestSubagentTreeProjection:
         assert tree.current_session_agent_id == child.id
         assert [node.session_agent_id for node in tree.nodes] == [root_agent.id]
         root_node = tree.nodes[0]
-        assert root_node.status == "idle"
+        assert root_node.status == "completed"
+        assert root_node.unread_result is False
         child_node = root_node.children[0]
         assert child_node.session_agent_id == child.id
         assert child_node.path == "/root/reviewer"

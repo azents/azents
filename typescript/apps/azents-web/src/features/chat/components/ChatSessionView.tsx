@@ -12,15 +12,18 @@
 import {
   ActionIcon,
   Box,
+  Button,
   Drawer,
   Group,
   rem,
+  Text,
   useMantineTheme,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { IconGitBranch } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
 import { SubagentTreePanel } from "@/features/agents/components/SubagentTreePanel";
 import { useSubagentTreePanelContainer } from "@/features/agents/containers/useSubagentTreePanelContainer";
@@ -34,6 +37,7 @@ import type { ConnectionStatus } from "../types";
 import type {
   AgentResponse,
   AgentSessionResponse,
+  SubagentTreeNodeResponse,
 } from "@azents/public-client";
 
 interface ChatSessionViewProps {
@@ -46,6 +50,39 @@ interface ChatSessionViewProps {
   session: AgentSessionResponse;
   /** connection status parent to push (for sidebar badge) */
   onConnectionStatusChange: (status: ConnectionStatus) => void;
+}
+
+interface SubagentNavigationLinks {
+  currentPath: string;
+  root: SubagentTreeNodeResponse;
+  parent: SubagentTreeNodeResponse | null;
+}
+
+function flattenSubagentNodes(
+  nodes: SubagentTreeNodeResponse[],
+): SubagentTreeNodeResponse[] {
+  return nodes.flatMap((node) => [
+    node,
+    ...flattenSubagentNodes(node.children ?? []),
+  ]);
+}
+
+function findSubagentNode(
+  nodes: SubagentTreeNodeResponse[],
+  sessionAgentId?: string | null,
+): SubagentTreeNodeResponse | null {
+  if (!sessionAgentId) {
+    return null;
+  }
+  return nodes.find((node) => node.session_agent_id === sessionAgentId) ?? null;
+}
+
+function sessionHref(
+  handle: string,
+  agentId: string,
+  sessionId: string,
+): string {
+  return `/w/${handle}/agents/${agentId}/sessions/${sessionId}`;
 }
 
 export function ChatSessionView({
@@ -83,6 +120,27 @@ export function ChatSessionView({
     agentId: agent.id,
     sessionId,
   });
+  const subagentNavigation = useMemo((): SubagentNavigationLinks | null => {
+    if (subagentTreePanel.state.type !== "LOADED") {
+      return null;
+    }
+    const tree = subagentTreePanel.state.tree;
+    const nodes = flattenSubagentNodes(tree.nodes);
+    const current = findSubagentNode(nodes, tree.current_session_agent_id);
+    const root = findSubagentNode(nodes, tree.root_session_agent_id);
+    if (
+      current === null ||
+      root === null ||
+      current.session_agent_id === root.session_agent_id
+    ) {
+      return null;
+    }
+    return {
+      currentPath: current.path,
+      root,
+      parent: findSubagentNode(nodes, current.parent_session_agent_id),
+    };
+  }, [subagentTreePanel.state]);
   const effectiveContextWindowTokens =
     agent.effective_context_window_tokens ?? null;
   const modelName = formatModelSelectionSummary(agent.model_selection);
@@ -117,6 +175,54 @@ export function ChatSessionView({
           </Group>
         }
       />
+      {subagentNavigation !== null && (
+        <Box
+          px="md"
+          py="xs"
+          style={{
+            borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
+            backgroundColor: "var(--mantine-color-body)",
+          }}
+        >
+          <Group gap="xs" wrap="nowrap" style={{ overflowX: "auto" }}>
+            <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+              {tAgentDetail("subagents.pathLabel", {
+                path: subagentNavigation.currentPath,
+              })}
+            </Text>
+            {subagentNavigation.parent !== null && (
+              <Button
+                component={Link}
+                href={sessionHref(
+                  handle,
+                  agent.id,
+                  subagentNavigation.parent.agent_session_id,
+                )}
+                size="xs"
+                variant="light"
+              >
+                {tAgentDetail("subagents.parentLink", {
+                  name: subagentNavigation.parent.name,
+                })}
+              </Button>
+            )}
+            <Button
+              component={Link}
+              href={sessionHref(
+                handle,
+                agent.id,
+                subagentNavigation.root.agent_session_id,
+              )}
+              size="xs"
+              variant="subtle"
+            >
+              {tAgentDetail("subagents.rootLink", {
+                name: subagentNavigation.root.name,
+              })}
+            </Button>
+          </Group>
+        </Box>
+      )}
       <Box flex={1} mih={0}>
         <ChatView
           chatViewState={output.chatViewState}

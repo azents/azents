@@ -602,6 +602,9 @@
           "total": "ノード {count} 件",
           "empty": "このセッションから作成されたサブエージェントがここに表示されます。",
           "rootBadge": "ルート",
+          "pathLabel": "現在: {path}",
+          "parentLink": "親: {name}",
+          "rootLink": "ルート: {name}",
           "unread": "未読",
           "runIndex": "Run {index}",
           "status": {

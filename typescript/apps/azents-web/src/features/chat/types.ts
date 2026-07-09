@@ -121,6 +121,15 @@ export interface ActionMessagePayload {
   message: string;
 }
 
+export interface AgentMessagePayload {
+  message_kind: "spawn_agent" | "send_message" | "followup_task";
+  source_session_agent_id: string;
+  source_path: string;
+  target_session_agent_id: string;
+  target_path: string;
+  content: string;
+}
+
 export interface UserMessagePayload {
   content: string | UserContentPart[];
   attachments: EventAttachment[];
@@ -287,6 +296,7 @@ export type ChatEventPayload =
   | CompactionSummaryPayload
   | GoalBriefingPayload
   | ActionMessagePayload
+  | AgentMessagePayload
   | ActionExecutionResultPayload
   | SkillLoadedPayload
   | SystemReminderPayload
@@ -323,6 +333,7 @@ export type ChatHistoryEvent =
   | EventBase<"goal_updated", UserMessagePayload>
   | EventBase<"goal_briefing", GoalBriefingPayload>
   | EventBase<"action_message", ActionMessagePayload>
+  | EventBase<"agent_message", AgentMessagePayload>
   | EventBase<"action_execution_result", ActionExecutionResultPayload>
   | EventBase<"skill_loaded", SkillLoadedPayload>
   | EventBase<"system_reminder", SystemReminderPayload>

@@ -159,6 +159,8 @@ def _has_unread_subagent_result(
     latest_run_index: int | None,
 ) -> bool:
     """Return whether latest terminal result is unread by the parent."""
+    if agent.parent_session_agent_id is None:
+        return False
     if latest_run_status not in {
         AgentRunStatus.COMPLETED,
         AgentRunStatus.FAILED,
