@@ -58,7 +58,7 @@ Only entries with selectable visibility are returned by the public picker list A
 
 ## Source snapshots and sync attempts
 
-LiteLLM is the current lowerer target projection source. The source sync service records LiteLLM source snapshots before projection. System and integration projections use the stored LiteLLM source snapshot rather than fetching external model metadata from the picker read path.
+LiteLLM is the current lowerer target projection source. The source sync service fetches the remote LiteLLM model cost catalog and records it as a LiteLLM source snapshot before projection. System and integration projections use the stored LiteLLM source snapshot rather than fetching external model metadata from the picker read path.
 
 Each catalog sync records an attempt with status, counts, failure metadata, action hint, and diagnostics. Failed syncs keep the last successful snapshot available when one exists.
 
@@ -78,7 +78,7 @@ A catalog with no current snapshot still returns a successful status-aware respo
 
 Selectable entries are ordered by a stored or derived freshness rank before display name and model identifier tie breakers so newer model generations appear first.
 
-The read path must not call provider listing APIs, models.dev, or remote LiteLLM source fetch. Those operations belong to sync paths.
+The read path must not call provider listing APIs, models.dev, or remote LiteLLM source fetch. Those operations belong to sync paths. System and integration catalog sync can fetch the remote LiteLLM model cost catalog so newly published model metadata is not tied to the installed LiteLLM package version.
 
 ## Sync API
 
@@ -121,4 +121,4 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 ## Current implementation notes
 
-The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use LiteLLM projection source data for the active lowerer target.
+The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use the remote LiteLLM model cost catalog as projection source data for the active lowerer target.
