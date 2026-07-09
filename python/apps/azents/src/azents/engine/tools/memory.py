@@ -65,7 +65,11 @@ class SearchMemoriesInput(BaseModel):
     """search_memories tool input."""
 
     query: str = Field(
-        description="Keyword to search in name, description, and content."
+        description=(
+            "Keyword search only. Do not pass a full sentence. "
+            "Extract 1-3 distinctive keywords, memory names, project names, "
+            "or error terms from the request."
+        )
     )  # noqa: E501
     scope: MemoryScope | None = Field(
         default=None, description="Filter by scope. None searches both scopes."
@@ -364,8 +368,10 @@ def make_search_memories_tool(
         search_memories,
         name="search_memories",
         description=(
-            "Search memories by keyword. "
-            "Searches in name, description, and content fields."
+            "Search memories by short keywords, not full sentences. "
+            "Extract 1-3 distinctive keywords, memory names, project names, "
+            "or error terms before calling this tool. Searches in name, "
+            "description, and content fields."
         ),
     )
 
