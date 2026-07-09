@@ -11,12 +11,21 @@ import { Box, Collapse, Group, rem, Text, UnstyledButton } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { useRef } from "react";
 import { MarkdownContent } from "./MarkdownContent";
 
 const dashedLineStyle: React.CSSProperties = {
   flex: 1,
   borderBottom: `${rem(1)} dashed var(--mantine-color-default-border)`,
 };
+
+function isElementVisibleInViewport(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+  const viewportHeight =
+    window.innerHeight || document.documentElement.clientHeight;
+
+  return rect.top >= 0 && rect.bottom <= viewportHeight;
+}
 
 interface SummaryToggleButtonProps {
   opened: boolean;
@@ -60,13 +69,42 @@ export function CompactionDivider({
   initialOpened = false,
 }: CompactionDividerProps): React.ReactElement {
   const t = useTranslations("chat");
-  const [opened, { toggle }] = useDisclosure(initialOpened);
+  const toggleItemRef = useRef<HTMLDivElement>(null);
+  const [opened, { close, toggle }] = useDisclosure(initialOpened);
+
+  function collapseFromSummaryBody(): void {
+    const shouldScrollToToggle = toggleItemRef.current
+      ? !isElementVisibleInViewport(toggleItemRef.current)
+      : false;
+
+    close();
+
+    if (shouldScrollToToggle) {
+      requestAnimationFrame(() => {
+        toggleItemRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+    }
+  }
+
+  function handleSummaryBodyKeyDown(
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ): void {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    collapseFromSummaryBody();
+  }
 
   return (
     <Box mb="md">
       <Group gap="xs" align="center">
         <Box style={dashedLineStyle} />
-        <Group gap="xs" align="center">
+        <Group ref={toggleItemRef} gap="xs" align="center">
           <Text size="xs" c="dimmed">
             {t("compaction.summary")}
           </Text>
@@ -79,16 +117,19 @@ export function CompactionDivider({
           <Box
             mt="xs"
             p="sm"
+            role="button"
+            tabIndex={0}
+            aria-label={t("compaction.collapse")}
+            onClick={collapseFromSummaryBody}
+            onKeyDown={handleSummaryBodyKeyDown}
             style={{
               borderRadius: "var(--mantine-radius-sm)",
               background: "var(--mantine-color-default)",
               border: `${rem(1)} dashed var(--mantine-color-default-border)`,
+              cursor: "pointer",
             }}
           >
             <MarkdownContent>{content}</MarkdownContent>
-            <Group justify="center" mt="sm">
-              <SummaryToggleButton opened={opened} onToggle={toggle} />
-            </Group>
           </Box>
         </Collapse>
       )}
