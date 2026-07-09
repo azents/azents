@@ -11,6 +11,7 @@ from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
     ModelParameters,
+    SubagentSettings,
 )
 from azents.core.enums import AgentType
 from azents.repos.agent.data import Agent
@@ -36,6 +37,7 @@ class AgentOutput(BaseModel):
     shell_enabled: bool
     memory_enabled: bool
     max_turns: int | None
+    subagent_settings: SubagentSettings
     avatar: UploadedImage | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -69,6 +71,7 @@ class AgentOutput(BaseModel):
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
             max_turns=data.max_turns,
+            subagent_settings=data.subagent_settings,
             avatar=avatar,
             created_at=data.created_at,
             updated_at=data.updated_at,
@@ -110,6 +113,9 @@ class AgentCreateInput(BaseModel):
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
+    subagent_settings: SubagentSettings = Field(
+        default_factory=SubagentSettings, description="Subagent execution settings"
+    )
 
 
 class AgentUpdateInput(TypedDict, total=False):
@@ -143,6 +149,9 @@ class AgentUpdateInput(TypedDict, total=False):
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
     max_turns: Annotated[int | None, Field(description="Maximum agent turn count")]
+    subagent_settings: Annotated[
+        SubagentSettings, Field(description="Subagent execution settings")
+    ]
 
 
 class AgentListOutput(BaseModel):

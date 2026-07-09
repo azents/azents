@@ -44,8 +44,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-08
-spec_version: 39
+last_verified_at: 2026-07-09
+spec_version: 40
 ---
 
 # Agent Domain Spec
@@ -72,7 +72,10 @@ Agent is central execution unit of azents. Within Workspace, it bundles model se
 | `shell_enabled` | whether builtin shell toolkit is exposed |
 | `memory_enabled` | whether memory prompt/tool is exposed |
 | `max_turns` | run turn limit. null means unlimited |
+| `subagent_settings` | JSON settings for session-scoped subagent execution limits. Default is `{ "max_subagents": 3, "max_depth": 1 }` |
 | `avatar` | Agent avatar stored image metadata |
+
+`subagent_settings.max_subagents` is the maximum active subagent count under one root session. It is equivalent to Codex `max_concurrent_threads_per_session - 1`; the root/current agent is not counted in the stored value. `subagent_settings.max_depth` is the maximum `SessionAgent` tree depth below `/root`, where `1` allows root-to-child spawning only. Both values are non-negative integers.
 
 `model_selection` and `lightweight_model_selection` are `AgentModelSelection` JSONB snapshots and are not FK targets.
 
@@ -136,6 +139,10 @@ Create/update request receives only following model-related fields.
     "max_output_tokens": 8192,
     "reasoning_effort": "medium",
     "builtin_tools": []
+  },
+  "subagent_settings": {
+    "max_subagents": 3,
+    "max_depth": 1
   }
 }
 ```
@@ -145,7 +152,8 @@ Create/update request receives only following model-related fields.
 - `model_parameters` is whole-object replace. Unknown keys are rejected.
 - `model_parameters.context_window_tokens` is an optional Agent-level input budget cap. It is stored as user intent even when larger than current model limits, and runtime/API effective context calculation clamps it with model limits.
 - `model_parameters.max_output_tokens` is an optional output generation cap. When omitted/null, runtime does not set provider `max_output_tokens` and provider/model defaults apply.
-- Response returns stored `model_selection`, `lightweight_model_selection`, `model_parameters`, effective context window value.
+- `subagent_settings` is a whole-object replace when supplied. Omitted create requests use the default `{ "max_subagents": 3, "max_depth": 1 }`; omitted update requests leave the stored settings unchanged.
+- Response returns stored `model_selection`, `lightweight_model_selection`, `model_parameters`, `subagent_settings`, and effective context window value.
 
 ### 2.2 Workspace model settings
 
@@ -244,6 +252,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-09 | 40 | Added Agent `subagent_settings` persistence/API contract for subagent concurrency and depth limits |
 | 2026-07-08 | 39 | Clarified that current subagents are session-scoped `SessionAgent` participants, not persistent Agent roles |
 | 2026-07-06 | 38 | Removed legacy subagent role, junction, API, runtime delegation, and living spec surfaces |
 | 2026-07-06 | 37 | Renamed Agent output token cap to `max_output_tokens` and added Agent `context_window_tokens` effective context override |

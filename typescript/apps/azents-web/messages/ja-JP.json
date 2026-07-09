@@ -550,7 +550,12 @@
           "enabled": "Enabled",
           "disabled": "Disabled",
           "shellEnabled": "Shell on",
-          "shellDisabled": "Shell off"
+          "shellDisabled": "Shell off",
+          "subagents": "最大 {count} · 深さ {depth}"
+        },
+        "subagents": {
+          "label": "Subagents",
+          "description": "Delegated agents の同時実行数とネスト制限"
         }
       },
       "settingsLayout": {
@@ -706,7 +711,12 @@
         "emptyDescription": "メモリを作成するか、検索条件を調整してください。",
         "deleteConfirm": "メモリ「{name}」を削除しますか？この操作は元に戻せません。"
       },
-      "shellEnabledDescription": "このエージェントにシェルコマンドの実行を許可する"
+      "shellEnabledDescription": "このエージェントにシェルコマンドの実行を許可する",
+      "subagentsSectionLabel": "サブエージェント",
+      "subagentMaxSubagentsLabel": "最大サブエージェント数",
+      "subagentMaxSubagentsDescription": "1 つの root session 配下で同時に active にできる subagent 数です。root agent は含みません。",
+      "subagentMaxDepthLabel": "最大深さ",
+      "subagentMaxDepthDescription": "root agent 配下の subagent tree の最大深さです。1 は root → child のみを許可します。"
     },
     "toolkits": {
       "headline": "ツールキット",

@@ -44,6 +44,11 @@ const builtinToolConfigSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional().default({}),
 });
 
+const subagentSettingsSchema = z.object({
+  max_subagents: z.number().int().min(0),
+  max_depth: z.number().int().min(0),
+});
+
 const modelParametersSchema = z
   .object({
     temperature: z.number().min(0).max(2).nullable().optional(),
@@ -118,6 +123,7 @@ export const agentRouter = router({
         shell_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
+        subagent_settings: subagentSettingsSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -138,6 +144,7 @@ export const agentRouter = router({
             shell_enabled: input.shell_enabled,
             memory_enabled: input.memory_enabled,
             max_turns: input.max_turns,
+            subagent_settings: input.subagent_settings,
           },
           throwOnError: true,
         });
@@ -169,6 +176,7 @@ export const agentRouter = router({
         shell_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
+        subagent_settings: subagentSettingsSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -195,6 +203,7 @@ export const agentRouter = router({
             shell_enabled: input.shell_enabled,
             memory_enabled: input.memory_enabled,
             max_turns: input.max_turns,
+            subagent_settings: input.subagent_settings,
           },
           throwOnError: true,
         });

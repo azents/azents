@@ -73,6 +73,7 @@ function createAgent(input: AgentFixtureInput): EnrichedAgent {
     shell_enabled: true,
     memory_enabled: true,
     max_turns: null,
+    subagent_settings: { max_subagents: 3, max_depth: 1 },
     avatar: null,
     created_at: "2026-04-28T09:00:00.000Z",
     updated_at: input.lastActiveAt,

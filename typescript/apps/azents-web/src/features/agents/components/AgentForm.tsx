@@ -56,6 +56,7 @@ export type AgentFormSection =
   | "profile"
   | "model"
   | "capabilities"
+  | "subagents"
   | "admins";
 
 interface AgentFormProps {
@@ -136,6 +137,8 @@ export function AgentForm({
       shell_enabled: true,
       memory_enabled: true,
       max_turns: null,
+      subagent_max_subagents: 3,
+      subagent_max_depth: 1,
       builtin_tools: [],
     },
     validate: (values) => {
@@ -185,6 +188,8 @@ export function AgentForm({
         shell_enabled: agent.shell_enabled,
         memory_enabled: agent.memory_enabled,
         max_turns: agent.max_turns ?? null,
+        subagent_max_subagents: agent.subagent_settings.max_subagents ?? 3,
+        subagent_max_depth: agent.subagent_settings.max_depth ?? 1,
         builtin_tools:
           agent.model_parameters?.builtin_tools?.map((bt) => bt.name) ?? [],
       });
@@ -291,6 +296,7 @@ export function AgentForm({
   const showProfile = section === "all" || section === "profile";
   const showModel = section === "all" || section === "model";
   const showCapabilities = section === "all" || section === "capabilities";
+  const showSubagents = section === "all" || section === "subagents";
   const showAdmins = section === "all" || section === "admins";
   const showFormActions = section !== "admins";
 
@@ -569,6 +575,47 @@ export function AgentForm({
               }}
               error={form.errors.max_turns}
             />
+          )}
+
+          {showSubagents && (
+            <>
+              <Divider
+                label={t("subagentsSectionLabel")}
+                labelPosition="left"
+              />
+              <NumberInput
+                label={t("subagentMaxSubagentsLabel")}
+                description={t("subagentMaxSubagentsDescription")}
+                min={0}
+                step={1}
+                allowDecimal={false}
+                allowNegative={false}
+                value={form.values.subagent_max_subagents}
+                onChange={(value) => {
+                  form.setFieldValue(
+                    "subagent_max_subagents",
+                    typeof value === "number" ? value : 0,
+                  );
+                }}
+                error={form.errors.subagent_max_subagents}
+              />
+              <NumberInput
+                label={t("subagentMaxDepthLabel")}
+                description={t("subagentMaxDepthDescription")}
+                min={0}
+                step={1}
+                allowDecimal={false}
+                allowNegative={false}
+                value={form.values.subagent_max_depth}
+                onChange={(value) => {
+                  form.setFieldValue(
+                    "subagent_max_depth",
+                    typeof value === "number" ? value : 0,
+                  );
+                }}
+                error={form.errors.subagent_max_depth}
+              />
+            </>
           )}
 
           {showProfile && (

@@ -52,6 +52,27 @@ class BuiltinToolConfig(BaseModel):
     )
 
 
+DEFAULT_SUBAGENT_MAX_SUBAGENTS = 3
+DEFAULT_SUBAGENT_MAX_DEPTH = 1
+
+
+class SubagentSettings(BaseModel):
+    """Subagent execution settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_subagents: int = Field(
+        default=DEFAULT_SUBAGENT_MAX_SUBAGENTS,
+        ge=0,
+        description="Maximum active subagents per root session",
+    )
+    max_depth: int = Field(
+        default=DEFAULT_SUBAGENT_MAX_DEPTH,
+        ge=0,
+        description="Maximum subagent tree depth below the root agent",
+    )
+
+
 class ModelParameters(BaseModel):
     """LLM model parameters.
 

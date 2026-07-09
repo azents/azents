@@ -15,12 +15,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-08 | 39 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-09 | 40 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-09 | 90 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-09 | 3 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-09 | 49 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-09 | 50 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-08 | 6 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-08 | 36 |
 
@@ -30,7 +30,7 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-09 | 63 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-09 | 64 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-09 | 11 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
@@ -149,8 +149,9 @@ _13 documents_
 - [ADR-0096: Codex-first Subagent Redesign](adr/0096-codex-first-subagent-redesign.md)
 - [ADR-0097: Continue FIFO Processing After Failed TurnActions](adr/0097-turn-action-fifo-continuation.md)
 - [ADR-0098: Subagent Human Write Boundary](adr/0098-subagent-human-write-boundary.md)
+- [ADR-0099: Codex-Compatible Subagent Concurrency](adr/0099-codex-compatible-subagent-concurrency.md)
 
-_101 documents_
+_102 documents_
 
 ## Issues (Bug Tracking)
 
@@ -183,4 +184,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 358
+- Total documents: 359

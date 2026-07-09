@@ -37,40 +37,41 @@ class TestAgentListResponse(unittest.TestCase):
             return AgentListResponse(
                 items = [
                     azentspublicclient.models.agent_response.AgentResponse(
-                        id = '', 
-                        name = '', 
-                        description = '', 
+                        id = '',
+                        name = '',
+                        description = '',
                         model_selection = {
                             'key' : null
-                            }, 
+                            },
                         lightweight_model_selection = {
                             'key' : null
-                            }, 
-                        effective_context_window_tokens = 56, 
-                        effective_auto_compaction_threshold_tokens = 56, 
-                        model_parameters = { }, 
-                        system_prompt = '', 
-                        enabled = True, 
-                        type = 'public', 
-                        runtime_provider_id = '', 
-                        shell_enabled = True, 
-                        memory_enabled = True, 
-                        max_turns = 56, 
+                            },
+                        effective_context_window_tokens = 56,
+                        effective_auto_compaction_threshold_tokens = 56,
+                        model_parameters = { },
+                        system_prompt = '',
+                        enabled = True,
+                        type = 'public',
+                        runtime_provider_id = '',
+                        shell_enabled = True,
+                        memory_enabled = True,
+                        max_turns = 56,
+                        subagent_settings = { },
                         avatar = azentspublicclient.models.uploaded_image.UploadedImage(
-                            filename = '', 
+                            filename = '',
                             default = azentspublicclient.models.image_file.ImageFile(
-                                url = '', 
-                                width = 56, 
-                                height = 56, ), 
+                                url = '',
+                                width = 56,
+                                height = 56, ),
                             thumbnails = azentspublicclient.models.image_thumbnails.ImageThumbnails(
                                 small = azentspublicclient.models.image_file.ImageFile(
-                                    url = '', 
-                                    width = 56, 
-                                    height = 56, ), 
-                                medium = , 
-                                large = , ), 
-                            uploaded_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                    url = '',
+                                    width = 56,
+                                    height = 56, ),
+                                medium = ,
+                                large = , ),
+                            uploaded_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -78,40 +79,41 @@ class TestAgentListResponse(unittest.TestCase):
             return AgentListResponse(
                 items = [
                     azentspublicclient.models.agent_response.AgentResponse(
-                        id = '', 
-                        name = '', 
-                        description = '', 
+                        id = '',
+                        name = '',
+                        description = '',
                         model_selection = {
                             'key' : null
-                            }, 
+                            },
                         lightweight_model_selection = {
                             'key' : null
-                            }, 
-                        effective_context_window_tokens = 56, 
-                        effective_auto_compaction_threshold_tokens = 56, 
-                        model_parameters = { }, 
-                        system_prompt = '', 
-                        enabled = True, 
-                        type = 'public', 
-                        runtime_provider_id = '', 
-                        shell_enabled = True, 
-                        memory_enabled = True, 
-                        max_turns = 56, 
+                            },
+                        effective_context_window_tokens = 56,
+                        effective_auto_compaction_threshold_tokens = 56,
+                        model_parameters = { },
+                        system_prompt = '',
+                        enabled = True,
+                        type = 'public',
+                        runtime_provider_id = '',
+                        shell_enabled = True,
+                        memory_enabled = True,
+                        max_turns = 56,
+                        subagent_settings = { },
                         avatar = azentspublicclient.models.uploaded_image.UploadedImage(
-                            filename = '', 
+                            filename = '',
                             default = azentspublicclient.models.image_file.ImageFile(
-                                url = '', 
-                                width = 56, 
-                                height = 56, ), 
+                                url = '',
+                                width = 56,
+                                height = 56, ),
                             thumbnails = azentspublicclient.models.image_thumbnails.ImageThumbnails(
                                 small = azentspublicclient.models.image_file.ImageFile(
-                                    url = '', 
-                                    width = 56, 
-                                    height = 56, ), 
-                                medium = , 
-                                large = , ), 
-                            uploaded_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                    url = '',
+                                    width = 56,
+                                    height = 56, ),
+                                medium = ,
+                                large = , ),
+                            uploaded_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

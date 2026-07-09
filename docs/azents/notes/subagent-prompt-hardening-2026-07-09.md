@@ -75,6 +75,8 @@ Codex has prompt text for available concurrency slots. Azents does not support t
 
 Backlog: add concurrency-slot prompt text only after Azents implements an equivalent scheduling/concurrency concept.
 
+Next-phase accepted decision: implement Codex-compatible multi-agent concurrency and nesting limits before reintroducing the concurrency-slot prompt text. Match Codex defaults and semantics: `max_concurrent_threads_per_session = 4` counts the parent/root agent, so the default active subagent capacity is `3`; `agent max_depth = 1` permits root-to-child spawning by default. Both values must be configurable through agent settings. When active subagent capacity is exhausted, normal `spawn_agent` should fail with a clear limit error rather than queueing; any job-style retry loop must be a separate scheduler concern.
+
 ### Proactive delegation
 
 Do not add proactive delegation behavior in this pass. Current Azents behavior remains explicit-request-only unless a later design changes this.

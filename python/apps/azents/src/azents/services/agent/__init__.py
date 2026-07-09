@@ -341,6 +341,7 @@ class AgentService:
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
             max_turns=create.max_turns,
+            subagent_settings=create.subagent_settings,
         )
         async with self.session_manager() as session:
             if create.model_selection is not None:
@@ -542,6 +543,7 @@ class AgentService:
             "shell_enabled",
             "memory_enabled",
             "max_turns",
+            "subagent_settings",
         ):
             if key in update:
                 repo_update[key] = update[key]  # type: ignore[literal-required]
