@@ -98,6 +98,7 @@ export const Default = {} satisfies Story;
 
 export const DuplicateLabel = {
   args: {
+    showValidationErrors: true,
     options: [
       defaultOption,
       {
@@ -108,8 +109,27 @@ export const DuplicateLabel = {
   },
 } satisfies Story;
 
+export const PendingNewModel = {
+  args: {
+    options: [
+      defaultOption,
+      lightweightOption,
+      {
+        id: "option-1",
+        label: "option-1",
+        model_provider_integration_id: null,
+        model_selection_value: null,
+        model_display_name: null,
+        model_identifier: null,
+        normalized_capabilities: null,
+      },
+    ],
+  },
+} satisfies Story;
+
 export const MissingModel = {
   args: {
+    showValidationErrors: true,
     options: [
       {
         ...defaultOption,

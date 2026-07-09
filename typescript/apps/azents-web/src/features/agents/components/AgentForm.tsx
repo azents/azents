@@ -30,7 +30,7 @@ import { useForm } from "@mantine/form";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   findSelectableModelOptionByLabel,
   selectableModelOptionFormValuesFromStoredOptions,
@@ -112,6 +112,7 @@ export function AgentForm({
   cancelHref,
 }: AgentFormProps): React.ReactElement {
   const t = useTranslations("workspace.agents");
+  const [hasSubmitAttempted, setHasSubmitAttempted] = useState(false);
 
   const isEdit = formState.type === "EDIT";
   const backPath = cancelHref ?? `/w/${handle}/agents`;
@@ -186,6 +187,7 @@ export function AgentForm({
           agent.model_parameters?.builtin_tools?.map((bt) => bt.name) ?? [],
       });
       form.resetDirty();
+      setHasSubmitAttempted(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run only on initial load
   }, [formState.type]);
@@ -207,6 +209,7 @@ export function AgentForm({
         workspaceModelSettings.default_lightweight_model_label ?? null,
     });
     form.resetDirty();
+    setHasSubmitAttempted(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Resynchronize create defaults before user edits.
   }, [formState.type, workspaceModelSettings]);
 
@@ -254,9 +257,13 @@ export function AgentForm({
     );
   }
 
-  const handleSubmit = form.onSubmit((values) => {
-    onSubmit(values);
-  });
+  const handleSubmit = form.onSubmit(
+    (values) => {
+      setHasSubmitAttempted(true);
+      onSubmit(values);
+    },
+    () => setHasSubmitAttempted(true),
+  );
 
   const fullpageChrome = mode === "fullpage";
   const showProfile = section === "all" || section === "profile";
@@ -322,6 +329,7 @@ export function AgentForm({
               lightweightModelLabel={form.values.lightweight_model_label}
               providerOptions={providerOptions}
               canEdit
+              showValidationErrors={hasSubmitAttempted}
               onSyncCatalog={onSyncCatalog}
               onChangeOptions={(options) =>
                 form.setFieldValue("selectable_model_options", options)

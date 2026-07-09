@@ -5,7 +5,7 @@
 import { Alert, Button, Card, Group, Stack, Text } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useTranslations } from "next-intl";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { SelectableModelOptionsEditor } from "@/features/agents/components/SelectableModelOptionsEditor";
 import { selectableModelOptionFormValuesFromStoredOptions } from "@/features/agents/model-selection";
 import type {
@@ -47,6 +47,7 @@ export function WorkspaceModelSettingsCard({
   onSubmit,
 }: WorkspaceModelSettingsCardProps): React.ReactElement {
   const t = useTranslations("workspace.llmSettings.modelSelection");
+  const [hasSubmitAttempted, setHasSubmitAttempted] = useState(false);
   const form = useForm<WorkspaceModelSettingsFormValues>({
     mode: "controlled",
     initialValues: {
@@ -88,12 +89,17 @@ export function WorkspaceModelSettingsCard({
         settings?.default_lightweight_model_label ?? null,
     });
     form.resetDirty();
+    setHasSubmitAttempted(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Resynchronize form when server settings change.
   }, [settings]);
 
-  const submit = form.onSubmit((values) => {
-    onSubmit(values);
-  });
+  const submit = form.onSubmit(
+    (values) => {
+      setHasSubmitAttempted(true);
+      onSubmit(values);
+    },
+    () => setHasSubmitAttempted(true),
+  );
 
   return (
     <Card withBorder padding="md">
@@ -114,6 +120,7 @@ export function WorkspaceModelSettingsCard({
             lightweightModelLabel={form.values.defaultLightweightModelLabel}
             providerOptions={providerOptions}
             canEdit={canManage}
+            showValidationErrors={hasSubmitAttempted}
             onSyncCatalog={onSyncCatalog}
             onChangeOptions={(options) =>
               form.setFieldValue("defaultSelectableModelOptions", options)

@@ -56,6 +56,7 @@ export interface SelectableModelOptionsEditorProps {
   lightweightModelLabel: string | null;
   providerOptions: ProviderIntegrationOption[];
   canEdit: boolean;
+  showValidationErrors?: boolean;
   onSyncCatalog: (integrationId: string) => void;
   onChangeOptions: (options: SelectableModelOptionFormValue[]) => void;
   onChangeMainModelLabel: (label: string | null) => void;
@@ -67,6 +68,7 @@ interface SelectableModelRowProps {
   duplicate: boolean;
   canEdit: boolean;
   canRemove: boolean;
+  showValidationErrors: boolean;
   onChangeLabel: (value: string) => void;
   onChangeModel: () => void;
   onRemove: () => void;
@@ -114,6 +116,7 @@ function SelectableModelRow({
   duplicate,
   canEdit,
   canRemove,
+  showValidationErrors,
   onChangeLabel,
   onChangeModel,
   onRemove,
@@ -159,11 +162,13 @@ function SelectableModelRow({
           value={option.label}
           disabled={!canEdit}
           error={
-            option.label.trim() === ""
-              ? t("emptyLabel")
-              : duplicate
-                ? t("duplicateLabel")
-                : null
+            showValidationErrors
+              ? option.label.trim() === ""
+                ? t("emptyLabel")
+                : duplicate
+                  ? t("duplicateLabel")
+                  : null
+              : null
           }
           onChange={(event) => onChangeLabel(event.currentTarget.value)}
         />
@@ -209,6 +214,7 @@ export function SelectableModelOptionsEditor({
   lightweightModelLabel,
   providerOptions,
   canEdit,
+  showValidationErrors = false,
   onSyncCatalog,
   onChangeOptions,
   onChangeMainModelLabel,
@@ -317,13 +323,21 @@ export function SelectableModelOptionsEditor({
             {t("addOption")}
           </Button>
         </Group>
-        {options.length === 0 && <Alert color="red">{t("emptyList")}</Alert>}
+        {showValidationErrors && options.length === 0 && (
+          <Alert color="red">{t("emptyList")}</Alert>
+        )}
         {options.length >= MAX_SELECTABLE_MODEL_OPTIONS && (
           <Alert color="blue">{t("maxOptions")}</Alert>
         )}
-        {hasEmptyLabels && <Alert color="red">{t("emptyLabel")}</Alert>}
-        {hasDuplicateLabels && <Alert color="red">{t("duplicateLabel")}</Alert>}
-        {hasMissingModels && <Alert color="red">{t("missingModel")}</Alert>}
+        {showValidationErrors && hasEmptyLabels && (
+          <Alert color="red">{t("emptyLabel")}</Alert>
+        )}
+        {showValidationErrors && hasDuplicateLabels && (
+          <Alert color="red">{t("duplicateLabel")}</Alert>
+        )}
+        {showValidationErrors && hasMissingModels && (
+          <Alert color="red">{t("missingModel")}</Alert>
+        )}
       </Stack>
 
       {activeOption != null && (
@@ -414,6 +428,7 @@ export function SelectableModelOptionsEditor({
                       duplicate={rowHasDuplicateLabel(options, index)}
                       canEdit={canEdit}
                       canRemove={options.length > 1}
+                      showValidationErrors={showValidationErrors}
                       onChangeLabel={(value) => {
                         handleChangeOptions(
                           updateOption(options, option.id, (current) => ({
