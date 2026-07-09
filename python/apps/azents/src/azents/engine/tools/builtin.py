@@ -118,6 +118,10 @@ _MEMORY_READ_RULES_PROMPT = dedent("""\
 
     Use `list_memories` or `search_memories` to discover relevant memories. Use `get_memory` to retrieve full content when a memory looks relevant.
 
+    #### Memory lookup
+
+    `search_memories` is keyword search, not sentence or semantic search. Before calling it, extract 1-3 distinctive keywords from the user's request, such as project names, tool names, error terms, repository names, policy names, or memory names. Do not pass the full user sentence as the query.
+
     #### Types of memory
 
     **user** — User's role, expertise, preferences.
@@ -158,7 +162,7 @@ _MEMORY_WRITE_RULES_PROMPT = dedent("""\
 
     #### Duplicate prevention
 
-    Do not save duplicate memories. Use `list_memories` or `search_memories` to check if a similar memory already exists. Use the same `name` to update an existing memory (upsert).""")  # noqa: E501
+    Do not save duplicate memories. Use `list_memories` or `search_memories` with short keywords to check if a similar memory already exists. Use the same `name` to update an existing memory (upsert).""")  # noqa: E501
 
 _MAX_MEMORY_SUMMARIES = 100
 
