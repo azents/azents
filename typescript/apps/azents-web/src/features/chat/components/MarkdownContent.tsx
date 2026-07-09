@@ -181,7 +181,7 @@ function CodeBlock({
             background: "transparent",
             color: "inherit",
             margin: 0,
-            padding: "0.6em var(--mantine-spacing-lg) 0.6em 0.8em",
+            padding: "0.6em 0.8em",
           }}
           codeTagProps={{
             className: classes.highlightedCode,
