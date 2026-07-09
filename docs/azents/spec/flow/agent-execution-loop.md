@@ -37,8 +37,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-08
-spec_version: 62
+last_verified_at: 2026-07-09
+spec_version: 63
 ---
 
 # Agent Execution Loop
@@ -57,16 +57,17 @@ Main steps:
 
 1. Worker promotes input buffers to durable event input, including ordered `action_message` and `agent_message` events, at wake-up entry and at each model-call turn boundary.
 2. Worker executes operation TurnActions such as `create_git_worktree` before the next model dispatch; a failed operation is marked failed and FIFO processing continues to later pending input.
-3. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
-4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
-5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
-6. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
+3. When a successful operation TurnAction mutates Project or runtime context, the worker cancels the current model boundary and sends a follow-up wake-up if pending input buffers remain or the promoted transcript tail already contains actionable model input.
+4. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
+5. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
+6. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
+7. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
    into a LiteLLM Responses native request.
-7. `PostLowerFilterPipeline` applies adapter-native request size guard.
-8. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
-9. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
-10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
-11. When no foreground client tool call or pending follow-up remains, the runner observes the
+8. `PostLowerFilterPipeline` applies adapter-native request size guard.
+9. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
+10. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
+11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
+12. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
 Streaming deltas are UI projection only. Durable events are appended based on completed output items
