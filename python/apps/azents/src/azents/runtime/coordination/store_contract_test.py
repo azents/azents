@@ -103,6 +103,60 @@ async def test_request_stream_can_be_claimed_and_acked(
 
 
 @pytest.mark.asyncio
+async def test_unacked_request_can_be_reclaimed(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Pending request entries can be reclaimed by a replacement consumer."""
+    envelope = _request_envelope("req-1")
+
+    cursor = await store.append_request("runner:runtime-1", envelope)
+    first = await store.claim_next_request(
+        "runner:runtime-1",
+        consumer_group="runtime-1:generation-1",
+        consumer_id="replica-a",
+        block_ms=0,
+        reclaim_idle_seconds=60,
+    )
+    blocked = await store.claim_next_request(
+        "runner:runtime-1",
+        consumer_group="runtime-1:generation-1",
+        consumer_id="replica-b",
+        block_ms=0,
+        reclaim_idle_seconds=60,
+    )
+    reclaimed = await store.claim_next_request(
+        "runner:runtime-1",
+        consumer_group="runtime-1:generation-1",
+        consumer_id="replica-b",
+        block_ms=0,
+        reclaim_idle_seconds=0,
+    )
+
+    assert first is not None
+    assert first.cursor == cursor
+    assert blocked is None
+    assert reclaimed is not None
+    assert reclaimed.cursor == cursor
+    assert reclaimed.envelope == envelope
+
+    await store.ack_request(
+        "runner:runtime-1",
+        consumer_group="runtime-1:generation-1",
+        cursor=cursor,
+    )
+    assert (
+        await store.claim_next_request(
+            "runner:runtime-1",
+            consumer_group="runtime-1:generation-1",
+            consumer_id="replica-c",
+            block_ms=0,
+            reclaim_idle_seconds=0,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
 async def test_reply_stream_cursor_resume(
     store: RuntimeCoordinationStore,
 ) -> None:

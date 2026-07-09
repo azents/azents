@@ -3,7 +3,7 @@
 import base64
 import dataclasses
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
@@ -75,12 +75,27 @@ class RedisRuntimeCoordinationStore:
         consumer_group: str,
         consumer_id: str,
         block_ms: int,
+        reclaim_idle_seconds: float | None = None,
     ) -> RuntimeRequestRecord | None:
         """Claim the next request for an active owner consumer."""
         stream_key = self._stream_key("request", stream_id)
         await self._refresh_stream_ttl(stream_key)
         await self._ensure_group(stream_key, consumer_group)
         await self._refresh_stream_ttl(stream_key)
+        if reclaim_idle_seconds is not None:
+            xautoclaim = cast(Any, self._redis).xautoclaim
+            reclaimed = await xautoclaim(
+                stream_key,
+                consumer_group,
+                consumer_id,
+                int(reclaim_idle_seconds * 1000),
+                start_id="0-0",
+                count=1,
+            )
+            record = _request_record_from_xautoclaim(reclaimed)
+            if record is not None:
+                await self._refresh_stream_ttl(stream_key)
+                return record
         block = block_ms if block_ms > 0 else None
         result = await self._redis.xreadgroup(
             consumer_group,
@@ -506,6 +521,31 @@ class RedisRuntimeCoordinationStore:
 
     def _completion_claim_key(self, operation_id: str) -> str:
         return f"{self._key_prefix}:completion-claim:{operation_id}"
+
+
+def _request_record_from_xautoclaim(result: object) -> RuntimeRequestRecord | None:
+    if not isinstance(result, Sequence) or isinstance(result, (bytes, str)):
+        return None
+    if len(result) < 2:
+        return None
+    entries = result[1]
+    if not isinstance(entries, Sequence) or isinstance(entries, (bytes, str)):
+        return None
+    if not entries:
+        return None
+    entry = entries[0]
+    if not isinstance(entry, Sequence) or isinstance(entry, (bytes, str)):
+        return None
+    if len(entry) != 2:
+        return None
+    cursor, fields = entry
+    if not isinstance(fields, Mapping):
+        return None
+    payload = _payload_field(fields)
+    return RuntimeRequestRecord(
+        cursor=_decode_text(cursor),
+        envelope=_envelope_from_json(payload),
+    )
 
 
 def _payload_field(fields: Mapping[object, object]) -> str:

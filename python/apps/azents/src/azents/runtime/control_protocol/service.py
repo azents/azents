@@ -1,5 +1,6 @@
 """Agent Runtime control protocol foundation service."""
 
+import dataclasses
 import secrets
 from datetime import datetime
 
@@ -32,6 +33,8 @@ from azents.runtime.coordination.store import RuntimeCoordinationStore
 _DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 20
 _DEFAULT_CONNECTION_TTL_SECONDS = 60
 _DEFAULT_OPERATION_TTL_SECONDS = 900
+_DEFAULT_REQUEST_RECLAIM_IDLE_SECONDS = 30.0
+_OPERATION_TTL_DEADLINE_BUFFER_SECONDS = 300
 
 
 class RuntimeControlProtocolService:
@@ -45,6 +48,7 @@ class RuntimeControlProtocolService:
         heartbeat_interval_seconds: int = _DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
         connection_ttl_seconds: int = _DEFAULT_CONNECTION_TTL_SECONDS,
         operation_ttl_seconds: int = _DEFAULT_OPERATION_TTL_SECONDS,
+        request_reclaim_idle_seconds: float = _DEFAULT_REQUEST_RECLAIM_IDLE_SECONDS,
     ) -> None:
         """Initialize the control protocol service."""
         self._store = store
@@ -52,6 +56,7 @@ class RuntimeControlProtocolService:
         self._heartbeat_interval_seconds = heartbeat_interval_seconds
         self._connection_ttl_seconds = connection_ttl_seconds
         self._operation_ttl_seconds = operation_ttl_seconds
+        self._request_reclaim_idle_seconds = request_reclaim_idle_seconds
 
     async def register_provider(
         self,
@@ -280,15 +285,23 @@ class RuntimeControlProtocolService:
             generation=generation,
         ):
             return None
+        stream_id = _provider_request_stream_id(provider_id, generation)
+        consumer_group = _generation_group(provider_id, generation)
         record = await self._store.claim_next_request(
-            _provider_request_stream_id(provider_id, generation),
-            consumer_group=_generation_group(provider_id, generation),
+            stream_id,
+            consumer_group=consumer_group,
             consumer_id=consumer_id,
             block_ms=block_ms,
+            reclaim_idle_seconds=self._request_reclaim_idle_seconds,
         )
         if record is None:
             return None
-        return record.envelope
+        return dataclasses.replace(
+            record.envelope,
+            cursor=record.cursor,
+            stream_id=stream_id,
+            consumer_group=consumer_group,
+        )
 
     async def claim_next_runner_request(
         self,
@@ -305,15 +318,38 @@ class RuntimeControlProtocolService:
             generation=generation,
         ):
             return None
+        stream_id = _runner_request_stream_id(runtime_id, generation)
+        consumer_group = _generation_group(runtime_id, generation)
         record = await self._store.claim_next_request(
-            _runner_request_stream_id(runtime_id, generation),
-            consumer_group=_generation_group(runtime_id, generation),
+            stream_id,
+            consumer_group=consumer_group,
             consumer_id=consumer_id,
             block_ms=block_ms,
+            reclaim_idle_seconds=self._request_reclaim_idle_seconds,
         )
         if record is None:
             return None
-        return record.envelope
+        return dataclasses.replace(
+            record.envelope,
+            cursor=record.cursor,
+            stream_id=stream_id,
+            consumer_group=consumer_group,
+        )
+
+    async def ack_claimed_request(
+        self,
+        envelope: RuntimeRequestEnvelope,
+    ) -> None:
+        """Acknowledge a claimed Provider or Runner request envelope."""
+        if envelope.cursor is None:
+            raise ValueError("Claimed request cursor is required")
+        if envelope.stream_id is None or envelope.consumer_group is None:
+            raise ValueError("Claimed request stream metadata is required")
+        await self._store.ack_request(
+            envelope.stream_id,
+            consumer_group=envelope.consumer_group,
+            cursor=envelope.cursor,
+        )
 
     async def append_reply_event(
         self,
@@ -495,7 +531,8 @@ def _operation_ttl_seconds(
     if deadline_at is None:
         return default_ttl_seconds
     deadline_ttl = int((deadline_at - created_at).total_seconds())
-    return max(1, min(default_ttl_seconds, deadline_ttl))
+    deadline_ttl_with_buffer = deadline_ttl + _OPERATION_TTL_DEADLINE_BUFFER_SECONDS
+    return max(default_ttl_seconds, deadline_ttl_with_buffer, 1)
 
 
 def _provider_request_stream_id(provider_id: str, generation: int) -> str:

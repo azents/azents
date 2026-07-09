@@ -5,6 +5,7 @@
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -45,6 +46,19 @@ from azents.runtime.coordination.store import RuntimeCoordinationStore
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class _RunnerOutboundItem:
+    """Runner outbound message with optional request ack metadata."""
+
+    message: runtime_runner_control_pb2.RunnerControlMessage
+    ack_envelope: RuntimeRequestEnvelope | None = None
+
+
+type _RunnerOutbound = (
+    runtime_runner_control_pb2.RunnerControlMessage | _RunnerOutboundItem
+)
 
 
 class RuntimeRunnerStateSink(Protocol):
@@ -112,9 +126,7 @@ class RuntimeRunnerControlGrpcServicer(
                 "owner_replica_id": self._owner_replica_id,
             },
         )
-        outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage] = (
-            asyncio.Queue()
-        )
+        outbound: asyncio.Queue[_RunnerOutbound] = asyncio.Queue()
         inbound_task = asyncio.create_task(
             self._consume_runner_messages(
                 request_iterator,
@@ -145,6 +157,7 @@ class RuntimeRunnerControlGrpcServicer(
                 outbound,
                 inbound_task,
                 operation_task,
+                control_protocol=self._control_protocol,
             ):
                 yield message
         finally:
@@ -200,7 +213,7 @@ class RuntimeRunnerControlGrpcServicer(
     async def _consume_runner_messages(
         self,
         request_iterator: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
-        outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage],
+        outbound: asyncio.Queue[_RunnerOutbound],
         *,
         runtime_id: str,
         generation: int,
@@ -296,7 +309,7 @@ class RuntimeRunnerControlGrpcServicer(
         runtime_id: str,
         generation: int,
         request_id: str,
-        outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage],
+        outbound: asyncio.Queue[_RunnerOutbound],
     ) -> bool:
         ok = await self._control_protocol.heartbeat_runner(
             runtime_id=runtime_id,
@@ -310,7 +323,7 @@ class RuntimeRunnerControlGrpcServicer(
 
     async def _relay_runner_operations(
         self,
-        outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage],
+        outbound: asyncio.Queue[_RunnerOutbound],
         *,
         runtime_id: str,
         generation: int,
@@ -325,6 +338,13 @@ class RuntimeRunnerControlGrpcServicer(
             if envelope is None:
                 await asyncio.sleep(max(self._operation_block_ms, 1) / 1000)
                 continue
+            if _deadline_expired(envelope, datetime.now(UTC)):
+                await self._expire_runner_operation(
+                    envelope,
+                    runtime_id=runtime_id,
+                )
+                await self._control_protocol.ack_claimed_request(envelope)
+                continue
             _LOGGER.info(
                 "Runtime Runner operation routed",
                 extra={
@@ -335,11 +355,49 @@ class RuntimeRunnerControlGrpcServicer(
                 },
             )
             outbound.put_nowait(
-                runtime_runner_control_pb2.RunnerControlMessage(
-                    request_id=envelope.request_id,
-                    operation_request=await self._runner_operation(envelope),
+                _RunnerOutboundItem(
+                    message=runtime_runner_control_pb2.RunnerControlMessage(
+                        request_id=envelope.request_id,
+                        operation_request=await self._runner_operation(envelope),
+                    ),
+                    ack_envelope=envelope,
                 )
             )
+
+    async def _expire_runner_operation(
+        self,
+        envelope: RuntimeRequestEnvelope,
+        *,
+        runtime_id: str,
+    ) -> None:
+        _LOGGER.warning(
+            "Runtime Runner operation expired before relay",
+            extra={
+                "runtime_id": runtime_id,
+                "runner_generation": envelope.generation,
+                "request_id": envelope.request_id,
+                "operation_type": envelope.operation_type,
+            },
+        )
+        await self._control_protocol.append_reply_event(
+            RuntimeReplyEvent(
+                request_id=envelope.request_id,
+                runtime_id=envelope.runtime_id,
+                generation=envelope.generation,
+                event_type=RuntimeReplyEventType.FINAL_ERROR,
+                payload={
+                    "success": False,
+                    "error_code": "RUNNER_OPERATION_EXPIRED",
+                    "error_message": "Runner operation expired before relay",
+                },
+                created_at=datetime.now(UTC),
+                final=True,
+            ),
+            reply_stream_id=envelope.reply_stream_id,
+            operation_id=f"operation:{envelope.request_id}",
+            expected_target=RuntimeCoordinationTarget.RUNNER,
+            expected_subject_id=runtime_id,
+        )
 
     async def _runner_operation(
         self,
@@ -472,9 +530,11 @@ async def _first_register_message(
 
 
 async def _outbound_messages(
-    outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage],
+    outbound: asyncio.Queue[_RunnerOutbound],
     inbound_task: asyncio.Task[None],
     operation_task: asyncio.Task[None],
+    *,
+    control_protocol: RuntimeControlProtocolService,
 ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
     get_task = asyncio.create_task(outbound.get())
     try:
@@ -484,7 +544,14 @@ async def _outbound_messages(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if get_task in done:
-                yield get_task.result()
+                item = get_task.result()
+                if isinstance(item, _RunnerOutboundItem):
+                    try:
+                        yield item.message
+                    finally:
+                        await _ack_outbound_item(control_protocol, item)
+                else:
+                    yield item
                 get_task = asyncio.create_task(outbound.get())
                 continue
             for task in (inbound_task, operation_task):
@@ -495,6 +562,15 @@ async def _outbound_messages(
         get_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await get_task
+
+
+async def _ack_outbound_item(
+    control_protocol: RuntimeControlProtocolService,
+    item: _RunnerOutboundItem,
+) -> None:
+    if item.ack_envelope is None:
+        return
+    await control_protocol.ack_claimed_request(item.ack_envelope)
 
 
 def _registration(
@@ -709,6 +785,10 @@ def _str_list_payload(payload: dict[str, JsonValue], key: str) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
+
+
+def _deadline_expired(envelope: RuntimeRequestEnvelope, now: datetime) -> bool:
+    return envelope.deadline_at is not None and envelope.deadline_at <= now
 
 
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
