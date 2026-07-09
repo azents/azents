@@ -1101,13 +1101,13 @@ class AuthV1Api:
         # process the path parameters
         # process the query parameters
         if email is not None:
-
+            
             _query_params.append(('email', email))
-
+            
         if csrf_token is not None:
-
+            
             _query_params.append(('csrf_token', csrf_token))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -1383,13 +1383,13 @@ class AuthV1Api:
         # process the path parameters
         # process the query parameters
         if offset is not None:
-
+            
             _query_params.append(('offset', offset))
-
+            
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -1680,13 +1680,13 @@ class AuthV1Api:
             _path_params['email'] = email
         # process the query parameters
         if offset is not None:
-
+            
             _query_params.append(('offset', offset))
-
+            
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -1962,13 +1962,13 @@ class AuthV1Api:
         # process the path parameters
         # process the query parameters
         if offset is not None:
-
+            
             _query_params.append(('offset', offset))
-
+            
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -2244,13 +2244,13 @@ class AuthV1Api:
         # process the path parameters
         # process the query parameters
         if offset is not None:
-
+            
             _query_params.append(('offset', offset))
-
+            
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -2809,3 +2809,5 @@ class AuthV1Api:
             _host=_host,
             _request_auth=_request_auth
         )
+
+

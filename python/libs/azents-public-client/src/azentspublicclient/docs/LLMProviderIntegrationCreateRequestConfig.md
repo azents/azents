@@ -19,6 +19,7 @@ Name | Type | Description | Notes
 **last_refreshed_at** | **datetime** |  | [optional] 
 **last_failed_at** | **datetime** |  | [optional] 
 **last_failure_reason** | **str** |  | [optional] 
+**entitlement_status** | **str** |  | [optional] 
 
 ## Example
 

@@ -60,6 +60,7 @@ export interface LlmSettingsContainerOutput {
   mutationState: MutationState;
   canManage: boolean;
   providerOptions: ProviderIntegrationOption[];
+  availableProviderValues: string[];
   modelOptions: ModelSelectionOption[];
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
@@ -110,6 +111,8 @@ export function useLlmSettingsContainer(
   const canManage = meQuery.data?.role === "owner";
 
   const listQuery = trpc.llmProviderIntegration.list.useQuery({ handle });
+  const providerCapabilitiesQuery =
+    trpc.llmProviderIntegration.listProviders.useQuery({ handle });
   const workspaceModelSettingsQuery = trpc.workspaceModelSettings.get.useQuery({
     handle,
   });
@@ -118,10 +121,18 @@ export function useLlmSettingsContainer(
     [listQuery.data],
   );
   const listState: IntegrationListState = useMemo(() => {
-    if (listQuery.isLoading || workspaceModelSettingsQuery.isLoading) {
+    if (
+      listQuery.isLoading ||
+      providerCapabilitiesQuery.isLoading ||
+      workspaceModelSettingsQuery.isLoading
+    ) {
       return { type: "LOADING" };
     }
-    if (listQuery.isError || workspaceModelSettingsQuery.isError) {
+    if (
+      listQuery.isError ||
+      providerCapabilitiesQuery.isError ||
+      workspaceModelSettingsQuery.isError
+    ) {
       return { type: "ERROR" };
     }
     return {
@@ -132,6 +143,8 @@ export function useLlmSettingsContainer(
   }, [
     listQuery.isLoading,
     listQuery.isError,
+    providerCapabilitiesQuery.isLoading,
+    providerCapabilitiesQuery.isError,
     integrations,
     workspaceModelSettingsQuery.isLoading,
     workspaceModelSettingsQuery.isError,
@@ -143,6 +156,12 @@ export function useLlmSettingsContainer(
   const providerOptions = useMemo(
     () => buildProviderIntegrationOptions(integrations),
     [integrations],
+  );
+
+  const availableProviderValues = useMemo(
+    () =>
+      providerCapabilitiesQuery.data?.items.map((item) => item.provider) ?? [],
+    [providerCapabilitiesQuery.data],
   );
 
   const modelOptions = useMemo<ModelSelectionOption[]>(() => [], []);
@@ -313,6 +332,7 @@ export function useLlmSettingsContainer(
     mutationState,
     canManage,
     providerOptions,
+    availableProviderValues,
     modelOptions,
     catalogStates,
     modelsLoading,

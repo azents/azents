@@ -39,10 +39,10 @@ class TestHTTPValidationError(unittest.TestCase):
                     azentsadminclient.models.validation_error.ValidationError(
                         loc = [
                             null
-                            ],
-                        msg = '',
-                        type = '',
-                        input = null,
+                            ], 
+                        msg = '', 
+                        type = '', 
+                        input = null, 
                         ctx = azentsadminclient.models.context.Context(), )
                     ]
             )

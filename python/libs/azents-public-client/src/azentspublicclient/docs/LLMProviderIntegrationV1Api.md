@@ -8,6 +8,7 @@ Method | HTTP request | Description
 [**llm_provider_integration_v1_delete_integration**](LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_delete_integration) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Delete Integration
 [**llm_provider_integration_v1_get_integration**](LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_get_integration) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Get Integration
 [**llm_provider_integration_v1_list_integration_catalog_entries**](LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integration_catalog_entries) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-entries | List Integration Catalog Entries
+[**llm_provider_integration_v1_list_integration_providers**](LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integration_providers) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/providers | List Integration Providers
 [**llm_provider_integration_v1_list_integrations**](LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integrations) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | List Integrations
 [**llm_provider_integration_v1_sync_integration_catalog**](LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_sync_integration_catalog) | **POST** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-sync | Sync Integration Catalog
 [**llm_provider_integration_v1_update_integration**](LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_update_integration) | **PATCH** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Update Integration
@@ -331,6 +332,85 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**ModelCatalogEntryListResponse**](ModelCatalogEntryListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **llm_provider_integration_v1_list_integration_providers**
+> LLMProviderCapabilityListResponse llm_provider_integration_v1_list_integration_providers(handle)
+
+List Integration Providers
+
+List provider options available to create in this workspace.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.llm_provider_capability_list_response import LLMProviderCapabilityListResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
+    handle = 'handle_example' # str | 
+
+    try:
+        # List Integration Providers
+        api_response = api_instance.llm_provider_integration_v1_list_integration_providers(handle)
+        print("The response of LLMProviderIntegrationV1Api->llm_provider_integration_v1_list_integration_providers:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling LLMProviderIntegrationV1Api->llm_provider_integration_v1_list_integration_providers: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+
+### Return type
+
+[**LLMProviderCapabilityListResponse**](LLMProviderCapabilityListResponse.md)
 
 ### Authorization
 

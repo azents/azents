@@ -6,28 +6,28 @@ Agent response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**name** | **str** |  |
-**description** | **str** |  |
-**model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  |
-**lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  |
-**selectable_model_options** | [**List[SelectableModelOption]**](SelectableModelOption.md) |  |
-**main_model_label** | **str** |  |
-**lightweight_model_label** | **str** |  |
-**effective_context_window_tokens** | **int** |  |
-**effective_auto_compaction_threshold_tokens** | **int** |  |
-**model_parameters** | [**ModelParameters**](ModelParameters.md) |  |
-**system_prompt** | **str** |  |
-**enabled** | **bool** |  |
-**type** | [**AgentType**](AgentType.md) |  |
-**runtime_provider_id** | **str** |  |
-**shell_enabled** | **bool** |  |
-**memory_enabled** | **bool** |  |
-**max_turns** | **int** |  |
-**subagent_settings** | [**SubagentSettings**](SubagentSettings.md) |  |
-**avatar** | [**UploadedImage**](UploadedImage.md) |  | [optional]
-**created_at** | **datetime** |  |
-**updated_at** | **datetime** |  |
+**id** | **str** |  | 
+**name** | **str** |  | 
+**description** | **str** |  | 
+**model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | 
+**lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | 
+**selectable_model_options** | [**List[SelectableModelOption]**](SelectableModelOption.md) |  | 
+**main_model_label** | **str** |  | 
+**lightweight_model_label** | **str** |  | 
+**effective_context_window_tokens** | **int** |  | 
+**effective_auto_compaction_threshold_tokens** | **int** |  | 
+**model_parameters** | [**ModelParameters**](ModelParameters.md) |  | 
+**system_prompt** | **str** |  | 
+**enabled** | **bool** |  | 
+**type** | [**AgentType**](AgentType.md) |  | 
+**runtime_provider_id** | **str** |  | 
+**shell_enabled** | **bool** |  | 
+**memory_enabled** | **bool** |  | 
+**max_turns** | **int** |  | 
+**subagent_settings** | [**SubagentSettings**](SubagentSettings.md) |  | 
+**avatar** | [**UploadedImage**](UploadedImage.md) |  | [optional] 
+**created_at** | **datetime** |  | 
+**updated_at** | **datetime** |  | 
 
 ## Example
 

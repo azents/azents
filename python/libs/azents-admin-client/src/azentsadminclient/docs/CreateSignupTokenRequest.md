@@ -6,8 +6,8 @@ Signup token creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Email to pin to the token |
-**delivery_method** | [**SignupTokenDeliveryMethod**](SignupTokenDeliveryMethod.md) | Token delivery method |
+**email** | **str** | Email to pin to the token | 
+**delivery_method** | [**SignupTokenDeliveryMethod**](SignupTokenDeliveryMethod.md) | Token delivery method | 
 
 ## Example
 
@@ -27,3 +27,5 @@ create_signup_token_request_dict = create_signup_token_request_instance.to_dict(
 create_signup_token_request_from_dict = CreateSignupTokenRequest.from_dict(create_signup_token_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

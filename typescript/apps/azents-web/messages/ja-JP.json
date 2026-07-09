@@ -337,7 +337,8 @@
         "google_gemini": "Google Gemini",
         "aws_bedrock": "AWS Bedrock",
         "google_vertex_ai": "Google Vertex AI",
-        "chatgpt_oauth": "ChatGPT サブスクリプション"
+        "chatgpt_oauth": "ChatGPT サブスクリプション",
+        "xai_oauth": "xAI Grok OAuth"
       },
       "chatgptOAuth": {
         "title": "ChatGPT サブスクリプション",
@@ -431,6 +432,19 @@
         "skipProviderOrNormalizationFiltered": "Provider または正規化で除外",
         "skipUnsupportedBedrockModel": "未対応の Bedrock モデル",
         "skipUnsupportedVertexModel": "未対応の Vertex モデル"
+      },
+      "xaiOAuth": {
+        "title": "xAI Grok OAuth",
+        "oauthBadge": "実験的 OAuth",
+        "description": "xAI のデバイスコード OAuth で、自分の SuperGrok または X Premium アカウントを接続します。",
+        "callbackUnavailable": "利用可否は xAI によって制御され、サブスクリプション階層や allowlist 状態によって 403 が返る場合があります。",
+        "connected": "接続済み",
+        "deviceInstruction": "<link>xAI 認証ページ</link>を開き、以下のコードを入力してください。",
+        "copyCode": "コードをコピー",
+        "copied": "コピーしました",
+        "connectWithDeviceCode": "デバイスコードで接続",
+        "cancel": "キャンセル",
+        "statusError": "デバイス認証は {status} です。"
       }
     },
     "agents": {

@@ -55,7 +55,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest |
+    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest | 
 
     try:
         # Create Password Reset Token
@@ -89,6 +89,9 @@ Class | Method | HTTP request | Description
 *HealthV1Api* | [**health_v1_readiness**](azentsadminclient/docs/HealthV1Api.md#health_v1_readiness) | **GET** /health/v1/readiness | Readiness
 *InvitationV1Api* | [**invitation_v1_delete_invitation**](azentsadminclient/docs/InvitationV1Api.md#invitation_v1_delete_invitation) | **DELETE** /invitation/v1/invitations/{invitation_id} | Delete Invitation
 *InvitationV1Api* | [**invitation_v1_list_workspace_invitations**](azentsadminclient/docs/InvitationV1Api.md#invitation_v1_list_workspace_invitations) | **GET** /invitation/v1/workspaces/{handle}/invitations | List Workspace Invitations
+*ModelCatalogV1Api* | [**model_catalog_v1_list_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_list_system_model_catalogs) | **GET** /model-catalog/v1/system-catalogs | List System Model Catalogs
+*ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalog**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalog) | **POST** /model-catalog/v1/system-catalogs/{provider}/refresh | Refresh System Model Catalog
+*ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
 *UserEmailV1Api* | [**useremail_v1_create_email**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_create_email) | **POST** /user-email/v1/users/{user_id}/emails | Create Email
 *UserEmailV1Api* | [**useremail_v1_delete_email**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_delete_email) | **DELETE** /user-email/v1/emails/{email_id} | Delete Email
 *UserEmailV1Api* | [**useremail_v1_list_emails**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_list_emails) | **GET** /user-email/v1/emails | List Emails
@@ -130,12 +133,18 @@ Class | Method | HTTP request | Description
  - [InvitationListResponse](azentsadminclient/docs/InvitationListResponse.md)
  - [InvitationResponse](azentsadminclient/docs/InvitationResponse.md)
  - [InvitationStatus](azentsadminclient/docs/InvitationStatus.md)
+ - [LLMProvider](azentsadminclient/docs/LLMProvider.md)
  - [PasswordResetTokenListResponse](azentsadminclient/docs/PasswordResetTokenListResponse.md)
  - [PasswordResetTokenResponse](azentsadminclient/docs/PasswordResetTokenResponse.md)
  - [SentryDiagnostics](azentsadminclient/docs/SentryDiagnostics.md)
  - [SignupTokenDeliveryMethod](azentsadminclient/docs/SignupTokenDeliveryMethod.md)
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)
  - [SignupTokenResponse](azentsadminclient/docs/SignupTokenResponse.md)
+ - [SystemModelCatalogListResponse](azentsadminclient/docs/SystemModelCatalogListResponse.md)
+ - [SystemModelCatalogRefreshListResponse](azentsadminclient/docs/SystemModelCatalogRefreshListResponse.md)
+ - [SystemModelCatalogRefreshResponse](azentsadminclient/docs/SystemModelCatalogRefreshResponse.md)
+ - [SystemModelCatalogResponse](azentsadminclient/docs/SystemModelCatalogResponse.md)
+ - [SystemModelCatalogSyncAttemptResponse](azentsadminclient/docs/SystemModelCatalogSyncAttemptResponse.md)
  - [TransferOwnershipRequest](azentsadminclient/docs/TransferOwnershipRequest.md)
  - [UserEmailCreateRequest](azentsadminclient/docs/UserEmailCreateRequest.md)
  - [UserEmailListResponse](azentsadminclient/docs/UserEmailListResponse.md)
@@ -167,3 +176,7 @@ Authentication schemes defined for the API:
 
 
 ## Author
+
+
+
+

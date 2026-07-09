@@ -34,7 +34,8 @@ type ProviderLabels = Record<
   | "google_gemini"
   | "aws_bedrock"
   | "google_vertex_ai"
-  | "chatgpt_oauth",
+  | "chatgpt_oauth"
+  | "xai_oauth",
   string
 >;
 
@@ -51,6 +52,8 @@ function providerColor(provider: string): string {
       return "yellow";
     case "chatgpt_oauth":
       return "teal";
+    case "xai_oauth":
+      return "dark";
     default:
       return "gray";
   }
@@ -70,6 +73,8 @@ function labelForProvider(provider: string, labels: ProviderLabels): string {
       return labels.google_vertex_ai;
     case "chatgpt_oauth":
       return labels.chatgpt_oauth;
+    case "xai_oauth":
+      return labels.xai_oauth;
     default:
       return provider;
   }
@@ -84,6 +89,7 @@ export function LlmSettings(
     mutationState,
     canManage,
     providerOptions,
+    availableProviderValues,
     modelOptions,
     catalogStates,
     modelsLoading,
@@ -151,6 +157,7 @@ export function LlmSettings(
 
         <IntegrationFormModal
           handle={props.handle}
+          availableProviderValues={availableProviderValues}
           formModal={formModal}
           mutationState={mutationState}
           onClose={onCloseModal}
@@ -187,6 +194,7 @@ function IntegrationCard({
     aws_bedrock: t("providers.aws_bedrock"),
     google_vertex_ai: t("providers.google_vertex_ai"),
     chatgpt_oauth: t("providers.chatgpt_oauth"),
+    xai_oauth: t("providers.xai_oauth"),
   };
 
   return (

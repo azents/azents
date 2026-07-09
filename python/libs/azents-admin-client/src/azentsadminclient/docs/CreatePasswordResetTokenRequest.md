@@ -6,8 +6,8 @@ Password reset token creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**user_id** | **str** |  | [optional]
-**email** | **str** |  | [optional]
+**user_id** | **str** |  | [optional] 
+**email** | **str** |  | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ create_password_reset_token_request_dict = create_password_reset_token_request_i
 create_password_reset_token_request_from_dict = CreatePasswordResetTokenRequest.from_dict(create_password_reset_token_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

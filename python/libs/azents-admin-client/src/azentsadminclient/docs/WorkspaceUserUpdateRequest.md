@@ -6,8 +6,8 @@ WorkspaceUser update request schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** |  | [optional]
-**locale** | **str** |  | [optional]
+**name** | **str** |  | [optional] 
+**locale** | **str** |  | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ workspace_user_update_request_dict = workspace_user_update_request_instance.to_d
 workspace_user_update_request_from_dict = WorkspaceUserUpdateRequest.from_dict(workspace_user_update_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

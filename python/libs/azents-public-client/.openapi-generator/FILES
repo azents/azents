@@ -16,6 +16,7 @@ azentspublicclient/api/user_v1_api.py
 azentspublicclient/api/workspace_model_settings_v1_api.py
 azentspublicclient/api/workspace_user_v1_api.py
 azentspublicclient/api/workspace_v1_api.py
+azentspublicclient/api/xaio_auth_v1_api.py
 azentspublicclient/api_client.py
 azentspublicclient/api_response.py
 azentspublicclient/configuration.py
@@ -165,6 +166,8 @@ azentspublicclient/docs/JoinRequestStatus.md
 azentspublicclient/docs/JoinRequestV1Api.md
 azentspublicclient/docs/LLMModelDeveloper.md
 azentspublicclient/docs/LLMProvider.md
+azentspublicclient/docs/LLMProviderCapabilityListResponse.md
+azentspublicclient/docs/LLMProviderCapabilityResponse.md
 azentspublicclient/docs/LLMProviderIntegrationCreateRequest.md
 azentspublicclient/docs/LLMProviderIntegrationCreateRequestConfig.md
 azentspublicclient/docs/LLMProviderIntegrationListResponse.md
@@ -293,6 +296,12 @@ azentspublicclient/docs/WorkspaceUserRole.md
 azentspublicclient/docs/WorkspaceUserV1Api.md
 azentspublicclient/docs/WorkspaceV1Api.md
 azentspublicclient/docs/WsTicketResponse.md
+azentspublicclient/docs/XAIOAuthV1Api.md
+azentspublicclient/docs/XaiOAuthConfig.md
+azentspublicclient/docs/XaiOAuthDeviceStartResponse.md
+azentspublicclient/docs/XaiOAuthDeviceStatusResponse.md
+azentspublicclient/docs/XaiOAuthSecrets.md
+azentspublicclient/docs/XaiOAuthSessionStatus.md
 azentspublicclient/exceptions.py
 azentspublicclient/models/__init__.py
 azentspublicclient/models/accept_decline_response.py
@@ -434,6 +443,8 @@ azentspublicclient/models/join_request_status.py
 azentspublicclient/models/live_event_list_response.py
 azentspublicclient/models/llm_model_developer.py
 azentspublicclient/models/llm_provider.py
+azentspublicclient/models/llm_provider_capability_list_response.py
+azentspublicclient/models/llm_provider_capability_response.py
 azentspublicclient/models/llm_provider_integration_create_request.py
 azentspublicclient/models/llm_provider_integration_create_request_config.py
 azentspublicclient/models/llm_provider_integration_list_response.py
@@ -553,6 +564,11 @@ azentspublicclient/models/workspace_user_list_response.py
 azentspublicclient/models/workspace_user_response.py
 azentspublicclient/models/workspace_user_role.py
 azentspublicclient/models/ws_ticket_response.py
+azentspublicclient/models/xai_o_auth_config.py
+azentspublicclient/models/xai_o_auth_device_start_response.py
+azentspublicclient/models/xai_o_auth_device_status_response.py
+azentspublicclient/models/xai_o_auth_secrets.py
+azentspublicclient/models/xai_o_auth_session_status.py
 azentspublicclient/rest.py
 azentspublicclient/test/__init__.py
 azentspublicclient/test/test_accept_decline_response.py
@@ -702,6 +718,8 @@ azentspublicclient/test/test_join_request_v1_api.py
 azentspublicclient/test/test_live_event_list_response.py
 azentspublicclient/test/test_llm_model_developer.py
 azentspublicclient/test/test_llm_provider.py
+azentspublicclient/test/test_llm_provider_capability_list_response.py
+azentspublicclient/test/test_llm_provider_capability_response.py
 azentspublicclient/test/test_llm_provider_integration_create_request.py
 azentspublicclient/test/test_llm_provider_integration_create_request_config.py
 azentspublicclient/test/test_llm_provider_integration_list_response.py
@@ -829,4 +847,10 @@ azentspublicclient/test/test_workspace_user_role.py
 azentspublicclient/test/test_workspace_user_v1_api.py
 azentspublicclient/test/test_workspace_v1_api.py
 azentspublicclient/test/test_ws_ticket_response.py
+azentspublicclient/test/test_xai_o_auth_config.py
+azentspublicclient/test/test_xai_o_auth_device_start_response.py
+azentspublicclient/test/test_xai_o_auth_device_status_response.py
+azentspublicclient/test/test_xai_o_auth_secrets.py
+azentspublicclient/test/test_xai_o_auth_session_status.py
+azentspublicclient/test/test_xaio_auth_v1_api.py
 azentspublicclient_README.md

@@ -337,7 +337,8 @@
         "google_gemini": "Google Gemini",
         "aws_bedrock": "AWS Bedrock",
         "google_vertex_ai": "Google Vertex AI",
-        "chatgpt_oauth": "Abonnement ChatGPT"
+        "chatgpt_oauth": "Abonnement ChatGPT",
+        "xai_oauth": "OAuth xAI Grok"
       },
       "chatgptOAuth": {
         "title": "Abonnement ChatGPT",
@@ -431,6 +432,19 @@
         "skipProviderOrNormalizationFiltered": "Filtré par provider ou normalisation",
         "skipUnsupportedBedrockModel": "Modèle Bedrock non pris en charge",
         "skipUnsupportedVertexModel": "Modèle Vertex non pris en charge"
+      },
+      "xaiOAuth": {
+        "title": "OAuth xAI Grok",
+        "oauthBadge": "OAuth expérimental",
+        "description": "Connectez votre compte SuperGrok ou X Premium avec OAuth par code appareil de xAI.",
+        "callbackUnavailable": "La disponibilité est contrôlée par xAI et peut renvoyer 403 selon votre niveau d’abonnement ou votre statut d’allowlist.",
+        "connected": "Connecté",
+        "deviceInstruction": "Ouvrez <link>la vérification xAI</link> et saisissez le code ci-dessous.",
+        "copyCode": "Copier le code",
+        "copied": "Copié",
+        "connectWithDeviceCode": "Connecter avec un code appareil",
+        "cancel": "Annuler",
+        "statusError": "Autorisation appareil {status}."
       }
     },
     "agents": {

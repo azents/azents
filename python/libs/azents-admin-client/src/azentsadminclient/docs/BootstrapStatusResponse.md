@@ -6,7 +6,7 @@ First owner bootstrap status response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**available** | **bool** | bootstrap availability flag |
+**available** | **bool** | bootstrap availability flag | 
 
 ## Example
 
@@ -26,3 +26,5 @@ bootstrap_status_response_dict = bootstrap_status_response_instance.to_dict()
 bootstrap_status_response_from_dict = BootstrapStatusResponse.from_dict(bootstrap_status_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

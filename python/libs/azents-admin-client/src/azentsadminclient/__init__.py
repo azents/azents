@@ -22,6 +22,7 @@ __all__ = [
     "DebugV1Api",
     "HealthV1Api",
     "InvitationV1Api",
+    "ModelCatalogV1Api",
     "UserEmailV1Api",
     "UserV1Api",
     "WorkspaceUserV1Api",
@@ -52,12 +53,18 @@ __all__ = [
     "InvitationListResponse",
     "InvitationResponse",
     "InvitationStatus",
+    "LLMProvider",
     "PasswordResetTokenListResponse",
     "PasswordResetTokenResponse",
     "SentryDiagnostics",
     "SignupTokenDeliveryMethod",
     "SignupTokenListResponse",
     "SignupTokenResponse",
+    "SystemModelCatalogListResponse",
+    "SystemModelCatalogRefreshListResponse",
+    "SystemModelCatalogRefreshResponse",
+    "SystemModelCatalogResponse",
+    "SystemModelCatalogSyncAttemptResponse",
     "TransferOwnershipRequest",
     "UserEmailCreateRequest",
     "UserEmailListResponse",
@@ -82,6 +89,7 @@ from azentsadminclient.api.auth_v1_api import AuthV1Api as AuthV1Api
 from azentsadminclient.api.debug_v1_api import DebugV1Api as DebugV1Api
 from azentsadminclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
+from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api as ModelCatalogV1Api
 from azentsadminclient.api.user_email_v1_api import UserEmailV1Api as UserEmailV1Api
 from azentsadminclient.api.user_v1_api import UserV1Api as UserV1Api
 from azentsadminclient.api.workspace_user_v1_api import WorkspaceUserV1Api as WorkspaceUserV1Api
@@ -116,12 +124,18 @@ from azentsadminclient.models.health_status import HealthStatus as HealthStatus
 from azentsadminclient.models.invitation_list_response import InvitationListResponse as InvitationListResponse
 from azentsadminclient.models.invitation_response import InvitationResponse as InvitationResponse
 from azentsadminclient.models.invitation_status import InvitationStatus as InvitationStatus
+from azentsadminclient.models.llm_provider import LLMProvider as LLMProvider
 from azentsadminclient.models.password_reset_token_list_response import PasswordResetTokenListResponse as PasswordResetTokenListResponse
 from azentsadminclient.models.password_reset_token_response import PasswordResetTokenResponse as PasswordResetTokenResponse
 from azentsadminclient.models.sentry_diagnostics import SentryDiagnostics as SentryDiagnostics
 from azentsadminclient.models.signup_token_delivery_method import SignupTokenDeliveryMethod as SignupTokenDeliveryMethod
 from azentsadminclient.models.signup_token_list_response import SignupTokenListResponse as SignupTokenListResponse
 from azentsadminclient.models.signup_token_response import SignupTokenResponse as SignupTokenResponse
+from azentsadminclient.models.system_model_catalog_list_response import SystemModelCatalogListResponse as SystemModelCatalogListResponse
+from azentsadminclient.models.system_model_catalog_refresh_list_response import SystemModelCatalogRefreshListResponse as SystemModelCatalogRefreshListResponse
+from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse as SystemModelCatalogRefreshResponse
+from azentsadminclient.models.system_model_catalog_response import SystemModelCatalogResponse as SystemModelCatalogResponse
+from azentsadminclient.models.system_model_catalog_sync_attempt_response import SystemModelCatalogSyncAttemptResponse as SystemModelCatalogSyncAttemptResponse
 from azentsadminclient.models.transfer_ownership_request import TransferOwnershipRequest as TransferOwnershipRequest
 from azentsadminclient.models.user_email_create_request import UserEmailCreateRequest as UserEmailCreateRequest
 from azentsadminclient.models.user_email_list_response import UserEmailListResponse as UserEmailListResponse
@@ -139,3 +153,4 @@ from azentsadminclient.models.workspace_user_list_response import WorkspaceUserL
 from azentsadminclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentsadminclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
 from azentsadminclient.models.workspace_user_update_request import WorkspaceUserUpdateRequest as WorkspaceUserUpdateRequest
+

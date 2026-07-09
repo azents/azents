@@ -1863,8 +1863,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    session_id = 'session_id_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
 
     try:
         # Get Subagent Tree
@@ -1882,8 +1882,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  |
- **session_id** | **str**|  |
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
 
 ### Return type
 

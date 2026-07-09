@@ -191,6 +191,21 @@ class LLMProviderIntegrationListResponse(BaseModel):
     items: list[LLMProviderIntegrationResponse]
 
 
+class LLMProviderCapabilityResponse(BaseModel):
+    """LLM provider capability exposed to the workspace UI."""
+
+    provider: LLMProvider
+    display_name: str
+    credential_type: str
+    experimental: bool = False
+
+
+class LLMProviderCapabilityListResponse(BaseModel):
+    """Available LLM provider capability list response."""
+
+    items: list[LLMProviderCapabilityResponse]
+
+
 class LLMProviderIntegrationCreateRequest(BaseModel):
     """LLM Provider Integration creation request."""
 

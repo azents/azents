@@ -27,3 +27,5 @@ subagent_settings_dict = subagent_settings_instance.to_dict()
 subagent_settings_from_dict = SubagentSettings.from_dict(subagent_settings_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

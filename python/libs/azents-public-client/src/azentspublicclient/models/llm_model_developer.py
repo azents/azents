@@ -29,6 +29,7 @@ class LLMModelDeveloper(str, Enum):
     OPENAI = 'openai'
     ANTHROPIC = 'anthropic'
     GOOGLE = 'google'
+    XAI = 'xai'
     META = 'meta'
     MISTRAL = 'mistral'
 

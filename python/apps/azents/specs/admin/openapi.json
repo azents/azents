@@ -2081,6 +2081,7 @@
         "enum": [
           "openai",
           "chatgpt_oauth",
+          "xai_oauth",
           "anthropic",
           "google_gemini",
           "aws_bedrock",

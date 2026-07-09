@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, ModelParameters
-from azents.core.enums import ExchangeFileStatus
+from azents.core.enums import ExchangeFileStatus, LLMProvider
 from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
 from azents.core.tools import (
     ResolveContext,
@@ -55,15 +55,36 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
-from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
+from azents.services.chatgpt_oauth.data import (
+    ProviderRejected as ChatGPTOAuthProviderRejected,
+)
+from azents.services.chatgpt_oauth.data import (
+    ProviderUnavailable as ChatGPTOAuthProviderUnavailable,
+)
+from azents.services.chatgpt_oauth.runtime import (
+    ensure_runtime_tokens as ensure_chatgpt_oauth_runtime_tokens,
+)
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import (
     ModelFileInvalidImage,
     ModelFileOversized,
     ModelFileService,
     model_file_size_limit_message,
+)
+from azents.services.xai_oauth.data import (
+    ProviderEntitlementDenied as XaiOAuthProviderEntitlementDenied,
+)
+from azents.services.xai_oauth.data import (
+    ProviderRejected as XaiOAuthProviderRejected,
+)
+from azents.services.xai_oauth.data import (
+    ProviderUnavailable as XaiOAuthProviderUnavailable,
+)
+from azents.services.xai_oauth.runtime import (
+    ensure_runtime_tokens as ensure_xai_oauth_runtime_tokens,
 )
 
 from .input import (
@@ -178,6 +199,43 @@ ResolveError = (
     | IntegrationDisabled
     | InvalidModelParameters
 )
+RuntimeTokenRefreshError = (
+    ChatGPTOAuthProviderRejected
+    | ChatGPTOAuthProviderUnavailable
+    | XaiOAuthProviderRejected
+    | XaiOAuthProviderEntitlementDenied
+    | XaiOAuthProviderUnavailable
+)
+
+
+async def _ensure_provider_runtime_tokens(
+    *,
+    integration: LLMProviderIntegrationWithSecrets,
+    integration_repository: LLMProviderIntegrationRepository,
+    session_manager: SessionManager[AsyncSession],
+    xai_oauth_client_id: str | None,
+) -> Result[LLMProviderIntegrationWithSecrets, RuntimeTokenRefreshError]:
+    """Refresh provider OAuth credentials before Runtime execution."""
+    if integration.provider == LLMProvider.XAI_OAUTH:
+        result = await ensure_xai_oauth_runtime_tokens(
+            integration=integration,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+            client_id=xai_oauth_client_id,
+        )
+    else:
+        result = await ensure_chatgpt_oauth_runtime_tokens(
+            integration=integration,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+        )
+    match result:
+        case Success(value):
+            return Success(value)
+        case Failure(error):
+            return Failure(error)
+        case _:
+            assert_never(result)
 
 
 def _resolve_reasoning_effort(
@@ -225,6 +283,7 @@ async def resolve_invoke_input(
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
+    xai_oauth_client_id: str | None = None,
 ) -> Result[RunRequest, ResolveError]:
     """Load Agent/Integration and build RunRequest."""
     return await resolve_invoke_input_with_model_source(
@@ -235,6 +294,7 @@ async def resolve_invoke_input(
         session_manager=session_manager,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
+        xai_oauth_client_id=xai_oauth_client_id,
     )
 
 
@@ -247,6 +307,7 @@ async def resolve_invoke_input_with_model_source(
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
+    xai_oauth_client_id: str | None = None,
 ) -> Result[RunRequest, ResolveError]:
     """Load Agent while separately specifying source agent for LLM model selection."""
     async with session_manager() as session:
@@ -285,10 +346,11 @@ async def resolve_invoke_input_with_model_source(
                     integration_id=main_selection.llm_provider_integration_id,
                 )
             )
-        refreshed_integration = await ensure_runtime_tokens(
+        refreshed_integration = await _ensure_provider_runtime_tokens(
             integration=integration,
             integration_repository=integration_repository,
             session_manager=session_manager,
+            xai_oauth_client_id=xai_oauth_client_id,
         )
         match refreshed_integration:
             case Success(value):
@@ -320,10 +382,11 @@ async def resolve_invoke_input_with_model_source(
                         integration_id=lightweight_selection.llm_provider_integration_id,
                     )
                 )
-            refreshed_lightweight_integration = await ensure_runtime_tokens(
+            refreshed_lightweight_integration = await _ensure_provider_runtime_tokens(
                 integration=loaded_lightweight_integration,
                 integration_repository=integration_repository,
                 session_manager=session_manager,
+                xai_oauth_client_id=xai_oauth_client_id,
             )
             match refreshed_lightweight_integration:
                 case Success(value):

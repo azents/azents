@@ -6,11 +6,11 @@ User response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | User ID (UUID7 hex) |
-**primary_email_id** | **str** | Primary email ID |
-**primary_email** | **str** | Primary email address |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | User ID (UUID7 hex) | 
+**primary_email_id** | **str** | Primary email ID | 
+**primary_email** | **str** | Primary email address | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 
@@ -30,3 +30,5 @@ user_response_dict = user_response_instance.to_dict()
 user_response_from_dict = UserResponse.from_dict(user_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

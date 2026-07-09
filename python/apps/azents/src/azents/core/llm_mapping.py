@@ -14,8 +14,10 @@ from azents.core.credentials import (
     ChatGPTOAuthSecrets,
     GcpConfig,
     GcpSecrets,
+    XaiOAuthSecrets,
 )
 from azents.core.enums import LLMProvider
+from azents.core.xai_oauth import XAI_OAUTH_BACKEND_BASE_URL
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
@@ -28,6 +30,7 @@ PROVIDER_LITELLM_PREFIX: dict[LLMProvider, str] = {
     LLMProvider.AWS_BEDROCK: "bedrock/",
     LLMProvider.GOOGLE_VERTEX_AI: "vertex_ai/",
     LLMProvider.CHATGPT_OAUTH: "",
+    LLMProvider.XAI_OAUTH: "xai/",
 }
 
 
@@ -73,6 +76,13 @@ def build_credential_kwargs(
                 "api_key": token,
                 "base_url": CHATGPT_OAUTH_BACKEND_BASE_URL,
                 "api_base": CHATGPT_OAUTH_BACKEND_BASE_URL,
+            }
+        case XaiOAuthSecrets(access_token=token):
+            return {
+                "api_key": token,
+                "base_url": XAI_OAUTH_BACKEND_BASE_URL,
+                "api_base": XAI_OAUTH_BACKEND_BASE_URL,
+                "custom_llm_provider": "xai",
             }
         case AwsSecrets(secret_access_key=secret):
             config = cast(AwsConfig, integration.config)
