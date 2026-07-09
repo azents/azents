@@ -208,3 +208,104 @@ class TestModelSelectionReadiness:
         assert body["default_lightweight_model_selection"]["model_identifier"] == (
             "gpt-5.5"
         )
+
+    def test_selectable_model_options_copy_to_agent_and_fallback(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+    ) -> None:
+        """Workspace selectable model options copy to Agent and fallback by order."""
+        token, handle, integration_id = _workspace_with_deterministic_integration(
+            public_api_client,
+            admin_api_client,
+            variant="deterministic-success",
+        )
+        _sync_catalog(azents_public_server_url, token, handle, integration_id)
+        listing = wait_until(
+            lambda: requests.get(
+                f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
+                f"{handle}/llm-provider-integrations/{integration_id}/catalog-entries",
+                headers=_headers(token),
+                timeout=10,
+            ),
+            timeout=10,
+            interval=0.2,
+            message="Stored catalog entries did not become readable",
+        )
+        listing.raise_for_status()
+        entries = listing.json()["entries"]
+        main_selection = {
+            "llm_provider_integration_id": integration_id,
+            "model_identifier": entries[0]["provider_model_identifier"],
+        }
+        lightweight_selection = {
+            "llm_provider_integration_id": integration_id,
+            "model_identifier": entries[1]["provider_model_identifier"],
+        }
+
+        update = requests.put(
+            f"{azents_public_server_url}/workspace-model-settings/v1/workspaces/{handle}",
+            headers=_headers(token),
+            json={
+                "default_selectable_model_options": [
+                    {"label": "default", "model_selection": main_selection},
+                    {"label": "lightweight", "model_selection": lightweight_selection},
+                ],
+                "default_main_model_label": "default",
+                "default_lightweight_model_label": "lightweight",
+            },
+            timeout=10,
+        )
+        assert update.status_code == 200
+        settings = update.json()
+        assert [
+            option["label"] for option in settings["default_selectable_model_options"]
+        ] == ["default", "lightweight"]
+        assert settings["default_model_selection"]["model_identifier"] == "gpt-5.5"
+        assert (
+            settings["default_lightweight_model_selection"]["model_identifier"]
+            == "gpt-5.5-mini"
+        )
+
+        created = requests.post(
+            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents",
+            headers=_headers(token),
+            json={"name": "Selectable Options Agent", "type": "public"},
+            timeout=10,
+        )
+        assert created.status_code == 201
+        agent = created.json()
+        assert [option["label"] for option in agent["selectable_model_options"]] == [
+            "default",
+            "lightweight",
+        ]
+        assert agent["main_model_label"] == "default"
+        assert agent["lightweight_model_label"] == "lightweight"
+        assert agent["model_selection"]["model_identifier"] == "gpt-5.5"
+        assert (
+            agent["lightweight_model_selection"]["model_identifier"] == "gpt-5.5-mini"
+        )
+
+        fallback_update = requests.patch(
+            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents/{agent['id']}",
+            headers=_headers(token),
+            json={
+                "selectable_model_options": [
+                    {"label": "fast", "model_selection": lightweight_selection},
+                    {"label": "default", "model_selection": main_selection},
+                ],
+                "main_model_label": "removed-label",
+                "lightweight_model_label": "removed-label",
+            },
+            timeout=10,
+        )
+        assert fallback_update.status_code == 200
+        updated_agent = fallback_update.json()
+        assert updated_agent["main_model_label"] == "fast"
+        assert updated_agent["lightweight_model_label"] == "fast"
+        assert updated_agent["model_selection"]["model_identifier"] == "gpt-5.5-mini"
+        assert (
+            updated_agent["lightweight_model_selection"]["model_identifier"]
+            == "gpt-5.5-mini"
+        )
