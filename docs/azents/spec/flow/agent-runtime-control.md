@@ -23,7 +23,7 @@ code_paths:
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
 last_verified_at: 2026-07-09
-spec_version: 9
+spec_version: 10
 ---
 
 # Agent Runtime Control
@@ -90,8 +90,11 @@ The store owns:
 - operation metadata, heartbeat/progress/final events
 - background operation completion claims
 - generation fencing data used to reject stale provider/runner messages
+- request claim cursors and stream metadata used to acknowledge delivered Provider/Runner requests
 
 Generation fencing is enforced before volatile stream messages mutate durable state. Control rejects or closes Provider/Runner streams whose inbound message generation differs from the accepted registration generation. Durable Provider reports are accepted only when both the Provider stream generation and observed desired generation are monotonic relative to the `agent_runtimes` row. Durable Runner state reports are accepted only when the Runner generation is not older than the row generation. Stale reports must not overwrite workspace path, observed state, runner availability, or current failure fields.
+
+Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed request with the stream cursor and consumer-group metadata needed to acknowledge the request only after it has been sent on the matching gRPC stream. Unacknowledged requests may be reclaimed after an idle interval so a Control replica crash or stream interruption does not strand in-flight Provider/Runner work.
 
 The store is not a source of product truth. Losing store data may interrupt in-flight commands but must not make a Control replica infer that a Runtime does not exist or that workspace data can be discarded.
 
@@ -145,7 +148,7 @@ Runner owns runtime exec process handles, stdin writers, stdout/stderr drains, u
 
 Process output is continuously drained into bounded Runner-owned buffers. Tool calls drain unread buffers into one model-visible client tool result and preserve structured process metadata. Running exec processes do not use background operation completion publication and do not inject `background_completion` messages when they exit; callers observe completion through process events or later `write_stdin` polling.
 
-Runner operations are deadline-bounded end to end. Every `RuntimeRunnerOperation` carries a non-null `deadline_at`, including foreground and background operations. Foreground callers pass the same deadline to the reply-stream fold/resume path; waiting for a final reply without a deadline is invalid. If the reply stream does not produce a final event before the deadline, Control appends a local final error event with `operation_timeout`, marks the operation final, and the caller receives a failed operation result instead of waiting indefinitely. Provider lifecycle commands and Coordination Store metadata may still model optional deadlines because they cover different request classes and storage TTL semantics.
+Runner operations are deadline-bounded end to end. Every `RuntimeRunnerOperation` carries a non-null `deadline_at`, including foreground and background operations. Foreground callers pass the same deadline to the reply-stream fold/resume path; waiting for a final reply without a deadline is invalid. If the reply stream does not produce a final event before the deadline, Control appends a local final error event with `operation_timeout`, marks the operation final, and the caller receives a failed operation result instead of waiting indefinitely. Coordination Store operation metadata must live at least until the operation deadline plus a buffer so timeout/final folding can complete; it must not expire earlier merely because the default operation TTL is shorter than the requested deadline. Provider lifecycle commands and Coordination Store metadata may still model optional deadlines because they cover different request classes and storage TTL semantics.
 
 ## Lifecycle Semantics
 
@@ -161,7 +164,7 @@ Reset carries its own desired generation and a final desired state. Provider is 
 
 ## Background Operation Completion
 
-Long-running Runner operations can be marked background. Control stores background operation metadata in the Coordination Store, folds matching request events from the generation-scoped operation reply stream when a final event appears, claims publication idempotently, and enqueues a structured Worker input message.
+Long-running Runner operations can be marked background. Control stores background operation metadata in the Coordination Store, folds matching request events from the generation-scoped operation reply stream when a final event appears, claims publication idempotently, and enqueues a structured Worker input message. Background operation metadata includes the request id, operation id, parent AgentSession context, workspace id, agent id, tool name, and idempotency key needed to publish completion after the original request stream has been claimed, acknowledged, or retried.
 
 The Worker input queue message contains the parent AgentSession id, workspace id, agent id, runtime id, operation id, request id, tool name, status, completion text, and an idempotency key. Worker stores it as a `background_completion` input buffer for the parent AgentSession and sends a session wake-up. Completion publication must be idempotent across Control replica restarts.
 
@@ -191,6 +194,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-09** (spec_version 10) — Added Provider/Runner request claim/ack/reclaim semantics, operation metadata deadline buffering, and background completion context propagation.
 - **2026-07-09** (spec_version 9) — Added monotonic Provider/Runner generation fencing for stream messages and durable Runtime state updates.
 - **2026-07-09** (spec_version 8) — Added Runtime Control shared-token authentication for Provider and Runner gRPC streams and documented the Helm Secret-based wiring contract.
 - **2026-07-04** (spec_version 6) — Added typed Runner Git operations for ref preview, worktree creation, worktree removal, and branch deletion.
