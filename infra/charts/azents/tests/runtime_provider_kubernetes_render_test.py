@@ -23,7 +23,6 @@ def _helm_template(*values: str) -> str:
         "adminWeb.image.repository=repo/admin-web",
         "adminWeb.image.tag=sha",
         "secrets.existingSecrets.redis=azents-redis",
-        "server.runtimeControl.auth.existingSecret=azents-runtime-control-auth",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])
@@ -58,8 +57,7 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "repo/provider:sha" in rendered
     assert "repo/runner:sha" in rendered
     assert "AZ_RUNTIME_CONTROL_ENDPOINT" in rendered
-    assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" in rendered
-    assert "azents-runtime-control-auth" in rendered
+    assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
     assert "AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_STORAGE_CLASS" in rendered
@@ -82,6 +80,23 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "192.168.0.0/16" in rendered
     assert 'namespace: "default"' in rendered
     assert 'namespace: "azents-runtime"' in rendered
+
+
+def test_runtime_provider_kubernetes_auth_enabled_render_contract() -> None:
+    """auth enabled values render the Runtime Control auth token Secret ref."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+        "server.runtimeControl.auth.enabled=true",
+        "server.runtimeControl.auth.existingSecret=azents-runtime-control-auth",
+    )
+
+    assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" in rendered
+    assert "azents-runtime-control-auth" in rendered
+    assert "runtime-control-token" in rendered
 
 
 def test_runtime_provider_kubernetes_network_policy_allows_runtime_control() -> None:
