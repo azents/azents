@@ -41,17 +41,7 @@ async def update_workspace_model_settings(
     result = await service.update(
         member.workspace_id,
         WorkspaceModelSettingsUpdateInput(
-            default_model_selection=request_body.default_model_selection,
-            default_lightweight_model_selection=(
-                request_body.default_lightweight_model_selection
-            ),
-            default_selectable_model_options=(
-                request_body.default_selectable_model_options
-            ),
-            default_main_model_label=request_body.default_main_model_label,
-            default_lightweight_model_label=(
-                request_body.default_lightweight_model_label
-            ),
+            **request_body.model_dump(exclude_unset=True)
         ),
     )
     match result:
