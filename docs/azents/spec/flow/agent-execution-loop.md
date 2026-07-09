@@ -37,8 +37,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-08
-spec_version: 62
+last_verified_at: 2026-07-09
+spec_version: 63
 ---
 
 # Agent Execution Loop
@@ -257,15 +257,22 @@ while keeping the subagent collaboration toolkit available.
 
 Subagent collaboration tools communicate through target child input buffers:
 
-- `spawn_agent` creates a child `SessionAgent` plus hidden child `AgentSession`, optionally forks the
-  parent's current model-visible context, appends that selected context to the child transcript, writes
-  an initial `agent_message`, marks the child running, and sends a broker wake-up.
+- `spawn_agent` creates a child `SessionAgent` plus hidden child `AgentSession`, forks the parent's
+  current model-visible context by default, appends that selected context to the child transcript,
+  writes an initial `agent_message`, marks the child running, and sends a broker wake-up. The caller
+  may still explicitly select no context or a bounded number of recent turns through `fork_turns`.
 - `send_message` writes an `agent_message` to the target child without waking it.
 - `followup_task` writes an `agent_message`, marks the child running, and sends a broker wake-up.
 
 `agent_message` lowering renders the mailbox payload as explicitly sourced delegated input for the
 target child session. Broker wake-ups remain payload-free; recovery is based on persisted input
 buffers and `agent_sessions.run_state`.
+
+Human-authored direct writes are root-session only. REST message/edit/command/failed-run retry paths
+and operation retry/discard paths reject `session_kind = subagent` before creating input buffers,
+chat write requests, pending commands, operation mutations, live projections, or broker wake-ups.
+Subagent mailbox input must be written by a parent SessionAgent through collaboration tools as
+`agent_message` buffers.
 
 User-facing stop is subtree-aware: stopping a root session records stop intent for running linked
 descendants, and stopping a child detail session records stop intent for that child subtree.
@@ -469,6 +476,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-09** — v63. Documented default subagent context forking and child-session human write rejection before side effects.
 - **2026-07-08** — v62. Documented subagent worker scheduling through normal session runs, `agent_message` mailbox promotion, subagent execution-mode tool resolution, terminal result projections, and subtree stop behavior.
 - **2026-07-08** — v61. Process TurnActions at every model-call turn boundary; failed actions are marked failed and FIFO processing continues, while context invalidation exits through a follow-up wake-up without a completed run marker.
 - **2026-07-08** — v60. Process TurnActions at every model-call turn boundary and close the current run when an operation action blocks or invalidates context.

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 from azcommon.result import Failure, Result, Success
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 
 from azents.api.public.chat.v1 import (
     _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
@@ -293,8 +293,14 @@ class _BufferedInputService:
 class _RestWriteChatService:
     """ChatSessionService double for REST write tests."""
 
-    def __init__(self, session_id: str = "0123456789abcdef0123456789abcdef") -> None:
+    def __init__(
+        self,
+        session_id: str = "0123456789abcdef0123456789abcdef",
+        *,
+        session_kind: AgentSessionKind = AgentSessionKind.ROOT,
+    ) -> None:
         self.session_id = session_id
+        self.session_kind = session_kind
         self.get_agent_session_calls: list[tuple[str, str, str]] = []
         self.live_session_ids: list[str] = []
         self.event = Event(
@@ -335,7 +341,7 @@ class _RestWriteChatService:
                 workspace_id="workspace-1",
                 agent_id=agent_id,
                 handle="test-session-handle",
-                session_kind=AgentSessionKind.ROOT,
+                session_kind=self.session_kind,
                 status=AgentSessionStatus.ACTIVE,
                 start_reason=AgentSessionStartReason.INITIAL,
                 title=None,
@@ -1399,6 +1405,27 @@ class TestEventRoutes:
 
 class TestRestMessageWriteContract:
     """REST message write contract tests."""
+
+    async def test_validate_rest_session_rejects_subagent_before_write(
+        self,
+    ) -> None:
+        """REST write validation rejects child subagents before side effects."""
+        chat_service = _RestWriteChatService(
+            session_kind=AgentSessionKind.SUBAGENT,
+        )
+
+        try:
+            await _validate_rest_session(
+                chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+                agent_id="agent-1",
+                session_id="0123456789abcdef0123456789abcdef",
+                user_id="user-1",
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+            assert exc.detail == "Subagent sessions are read-only."
+        else:
+            raise AssertionError("Expected HTTPException")
 
     async def test_existing_session_message_commits_buffer_and_returns_snapshot(
         self,

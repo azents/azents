@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentProjectDefaultItemType,
+    AgentSessionKind,
     AgentSessionStatus,
     InputBufferKind,
 )
@@ -75,10 +76,16 @@ class AgentSessionInputInactiveSession:
     """Requested AgentSession is not writable."""
 
 
+@dataclasses.dataclass(frozen=True)
+class AgentSessionInputSubagentReadOnly:
+    """Requested child subagent session does not accept direct human input."""
+
+
 AgentSessionInputError = (
     AgentSessionInputSessionNotFound
     | AgentSessionInputWrongAgent
     | AgentSessionInputInactiveSession
+    | AgentSessionInputSubagentReadOnly
     | InvalidProjectPath
 )
 
@@ -137,6 +144,8 @@ class AgentSessionInputService:
                 return Failure(AgentSessionInputWrongAgent())
             if agent_session.status != AgentSessionStatus.ACTIVE:
                 return Failure(AgentSessionInputInactiveSession())
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(AgentSessionInputSubagentReadOnly())
 
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
@@ -182,6 +191,8 @@ class AgentSessionInputService:
                 return Failure(AgentSessionInputWrongAgent())
             if agent_session.status != AgentSessionStatus.ACTIVE:
                 return Failure(AgentSessionInputInactiveSession())
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(AgentSessionInputSubagentReadOnly())
 
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id

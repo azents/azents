@@ -7,7 +7,12 @@ from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentSessionRunState, EventKind, InputBufferKind
+from azents.core.enums import (
+    AgentSessionKind,
+    AgentSessionRunState,
+    EventKind,
+    InputBufferKind,
+)
 from azents.engine.events.types import FileOutputPart, SystemErrorPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -406,6 +411,8 @@ class ChatWriteService:
             raise ValueError("AgentSession not found")
         if locked.agent_id != agent_id:
             raise ValueError("AgentSession does not belong to the agent")
+        if locked.session_kind is AgentSessionKind.SUBAGENT:
+            raise ValueError("Subagent sessions are read-only")
         if locked.run_state != AgentSessionRunState.IDLE:
             raise ValueError("Session is running")
         if locked.pending_command_id is not None:

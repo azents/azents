@@ -33,7 +33,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-09
-spec_version: 48
+spec_version: 49
 ---
 
 # Toolkit
@@ -322,6 +322,11 @@ and subagent execution modes and exposes the coherent collaboration bundle as un
 - `list_agents`
 
 `spawn_agent` currently supports only `agent_type = default`; unsupported values fail as tool errors.
+Its `fork_turns` parameter defaults to `all`, so the child starts with the parent's current
+model-visible context unless the caller explicitly selects no context or a bounded number of turns.
+The child prompt describes that it has almost the same tool set as the parent because subagent
+execution mode intentionally removes root/user-facing capabilities while preserving collaboration and
+runtime work tools.
 The toolkit stores inter-agent delivery as target session `agent_message` input buffers. `send_message`
 queues without waking the target, while `spawn_agent` and `followup_task` mark the target session
 running and send normal broker wake-up signals. `wait_agent` reads unread terminal run projections and
@@ -334,7 +339,9 @@ target session and returns its previous projected status; it does not close, del
 descendants.
 
 The toolkit emits non-durable `subagent_tree_changed` events as invalidation signals. Durable tree
-state remains in `SessionAgent`, linked `AgentSession`, and latest `agent_runs` rows.
+state remains in `SessionAgent`, linked `AgentSession`, and latest `agent_runs` rows. Parent observation
+wording is terminal-result based: `wait_agent` exposes unread terminal child results, not immediate
+human delivery guarantees.
 
 ### Goal/Todo Prompt and Result Stability
 

@@ -16,11 +16,11 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-08 | 39 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-08 | 89 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-09 | 90 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-09 | 3 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-06-21 | 1 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-09 | 48 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-09 | 49 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-08 | 6 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-08 | 36 |
 
@@ -30,11 +30,11 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-08 | 62 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-09 | 63 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-06 | 7 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-09 | 18 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-09 | 19 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-06 | 18 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-08 | 10 |
@@ -148,8 +148,9 @@ _13 documents_
 - [ADR-0095: Register Project Picker Worktree UI](adr/0095-register-project-picker-worktree-ui.md)
 - [ADR-0096: Codex-first Subagent Redesign](adr/0096-codex-first-subagent-redesign.md)
 - [ADR-0097: Continue FIFO Processing After Failed TurnActions](adr/0097-turn-action-fifo-continuation.md)
+- [ADR-0098: Subagent Human Write Boundary](adr/0098-subagent-human-write-boundary.md)
 
-_100 documents_
+_101 documents_
 
 ## Issues (Bug Tracking)
 
@@ -166,8 +167,9 @@ _3 documents_
 - [Local sandbox provider daemon research](notes/local-sandbox-provider-daemon-research.md)
 - [Session Git Worktree Lifecycle Research](notes/session-git-worktree-lifecycle-research.md)
 - [Session Project Model Research and Discussion Summary](notes/session-project-model-research.md)
+- [Subagent Prompt Hardening Notes](notes/subagent-prompt-hardening-2026-07-09.md)
 
-_5 documents_
+_6 documents_
 
 ## Documentation Rules · Overview
 
@@ -181,4 +183,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 356
+- Total documents: 358

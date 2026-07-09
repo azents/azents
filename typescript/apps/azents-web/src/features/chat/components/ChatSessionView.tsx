@@ -315,7 +315,7 @@ export function ChatSessionView({
           readOnlyNotice={
             subagentNavigation === null
               ? null
-              : tAgentDetail("subagents.readOnlyNotice")
+              : tAgentDetail("subagents.inputDisabledPlaceholder")
           }
         />
       </Box>

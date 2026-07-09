@@ -609,12 +609,14 @@
           "backToParentTooltip": "상위 에이전트로 돌아가기: {name} ({path})",
           "navigationMenu": "서브에이전트 이동 옵션",
           "readOnlyNotice": "서브에이전트 세션은 읽기 전용입니다. 새 지시는 상위 에이전트에서 보내세요.",
+          "inputDisabledPlaceholder": "서브에이전트 세션이라 직접 입력할 수 없습니다. 새 지시는 상위 에이전트에서 보내세요.",
           "unread": "읽지 않음",
           "runIndex": "Run {index}",
           "status": {
             "idle": "대기",
             "running": "실행 중",
             "completed": "완료",
+            "failed": "실패",
             "errored": "오류",
             "interrupted": "중단됨",
             "notFound": "없음"
@@ -983,6 +985,7 @@
     "startConversation": "메시지를 보내 대화를 시작하세요",
     "inputPlaceholder": "메시지를 입력하세요...",
     "inputPlaceholderDesktop": "메시지를 입력하세요... (Shift+Enter로 줄바꿈)",
+    "inputDisabledPlaceholder": "이 세션에는 직접 입력할 수 없습니다.",
     "connected": "연결됨",
     "connecting": "연결 중",
     "reconnecting": "재연결 중",

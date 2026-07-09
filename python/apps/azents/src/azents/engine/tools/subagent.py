@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import json
 import time
+from textwrap import dedent
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -54,9 +55,10 @@ class SpawnAgentInput(BaseModel):
         description="Agent type. Only the default type is supported.",
     )
     fork_turns: str = Field(
-        default="none",
+        default="all",
         description=(
-            "Context fork selection: 'none', 'all', or a positive integer string."
+            "Context fork selection: 'none', 'all', or a positive integer string. "
+            "Defaults to 'all'."
         ),
     )
 
@@ -164,17 +166,37 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Return subagent collaboration guidance."""
         del context
-        return (
-            "Use subagent tools to delegate independent work to child agents. "
-            "Child agents have separate transcripts and can be nested. "
-            "Use send_message for queue-only notes, followup_task for work "
-            "that should wake the child, wait_agent to observe completed "
-            "child results, and list_agents to inspect the tree."
+        return dedent(
+            """\
+            You are an agent in a team of agents collaborating to fulfill the
+            user's goals.
+
+            At the start of your turn, you are the active agent.
+            You can spawn sub-agents to handle subtasks, and those sub-agents
+            can spawn their own sub-agents.
+            All agents in the team are similarly capable and have access to
+            almost the same set of tools, except for Azents root/user-facing
+            capabilities that are not available in subagent mode.
+
+            You can use `spawn_agent` to create a new agent, `followup_task`
+            to give an existing agent a new task and wake it, and
+            `send_message` to pass a message to a running agent without
+            waking it.
+            Child agents can also spawn their own sub-agents.
+            You can decide how much context you want to propagate to your
+            sub-agents with the `fork_turns` parameter, which defaults to
+            `all`.
+            Use `wait_agent` to observe unread terminal child results when
+            you need completion output from child agents.
+
+            When you provide a final response, that content is delivered back
+            to your parent agent as a terminal child result.
+            """
         )
 
     def _spawn_agent_tool(self) -> FunctionTool:
         async def spawn_agent(input: SpawnAgentInput) -> str:
-            """Create a child subagent and assign its initial task."""
+            """Create a child subagent and return its identity."""
             if input.agent_type != "default":
                 raise FunctionToolError("Only the default agent_type is supported")
             try:
@@ -279,7 +301,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     def _followup_task_tool(self) -> FunctionTool:
         async def followup_task(input: FollowupTaskInput) -> str:
-            """Assign a follow-up task to a target child agent and wake it."""
+            """Assign a follow-up task to an existing child agent and wake it."""
             if not input.task.strip():
                 raise FunctionToolError("task is required")
             async with self.session_manager() as session:

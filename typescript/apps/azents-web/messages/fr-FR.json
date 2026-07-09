@@ -609,12 +609,14 @@
           "backToParentTooltip": "Retour au parent : {name} ({path})",
           "navigationMenu": "Options de navigation du sous-agent",
           "readOnlyNotice": "Les sessions de sous-agent sont en lecture seule. Envoyez les nouvelles instructions depuis l’agent parent.",
+          "inputDisabledPlaceholder": "Cette session de sous-agent ne permet pas la saisie directe. Envoyez les instructions depuis l’agent parent.",
           "unread": "Non lu",
           "runIndex": "Run {index}",
           "status": {
             "idle": "Inactif",
             "running": "En cours",
             "completed": "Terminé",
+            "failed": "Échec",
             "errored": "Erreur",
             "interrupted": "Interrompu",
             "notFound": "Introuvable"
@@ -983,6 +985,7 @@
     "startConversation": "Envoyez un message pour démarrer la conversation",
     "inputPlaceholder": "Saisissez un message…",
     "inputPlaceholderDesktop": "Saisissez un message… (Maj+Entrée pour un saut de ligne)",
+    "inputDisabledPlaceholder": "La saisie directe est désactivée pour cette session.",
     "connected": "Connecté",
     "connecting": "Connexion",
     "reconnecting": "Reconnexion",

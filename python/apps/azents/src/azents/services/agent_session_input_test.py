@@ -1,6 +1,9 @@
 """AgentSessionInputService tests."""
 
 import datetime
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import cast
 
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,12 +47,19 @@ from azents.testing.model_selection import make_test_model_selection_dict
 from .agent_session_input import (
     AgentSessionInputInactiveSession,
     AgentSessionInputService,
+    AgentSessionInputSubagentReadOnly,
 )
 from .input_buffer import (
     InputBufferEnqueue,
     InputBufferEnqueueResult,
     InputBufferService,
 )
+
+
+@asynccontextmanager
+async def _session_manager_double() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a placeholder DB session for service-double tests."""
+    yield cast(AsyncSession, object())
 
 
 class _RuntimeRepositoryDouble(AgentRuntimeRepository):
@@ -81,8 +91,14 @@ class _RuntimeRepositoryDouble(AgentRuntimeRepository):
 class _AgentSessionRepositoryDouble(AgentSessionRepository):
     """AgentSession repository for tests."""
 
-    def __init__(self, calls: list[str]) -> None:
+    def __init__(
+        self,
+        calls: list[str],
+        *,
+        session_kind: AgentSessionKind = AgentSessionKind.ROOT,
+    ) -> None:
         self.calls = calls
+        self.session_kind = session_kind
 
     async def get_by_id(
         self,
@@ -98,7 +114,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
             workspace_id="workspace-1",
             agent_id="agent-1",
             handle="test-session-handle",
-            session_kind=AgentSessionKind.ROOT,
+            session_kind=self.session_kind,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,
             title=None,
@@ -316,6 +332,48 @@ class TestAgentSessionInputService:
         assert input_buffer_service.enqueued.session_id == "session-1"
         assert input_buffer_service.enqueued.content == "restore me"
 
+    async def test_create_buffered_agent_input_rejects_subagent_before_wake(
+        self,
+    ) -> None:
+        """Do not enqueue direct input or wake runtime for a child subagent."""
+        calls: list[str] = []
+        runtime_repository = _RuntimeRepositoryDouble(calls)
+        session_repository = _AgentSessionRepositoryDouble(
+            calls,
+            session_kind=AgentSessionKind.SUBAGENT,
+        )
+        input_buffer_service = _InputBufferServiceDouble(calls)
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=runtime_repository,
+            agent_session_repository=session_repository,
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            input_buffer_service=input_buffer_service,
+            session_manager=_session_manager_double,
+        )
+
+        result = await service.create_buffered_agent_input(
+            agent_id="agent-1",
+            agent_session_id="session-1",
+            message=InputMessage(
+                text="blocked",
+                user_id="user-1",
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            ),
+            user_id="user-1",
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, AgentSessionInputSubagentReadOnly)
+        assert calls == ["get_by_id"]
+        assert input_buffer_service.enqueued is None
+
     async def test_create_team_session_with_buffered_input_bootstraps_session(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -475,6 +533,69 @@ class TestAgentSessionInputService:
                 session, old_session.id
             )
         assert old_buffers == []
+
+    async def test_buffered_agent_input_rejects_subagent_session(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Direct human input cannot be enqueued into a child subagent session."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(session, "subagent-input-readonly")
+            user_id = await _create_user(session, "subagent-readonly@example.com")
+            agent_id = await _create_agent(session, workspace_id, "subagent-readonly")
+            root_session = await AgentSessionRepository().ensure_team_primary_for_agent(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+            root_agent = await AgentSessionRepository().get_session_agent_by_session_id(
+                session,
+                root_session.id,
+            )
+            assert root_agent is not None
+            child_agent = await AgentSessionRepository().create_child_session_agent(
+                session,
+                parent_session_agent_id=root_agent.id,
+                name="child",
+                agent_type="default",
+                title="Child",
+                last_task_message=None,
+            )
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+
+        result = await service.create_buffered_agent_input(
+            agent_id=agent_id,
+            agent_session_id=child_agent.agent_session_id,
+            message=InputMessage(
+                text="direct child input",
+                user_id=user_id,
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            ),
+            user_id=user_id,
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, AgentSessionInputSubagentReadOnly)
+        async with rdb_session_manager() as session:
+            buffers = await InputBufferRepository().list_by_session_id(
+                session,
+                child_agent.agent_session_id,
+            )
+        assert buffers == []
 
     async def test_create_buffered_agent_input_marks_session_running(
         self,

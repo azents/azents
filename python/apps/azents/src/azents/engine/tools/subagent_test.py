@@ -29,7 +29,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 
-from .subagent import SubagentToolkit
+from .subagent import SpawnAgentInput, SubagentToolkit
 
 _NOW = datetime.datetime.now(datetime.UTC)
 
@@ -334,6 +334,32 @@ async def _make_toolkit() -> tuple[
         run_repository,
         published_events,
     )
+
+
+async def test_subagent_static_prompt_matches_azents_semantics() -> None:
+    """Expose Codex-style team guidance with Azents delivery semantics."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+
+    prompt = await toolkit.get_static_prompt(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, lambda _event: None),
+            session_id="root-session",
+        )
+    )
+
+    assert "almost the same set of tools" in prompt
+    assert "fork_turns` parameter, which defaults to" in prompt
+    assert "terminal child result" in prompt
+    assert "immediately delivered" not in prompt
+
+
+def test_spawn_agent_fork_turns_defaults_to_all() -> None:
+    """spawn_agent propagates all context by default."""
+    assert SpawnAgentInput.model_fields["fork_turns"].default == "all"
 
 
 async def test_send_message_is_queue_only() -> None:
