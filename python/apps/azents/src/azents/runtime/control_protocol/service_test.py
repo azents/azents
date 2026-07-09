@@ -21,12 +21,30 @@ from azents.runtime.control_protocol.service import (
 )
 from azents.runtime.coordination.data import (
     RuntimeCoordinationTarget,
+    RuntimeOperationMetadata,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
 )
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
 )
+
+
+class RecordingTtlStore(InMemoryRuntimeCoordinationStore):
+    """In-memory store that records operation metadata TTLs for assertions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.last_operation_ttl_seconds: int | None = None
+
+    async def put_operation(
+        self,
+        metadata: RuntimeOperationMetadata,
+        *,
+        ttl_seconds: int | None,
+    ) -> None:
+        self.last_operation_ttl_seconds = ttl_seconds
+        await super().put_operation(metadata, ttl_seconds=ttl_seconds)
 
 
 @pytest.mark.asyncio
@@ -98,9 +116,80 @@ async def test_dispatch_provider_command_uses_provider_generation_fence() -> Non
     assert result.request_stream_id == "provider:provider-1:generation:1:requests"
     assert result.reply_stream_id == "provider:provider-1:generation:1:replies"
     assert claimed is not None
+    assert claimed.cursor is not None
+    assert claimed.stream_id == "provider:provider-1:generation:1:requests"
+    assert claimed.consumer_group == "provider-1:generation:1"
     assert claimed.runtime_id == "runtime-1"
     assert claimed.target == RuntimeCoordinationTarget.PROVIDER
     assert claimed.payload["desired_generation"] == 3
+
+    await service.ack_claimed_request(claimed)
+    assert (
+        await service.claim_next_provider_request(
+            provider_id="provider-1",
+            generation=accepted.generation,
+            consumer_id="control-b",
+            block_ms=0,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_claimed_runner_request_can_be_reclaimed_until_acked() -> None:
+    """Unacked claimed requests can move to another consumer after idle timeout."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "req-2",
+        request_reclaim_idle_seconds=0,
+    )
+    now = _now()
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=runner.generation,
+            operation_type="bash",
+            payload={"command": "echo ok"},
+            deadline_at=now + timedelta(seconds=30),
+            body_stream_id=None,
+            background=False,
+        ),
+        created_at=now,
+    )
+
+    first = await service.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=runner.generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    reclaimed = await service.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=runner.generation,
+        consumer_id="runner-b",
+        block_ms=0,
+    )
+
+    assert isinstance(result, RuntimeDispatchResult)
+    assert first is not None
+    assert reclaimed is not None
+    assert reclaimed.request_id == first.request_id
+    assert reclaimed.cursor == first.cursor
+    assert reclaimed.stream_id == first.stream_id
+    assert reclaimed.consumer_group == first.consumer_group
+
+    await service.ack_claimed_request(reclaimed)
+    assert (
+        await service.claim_next_runner_request(
+            runtime_id="runtime-1",
+            generation=runner.generation,
+            consumer_id="runner-c",
+            block_ms=0,
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -320,6 +409,51 @@ async def test_stale_reply_event_is_not_appended() -> None:
         )
         == []
     )
+
+
+@pytest.mark.asyncio
+async def test_operation_ttl_keeps_deadline_buffer() -> None:
+    """Operation metadata remains available past short client deadlines."""
+    store = RecordingTtlStore()
+    request_ids = iter(("req-1", "req-2"))
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: next(request_ids),
+        operation_ttl_seconds=900,
+    )
+    created_at = _now()
+    runner = await service.register_runner(
+        _runner_registration(),
+        registered_at=created_at,
+    )
+
+    await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=runner.generation,
+            operation_type="bash",
+            payload={"command": "echo short"},
+            deadline_at=created_at + timedelta(seconds=30),
+            body_stream_id=None,
+            background=False,
+        ),
+        created_at=created_at,
+    )
+    assert store.last_operation_ttl_seconds == 900
+
+    await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=runner.generation,
+            operation_type="bash",
+            payload={"command": "echo long"},
+            deadline_at=created_at + timedelta(seconds=1200),
+            body_stream_id=None,
+            background=False,
+        ),
+        created_at=created_at,
+    )
+    assert store.last_operation_ttl_seconds == 1500
 
 
 def _provider_registration() -> RuntimeProviderRegistration:

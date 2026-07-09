@@ -239,7 +239,7 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
                 "owner_session_id": "session-1",
                 "env": {"PYTHONUNBUFFERED": "1"},
             },
-            deadline_at=_now() + timedelta(seconds=30),
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
             background=False,
         ),
@@ -295,6 +295,64 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_grpc_expires_operation_before_relay() -> None:
+    """Expired Runner operations are finalized and acked without relaying."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
+    sink = FakeStateSink()
+    servicer = _servicer(service, store, sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="process.start",
+            payload={
+                "command": "python -m http.server",
+                "workdir": "/workspace/agent",
+                "yield_time_ms": 1000,
+                "max_output_bytes": 4096,
+                "owner_session_id": "session-1",
+            },
+            deadline_at=_now() - timedelta(seconds=1),
+            body_stream_id=None,
+            background=False,
+        ),
+        created_at=_now() - timedelta(seconds=2),
+    )
+
+    assert isinstance(result, RuntimeDispatchResult)
+    replies = []
+    for _ in range(10):
+        replies = await service.read_replies(
+            reply_stream_id=result.reply_stream_id,
+            after_cursor=None,
+            limit=10,
+        )
+        if replies:
+            break
+        await asyncio.sleep(0.01)
+
+    assert len(replies) == 1
+    assert replies[0].event.event_type is RuntimeReplyEventType.FINAL_ERROR
+    assert replies[0].event.payload["error_code"] == "RUNNER_OPERATION_EXPIRED"
+    assert (
+        await service.claim_next_runner_request(
+            runtime_id="runtime-1",
+            generation=accepted.register_accepted.generation,
+            consumer_id="runner-b",
+            block_ms=0,
+        )
+        is None
+    )
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
 async def test_runner_grpc_relays_git_operation_payload() -> None:
     """The gRPC bridge maps Git operation payloads to protobuf oneofs."""
     store = InMemoryRuntimeCoordinationStore()
@@ -317,7 +375,7 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
                 "branch_name": "azents/session",
                 "starting_ref": "main",
             },
-            deadline_at=_now() + timedelta(seconds=30),
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
             background=False,
         ),
