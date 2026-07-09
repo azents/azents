@@ -185,7 +185,7 @@ function SubagentNodeRow({
                   {t("subagents.rootBadge")}
                 </Badge>
               )}
-              {node.unread_result && (
+              {!root && node.unread_result && (
                 <Badge size="xs" color="blue" variant="filled">
                   {t("subagents.unread")}
                 </Badge>

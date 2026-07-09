@@ -15,8 +15,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-08
-spec_version: 16
+last_verified_at: 2026-07-09
+spec_version: 17
 ---
 
 # Chat Session Resync
@@ -130,12 +130,19 @@ root `SessionAgent` id, root `AgentSession` id, current `SessionAgent` id, and n
 
 Each node contains the linked `agent_session_id` used for direct child detail routes, canonical path,
 projected status, latest task/message preview, unread terminal result flag, latest run metadata,
-terminal result source event id, terminal result message preview, and children. Refresh/reconnect must
-reconstruct tree state by refetching this endpoint from durable DB state.
+terminal result source event id, terminal result message preview, and children. The unread terminal
+result flag applies only to non-root child nodes because root sessions do not have a parent observer.
+Refresh/reconnect must reconstruct tree state by refetching this endpoint from durable DB state.
 
 `subagent_tree_changed` is not source-of-truth state. The frontend invalidates all cached Subagent
 Tree queries when it receives the event so both root and child detail views converge on the same
-durable projection after refetch.
+durable projection after refetch. Child detail views also use the tree projection to render explicit
+parent/root navigation links so users can move back up the session-agent tree without relying on the
+drawer.
+
+Durable and live `agent_message` events render in the child chat timeline as parent-agent task cards.
+The card content is the delivered task/message and its metadata identifies the source SessionAgent
+path, preserving the parent command that caused the child run.
 
 ## 6. Timeline State Rules
 
@@ -298,6 +305,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-09** — v17. Clarified non-root unread result semantics, child parent/root navigation, and `agent_message` timeline rendering.
 - **2026-07-08** — v16. Added Subagent Tree resync contract, `subagent_tree_changed` invalidation semantics, and frontend tree cache convergence behavior.
 - **2026-07-06** — v15. Removed session-initialization resync state and documented durable `action_execution_result` recovery.
 - **2026-07-06** — v14. Added action-execution retry/discard mutation response reconciliation semantics.

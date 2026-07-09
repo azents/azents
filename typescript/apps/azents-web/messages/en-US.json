@@ -602,6 +602,9 @@
           "total": "{count, plural, =1 {1 node} other {# nodes}}",
           "empty": "Subagents spawned from this session will appear here.",
           "rootBadge": "Root",
+          "pathLabel": "Current: {path}",
+          "parentLink": "Parent: {name}",
+          "rootLink": "Root: {name}",
           "unread": "Unread",
           "runIndex": "Run {index}",
           "status": {

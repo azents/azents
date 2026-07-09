@@ -602,6 +602,9 @@
           "total": "{count, plural, =1 {1 nœud} other {# nœuds}}",
           "empty": "Les sous-agents créés depuis cette session apparaîtront ici.",
           "rootBadge": "Racine",
+          "pathLabel": "Actuel : {path}",
+          "parentLink": "Parent : {name}",
+          "rootLink": "Racine : {name}",
           "unread": "Non lu",
           "runIndex": "Run {index}",
           "status": {
