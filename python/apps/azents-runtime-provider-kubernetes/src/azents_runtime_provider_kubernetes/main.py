@@ -155,7 +155,7 @@ async def _run_control_loop(
             watch_task = asyncio.create_task(
                 _report_pod_watch_events(
                     lifecycle,
-                    control_client,
+                    run_loop,
                     stop=stop,
                 ),
                 name="runtime-provider-pod-watch",
@@ -201,7 +201,7 @@ async def _run_control_loop(
 
 async def _report_pod_watch_events(
     lifecycle: KubernetesRuntimeControlAdapter,
-    control_client: GrpcProviderControlClient,
+    run_loop: ProviderRunLoop,
     *,
     stop: asyncio.Event,
 ) -> None:
@@ -209,18 +209,18 @@ async def _report_pod_watch_events(
     while not stop.is_set():
         try:
             async for report in lifecycle.watch_known_runtimes():
-                await control_client.report_provider_state(report)
+                current_report = await run_loop.report_provider_state(report)
                 _LOGGER.info(
                     "Runtime Provider watch report sent",
                     extra={
-                        "provider_id": report.provider_id,
-                        "runtime_id": report.runtime_id,
-                        "provider_generation": report.provider_generation,
-                        "observed_state": report.observed_state.value,
+                        "provider_id": current_report.provider_id,
+                        "runtime_id": current_report.runtime_id,
+                        "provider_generation": current_report.provider_generation,
+                        "observed_state": current_report.observed_state.value,
                         "observed_desired_generation": (
-                            report.observed_desired_generation
+                            current_report.observed_desired_generation
                         ),
-                        "reason": report.reason,
+                        "reason": current_report.reason,
                     },
                 )
                 if stop.is_set():
