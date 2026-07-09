@@ -30,7 +30,7 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-09 | 65 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-09 | 66 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-10 | 13 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
@@ -152,8 +152,9 @@ _14 documents_
 - [ADR-0098: Subagent Human Write Boundary](adr/0098-subagent-human-write-boundary.md)
 - [ADR-0099: Codex-Compatible Subagent Concurrency](adr/0099-codex-compatible-subagent-concurrency.md)
 - [ADR-0100: Label-Based Model Targets](adr/0100-label-based-model-targets.md)
+- [ADR-0101: Mark Forked History Boundaries for Subagent Tasks](adr/0101-subagent-forked-history-task-boundaries.md)
 
-_103 documents_
+_104 documents_
 
 ## Issues (Bug Tracking)
 
@@ -186,4 +187,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 364
+- Total documents: 365

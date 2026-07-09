@@ -36,7 +36,7 @@ def format_system_reminder(
     instruction: str,
     data: tuple[SystemReminderDataItem, ...],
 ) -> str:
-    """Render synthetic reminder as one XML envelope."""
+    """Render structured synthetic reminder as one XML envelope."""
     return (
         f"<system_reminder type={quoteattr(reminder_type)}>\n"
         "<instruction>\n"
@@ -45,6 +45,11 @@ def format_system_reminder(
         f"{_format_data_items(data)}\n"
         "</system_reminder>"
     )
+
+
+def format_plain_system_reminder(text: str) -> str:
+    """Render a plain model-visible system reminder."""
+    return f"<system-reminder>\n{escape(text)}\n</system-reminder>"
 
 
 def format_goal_continuation_reminder(goal_objective: str | None) -> str:

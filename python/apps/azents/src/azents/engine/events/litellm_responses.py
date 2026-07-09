@@ -44,7 +44,7 @@ from azents.engine.events.system_reminders import (
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
     format_interrupted_reminder,
-    format_system_reminder,
+    format_plain_system_reminder,
 )
 from azents.engine.events.types import (
     AgentMessagePayload,
@@ -100,13 +100,23 @@ def _format_goal_updated_event_reminder(payload: UserMessagePayload) -> str:
 
 def _format_agent_message(payload: AgentMessagePayload) -> str:
     """Render agent_message as an explicitly sourced model-visible task."""
-    kind_label = payload.message_kind.replace("_", " ")
+    message_type = _agent_message_type(payload.message_kind)
     return "\n".join(
         [
-            f"Message from agent {payload.source_path} ({kind_label}):",
+            f"Message Type: {message_type}",
+            f"Task name: {payload.target_path}",
+            f"Sender: {payload.source_path}",
+            "Payload:",
             payload.content,
         ]
     )
+
+
+def _agent_message_type(message_kind: str) -> str:
+    """Return the model-visible agent mailbox message type."""
+    if message_kind in {"spawn_agent", "followup_task"}:
+        return "NEW_TASK"
+    return "MESSAGE"
 
 
 def _format_skill_loaded_event(payload: SkillLoadedPayload) -> str:
@@ -412,11 +422,7 @@ class LiteLLMResponsesLowerer:
             case SystemReminderPayload(text=text):
                 return {
                     "role": "user",
-                    "content": format_system_reminder(
-                        reminder_type="system_reminder",
-                        instruction=text,
-                        data=(),
-                    ),
+                    "content": format_plain_system_reminder(text),
                 }
             case RunMarkerPayload():
                 return None

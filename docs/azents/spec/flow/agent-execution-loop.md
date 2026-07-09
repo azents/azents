@@ -38,7 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-09
-spec_version: 65
+spec_version: 66
 ---
 
 # Agent Execution Loop
@@ -263,33 +263,45 @@ toolkit resolution uses subagent execution mode; otherwise it uses root executio
 excludes root/user-facing auto-bound capabilities such as Memory Write and Goal Toolkit
 while keeping the subagent collaboration toolkit available.
 
-Subagent collaboration tools communicate through target child input buffers:
+Subagent collaboration tools communicate through resolved agent input buffers:
 
 - `spawn_agent` first enforces the Agent's active subagent and depth limits while holding a root
   `SessionAgent` row lock for the tree. It fails with a tool error instead of queueing when the root
   tree already has `subagent_settings.max_subagents` active subagents or the requested child would
   exceed `subagent_settings.max_depth`. If allowed, it creates
   a child `SessionAgent` plus hidden child `AgentSession`, forks the parent's current model-visible
-  context by default, appends that selected context to the child transcript, writes an initial
-  `agent_message`, marks the child running, and sends a broker wake-up. The caller may still
-  explicitly select no context or a bounded number of recent turns through `fork_turns`.
-- `send_message` writes an `agent_message` to the target child without waking it.
-- `followup_task` writes an `agent_message`, marks the child running, and sends a broker wake-up.
+  context by default, appends that selected context to the child transcript, appends a
+  `system_reminder` event rendered as a `<system-reminder>` boundary when any parent history
+  was copied, writes an initial `agent_message`, marks the child running, and sends a broker
+  wake-up. The caller may still
+  explicitly select no context or a bounded number of recent turns through `fork_turns`. The
+  boundary reminder is inserted immediately after copied parent history for `fork_turns=all` or a
+  positive integer selection, and it marks preceding messages as inherited conversation history.
+- Agent references follow Codex v2 visibility and targeting semantics within the current root tree.
+  `list_agents` includes the root and the known agent tree, including ancestors of the caller.
+- `send_message` writes an `agent_message` to any resolved agent, including the root, without waking it.
+- `followup_task` writes an `agent_message`, marks the target running, and sends a broker wake-up,
+  but rejects the root as a target.
+- `interrupt_agent` rejects the root and the caller itself, then records stop intent only for the
+  resolved target's current run.
 
-`agent_message` lowering renders the mailbox payload as explicitly sourced delegated input for the
-target child session. Broker wake-ups remain payload-free; recovery is based on persisted input
-buffers and `agent_sessions.run_state`.
+`agent_message` lowering renders the mailbox payload as an explicit task envelope for the target
+child session. `spawn_agent` and `followup_task` render `Message Type: NEW_TASK`; `send_message`
+renders `Message Type: MESSAGE`. The envelope includes the target path as task name, sender path,
+and payload text so a subagent can distinguish its current assignment from inherited forked
+history. Broker wake-ups remain payload-free; recovery is based on persisted input buffers and
+`agent_sessions.run_state`.
 
 Human-authored direct writes are root-session only. REST message/edit/command/failed-run retry paths
 and operation retry/discard paths reject `session_kind = subagent` before creating input buffers,
 chat write requests, pending commands, operation mutations, live projections, or broker wake-ups.
-Subagent mailbox input must be written by a parent SessionAgent through collaboration tools as
+Subagent mailbox input must be written by another SessionAgent through collaboration tools as
 `agent_message` buffers.
 
 User-facing stop is subtree-aware: stopping a root session records stop intent for running linked
 descendants, and stopping a child detail session records stop intent for that child subtree.
 Model-visible `interrupt_agent` is intentionally narrower and records stop intent only for the named
-target child current run.
+target agent's current run after rejecting the root and the caller itself.
 
 ## 5. Tool Loop
 
@@ -488,6 +500,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-09** — v66. Documented forked-history `<system-reminder>` boundaries, explicit agent-message envelopes, and Codex v2 agent targeting and list visibility.
 - **2026-07-09** — v65. Clarified that selectable model labels are resolved before run start and runtime receives effective model snapshots only.
 - **2026-07-09** — v64. Documented `spawn_agent` active subagent and depth limit enforcement before child-session side effects.
 - **2026-07-09** — v63. Documented default subagent context forking and child-session human write rejection before side effects.
