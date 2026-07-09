@@ -158,7 +158,35 @@ function CodeBlock({
   }
 
   return (
-    <Box className={classes.codeBlock} component="pre" {...props}>
+    <Box className={classes.codeBlockFrame}>
+      <Box component="pre" {...props} className={classes.codeBlock}>
+        {language ? (
+          <SyntaxHighlighter
+            PreTag="div"
+            CodeTag="code"
+            language={language}
+            style={codeTheme}
+            useInlineStyles
+            customStyle={{
+              background: "var(--azents-chat-code-background)",
+              color: "var(--azents-chat-code-foreground)",
+              margin: 0,
+              padding: 0,
+            }}
+            codeTagProps={{
+              className: classes.highlightedCode,
+              style: {
+                background: "var(--azents-chat-code-background)",
+                color: "var(--azents-chat-code-foreground)",
+              },
+            }}
+          >
+            {codeText}
+          </SyntaxHighlighter>
+        ) : (
+          children
+        )}
+      </Box>
       <Box className={classes.codeBlockCopyButton}>
         <ChatCopyButton
           value={codeText}
@@ -169,32 +197,6 @@ function CodeBlock({
           iconSize={12}
         />
       </Box>
-      {language ? (
-        <SyntaxHighlighter
-          PreTag="div"
-          CodeTag="code"
-          language={language}
-          style={codeTheme}
-          useInlineStyles
-          customStyle={{
-            background: "var(--azents-chat-code-background)",
-            color: "var(--azents-chat-code-foreground)",
-            margin: 0,
-            padding: 0,
-          }}
-          codeTagProps={{
-            className: classes.highlightedCode,
-            style: {
-              background: "var(--azents-chat-code-background)",
-              color: "var(--azents-chat-code-foreground)",
-            },
-          }}
-        >
-          {codeText}
-        </SyntaxHighlighter>
-      ) : (
-        children
-      )}
     </Box>
   );
 }

@@ -1,6 +1,7 @@
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   codeReadabilityMarkdownSample,
+  longCodeBlockMarkdownSample,
   markdownSample,
   mermaidMarkdownSample,
 } from "../story-fixtures";
@@ -38,6 +39,12 @@ export const InlineText = {
 export const CodeReadability = {
   args: {
     children: codeReadabilityMarkdownSample,
+  },
+} satisfies Story;
+
+export const LongCodeBlock = {
+  args: {
+    children: longCodeBlockMarkdownSample,
   },
 } satisfies Story;
 

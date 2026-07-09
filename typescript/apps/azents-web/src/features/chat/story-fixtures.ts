@@ -190,6 +190,13 @@ pnpm --filter @azents/web typecheck
 \`\`\`
 `;
 
+export const longCodeBlockMarkdownSample = `Long code should scroll inside the block while keeping the copy button pinned to the visible corner.
+
+\`\`\`ts
+const command = "pnpm --filter @azents/web typecheck && pnpm --filter @azents/web lint && pnpm --filter @azents/web build-storybook -- --test --coverage --reporters=default --reporters=json";
+\`\`\`
+`;
+
 export const mermaidMarkdownSample = `Here is the current handoff flow:
 
 \`\`\`mermaid

@@ -73,13 +73,19 @@
 }
 
 /* code block */
+.codeBlockFrame {
+  position: relative;
+  margin: 0.5em 0;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .markdown pre,
 .codeBlock {
   --azents-chat-code-background: var(--mantine-color-gray-0);
   --azents-chat-code-foreground: var(--mantine-color-dark-9);
 
-  position: relative;
-  margin: 0.5em 0;
+  margin: 0;
   padding: 0.6em var(--mantine-spacing-lg) 0.6em 0.8em;
   border-radius: var(--mantine-radius-sm);
   background-color: var(--azents-chat-code-background);
