@@ -354,7 +354,7 @@
       },
       "modelSelection": {
         "title": "ワークスペースのデフォルトモデル",
-        "description": "明示的なモデル選択なしで保存されたエージェントは、このモデル snapshot をコピーします。",
+        "description": "Configure the ordered model list that new agents copy by default.",
         "currentMain": "現在のメイン:",
         "currentLightweight": "現在の軽量:",
         "mainProviderLabel": "デフォルトメイン Provider",
@@ -372,7 +372,10 @@
         "selectWorkspaceLightweightModel": "ワークスペース軽量モデルを選択",
         "noDefaultModelSelected": "既定モデル未選択",
         "useMainModel": "メインモデルを使用",
-        "changeModel": "モデルを変更"
+        "changeModel": "モデルを変更",
+        "optionsTitle": "Workspace selectable model options",
+        "optionsDescription": "Agents copy this ordered list and selected labels when they are created without custom options.",
+        "invalidOptions": "Fix model option labels and model selections before saving."
       },
       "modelConfig": {
         "headline": "モデル設定",
@@ -716,7 +719,30 @@
       "subagentMaxSubagentsLabel": "最大サブエージェント数",
       "subagentMaxSubagentsDescription": "1 つの root session 配下で同時に active にできる subagent 数です。root agent は含みません。",
       "subagentMaxDepthLabel": "最大深さ",
-      "subagentMaxDepthDescription": "root agent 配下の subagent tree の最大深さです。1 は root → child のみを許可します。"
+      "subagentMaxDepthDescription": "root agent 配下の subagent tree の最大深さです。1 は root → child のみを許可します。",
+      "selectableModelOptions": {
+        "title": "Selectable model options",
+        "description": "Define an ordered model list. Main and lightweight selections reference labels from this list; the first option is the fallback.",
+        "addOption": "Add option",
+        "emptyList": "Add at least one model option.",
+        "maxOptions": "Up to 10 model options can be added.",
+        "emptyLabel": "Model option label is required.",
+        "duplicateLabel": "Model option labels must be unique.",
+        "missingModel": "Choose a model for every option.",
+        "selectModelTitle": "Select model for {label}",
+        "newOption": "new option",
+        "mainLabel": "Main model label",
+        "mainDescription": "Used for normal agent turns.",
+        "lightweightLabel": "Lightweight model label",
+        "lightweightDescription": "Used for lightweight work and compaction fallback.",
+        "optionLabel": "Option label",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "remove": "Remove",
+        "noModelSelected": "No model selected",
+        "chooseModel": "Choose a provider integration and model.",
+        "changeModel": "Change model"
+      }
     },
     "toolkits": {
       "headline": "ツールキット",

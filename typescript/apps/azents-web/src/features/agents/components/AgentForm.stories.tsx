@@ -89,9 +89,12 @@ const baseAgent: AgentResponse = {
   description: "Exercises model selection snapshot settings.",
   model_selection: mainSelection,
   lightweight_model_selection: lightweightSelection,
-  selectable_model_options: [],
+  selectable_model_options: [
+    { label: "default", model_selection: mainSelection },
+    { label: "lightweight", model_selection: lightweightSelection },
+  ],
   main_model_label: "default",
-  lightweight_model_label: "default",
+  lightweight_model_label: "lightweight",
   effective_context_window_tokens: 1_000_000,
   effective_auto_compaction_threshold_tokens: 900_000,
   model_parameters: {
@@ -134,6 +137,7 @@ const meta = {
     members: [],
     providerOptions,
     modelOptions,
+    workspaceModelSettings: null,
     onSyncCatalog: () => {},
     onSubmit: noopSubmit,
     onAddAdmin: () => {},

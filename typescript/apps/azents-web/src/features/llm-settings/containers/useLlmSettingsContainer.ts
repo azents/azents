@@ -9,7 +9,8 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   buildProviderIntegrationOptions,
-  parseModelSelectionValue,
+  fallbackSelectableModelLabel,
+  selectableModelOptionInputsFromFormValues,
 } from "@/features/agents/model-selection";
 import { trpc } from "@/trpc/client";
 import type {
@@ -21,6 +22,7 @@ import type {
   ModelCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
+  SelectableModelOptionFormValue,
 } from "@/features/agents/model-selection";
 import type { LlmProviderIntegrationResponse } from "@azents/public-client";
 
@@ -83,8 +85,9 @@ export interface LlmSettingsContainerOutput {
   ) => void;
   onSyncCatalog: (integrationId: string) => void;
   onUpdateWorkspaceModelSettings: (data: {
-    defaultModelValue: string | null;
-    defaultLightweightModelValue: string | null;
+    defaultSelectableModelOptions: SelectableModelOptionFormValue[];
+    defaultMainModelLabel: string | null;
+    defaultLightweightModelLabel: string | null;
   }) => void;
 }
 
@@ -279,17 +282,24 @@ export function useLlmSettingsContainer(
 
   const onUpdateWorkspaceModelSettings = useCallback(
     (data: {
-      defaultModelValue: string | null;
-      defaultLightweightModelValue: string | null;
+      defaultSelectableModelOptions: SelectableModelOptionFormValue[];
+      defaultMainModelLabel: string | null;
+      defaultLightweightModelLabel: string | null;
     }): void => {
       setMutationState({ type: "SUBMITTING" });
       updateWorkspaceModelSettingsMutation.mutate({
         handle,
-        default_model_selection: parseModelSelectionValue(
-          data.defaultModelValue,
+        default_selectable_model_options:
+          selectableModelOptionInputsFromFormValues(
+            data.defaultSelectableModelOptions,
+          ),
+        default_main_model_label: fallbackSelectableModelLabel(
+          data.defaultMainModelLabel,
+          data.defaultSelectableModelOptions,
         ),
-        default_lightweight_model_selection: parseModelSelectionValue(
-          data.defaultLightweightModelValue,
+        default_lightweight_model_label: fallbackSelectableModelLabel(
+          data.defaultLightweightModelLabel,
+          data.defaultSelectableModelOptions,
         ),
       });
     },

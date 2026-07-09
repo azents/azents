@@ -19,7 +19,11 @@ import type {
 } from "../model-selection";
 import type { AgentFormValues } from "../schemas";
 import type { AdminListState, AgentFormState, MutationState } from "../types";
-import type { AgentAdminResponse, AgentResponse } from "@azents/public-client";
+import type {
+  AgentAdminResponse,
+  AgentResponse,
+  WorkspaceModelSettingsResponse,
+} from "@azents/public-client";
 
 type AgentSettingsSection =
   | "all"
@@ -38,6 +42,7 @@ interface AgentSettingsProps {
   adminListState: AdminListState;
   providerOptions: ProviderIntegrationOption[];
   modelOptions: ModelSelectionOption[];
+  workspaceModelSettings: WorkspaceModelSettingsResponse | null;
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];
