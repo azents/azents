@@ -120,7 +120,7 @@ _MEMORY_READ_RULES_PROMPT = dedent("""\
 
     #### Memory lookup
 
-    `search_memories` is keyword search, not sentence or semantic search. Before calling it, extract 1-3 distinctive keywords from the user's request, such as project names, tool names, error terms, repository names, policy names, or memory names. Do not pass the full user sentence as the query.
+    `search_memories` splits the query on whitespace and performs case-insensitive AND matching across memory name, description, and content. Include the distinctive terms that every search result should contain.
 
     #### Types of memory
 

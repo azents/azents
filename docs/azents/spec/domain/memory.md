@@ -22,7 +22,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
 last_verified_at: 2026-07-09
-spec_version: 3
+spec_version: 4
 ---
 
 # Memory
@@ -82,12 +82,12 @@ During AgentRuntime resolve, Agent with `memory_enabled` enabled receives Memory
 
 - `list_memories(scope=None, type=None)` returns agent scope summary and user scope summary grouped by type as markdown list. It queries sorted up to 100 rows per scope.
 - `get_memory(scope, name)` returns full `content` of a single Memory. Missing row is handled as tool error.
-- `search_memories(query, scope=None)` is `ILIKE` search over `name`, `description`, and `content`. The tool and Memory Rules describe this as keyword search and instruct the agent to extract 1-3 distinctive keywords instead of passing the full user sentence. If `scope=None` and user context exists, it searches both agent scope and user scope and returns up to 50 summaries.
+- `search_memories(query, scope=None)` splits `query` on whitespace and performs case-insensitive `ILIKE` matching over `name`, `description`, and `content`; every term must match at least one searchable field. If `scope=None` and user context exists, it searches both agent scope and user scope and returns up to 50 summaries.
 - `delete_memory(scope, name)` deletes by scope/name and returns existence result as JSON.
 
 ### Public API and settings UI
 
-Agent Memory settings use public Agent API routes under `/agent/v1/workspaces/{handle}/agents/{agent_id}/memories`. The list route requires an exact `scope` query parameter and accepts optional `type` and `query` filters. Empty search query uses normal sorted list semantics; non-empty search query performs lexical `ILIKE` search over `name`, `description`, and `content`.
+Agent Memory settings use public Agent API routes under `/agent/v1/workspaces/{handle}/agents/{agent_id}/memories`. The list route requires an exact `scope` query parameter and accepts optional `type` and `query` filters. Empty search query uses normal sorted list semantics; non-empty search query is split on whitespace and performs case-insensitive `ILIKE` AND matching over `name`, `description`, and `content`.
 
 Visibility follows Agent visibility. Agent-scope Memory is readable by users who can view the Agent. User-scope Memory is limited to entries whose `user_id` is the current authenticated user. Private Agent visibility failures are reported as `404 Agent not found` rather than exposing existence. Missing or scope-invisible Memory IDs are reported as `404 Memory not found`.
 
