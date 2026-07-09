@@ -426,6 +426,48 @@ class TestMemoryRepository:
         assert len(results) == 1
         assert results[0].name == "content-test"
 
+    async def test_search_splits_query_into_case_insensitive_and_terms(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Search splits whitespace terms and requires every term to match."""
+        workspace_id = await _create_workspace(rdb_session, handle="mem-sand-ws")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            model_slug="mem-sand-model",
+            integration_name="mem-sand-int",
+        )
+        repo = MemoryRepository()
+
+        for name, description, content in [
+            ("matching-memory", "Foo appears here", "Body includes BAR"),
+            ("foo-only", "Foo appears here", "Body without second term"),
+            ("bar-only", "Different description", "Body includes bar"),
+        ]:
+            await repo.upsert(
+                rdb_session,
+                agent_id=agent_id,
+                user_id=None,
+                create=MemoryCreate(
+                    scope=MemoryScope.AGENT,
+                    type="project",
+                    name=name,
+                    description=description,
+                    content=content,
+                ),
+            )
+
+        results = await repo.search(
+            rdb_session, agent_id=agent_id, user_id=None, query="foo   bar"
+        )
+
+        assert [result.name for result in results] == ["matching-memory"]
+
+        full_results = await repo.search_full(
+            rdb_session, agent_id=agent_id, user_id=None, query="FOO bar"
+        )
+        assert [result.name for result in full_results] == ["matching-memory"]
+
     async def test_delete_by_name_exists(self, rdb_session: AsyncSession) -> None:
         """Deleting existing memory returns True."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-del-ws")

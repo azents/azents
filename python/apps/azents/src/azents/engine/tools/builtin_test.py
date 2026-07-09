@@ -997,7 +997,9 @@ class TestBuiltinToolkitMemoryPrompt:
         await toolkit.update_context(ctx)
         assert (await toolkit.get_static_prompt(_make_context())) == ""
         assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
-        assert "Memory Rules" in (await toolkit.get_dynamic_prompt(ctx))
+        dynamic_prompt = await toolkit.get_dynamic_prompt(ctx)
+        assert "Memory Rules" in dynamic_prompt
+        assert "case-insensitive AND matching" in dynamic_prompt
 
     @pytest.mark.asyncio
     async def test_memory_disabled_excludes_memory(self) -> None:

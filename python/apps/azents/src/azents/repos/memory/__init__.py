@@ -14,6 +14,23 @@ from .data import (
 )
 
 
+def _make_search_filter(query: str) -> sa.ColumnElement[bool]:
+    """Build case-insensitive AND search filters from whitespace terms."""
+    term_filters: list[sa.ColumnElement[bool]] = []
+    for term in query.split():
+        pattern = f"%{term}%"
+        term_filters.append(
+            sa.or_(
+                RDBAgentMemory.name.ilike(pattern),
+                RDBAgentMemory.description.ilike(pattern),
+                RDBAgentMemory.content.ilike(pattern),
+            )
+        )
+    if not term_filters:
+        return sa.false()
+    return sa.and_(*term_filters)
+
+
 class MemoryRepository:
     """Memory CRUD repository."""
 
@@ -194,19 +211,14 @@ class MemoryRepository:
         :param session: Database session
         :param agent_id: Agent ID
         :param user_id: User ID (None=agent scope)
-        :param query: Search string
+        :param query: Whitespace-separated search terms; all terms must match
         :param type: Type to filter (optional)
         :return: Memory list
         """
-        pattern = f"%{query}%"
-        like_filter = sa.or_(
-            RDBAgentMemory.name.ilike(pattern),
-            RDBAgentMemory.description.ilike(pattern),
-            RDBAgentMemory.content.ilike(pattern),
-        )
+        search_filter = _make_search_filter(query)
         stmt = sa.select(RDBAgentMemory).where(
             RDBAgentMemory.agent_id == agent_id,
-            like_filter,
+            search_filter,
         )
         if user_id is None:
             stmt = stmt.where(RDBAgentMemory.user_id.is_(None))
@@ -311,21 +323,18 @@ class MemoryRepository:
     ) -> list[MemorySummary]:
         """Search memory.
 
-        Search name, description, and content with ILIKE.
+        Search name, description, and content with case-insensitive ILIKE.
+        The query is split on whitespace, and every term must match at least one
+        searchable field.
         Search both agent scope and user scope when user_id is provided.
 
         :param session: Database session
         :param agent_id: Agent ID
         :param user_id: User ID (None=agent scope only)
-        :param query: Search string
+        :param query: Whitespace-separated search terms; all terms must match
         :return: MemorySummary list
         """
-        pattern = f"%{query}%"
-        like_filter = sa.or_(
-            RDBAgentMemory.name.ilike(pattern),
-            RDBAgentMemory.description.ilike(pattern),
-            RDBAgentMemory.content.ilike(pattern),
-        )
+        search_filter = _make_search_filter(query)
 
         scope_filter: sa.ColumnElement[bool]
         if user_id is None:
@@ -342,7 +351,7 @@ class MemoryRepository:
             .where(
                 RDBAgentMemory.agent_id == agent_id,
                 scope_filter,
-                like_filter,
+                search_filter,
             )
             .order_by(RDBAgentMemory.type, RDBAgentMemory.name)
             .limit(50)

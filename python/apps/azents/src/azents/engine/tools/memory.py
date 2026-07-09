@@ -66,11 +66,10 @@ class SearchMemoriesInput(BaseModel):
 
     query: str = Field(
         description=(
-            "Keyword search only. Do not pass a full sentence. "
-            "Extract 1-3 distinctive keywords, memory names, project names, "
-            "or error terms from the request."
+            "Whitespace-separated search terms. Search is case-insensitive, "
+            "and all terms must appear in name, description, or content."
         )
-    )  # noqa: E501
+    )
     scope: MemoryScope | None = Field(
         default=None, description="Filter by scope. None searches both scopes."
     )  # noqa: E501
@@ -315,7 +314,7 @@ def make_search_memories_tool(
     """
 
     async def search_memories(args: SearchMemoriesInput) -> str:
-        """Search memories by keyword in name, description, and content."""
+        """Search memories by whitespace-separated AND terms."""
         if args.scope == MemoryScope.USER and not user_id:
             raise FunctionToolError(
                 "Cannot search user-scope memories: no user context"
@@ -368,10 +367,9 @@ def make_search_memories_tool(
         search_memories,
         name="search_memories",
         description=(
-            "Search memories by short keywords, not full sentences. "
-            "Extract 1-3 distinctive keywords, memory names, project names, "
-            "or error terms before calling this tool. Searches in name, "
-            "description, and content fields."
+            "Search memories by whitespace-separated terms. "
+            "Search is case-insensitive and requires every term to match "
+            "name, description, or content."
         ),
     )
 
