@@ -6,8 +6,8 @@ Selectable model option input keyed by label.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**label** | **str** | Selectable model label |
-**model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) | Selectable model selection input |
+**label** | **str** | Selectable model label | 
+**model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) | Selectable model selection input | 
 
 ## Example
 
@@ -27,3 +27,5 @@ selectable_model_option_input_dict = selectable_model_option_input_instance.to_d
 selectable_model_option_input_from_dict = SelectableModelOptionInput.from_dict(selectable_model_option_input_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

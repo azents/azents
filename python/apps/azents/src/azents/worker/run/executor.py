@@ -372,6 +372,7 @@ class RunExecutor:
             session_manager=self.session_manager,
             exchange_file_service=self.exchange_file_service,
             model_file_service=self.model_file_service,
+            xai_oauth_client_id=self.worker_config.xai_oauth_client_id,
         )
 
         if resolved.failure:

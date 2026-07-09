@@ -285,6 +285,12 @@ class LiteLLMResponsesLowerer:
             if base_url is not None:
                 kwargs.setdefault("base_url", base_url)
                 kwargs.setdefault("api_base", base_url)
+        if self._provider_id == LLMProvider.XAI_OAUTH:
+            kwargs.setdefault("custom_llm_provider", "xai")
+            base_url = kwargs.get("base_url") or kwargs.get("api_base")
+            if base_url is not None:
+                kwargs.setdefault("base_url", base_url)
+                kwargs.setdefault("api_base", base_url)
         if self._provider_id in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
             prompt_cache_key = _openai_prompt_cache_key(self._prompt_cache_scope)
             if prompt_cache_key is not None:
@@ -496,6 +502,7 @@ def _uses_anthropic_cache_control(
     if provider_id in {
         LLMProvider.OPENAI,
         LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.XAI_OAUTH,
         LLMProvider.GOOGLE_GEMINI,
     }:
         return False
@@ -596,7 +603,7 @@ def _lower_hosted_tools(
             raise UnsupportedRequiredBuiltinToolError(msg)
         config = dict(tool.config)
         match target:
-            case "openai":
+            case "openai" | "xai":
                 native_tools.append({"type": "web_search", **config})
             case "google":
                 native_tools.append({"google_search": config})
@@ -623,12 +630,16 @@ def _hosted_tool_target(
     """Choose hosted tool lowering target from provider/model developer pair."""
     if provider_id in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         return "openai"
+    if provider_id == LLMProvider.XAI_OAUTH:
+        return "xai"
     if model_developer == LLMModelDeveloper.GOOGLE:
         return "google"
     if model_developer == LLMModelDeveloper.ANTHROPIC:
         return "anthropic"
     if provider in {"openai", "chatgpt_oauth"}:
         return "openai"
+    if provider == "xai_oauth":
+        return "xai"
     if provider in {"google_gemini", "google_vertex_ai"}:
         return "google"
     if provider == "anthropic":

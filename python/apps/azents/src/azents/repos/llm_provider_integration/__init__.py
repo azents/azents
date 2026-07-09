@@ -13,6 +13,8 @@ from azents.core.credentials import (
     ChatGPTOAuthSecrets,
     GcpConfig,
     GcpSecrets,
+    XaiOAuthConfig,
+    XaiOAuthSecrets,
 )
 from azents.core.crypto import CredentialCipher
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -26,10 +28,12 @@ from .data import (
     NotFound,
 )
 
-_SecretsUnion = ApiKeySecrets | AwsSecrets | GcpSecrets | ChatGPTOAuthSecrets
+_SecretsUnion = (
+    ApiKeySecrets | AwsSecrets | GcpSecrets | ChatGPTOAuthSecrets | XaiOAuthSecrets
+)
 _secrets_adapter = TypeAdapter[_SecretsUnion](_SecretsUnion)
 
-_ConfigUnion = AwsConfig | GcpConfig | ChatGPTOAuthConfig
+_ConfigUnion = AwsConfig | GcpConfig | ChatGPTOAuthConfig | XaiOAuthConfig
 _config_adapter = TypeAdapter[_ConfigUnion](_ConfigUnion)
 
 

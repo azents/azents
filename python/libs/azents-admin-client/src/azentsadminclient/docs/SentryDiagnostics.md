@@ -6,8 +6,8 @@ Sentry SDK diagnostics.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**initialized** | **bool** |  |
-**dsn_configured** | **bool** |  |
+**initialized** | **bool** |  | 
+**dsn_configured** | **bool** |  | 
 
 ## Example
 
@@ -27,3 +27,5 @@ sentry_diagnostics_dict = sentry_diagnostics_instance.to_dict()
 sentry_diagnostics_from_dict = SentryDiagnostics.from_dict(sentry_diagnostics_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

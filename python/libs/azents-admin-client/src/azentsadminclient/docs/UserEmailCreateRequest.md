@@ -6,7 +6,7 @@ UserEmail creation request schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Email address |
+**email** | **str** | Email address | 
 
 ## Example
 
@@ -26,3 +26,5 @@ user_email_create_request_dict = user_email_create_request_instance.to_dict()
 user_email_create_request_from_dict = UserEmailCreateRequest.from_dict(user_email_create_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

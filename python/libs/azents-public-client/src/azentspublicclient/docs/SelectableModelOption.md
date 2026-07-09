@@ -6,8 +6,8 @@ Stored selectable model option keyed by label.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**label** | **str** | Selectable model label |
-**model_selection** | [**AgentModelSelection**](AgentModelSelection.md) | Selectable model selection snapshot |
+**label** | **str** | Selectable model label | 
+**model_selection** | [**AgentModelSelection**](AgentModelSelection.md) | Selectable model selection snapshot | 
 
 ## Example
 
@@ -27,3 +27,5 @@ selectable_model_option_dict = selectable_model_option_instance.to_dict()
 selectable_model_option_from_dict = SelectableModelOption.from_dict(selectable_model_option_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

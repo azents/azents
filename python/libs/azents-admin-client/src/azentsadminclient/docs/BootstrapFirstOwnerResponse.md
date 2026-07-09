@@ -6,8 +6,8 @@ First owner bootstrap response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**workspace_handle** | **str** | Created Workspace handle |
-**user_id** | **str** | Created Owner User ID |
+**workspace_handle** | **str** | Created Workspace handle | 
+**user_id** | **str** | Created Owner User ID | 
 
 ## Example
 
@@ -27,3 +27,5 @@ bootstrap_first_owner_response_dict = bootstrap_first_owner_response_instance.to
 bootstrap_first_owner_response_from_dict = BootstrapFirstOwnerResponse.from_dict(bootstrap_first_owner_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

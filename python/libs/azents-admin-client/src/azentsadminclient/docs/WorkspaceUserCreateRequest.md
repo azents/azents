@@ -6,11 +6,11 @@ WorkspaceUser creation request schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**workspace_handle** | **str** | Owning Workspace handle |
-**user_id** | **str** | User ID |
-**name** | **str** | Workspace display name |
+**workspace_handle** | **str** | Owning Workspace handle | 
+**user_id** | **str** | User ID | 
+**name** | **str** | Workspace display name | 
 **locale** | **str** | Workspace locale (BCP 47) | [optional] [default to 'ko-KR']
-**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Role (owner, manager, member) |
+**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Role (owner, manager, member) | 
 
 ## Example
 
@@ -30,3 +30,5 @@ workspace_user_create_request_dict = workspace_user_create_request_instance.to_d
 workspace_user_create_request_from_dict = WorkspaceUserCreateRequest.from_dict(workspace_user_create_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

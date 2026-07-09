@@ -254,6 +254,9 @@ def get_worker_config(
         web_url=config.web_url,
         oauth_secret_key=config.credential_encryption.key,
         mcp_proxy_url=config.mcp_proxy_url,
+        xai_oauth_client_id=(
+            config.xai_oauth.client_id if config.xai_oauth.enabled else None
+        ),
         failed_run_max_retries=_int_from_env(
             "AZ_FAILED_RUN_MAX_RETRIES",
             _DEFAULT_FAILED_RUN_MAX_RETRIES,

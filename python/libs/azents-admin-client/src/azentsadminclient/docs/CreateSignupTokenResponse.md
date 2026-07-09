@@ -6,8 +6,8 @@ Signup token creation response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | [**SignupTokenResponse**](SignupTokenResponse.md) | Signup token metadata |
-**plaintext_token** | **str** | Plaintext signup token |
+**token** | [**SignupTokenResponse**](SignupTokenResponse.md) | Signup token metadata | 
+**plaintext_token** | **str** | Plaintext signup token | 
 
 ## Example
 
@@ -27,3 +27,5 @@ create_signup_token_response_dict = create_signup_token_response_instance.to_dic
 create_signup_token_response_from_dict = CreateSignupTokenResponse.from_dict(create_signup_token_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

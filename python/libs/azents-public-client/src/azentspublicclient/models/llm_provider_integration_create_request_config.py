@@ -20,11 +20,12 @@ from typing import Any, List, Optional
 from azentspublicclient.models.aws_config import AwsConfig
 from azentspublicclient.models.chat_gpto_auth_config import ChatGPTOAuthConfig
 from azentspublicclient.models.gcp_config import GcpConfig
+from azentspublicclient.models.xai_o_auth_config import XaiOAuthConfig
 from pydantic import StrictStr, Field
 from typing import Union, List, Set, Optional, Dict
 from typing_extensions import Literal, Self
 
-LLMPROVIDERINTEGRATIONCREATEREQUESTCONFIG_ONE_OF_SCHEMAS = ["AwsConfig", "ChatGPTOAuthConfig", "GcpConfig"]
+LLMPROVIDERINTEGRATIONCREATEREQUESTCONFIG_ONE_OF_SCHEMAS = ["AwsConfig", "ChatGPTOAuthConfig", "GcpConfig", "XaiOAuthConfig"]
 
 class LLMProviderIntegrationCreateRequestConfig(BaseModel):
     """
@@ -36,8 +37,10 @@ class LLMProviderIntegrationCreateRequestConfig(BaseModel):
     oneof_schema_2_validator: Optional[GcpConfig] = None
     # data type: ChatGPTOAuthConfig
     oneof_schema_3_validator: Optional[ChatGPTOAuthConfig] = None
-    actual_instance: Optional[Union[AwsConfig, ChatGPTOAuthConfig, GcpConfig]] = None
-    one_of_schemas: Set[str] = { "AwsConfig", "ChatGPTOAuthConfig", "GcpConfig" }
+    # data type: XaiOAuthConfig
+    oneof_schema_4_validator: Optional[XaiOAuthConfig] = None
+    actual_instance: Optional[Union[AwsConfig, ChatGPTOAuthConfig, GcpConfig, XaiOAuthConfig]] = None
+    one_of_schemas: Set[str] = { "AwsConfig", "ChatGPTOAuthConfig", "GcpConfig", "XaiOAuthConfig" }
 
     model_config = ConfigDict(
         validate_assignment=True,
@@ -81,12 +84,17 @@ class LLMProviderIntegrationCreateRequestConfig(BaseModel):
             error_messages.append(f"Error! Input type `{type(v)}` is not `ChatGPTOAuthConfig`")
         else:
             match += 1
+        # validate data type: XaiOAuthConfig
+        if not isinstance(v, XaiOAuthConfig):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `XaiOAuthConfig`")
+        else:
+            match += 1
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when setting `actual_instance` in LLMProviderIntegrationCreateRequestConfig with oneOf schemas: AwsConfig, ChatGPTOAuthConfig, GcpConfig. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when setting `actual_instance` in LLMProviderIntegrationCreateRequestConfig with oneOf schemas: AwsConfig, ChatGPTOAuthConfig, GcpConfig, XaiOAuthConfig. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when setting `actual_instance` in LLMProviderIntegrationCreateRequestConfig with oneOf schemas: AwsConfig, ChatGPTOAuthConfig, GcpConfig. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting `actual_instance` in LLMProviderIntegrationCreateRequestConfig with oneOf schemas: AwsConfig, ChatGPTOAuthConfig, GcpConfig, XaiOAuthConfig. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -122,13 +130,19 @@ class LLMProviderIntegrationCreateRequestConfig(BaseModel):
             match += 1
         except (ValidationError, ValueError) as e:
             error_messages.append(str(e))
+        # deserialize data into XaiOAuthConfig
+        try:
+            instance.actual_instance = XaiOAuthConfig.from_json(json_str)
+            match += 1
+        except (ValidationError, ValueError) as e:
+            error_messages.append(str(e))
 
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when deserializing the JSON string into LLMProviderIntegrationCreateRequestConfig with oneOf schemas: AwsConfig, ChatGPTOAuthConfig, GcpConfig. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when deserializing the JSON string into LLMProviderIntegrationCreateRequestConfig with oneOf schemas: AwsConfig, ChatGPTOAuthConfig, GcpConfig, XaiOAuthConfig. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into LLMProviderIntegrationCreateRequestConfig with oneOf schemas: AwsConfig, ChatGPTOAuthConfig, GcpConfig. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into LLMProviderIntegrationCreateRequestConfig with oneOf schemas: AwsConfig, ChatGPTOAuthConfig, GcpConfig, XaiOAuthConfig. Details: " + ", ".join(error_messages))
         else:
             return instance
 
@@ -142,7 +156,7 @@ class LLMProviderIntegrationCreateRequestConfig(BaseModel):
         else:
             return json.dumps(self.actual_instance)
 
-    def to_dict(self) -> Optional[Union[Dict[str, Any], AwsConfig, ChatGPTOAuthConfig, GcpConfig]]:
+    def to_dict(self) -> Optional[Union[Dict[str, Any], AwsConfig, ChatGPTOAuthConfig, GcpConfig, XaiOAuthConfig]]:
         """Returns the dict representation of the actual instance"""
         if self.actual_instance is None:
             return None

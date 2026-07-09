@@ -12,6 +12,7 @@ import type {
 const SYSTEM_CATALOG_PROVIDERS: SystemCatalogProvider[] = [
   "openai",
   "chatgpt_oauth",
+  "xai_oauth",
   "anthropic",
   "google_gemini",
 ];

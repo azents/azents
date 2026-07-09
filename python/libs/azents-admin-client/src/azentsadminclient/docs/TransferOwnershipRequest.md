@@ -6,7 +6,7 @@ Owner transfer request schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**new_owner_workspace_user_id** | **str** | New Owner WorkspaceUser ID |
+**new_owner_workspace_user_id** | **str** | New Owner WorkspaceUser ID | 
 
 ## Example
 
@@ -26,3 +26,5 @@ transfer_ownership_request_dict = transfer_ownership_request_instance.to_dict()
 transfer_ownership_request_from_dict = TransferOwnershipRequest.from_dict(transfer_ownership_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

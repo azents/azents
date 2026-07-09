@@ -6,14 +6,14 @@ Invitation response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | WorkspaceInvitation ID (UUID7 hex) |
-**workspace_id** | **str** | Workspace ID |
-**email** | **str** | Invitation target email |
-**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Invitation role |
-**invited_by** | **str** | Inviting WorkspaceUser ID |
-**status** | [**InvitationStatus**](InvitationStatus.md) | Invitation status |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | WorkspaceInvitation ID (UUID7 hex) | 
+**workspace_id** | **str** | Workspace ID | 
+**email** | **str** | Invitation target email | 
+**role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Invitation role | 
+**invited_by** | **str** | Inviting WorkspaceUser ID | 
+**status** | [**InvitationStatus**](InvitationStatus.md) | Invitation status | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 
@@ -33,3 +33,5 @@ invitation_response_dict = invitation_response_instance.to_dict()
 invitation_response_from_dict = InvitationResponse.from_dict(invitation_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

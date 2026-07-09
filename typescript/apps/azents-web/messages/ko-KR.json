@@ -337,7 +337,8 @@
         "google_gemini": "Google Gemini",
         "aws_bedrock": "AWS Bedrock",
         "google_vertex_ai": "Google Vertex AI",
-        "chatgpt_oauth": "ChatGPT 구독"
+        "chatgpt_oauth": "ChatGPT 구독",
+        "xai_oauth": "xAI Grok OAuth"
       },
       "chatgptOAuth": {
         "title": "ChatGPT 구독",
@@ -431,6 +432,19 @@
         "skipProviderOrNormalizationFiltered": "Provider 또는 정규화 기준으로 제외됨",
         "skipUnsupportedBedrockModel": "지원하지 않는 Bedrock 모델",
         "skipUnsupportedVertexModel": "지원하지 않는 Vertex 모델"
+      },
+      "xaiOAuth": {
+        "title": "xAI Grok OAuth",
+        "oauthBadge": "실험적 OAuth",
+        "description": "xAI 디바이스 코드 OAuth로 본인의 SuperGrok 또는 X Premium 계정을 연결합니다.",
+        "callbackUnavailable": "사용 가능 여부는 xAI가 제어하며, 구독 등급 또는 allowlist 상태에 따라 403이 반환될 수 있습니다.",
+        "connected": "연결됨",
+        "deviceInstruction": "<link>xAI 인증 페이지</link>를 열고 아래 코드를 입력하세요.",
+        "copyCode": "코드 복사",
+        "copied": "복사됨",
+        "connectWithDeviceCode": "디바이스 코드로 연결",
+        "cancel": "취소",
+        "statusError": "디바이스 인증 상태: {status}."
       }
     },
     "agents": {

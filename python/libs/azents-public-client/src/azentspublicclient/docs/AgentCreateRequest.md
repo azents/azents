@@ -6,22 +6,22 @@ Agent creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Agent name |
-**model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**selectable_model_options** | [**List[SelectableModelOptionInput]**](SelectableModelOptionInput.md) |  | [optional]
-**main_model_label** | **str** |  | [optional]
-**lightweight_model_label** | **str** |  | [optional]
-**description** | **str** |  | [optional]
-**model_parameters** | [**ModelParameters**](ModelParameters.md) |  | [optional]
-**system_prompt** | **str** |  | [optional]
+**name** | **str** | Agent name | 
+**model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**selectable_model_options** | [**List[SelectableModelOptionInput]**](SelectableModelOptionInput.md) |  | [optional] 
+**main_model_label** | **str** |  | [optional] 
+**lightweight_model_label** | **str** |  | [optional] 
+**description** | **str** |  | [optional] 
+**model_parameters** | [**ModelParameters**](ModelParameters.md) |  | [optional] 
+**system_prompt** | **str** |  | [optional] 
 **enabled** | **bool** | Enabled state | [optional] [default to True]
-**type** | [**AgentType**](AgentType.md) | Visibility scope | [optional]
-**runtime_provider_id** | **str** |  | [optional]
+**type** | [**AgentType**](AgentType.md) | Visibility scope | [optional] 
+**runtime_provider_id** | **str** |  | [optional] 
 **shell_enabled** | **bool** | Shell enabled state | [optional] [default to True]
 **memory_enabled** | **bool** | Memory enabled state | [optional] [default to True]
-**max_turns** | **int** |  | [optional]
-**subagent_settings** | [**SubagentSettings**](SubagentSettings.md) | Subagent execution settings | [optional]
+**max_turns** | **int** |  | [optional] 
+**subagent_settings** | [**SubagentSettings**](SubagentSettings.md) | Subagent execution settings | [optional] 
 
 ## Example
 

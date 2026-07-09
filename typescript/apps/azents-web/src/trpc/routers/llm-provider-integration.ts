@@ -14,9 +14,13 @@ import {
   llmProviderIntegrationV1CreateIntegration,
   llmProviderIntegrationV1DeleteIntegration,
   llmProviderIntegrationV1ListIntegrationCatalogEntries,
+  llmProviderIntegrationV1ListIntegrationProviders,
   llmProviderIntegrationV1ListIntegrations,
   llmProviderIntegrationV1SyncIntegrationCatalog,
   llmProviderIntegrationV1UpdateIntegration,
+  xaiOauthV1CancelDevice,
+  xaiOauthV1PollDevice,
+  xaiOauthV1StartDevice,
 } from "@azents/public-client";
 import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
@@ -75,6 +79,27 @@ export const llmProviderIntegrationRouter = router({
           path: { handle: input.handle },
           throwOnError: true,
         });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+        });
+      }
+    }),
+
+  /** Fetch provider options available for new integrations. */
+  listProviders: publicProcedure
+    .input(z.object({ handle: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await llmProviderIntegrationV1ListIntegrationProviders(
+          {
+            client: ctx.apiClient,
+            path: { handle: input.handle },
+            throwOnError: true,
+          },
+        );
         return data;
       } catch (e) {
         throw mapExpectedError(e, {
@@ -336,6 +361,70 @@ export const llmProviderIntegrationRouter = router({
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await chatgptOauthV1CancelDevice({
+          client: ctx.apiClient,
+          path: { handle: input.handle, session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  startXaiOauthDevice: publicProcedure
+    .input(z.object({ handle: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await xaiOauthV1StartDevice({
+          client: ctx.apiClient,
+          path: { handle: input.handle },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+        });
+      }
+    }),
+
+  getXaiOauthDeviceStatus: publicProcedure
+    .input(
+      z.object({ handle: z.string().min(1), sessionId: z.string().min(1) }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await xaiOauthV1PollDevice({
+          client: ctx.apiClient,
+          path: { handle: input.handle, session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  cancelXaiOauthDevice: publicProcedure
+    .input(
+      z.object({ handle: z.string().min(1), sessionId: z.string().min(1) }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await xaiOauthV1CancelDevice({
           client: ctx.apiClient,
           path: { handle: input.handle, session_id: input.sessionId },
           throwOnError: true,

@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     # OAuth2 for per-user MCP authentication
     oauth_secret_key: str = ""
 
+    # Experimental xAI Grok OAuth provider; disabled by default.
+    xai_oauth_enabled: bool = False
+    xai_oauth_client_id: str | None = None
+
     # MCP egress proxy; forward proxy for SSRF blocking
     mcp_proxy_url: str | None = None
 
@@ -272,6 +276,13 @@ class GitHubConfig(BaseModel):
     platform_client_secret: str | None = None
 
 
+class XaiOAuthConfig(BaseModel):
+    """Experimental xAI OAuth provider settings."""
+
+    enabled: bool = False
+    client_id: str | None = None
+
+
 class CredentialEncryptionConfig(BaseModel):
     """Credential encryption settings."""
 
@@ -345,6 +356,7 @@ class Config(BaseModel):
     redis: RedisConfig
     runtime: RuntimeConfig
     github: GitHubConfig | None = None
+    xai_oauth: XaiOAuthConfig = XaiOAuthConfig()
     web_url: str = ""
     api_url: str = ""
     oauth_secret_key: str = ""
@@ -422,6 +434,10 @@ class Config(BaseModel):
                 or settings.github_platform_client_id is not None
             )
             else None,
+            xai_oauth=XaiOAuthConfig(
+                enabled=settings.xai_oauth_enabled,
+                client_id=settings.xai_oauth_client_id,
+            ),
             web_url=settings.web_url or "",
             api_url=settings.api_url or "",
             oauth_secret_key=settings.oauth_secret_key,

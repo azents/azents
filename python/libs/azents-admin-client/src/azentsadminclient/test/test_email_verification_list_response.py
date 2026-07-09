@@ -37,12 +37,12 @@ class TestEmailVerificationListResponse(unittest.TestCase):
             return EmailVerificationListResponse(
                 items = [
                     azentsadminclient.models.email_verification_response.EmailVerificationResponse(
-                        id = '',
-                        email = '',
-                        code = '',
-                        csrf_token = '',
-                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                        verified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        email = '', 
+                        code = '', 
+                        csrf_token = '', 
+                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        verified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56
@@ -51,12 +51,12 @@ class TestEmailVerificationListResponse(unittest.TestCase):
             return EmailVerificationListResponse(
                 items = [
                     azentsadminclient.models.email_verification_response.EmailVerificationResponse(
-                        id = '',
-                        email = '',
-                        code = '',
-                        csrf_token = '',
-                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                        verified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        email = '', 
+                        code = '', 
+                        csrf_token = '', 
+                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        verified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56,

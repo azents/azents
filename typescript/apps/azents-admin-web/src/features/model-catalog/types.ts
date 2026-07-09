@@ -1,6 +1,7 @@
 export type SystemCatalogProvider =
   | "openai"
   | "chatgpt_oauth"
+  | "xai_oauth"
   | "anthropic"
   | "google_gemini";
 

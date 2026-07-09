@@ -54,6 +54,13 @@ class TestLLMProviderIntegrationV1Api(unittest.TestCase):
         """
         pass
 
+    def test_llm_provider_integration_v1_list_integration_providers(self) -> None:
+        """Test case for llm_provider_integration_v1_list_integration_providers
+
+        List Integration Providers
+        """
+        pass
+
     def test_llm_provider_integration_v1_list_integrations(self) -> None:
         """Test case for llm_provider_integration_v1_list_integrations
 

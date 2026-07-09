@@ -28,6 +28,7 @@ class LLMProvider(str, Enum):
     """
     OPENAI = 'openai'
     CHATGPT_OAUTH = 'chatgpt_oauth'
+    XAI_OAUTH = 'xai_oauth'
     ANTHROPIC = 'anthropic'
     GOOGLE_GEMINI = 'google_gemini'
     AWS_BEDROCK = 'aws_bedrock'

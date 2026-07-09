@@ -6,11 +6,11 @@ Workspace model settings update request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**default_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**default_lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional]
-**default_selectable_model_options** | [**List[SelectableModelOptionInput]**](SelectableModelOptionInput.md) |  | [optional]
-**default_main_model_label** | **str** |  | [optional]
-**default_lightweight_model_label** | **str** |  | [optional]
+**default_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**default_lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**default_selectable_model_options** | [**List[SelectableModelOptionInput]**](SelectableModelOptionInput.md) |  | [optional] 
+**default_main_model_label** | **str** |  | [optional] 
+**default_lightweight_model_label** | **str** |  | [optional] 
 
 ## Example
 

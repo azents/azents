@@ -6,8 +6,8 @@ Workspace creation request schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** | Workspace name |
-**handle** | **str** | Workspace unique handle |
+**name** | **str** | Workspace name | 
+**handle** | **str** | Workspace unique handle | 
 
 ## Example
 
@@ -27,3 +27,5 @@ workspace_create_request_dict = workspace_create_request_instance.to_dict()
 workspace_create_request_from_dict = WorkspaceCreateRequest.from_dict(workspace_create_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+
