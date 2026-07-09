@@ -95,6 +95,7 @@ class FakeLifecycle(RuntimeProviderLifecycle):
 
     known_reports: Sequence[RuntimeProviderReport] = ()
     fail_with: Exception | None = None
+    fail_on_observe_known: Exception | None = None
     commands: list[RuntimeLifecycleCommand] = dataclasses.field(default_factory=list)
 
     async def start(self, command: RuntimeLifecycleCommand) -> RuntimeLifecycleResult:
@@ -120,6 +121,8 @@ class FakeLifecycle(RuntimeProviderLifecycle):
 
     async def observe_known_runtimes(self) -> Sequence[RuntimeProviderReport]:
         """Return known fake Runtime reports."""
+        if self.fail_on_observe_known is not None:
+            raise self.fail_on_observe_known
         return self.known_reports
 
     async def _result(
@@ -147,6 +150,19 @@ async def test_start_registers_heartbeats_and_reports_known_runtimes() -> None:
     assert accepted.generation == 11
     assert client.registrations[0].provider_id == "provider-1"
     assert client.reports == [known]
+    assert client.heartbeats == [("provider-1", 11)]
+
+
+@pytest.mark.asyncio
+async def test_start_heartbeats_before_observing_known_runtimes() -> None:
+    """Provider registration TTL is refreshed before backend resynchronization."""
+    client = FakeControlClient()
+    lifecycle = FakeLifecycle(fail_on_observe_known=RuntimeError("backend scan failed"))
+    loop = _loop(client, lifecycle)
+
+    with pytest.raises(RuntimeError, match="backend scan failed"):
+        await loop.start()
+
     assert client.heartbeats == [("provider-1", 11)]
 
 
