@@ -1221,11 +1221,12 @@ async def test_execute_retries_failed_run_without_durable_error(
 
     assert engine.calls == 2
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
-    assert len(lifecycle.retry_states) == 1
+    assert len(lifecycle.retry_states) == 2
     retry_state = lifecycle.retry_states[0]
     assert retry_state is not None
     assert retry_state.failed_attempt_count == 1
     assert retry_state.last_user_message == "model temporarily unavailable"
+    assert lifecycle.retry_states[1] is None
     retry_updates = [
         run.retry
         for _, run in live_event_projector.live_run_updates
@@ -1234,6 +1235,7 @@ async def test_execute_retries_failed_run_without_durable_error(
     assert len(retry_updates) == 1
     assert retry_updates[0].last_error_message == "model temporarily unavailable"
     assert retry_updates[0].attempts[0].user_message == "model temporarily unavailable"
+    assert live_event_projector.live_run_updates[-1][1].retry is None
     assert finalizer.inputs == []
     assert not any(
         isinstance(event, Event) and event.kind == EventKind.SYSTEM_ERROR
@@ -1307,6 +1309,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
     assert len(retry_updates) == 1
     assert retry_updates[0].last_error_message == "An internal error occurred."
     assert retry_updates[0].attempts[0].error_type == "RuntimeError"
+    assert live_event_projector.live_run_updates[-1][1].retry is None
 
 
 @pytest.mark.asyncio
@@ -1452,6 +1455,55 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
     assert len(lifecycle.retry_states) == 1
     assert len(finalizer.inputs) == 1
     assert finalizer.inputs[0].reason == "retry_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clearing retry projection before retrying preserves local attempt history."""
+    monkeypatch.setattr(run_executor_module, "_FAILED_RUN_RETRY_WAIT_POLL_SECONDS", 0)
+    _patch_successful_resolution(monkeypatch)
+    lifecycle = _SessionLifecycle()
+    engine = _AlwaysFailingEngine()
+    finalizer = _FailedRunFinalizer()
+    executor = _executor(
+        lifecycle,
+        engine=cast(AgentEngineProtocol, engine),
+        failed_run_finalizer=finalizer,
+        failed_run_max_retries=2,
+    )
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert engine.calls == 2
+    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert len(lifecycle.retry_states) == 3
+    assert lifecycle.retry_states[1] is None
+    final_retry_state = lifecycle.retry_states[2]
+    assert final_retry_state is not None
+    assert final_retry_state.failed_attempt_count == 2
+    assert [attempt.attempt_number for attempt in final_retry_state.attempts] == [1, 2]
+    assert len(finalizer.inputs) == 1
+    assert [
+        attempt.attempt_number for attempt in finalizer.inputs[0].retry_state.attempts
+    ] == [1, 2]
 
 
 @pytest.mark.asyncio

@@ -92,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-09
-spec_version: 90
+spec_version: 91
 ---
 
 # Conversation & Events
@@ -334,9 +334,12 @@ before destructive cleanup can remove a path or branch.
 Phase values are `idle`, `preparing_input`, `waiting_for_model`, `streaming_model`,
 `normalizing_output`, `executing_tools`, `appending_events`, `compacting`, and `stopping`.
 
-`retry_state` is the source of truth for failed-run retry progress. While present, the run remains
-`running` and live run state may expose a retry projection. Terminal run updates clear `retry_state`
-so stale retry progress cannot leak into completed, stopped, failed, interrupted, or cancelled runs.
+`retry_state` is the source of truth for failed-run retry progress while a retry attempt is waiting.
+While present, the run remains `running` and live run state may expose a retry projection. When retry
+wait expires and the next attempt starts, the worker clears `retry_state` and publishes live run state
+without `run.retry` so stale retry progress does not remain visible during later successful model or
+tool progress. Terminal run updates also clear `retry_state` so retry progress cannot leak into
+completed, stopped, failed, interrupted, or cancelled runs.
 
 ## 4. Event Transcript Events
 
@@ -646,6 +649,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-09** — v91. Clarified that failed-run retry state is cleared when retry wait ends and the next attempt starts, preventing stale live retry errors during later successful progress.
 - **2026-07-09** — v90. Documented child subagent human-write rejection before REST, input-buffer, command, and operation side effects.
 - **2026-07-08** — v89. Added the current `SessionAgent` subagent tree, `agent_message` mailbox input, terminal child run projection, Subagent Tree API, hidden child session semantics, and subtree stop behavior.
 - **2026-07-08** — v88. Clarified TurnAction FIFO behavior: failed operation actions are marked failed and later input continues, while successful Project mutation rebuilds context at the next boundary.

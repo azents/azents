@@ -38,7 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-09
-spec_version: 64
+spec_version: 65
 ---
 
 # Agent Execution Loop
@@ -111,10 +111,13 @@ terminal. `RunExecutor` converts the propagated failure into `FailedRunAttempt`,
 same `run_id`. This keeps the run `running` and prevents durable failed history until retry is
 finalized.
 
-When the next attempt succeeds, the normal terminal completed path closes the same `agent_runs` row
-and clears `retry_state`. Known non-retryable failures, such as deterministic fixture strict-mode
-`no_fixture_match`, are classified with `retryability = non_retryable`, receive `backoff_seconds = 0`,
-and are finalized on the first failed attempt instead of waiting for the retry budget. When retry is
+When retry wait expires and the next attempt starts, `RunExecutor` clears `agent_runs.retry_state`
+and publishes a `live_run_updated` snapshot with `run.retry = null` so stale retry UI disappears
+while normal model/tool progress continues. The in-memory executor still carries the previous
+attempt summaries for the next failure in the same run. Known non-retryable failures, such as
+deterministic fixture strict-mode `no_fixture_match`, are classified with `retryability =
+non_retryable`, receive `backoff_seconds = 0`, and are finalized on the first failed attempt instead
+of waiting for the retry budget. When retry is
 exhausted, when a non-retryable failure is observed, or when stop is requested while retry is waiting,
 `FailedRunErrorFinalizer` promotes the latest attempt to durable failed-run output by delegating
 durable append and terminal run updates to the engine failed-run event store. That event-store
@@ -543,6 +546,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-09** (spec_version 65) — Clarified that retry live state is cleared before the next retry attempt starts so stale retry errors do not remain visible during successful progress.
 - **2026-07-06** (spec_version 58) — Promoted existing-session Register Project worktree actions and action retry/discard mutation semantics.
 - **2026-07-05** (spec_version 57) — Added operation TurnAction execution projection updates during status/log changes.
 - **2026-07-04** (spec_version 54) — Clarified that the session runner drains pending initialization work before dispatch and may continue into run creation on the same wake-up once setup becomes ready.
