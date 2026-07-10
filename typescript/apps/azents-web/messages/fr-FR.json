@@ -608,7 +608,7 @@
           "backToParent": "Retour au parent : {name}",
           "backToParentTooltip": "Retour au parent : {name} ({path})",
           "navigationMenu": "Options de navigation du sous-agent",
-          "readOnlyNotice": "Les sessions de sous-agent sont en lecture seule. Envoyez les nouvelles instructions depuis l’agent parent.",
+          "readOnlyNotice": "Utilisez l’agent parent.",
           "unread": "Non lu",
           "runIndex": "Run {index}",
           "status": {
@@ -982,7 +982,7 @@
     "loadingHistory": "Chargement de l'historique…",
     "startConversation": "Envoyez un message pour démarrer la conversation",
     "inputPlaceholder": "Saisissez un message…",
-    "inputPlaceholderDesktop": "Saisissez un message…",
+    "inputPlaceholderDesktop": "Saisissez un message… (Maj+Entrée pour un saut de ligne)",
     "connected": "Connecté",
     "connecting": "Connexion",
     "reconnecting": "Reconnexion",

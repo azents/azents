@@ -608,7 +608,7 @@
           "backToParent": "Back to parent: {name}",
           "backToParentTooltip": "Back to parent: {name} ({path})",
           "navigationMenu": "Subagent navigation options",
-          "readOnlyNotice": "Subagent sessions are read-only. Send new instructions from the parent agent.",
+          "readOnlyNotice": "Use the parent agent.",
           "unread": "Unread",
           "runIndex": "Run {index}",
           "status": {
@@ -982,7 +982,7 @@
     "loadingHistory": "Loading conversation history…",
     "startConversation": "Send a message to start the conversation",
     "inputPlaceholder": "Type a message…",
-    "inputPlaceholderDesktop": "Type a message…",
+    "inputPlaceholderDesktop": "Type a message… (Shift+Enter for newline)",
     "connected": "Connected",
     "connecting": "Connecting",
     "reconnecting": "Reconnecting",
