@@ -15,6 +15,7 @@ from azents_runtime_control.grpc_runner_client import (
 )
 from azents_runtime_control.proto import runtime_runner_control_pb2
 from azents_runtime_control.runner import (
+    RunnerOperationEnvelope,
     RunnerOperationEvent,
     RunnerRegistration,
     RuntimeRunnerEventType,
@@ -25,6 +26,12 @@ from azents_runtime_control.runner import (
 async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> None:
     """The client maps the gRPC stream onto the RunnerControlClient protocol."""
     sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    received: list[RunnerOperationEnvelope] = []
+    operation_received = asyncio.Event()
+
+    async def handle_operation(operation: RunnerOperationEnvelope) -> None:
+        received.append(operation)
+        operation_received.set()
 
     async def stream(
         requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
@@ -50,15 +57,23 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
                 runtime_id="runtime-1",
                 runner_generation=7,
                 operation_type="process.start",
+                owner_session_id="session-1",
                 process_start=runtime_runner_control_pb2.ProcessStartOperationPayload(
                     command="python -m http.server",
                     workdir="/workspace/agent",
                     yield_time_ms=1000,
                     max_output_bytes=4096,
-                    owner_session_id="session-1",
                     env={"PYTHONUNBUFFERED": "1"},
                 ),
                 reply_stream_id="reply:req-1",
+            ),
+        )
+        operation_start = await anext(requests)
+        sent.append(operation_start)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=operation_start.request_id,
+            operation_start_ack=runtime_runner_control_pb2.RunnerOperationStartAck(
+                allowed=True
             ),
         )
         heartbeat = await anext(requests)
@@ -73,30 +88,27 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
         sent.append(event)
 
     client = GrpcRunnerControlClient(stream)
+    client.set_operation_handler(handle_operation)
     accepted = await client.register_runner(
         _registration(),
         connection_id="connection-1",
         registered_at=_now(),
     )
-    operation = await client.claim_next_runner_operation(
-        runtime_id="runtime-1",
-        generation=accepted.generation,
-        consumer_id="consumer-1",
-        block_ms=100,
-    )
+    await asyncio.wait_for(operation_received.wait(), timeout=1)
+    operation = received[0]
 
     assert accepted.generation == 7
-    assert operation is not None
     assert operation.request_id == "req-1"
     assert operation.operation_type == "process.start"
+    assert operation.owner_session_id == "session-1"
     assert operation.payload == {
         "command": "python -m http.server",
         "workdir": "/workspace/agent",
         "yield_time_ms": 1000,
         "max_output_bytes": 4096,
-        "owner_session_id": "session-1",
         "env": {"PYTHONUNBUFFERED": "1"},
     }
+    assert await client.start_runner_operation(operation)
     assert await client.heartbeat_runner(
         runtime_id="runtime-1",
         generation=accepted.generation,
@@ -124,20 +136,81 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
         )
     )
     for _ in range(10):
-        if len(sent) >= 3:
+        if len(sent) >= 4:
             break
         await asyncio.sleep(0)
 
     assert sent[0].WhichOneof("payload") == "register"
     assert sent[0].register.workspace_path == "/workspace/agent"
-    assert sent[1].WhichOneof("payload") == "heartbeat"
-    event = sent[2].operation_event
+    assert sent[1].WhichOneof("payload") == "operation_start"
+    assert sent[1].operation_start.operation_id == "operation:req-1"
+    assert sent[2].WhichOneof("payload") == "heartbeat"
+    event = sent[3].operation_event
     assert event.event_type == "final_success"
     assert event.WhichOneof("payload") == "final_success"
     assert event.final_success.WhichOneof("result") == "process"
     assert event.final_success.process.process_id == "proc_123"
     assert event.final_success.process.status == "running"
     assert not event.final_success.process.HasField("exit_code")
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_grpc_client_backpressures_operation_delivery() -> None:
+    """The stream waits for scheduler admission before reading another operation."""
+    first_received = asyncio.Event()
+    release_first = asyncio.Event()
+    second_received = asyncio.Event()
+    received: list[RunnerOperationEnvelope] = []
+    release_stream = asyncio.Event()
+
+    async def handle_operation(operation: RunnerOperationEnvelope) -> None:
+        received.append(operation)
+        if operation.request_id == "req-1":
+            first_received.set()
+            await release_first.wait()
+        else:
+            second_received.set()
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        yield _operation_message("req-1")
+        yield _operation_message("req-2")
+        await release_stream.wait()
+
+    client = GrpcRunnerControlClient(stream)
+    client.set_operation_handler(handle_operation)
+    accepted = await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    assert accepted.generation == 7
+    await asyncio.wait_for(first_received.wait(), timeout=1)
+
+    assert [operation.request_id for operation in received] == ["req-1"]
+    assert not second_received.is_set()
+
+    release_first.set()
+    await asyncio.wait_for(second_received.wait(), timeout=1)
+    assert [operation.request_id for operation in received] == ["req-1", "req-2"]
+
+    release_stream.set()
     await client.close()
 
 
@@ -212,6 +285,24 @@ async def test_grpc_client_sends_control_token_metadata() -> None:
     assert ("authorization", "Bearer control-token") in observed_metadata
 
 
+def _operation_message(
+    request_id: str,
+) -> runtime_runner_control_pb2.RunnerControlMessage:
+    return runtime_runner_control_pb2.RunnerControlMessage(
+        request_id=request_id,
+        operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
+            runtime_id="runtime-1",
+            runner_generation=7,
+            operation_type="file.stat",
+            owner_session_id="session-1",
+            file_stat=runtime_runner_control_pb2.FileStatOperationPayload(
+                path="/workspace/agent"
+            ),
+            reply_stream_id=f"reply:{request_id}",
+        ),
+    )
+
+
 def _registration() -> RunnerRegistration:
     return RunnerRegistration(
         runtime_id="runtime-1",
@@ -233,6 +324,12 @@ def _now() -> datetime:
 async def test_grpc_client_maps_git_operation_payloads_and_results() -> None:
     """Git operation payloads and final results round-trip through protobuf."""
     sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    received: list[RunnerOperationEnvelope] = []
+    operation_received = asyncio.Event()
+
+    async def handle_operation(operation: RunnerOperationEnvelope) -> None:
+        received.append(operation)
+        operation_received.set()
 
     async def stream(
         requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
@@ -272,19 +369,15 @@ async def test_grpc_client_maps_git_operation_payloads_and_results() -> None:
         sent.append(event)
 
     client = GrpcRunnerControlClient(stream)
+    client.set_operation_handler(handle_operation)
     accepted = await client.register_runner(
         _registration(),
         connection_id="connection-1",
         registered_at=_now(),
     )
-    operation = await client.claim_next_runner_operation(
-        runtime_id="runtime-1",
-        generation=accepted.generation,
-        consumer_id="consumer-1",
-        block_ms=100,
-    )
+    await asyncio.wait_for(operation_received.wait(), timeout=1)
+    operation = received[0]
 
-    assert operation is not None
     assert operation.operation_type == "create_git_worktree"
     assert operation.payload == {
         "source_project_path": "/workspace/agent/repo",

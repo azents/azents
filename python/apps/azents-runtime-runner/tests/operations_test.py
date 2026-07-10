@@ -867,6 +867,11 @@ def _operation(
         runtime_id="runtime-1",
         runner_generation=1,
         operation_type=operation_type,
+        owner_session_id=(
+            value
+            if isinstance((value := payload.get("owner_session_id")), str)
+            else None
+        ),
         payload=payload,
         reply_stream_id="reply:request-1",
         body_stream_id=None,

@@ -37,6 +37,7 @@ from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeBodyChunkRecord,
     RuntimeCoordinationTarget,
+    RuntimeOperationStatus,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
@@ -126,7 +127,7 @@ class RuntimeRunnerControlGrpcServicer(
                 "owner_replica_id": self._owner_replica_id,
             },
         )
-        outbound: asyncio.Queue[_RunnerOutbound] = asyncio.Queue()
+        outbound: asyncio.Queue[_RunnerOutbound] = asyncio.Queue(maxsize=1)
         inbound_task = asyncio.create_task(
             self._consume_runner_messages(
                 request_iterator,
@@ -317,6 +318,34 @@ class RuntimeRunnerControlGrpcServicer(
                 ):
                     return
                 await self._append_runner_event(message)
+                continue
+            if payload == "operation_start":
+                operation = await self._coordination_store.get_operation(
+                    message.operation_start.operation_id
+                )
+                allowed = False
+                if (
+                    operation is not None
+                    and message.generation == generation
+                    and message.operation_start.runtime_id == runtime_id
+                    and operation.runtime_id == runtime_id
+                    and operation.target is RuntimeCoordinationTarget.RUNNER
+                ):
+                    started = await self._coordination_store.try_start_operation(
+                        message.operation_start.operation_id,
+                        updated_at=datetime.now(UTC),
+                    )
+                    allowed = started is not None
+                await outbound.put(
+                    runtime_runner_control_pb2.RunnerControlMessage(
+                        request_id=message.request_id,
+                        operation_start_ack=(
+                            runtime_runner_control_pb2.RunnerOperationStartAck(
+                                allowed=allowed
+                            )
+                        ),
+                    )
+                )
 
     async def _runner_generation_current(
         self,
@@ -369,7 +398,7 @@ class RuntimeRunnerControlGrpcServicer(
                     "operation_type": envelope.operation_type,
                 },
             )
-            outbound.put_nowait(
+            await outbound.put(
                 _RunnerOutboundItem(
                     message=runtime_runner_control_pb2.RunnerControlMessage(
                         request_id=envelope.request_id,
@@ -429,6 +458,9 @@ class RuntimeRunnerControlGrpcServicer(
             body_stream_id=envelope.body_stream_id or "",
             background=bool(envelope.payload.get("background")),
         )
+        owner_session_id = envelope.payload.get("owner_session_id")
+        if isinstance(owner_session_id, str):
+            message.owner_session_id = owner_session_id
         _copy_operation_payload(message, envelope.operation_type, payload)
         if envelope.deadline_at is not None:
             message.deadline_at.CopyFrom(_timestamp(envelope.deadline_at))
@@ -475,7 +507,7 @@ class RuntimeRunnerControlGrpcServicer(
         )
         operation_id = f"operation:{event.request_id}"
         operation = await self._coordination_store.get_operation(operation_id)
-        if operation is None:
+        if operation is None or operation.status is RuntimeOperationStatus.FINAL:
             return
         await self._control_protocol.append_reply_event(
             RuntimeReplyEvent(
@@ -674,9 +706,6 @@ def _copy_operation_payload(
         message.process_start.max_output_bytes = _int_payload(
             payload, "max_output_bytes"
         )
-        message.process_start.owner_session_id = _str_payload(
-            payload, "owner_session_id"
-        )
         env = payload.get("env")
         if isinstance(env, dict):
             message.process_start.env.update(
@@ -693,9 +722,6 @@ def _copy_operation_payload(
         message.process_write.yield_time_ms = _int_payload(payload, "yield_time_ms")
         message.process_write.max_output_bytes = _int_payload(
             payload, "max_output_bytes"
-        )
-        message.process_write.owner_session_id = _str_payload(
-            payload, "owner_session_id"
         )
         return
     if operation_type == "file.delete":

@@ -19,6 +19,7 @@ message RunnerMessage {
     RunnerHeartbeat heartbeat = 11;
     RunnerStateReport state_report = 20;
     RunnerOperationEvent operation_event = 21;
+    RunnerOperationStart operation_start = 22;
     RunnerError error = 40;
   }
 }
@@ -30,6 +31,7 @@ message RunnerControlMessage {
     RunnerRegisterAccepted register_accepted = 10;
     RunnerHeartbeatAck heartbeat_ack = 11;
     RunnerOperationRequest operation_request = 20;
+    RunnerOperationStartAck operation_start_ack = 21;
     RunnerError error = 40;
   }
 }
@@ -61,6 +63,15 @@ message RunnerHeartbeatAck {
   uint64 monotonic_sequence = 1;
 }
 
+message RunnerOperationStart {
+  string runtime_id = 1;
+  string operation_id = 2;
+}
+
+message RunnerOperationStartAck {
+  bool allowed = 1;
+}
+
 message RunnerStateReport {
   string runtime_id = 1;
   string runner_id = 2;
@@ -78,6 +89,7 @@ message RunnerOperationRequest {
   string runtime_id = 1;
   uint64 runner_generation = 2;
   string operation_type = 3;
+  optional string owner_session_id = 4;
   string reply_stream_id = 5;
   string body_stream_id = 6;
   bool background = 7;
@@ -143,20 +155,24 @@ message FileStatOperationPayload {
 }
 
 message ProcessStartOperationPayload {
+  reserved 6;
+  reserved "owner_session_id";
+
   string command = 1;
   optional string workdir = 2;
   uint32 yield_time_ms = 3;
   uint32 max_output_bytes = 4;
   map<string, string> env = 5;
-  string owner_session_id = 6;
 }
 
 message ProcessWriteOperationPayload {
+  reserved 5;
+  reserved "owner_session_id";
+
   string process_id = 1;
   string stdin = 2;
   uint32 yield_time_ms = 3;
   uint32 max_output_bytes = 4;
-  string owner_session_id = 5;
 }
 
 message FileDeleteOperationPayload {

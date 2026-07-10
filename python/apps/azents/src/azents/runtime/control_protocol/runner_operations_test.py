@@ -661,9 +661,9 @@ async def test_start_process_dispatches_and_folds_protocol_events() -> None:
         "workdir": "/workspace/agent",
         "yield_time_ms": 1000,
         "max_output_bytes": 4096,
-        "owner_session_id": "session-1",
         "env": {"PYTHONUNBUFFERED": "1"},
     }
+    assert request.payload["owner_session_id"] == "session-1"
 
     await harness.reply(
         request.request_id,
@@ -739,8 +739,8 @@ async def test_write_process_stdin_dispatches_empty_poll_and_missing_result() ->
         "stdin": "",
         "yield_time_ms": 0,
         "max_output_bytes": 2048,
-        "owner_session_id": "session-1",
     }
+    assert request.payload["owner_session_id"] == "session-1"
 
     await harness.reply(
         request.request_id,
@@ -984,6 +984,7 @@ async def test_stale_runner_generation_raises_before_dispatch() -> None:
                 runtime_id="runtime-1",
                 runner_generation=harness.runner_generation - 1,
                 operation_type="bash",
+                owner_session_id=None,
                 payload={"command": "pwd"},
                 deadline_at=_now() + timedelta(seconds=30),
                 body_stream_id=None,

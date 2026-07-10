@@ -202,11 +202,13 @@ class InMemoryRuntimeCoordinationStore:
         updated_at: datetime,
         final_event_cursor: str | None,
     ) -> RuntimeOperationMetadata | None:
-        """Update operation status if the operation exists."""
+        """Update operation status if the operation exists and is not final."""
         async with self._lock:
             metadata = self._operation_metadata.get(operation_id)
             if metadata is None:
                 return None
+            if metadata.status is RuntimeOperationStatus.FINAL:
+                return metadata
             updated = dataclasses.replace(
                 metadata,
                 status=status,
@@ -215,6 +217,58 @@ class InMemoryRuntimeCoordinationStore:
             )
             self._operation_metadata[operation_id] = updated
             return updated
+
+    async def try_start_operation(
+        self,
+        operation_id: str,
+        *,
+        updated_at: datetime,
+    ) -> RuntimeOperationMetadata | None:
+        """Atomically transition an operation from ACTIVE to RUNNING."""
+        async with self._lock:
+            metadata = self._operation_metadata.get(operation_id)
+            if metadata is None or metadata.status is not RuntimeOperationStatus.ACTIVE:
+                return None
+            updated = dataclasses.replace(
+                metadata,
+                status=RuntimeOperationStatus.RUNNING,
+                updated_at=updated_at,
+            )
+            self._operation_metadata[operation_id] = updated
+            return updated
+
+    async def append_reply_for_operation(
+        self,
+        stream_id: str,
+        event: RuntimeReplyEvent,
+        *,
+        operation_id: str,
+    ) -> tuple[str, RuntimeOperationMetadata] | None:
+        """Append a reply and update operation metadata if not already final."""
+        async with self._lock:
+            metadata = self._operation_metadata.get(operation_id)
+            if metadata is None or metadata.status is RuntimeOperationStatus.FINAL:
+                return None
+            stream = self._reply_streams.setdefault(stream_id, [])
+            cursor = str(len(stream) + 1)
+            stream.append(RuntimeReplyRecord(cursor=cursor, event=event))
+            if event.final:
+                updated = dataclasses.replace(
+                    metadata,
+                    status=RuntimeOperationStatus.FINAL,
+                    updated_at=event.created_at,
+                    final_event_cursor=cursor,
+                    last_event_at=event.created_at,
+                )
+            else:
+                updated = dataclasses.replace(
+                    metadata,
+                    updated_at=event.created_at,
+                    last_heartbeat_at=event.created_at,
+                    last_event_at=event.created_at,
+                )
+            self._operation_metadata[operation_id] = updated
+            return cursor, updated
 
     async def heartbeat_operation(
         self,
@@ -227,6 +281,8 @@ class InMemoryRuntimeCoordinationStore:
             metadata = self._operation_metadata.get(operation_id)
             if metadata is None:
                 return None
+            if metadata.status is RuntimeOperationStatus.FINAL:
+                return metadata
             updated = dataclasses.replace(
                 metadata,
                 updated_at=heartbeat_at,

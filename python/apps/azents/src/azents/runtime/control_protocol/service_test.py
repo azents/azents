@@ -22,6 +22,7 @@ from azents.runtime.control_protocol.service import (
 from azents.runtime.coordination.data import (
     RuntimeCoordinationTarget,
     RuntimeOperationMetadata,
+    RuntimeOperationStatus,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
 )
@@ -151,6 +152,7 @@ async def test_claimed_runner_request_can_be_reclaimed_until_acked() -> None:
             runtime_id="runtime-1",
             runner_generation=runner.generation,
             operation_type="bash",
+            owner_session_id=None,
             payload={"command": "echo ok"},
             deadline_at=now + timedelta(seconds=30),
             body_stream_id=None,
@@ -243,6 +245,7 @@ async def test_dispatch_runner_operation_supports_resume_after_reply_cursor() ->
             runtime_id="runtime-1",
             runner_generation=runner.generation,
             operation_type="bash",
+            owner_session_id=None,
             payload={"command": "echo ok"},
             deadline_at=now + timedelta(seconds=30),
             body_stream_id=None,
@@ -336,6 +339,7 @@ async def test_runner_reconnect_does_not_replay_previous_generation_requests() -
             runtime_id="runtime-1",
             runner_generation=first.generation,
             operation_type="bash",
+            owner_session_id=None,
             payload={"command": "echo ok"},
             deadline_at=now + timedelta(seconds=30),
             body_stream_id=None,
@@ -432,6 +436,7 @@ async def test_operation_ttl_keeps_deadline_buffer() -> None:
             runtime_id="runtime-1",
             runner_generation=runner.generation,
             operation_type="bash",
+            owner_session_id=None,
             payload={"command": "echo short"},
             deadline_at=created_at + timedelta(seconds=30),
             body_stream_id=None,
@@ -446,6 +451,7 @@ async def test_operation_ttl_keeps_deadline_buffer() -> None:
             runtime_id="runtime-1",
             runner_generation=runner.generation,
             operation_type="bash",
+            owner_session_id=None,
             payload={"command": "echo long"},
             deadline_at=created_at + timedelta(seconds=1200),
             body_stream_id=None,
@@ -454,6 +460,72 @@ async def test_operation_ttl_keeps_deadline_buffer() -> None:
         created_at=created_at,
     )
     assert store.last_operation_ttl_seconds == 1500
+
+
+@pytest.mark.asyncio
+async def test_late_final_reply_does_not_replace_canceled_cursor() -> None:
+    """Canceled finals remain authoritative when a late Runner final arrives."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "req-late",
+    )
+    now = _now()
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=runner.generation,
+            operation_type="bash",
+            owner_session_id=None,
+            payload={"command": "echo late"},
+            deadline_at=now + timedelta(seconds=30),
+            body_stream_id=None,
+            background=False,
+        ),
+        created_at=now,
+    )
+    assert isinstance(result, RuntimeDispatchResult)
+
+    canceled = await service.append_reply_event(
+        _reply(
+            "req-late",
+            runner.generation,
+            RuntimeReplyEventType.FINAL_ERROR,
+            final=True,
+        ),
+        reply_stream_id=result.reply_stream_id,
+        operation_id=result.operation_id,
+        expected_target=RuntimeCoordinationTarget.RUNNER,
+        expected_subject_id="runtime-1",
+    )
+    late = await service.append_reply_event(
+        _reply(
+            "req-late",
+            runner.generation,
+            RuntimeReplyEventType.FINAL_SUCCESS,
+            final=True,
+        ),
+        reply_stream_id=result.reply_stream_id,
+        operation_id=result.operation_id,
+        expected_target=RuntimeCoordinationTarget.RUNNER,
+        expected_subject_id="runtime-1",
+    )
+
+    assert isinstance(canceled, RuntimeReplyAppendResult)
+    assert late is None
+    metadata = await store.get_operation(result.operation_id)
+    assert metadata is not None
+    assert metadata.status is RuntimeOperationStatus.FINAL
+    assert metadata.final_event_cursor == canceled.cursor
+    replies = await service.read_replies(
+        reply_stream_id=result.reply_stream_id,
+        after_cursor=None,
+        limit=10,
+    )
+    assert [record.event.event_type for record in replies] == [
+        RuntimeReplyEventType.FINAL_ERROR
+    ]
 
 
 def _provider_registration() -> RuntimeProviderRegistration:
@@ -492,6 +564,7 @@ def _runner_operation(*, generation: int, now: datetime) -> RuntimeRunnerOperati
         runtime_id="runtime-1",
         runner_generation=generation,
         operation_type="bash",
+        owner_session_id=None,
         payload={"command": "pwd"},
         deadline_at=now + timedelta(seconds=30),
         body_stream_id=None,
