@@ -16,7 +16,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-10
-spec_version: 21
+spec_version: 22
 ---
 
 # Chat Session Resync
@@ -133,8 +133,8 @@ projected status, latest task/message preview, unread terminal result flag, late
 terminal result source event id, terminal result message preview, and children. The unread terminal
 result flag applies only to non-root child nodes because root sessions do not have a parent observer.
 Projected status treats a parent-interrupted subtree as interrupted for all descendants that do not
-have a newer terminal run. Siblings that have sent messages are sorted by their latest explicit
-agent-to-agent or terminal-result message time, newest first. Siblings without sent messages follow
+have a newer terminal run. Siblings with message activity are sorted by their latest explicit
+agent-to-agent message sent or received time, or terminal-result message time, newest first. Siblings without message activity follow
 status order—running, failed/completed, interrupted, then pending/idle—with name as the stable
 fallback. The parent-child hierarchy is never flattened by this ordering.
 
@@ -317,6 +317,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-10** — v22. Treated both sent and received agent messages as recent tree activity so the most recently contacted sibling appears first.
 - **2026-07-10** — v21. Prioritized recent agent message senders within each sibling group and added periodic, focus, and lifecycle-event tree refresh.
 - **2026-07-09** — v20. Rendered internal agent messages as collapsed source-labeled rows and standardized subagent surfaces on the robot icon.
 - **2026-07-09** — v19. Documented Subagent Tree status propagation/sorting and disabled child detail input with retained stop control.

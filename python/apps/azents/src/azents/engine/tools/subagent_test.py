@@ -83,7 +83,7 @@ def _session_agent(
         if kind is SessionAgentKind.SUBAGENT
         else None,
         last_task_message=None,
-        last_message_sent_at=None,
+        last_message_at=None,
         parent_observed_run_index=None,
         parent_observed_event_id=None,
         created_at=_NOW,
@@ -296,13 +296,13 @@ class _AgentSessionRepository:
         self.last_task_updates.append((session_agent_id, last_task_message))
         return self.target
 
-    async def mark_session_agent_message_sent(
+    async def mark_session_agent_message_activity(
         self,
         session: AsyncSession,
         *,
         session_agent_id: str,
     ) -> SessionAgent | None:
-        """Record the source agent message timestamp update."""
+        """Record an agent message activity timestamp update."""
         del session
         self.message_sent_updates.append(session_agent_id)
         return next(agent for agent in self.tree if agent.id == session_agent_id)
@@ -575,7 +575,7 @@ async def test_send_message_is_queue_only() -> None:
     assert input_service.enqueued[0].metadata["message_kind"] == "send_message"
     assert input_service.enqueued[0].content == "note"
     assert repo.last_task_updates == [("child-agent", "note")]
-    assert repo.message_sent_updates == ["root-agent"]
+    assert repo.message_sent_updates == ["root-agent", "child-agent"]
     assert repo.marked_running == []
     assert broker.messages == []
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
@@ -872,6 +872,25 @@ async def test_wait_agent_timeout_waits_until_deadline() -> None:
     assert repo.observation_updates == []
 
 
+async def test_wait_agent_rejects_current_agent_target() -> None:
+    """wait_agent rejects the current agent instead of treating it as missing."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
+
+    with pytest.raises(FunctionToolError, match="cannot wait for itself"):
+        await tool.handler(json.dumps({"agent_name": "root"}))
+
+
 async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     """spawn_agent creates a child when depth and active subagent limits allow it."""
     (
@@ -949,7 +968,11 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
     reminder_text = event_repo.appended[1].payload["text"]
     assert isinstance(reminder_text, str)
     assert "inherited conversation history" in reminder_text
-    assert "direct assignment begins after this reminder" in reminder_text
+    assert 'You are the subagent named "reviewer".' in reminder_text
+    assert 'Your full agent path is "/root/reviewer".' in reminder_text
+    assert "The next message is your current direct assignment." in reminder_text
+    assert "Never call wait_agent on yourself." in reminder_text
+    assert "for observing your descendants" in reminder_text
     assert input_service.enqueued[0].content == "Review only"
 
 

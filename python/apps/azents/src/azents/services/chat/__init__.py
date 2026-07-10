@@ -98,12 +98,12 @@ from .data import (
 from .live_events import LiveEventStore, input_buffer_to_live_event
 
 
-def _latest_agent_message_sent_at(
+def _latest_agent_message_at(
     agent: SessionAgent,
     latest_run: AgentRunState | None,
 ) -> datetime.datetime | None:
-    """Return the latest explicit or terminal message sent by an agent."""
-    timestamps = [agent.last_message_sent_at]
+    """Return the latest explicit or terminal message activity for an agent."""
+    timestamps = [agent.last_message_at]
     if latest_run is not None and latest_run.terminal_result_message is not None:
         timestamps.append(latest_run.ended_at)
     present = [timestamp for timestamp in timestamps if timestamp is not None]
@@ -134,7 +134,7 @@ def _subagent_tree_node(
         agent_type=agent.agent_type,
         status=_project_subagent_status(session, run_status),
         last_task_message=agent.last_task_message,
-        last_message_sent_at=_latest_agent_message_sent_at(agent, latest_run),
+        last_message_at=_latest_agent_message_at(agent, latest_run),
         unread_result=_has_unread_subagent_result(agent, run_status, run_index),
         latest_run_id=latest_run.id if latest_run is not None else None,
         latest_run_index=run_index,
@@ -186,8 +186,8 @@ def _subagent_status_sort_rank(status: str) -> int:
 def _subagent_tree_sort_key(
     node: SubagentTreeNode,
 ) -> tuple[bool, float, int, str]:
-    """Sort recently messaging siblings first, then preserve stable fallbacks."""
-    sent_at = node.last_message_sent_at
+    """Sort siblings with recent message activity first, then stable fallbacks."""
+    sent_at = node.last_message_at
     return (
         sent_at is None,
         -sent_at.timestamp() if sent_at is not None else 0.0,

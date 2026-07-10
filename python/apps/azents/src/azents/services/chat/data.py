@@ -91,7 +91,7 @@ class SubagentTreeNode:
     agent_type: str
     status: str
     last_task_message: str | None
-    last_message_sent_at: datetime.datetime | None
+    last_message_at: datetime.datetime | None
     unread_result: bool
     latest_run_id: str | None
     latest_run_index: int | None
