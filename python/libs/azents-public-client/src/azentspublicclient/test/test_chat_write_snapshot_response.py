@@ -68,7 +68,7 @@ class TestChatWriteSnapshotResponse(unittest.TestCase):
                 run = azentspublicclient.models.chat_live_run_state_response.ChatLiveRunStateResponse(
                     run_id = '', 
                     phase = 'idle', 
-                    status = 'running', 
+                    status = 'pending',
                     retry = azentspublicclient.models.chat_live_run_retry_state_response.ChatLiveRunRetryStateResponse(
                         status = '', 
                         last_error_message = '', 

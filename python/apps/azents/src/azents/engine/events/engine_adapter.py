@@ -117,7 +117,7 @@ from azents.engine.run.types import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
+from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
@@ -295,27 +295,10 @@ class AgentEngineAdapter:
                 transcript_repo=self.transcript_repo,
             )
             run_state = await self.run_repo.get_by_id(session, context.run_id)
-            if run_state is None:
-                run_state = await self.run_repo.create(
-                    session,
-                    AgentRunCreate(
-                        id=context.run_id,
-                        session_id=request.session_id,
-                        requested_model_target_label=None,
-                        requested_reasoning_effort=None,
-                        inference_profile_source=None,
-                        resolved_model_selection=None,
-                        resolved_reasoning_effort=None,
-                        resolved_at=None,
-                        effective_context_window_tokens=None,
-                        effective_auto_compaction_threshold_tokens=None,
-                        inference_profile_failure_code=None,
-                        inference_profile_failure_message=None,
-                        parent_agent_run_id=None,
-                    ),
+            if run_state is None or run_state.status is not AgentRunStatus.RUNNING:
+                raise RuntimeError(
+                    "AgentRun must be activated before engine invocation"
                 )
-            else:
-                await self.run_repo.update_retry_state(session, context.run_id, None)
             await session.commit()
         for event in user_message_events:
             yield durable(event)
@@ -457,6 +440,9 @@ class AgentEngineAdapter:
                         summarize=self.summary_model_call,
                     ),
                     max_input_tokens=request.effective_max_input_tokens,
+                    auto_compaction_threshold_tokens=(
+                        request.auto_compaction_threshold_tokens
+                    ),
                     compaction_id_factory=lambda: uuid7().hex,
                     on_compaction_started=on_auto_compaction_started,
                     summary_enricher=_compaction_summary_enricher(

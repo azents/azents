@@ -242,6 +242,7 @@ __all__ = [
     "RefreshTokenResponse",
     "RequestSignupEmailRequest",
     "RequestSignupEmailResponse",
+    "RequestedInferenceProfile",
     "ResetAgentRuntimeRequest",
     "ResponseChatV1ReadAgentWorkspacePath",
     "RuntimeDesiredState",
@@ -540,6 +541,7 @@ from azentspublicclient.models.refresh_token_request import RefreshTokenRequest 
 from azentspublicclient.models.refresh_token_response import RefreshTokenResponse as RefreshTokenResponse
 from azentspublicclient.models.request_signup_email_request import RequestSignupEmailRequest as RequestSignupEmailRequest
 from azentspublicclient.models.request_signup_email_response import RequestSignupEmailResponse as RequestSignupEmailResponse
+from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile as RequestedInferenceProfile
 from azentspublicclient.models.reset_agent_runtime_request import ResetAgentRuntimeRequest as ResetAgentRuntimeRequest
 from azentspublicclient.models.response_chat_v1_read_agent_workspace_path import ResponseChatV1ReadAgentWorkspacePath as ResponseChatV1ReadAgentWorkspacePath
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState as RuntimeDesiredState

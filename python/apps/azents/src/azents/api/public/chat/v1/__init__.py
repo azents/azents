@@ -581,6 +581,7 @@ async def _write_message_via_rest(
         agent_id=request.agent_id,
         agent_session_id=resolved_session_id,
         message=message,
+        inference_profile=request.inference_profile,
         user_id=user_id,
         client_request_id=request.client_request_id,
     )
@@ -1009,6 +1010,7 @@ async def _write_new_session_message_via_rest(
         await agent_session_input_service.create_team_session_with_buffered_input(
             agent_id=agent_id,
             message=message,
+            inference_profile=request.inference_profile,
             user_id=user_id,
             existing_project_paths=request.existing_project_paths,
             setup_actions=request.setup_actions,
@@ -1071,6 +1073,7 @@ async def _write_edit_message_via_rest(
             client_request_id=request.client_request_id,
             message_id=request.message_id,
             text=request.message,
+            inference_profile=request.inference_profile,
             metadata=metadata,
             attachments=[attachment.uri for attachment in materialized.attachments],
             file_parts=materialized.file_parts,
@@ -1244,6 +1247,11 @@ async def _write_turn_action_via_rest(
     """Handle TurnAction writes as action_message input buffers."""
     if request.action is None:
         raise HTTPException(status_code=400, detail="Action is required.")
+    if request.inference_profile is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Run-producing input requires an inference profile.",
+        )
     if request.attachments:
         raise HTTPException(
             status_code=400,
@@ -1271,6 +1279,7 @@ async def _write_turn_action_via_rest(
         agent_session_id=session_id,
         action=request.action.model_dump(mode="json"),
         message=message,
+        inference_profile=request.inference_profile,
         user_id=user_id,
         client_request_id=request.client_request_id,
     )
@@ -1306,10 +1315,16 @@ async def _write_input_via_rest(
     """Dispatch one composer input by action category."""
     match request.action:
         case None:
+            if request.inference_profile is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Run-producing input requires an inference profile.",
+                )
             message_request = ChatMessageWriteRequest(
                 agent_id=request.agent_id,
                 client_request_id=request.client_request_id,
                 message=request.message,
+                inference_profile=request.inference_profile,
                 attachments=request.attachments,
             )
             return await _write_message_via_rest(

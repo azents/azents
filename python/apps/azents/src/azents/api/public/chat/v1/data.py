@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 from typing import Literal, Self, assert_never
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from azents.core.enums import (
     AgentRunPhase,
@@ -16,7 +16,13 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
 )
-from azents.engine.events.action_messages import ChatAction, CreateGitWorktreeAction
+from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.llm_catalog import ModelReasoningEffort
+from azents.engine.events.action_messages import (
+    ChatAction,
+    CommandAction,
+    CreateGitWorktreeAction,
+)
 from azents.engine.events.types import Event
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
@@ -108,10 +114,26 @@ class ChatInputWriteRequest(BaseModel):
         default=None,
         description="Optional selected chat action",
     )
+    inference_profile: RequestedInferenceProfile | None = Field(
+        description=(
+            "Requested inference profile for run-producing input, or null for "
+            "a non-model command"
+        ),
+    )
     attachments: list[str] | None = Field(
         default=None,
         description="Attachment reference list, exchange:// URIs received after upload",
     )
+
+    @model_validator(mode="after")
+    def validate_inference_profile(self) -> Self:
+        """Require profiles exactly for inputs that produce a model run."""
+        command = isinstance(self.action, CommandAction)
+        if command and self.inference_profile is not None:
+            raise ValueError("Non-model commands require a null inference profile")
+        if not command and self.inference_profile is None:
+            raise ValueError("Run-producing input requires an inference profile")
+        return self
 
 
 class InputActionMessagePolicyResponse(BaseModel):
@@ -184,6 +206,9 @@ class ChatMessageWriteRequest(BaseModel):
         description="Client-generated idempotency key",
     )
     message: str = Field(description="Message content")
+    inference_profile: RequestedInferenceProfile = Field(
+        description="Requested inference profile for the model run",
+    )
     attachments: list[str] | None = Field(
         default=None,
         description="Attachment reference list, exchange:// URIs received after upload",
@@ -199,6 +224,9 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         description="Client-generated idempotency key",
     )
     message: str = Field(description="Message content")
+    inference_profile: RequestedInferenceProfile = Field(
+        description="Requested inference profile for the first model run",
+    )
     existing_project_paths: list[str] = Field(
         description="Existing Project paths to register on the created session",
     )
@@ -271,6 +299,9 @@ class ChatEditMessageWriteRequest(BaseModel):
     )
     message_id: str = Field(description="Existing user_message event ID to edit")
     message: str = Field(description="Edited message content")
+    inference_profile: RequestedInferenceProfile = Field(
+        description="Requested inference profile for the edited model run",
+    )
     attachments: list[str] | None = Field(
         default=None,
         description="Attachment reference list, exchange:// URIs received after upload",
@@ -1844,6 +1875,12 @@ class AgentSessionResponse(BaseModel):
 
     id: str = Field(description="Session ID")
     agent_id: str = Field(description="Agent ID")
+    last_model_target_label: str | None = Field(
+        description="Most recently activated model target label",
+    )
+    last_reasoning_effort: ModelReasoningEffort | None = Field(
+        description="Most recently activated reasoning effort, or null for Default",
+    )
     title: str | None = Field(description="User-facing session title")
     title_source: AgentSessionTitleSource | None = Field(
         description="Source of the current session title",
@@ -1865,6 +1902,8 @@ class AgentSessionResponse(BaseModel):
         return cls(
             id=session.id,
             agent_id=session.agent_id,
+            last_model_target_label=session.last_model_target_label,
+            last_reasoning_effort=session.last_reasoning_effort,
             title=session.title,
             title_source=session.title_source,
             status=session.status,

@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from azcommon.result import Failure, Result, Success
 from fastapi import BackgroundTasks, HTTPException
+from pydantic import ValidationError
 
 from azents.api.public.chat.v1 import (
     _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
@@ -61,7 +62,12 @@ from azents.core.enums import (
     EventKind,
     InputBufferKind,
 )
-from azents.engine.events.action_messages import CreateGitWorktreeAction, SkillAction
+from azents.core.inference_profile import RequestedInferenceProfile
+from azents.engine.events.action_messages import (
+    CommandAction,
+    CreateGitWorktreeAction,
+    SkillAction,
+)
 from azents.engine.events.types import (
     ActiveToolCall,
     Event,
@@ -1471,6 +1477,10 @@ class TestRestMessageWriteContract:
                 agent_id="agent-1",
                 client_request_id="client-1",
                 message="hello",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
             ),
             session_id="0123456789abcdef0123456789abcdef",
             user_id="user-1",
@@ -1510,6 +1520,10 @@ class TestRestMessageWriteContract:
             ChatSessionCreateMessageWriteRequest(
                 client_request_id="client-new-1",
                 message="hello from draft",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
                 existing_project_paths=["/workspace/agent/app"],
                 setup_actions=[],
             ),
@@ -1555,6 +1569,10 @@ class TestRestMessageWriteContract:
             ChatSessionCreateMessageWriteRequest(
                 client_request_id="client-new-mixed",
                 message="hello from mixed workspace",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
                 existing_project_paths=["/workspace/agent/app"],
                 setup_actions=[action],
             ),
@@ -1612,6 +1630,10 @@ class TestRestMessageWriteContract:
                     agent_id="agent-1",
                     client_request_id="client-mismatch",
                     message="hello",
+                    inference_profile=RequestedInferenceProfile(
+                        model_target_label="Primary",
+                        reasoning_effort=None,
+                    ),
                 ),
                 session_id="2223456789abcdef0123456789abcdef",
                 user_id="user-1",
@@ -1646,6 +1668,10 @@ class TestRestMessageWriteContract:
                 agent_id="agent-1",
                 client_request_id="worktree-1",
                 message="",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
                 action=CreateGitWorktreeAction(
                     source_project_path="/workspace/agent/source",
                     starting_ref="refs/heads/main",
@@ -1688,6 +1714,10 @@ class TestRestMessageWriteContract:
                 agent_id="agent-1",
                 client_request_id="skill-1",
                 message="Review this change",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
                 action=SkillAction(
                     skill_path="/workspace/agent/app/.claude/skills/review/SKILL.md"
                 ),
@@ -1728,6 +1758,10 @@ class TestRestEditCommandWriteContract:
                 client_request_id="edit-1",
                 message_id="message-1",
                 message="edited",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
             ),
             session_id="0123456789abcdef0123456789abcdef",
             user_id="user-1",
@@ -1761,6 +1795,10 @@ class TestRestEditCommandWriteContract:
                 client_request_id="edit-1",
                 message_id="message-1",
                 message="edited",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
             ),
             session_id="0123456789abcdef0123456789abcdef",
             user_id="user-1",
@@ -1821,6 +1859,43 @@ class TestRestEditCommandWriteContract:
 
         assert response.client_request_id == "command-1"
         assert broker.messages == []
+
+
+class TestChatInferenceProfileRequestContract:
+    """Composer request inference-profile validation tests."""
+
+    def test_run_producing_input_requires_profile(self) -> None:
+        """Reject a null profile for a normal model-producing message."""
+        try:
+            ChatInputWriteRequest(
+                agent_id="agent-1",
+                client_request_id="message-1",
+                message="hello",
+                action=None,
+                inference_profile=None,
+            )
+        except ValidationError as exc:
+            assert "Run-producing input requires an inference profile" in str(exc)
+        else:
+            raise AssertionError("Expected profile validation failure")
+
+    def test_command_requires_null_profile(self) -> None:
+        """Reject a model profile for a non-model command."""
+        try:
+            ChatInputWriteRequest(
+                agent_id="agent-1",
+                client_request_id="command-1",
+                message="",
+                action=CommandAction(name="compact"),
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+            )
+        except ValidationError as exc:
+            assert "Non-model commands require a null inference profile" in str(exc)
+        else:
+            raise AssertionError("Expected profile validation failure")
 
 
 class TestChatInputBufferContract:

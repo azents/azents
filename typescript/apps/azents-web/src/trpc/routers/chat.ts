@@ -58,6 +58,11 @@ const inputActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("skill"), skill_path: z.string().min(1) }),
 ]);
 
+const inferenceProfileSchema = z.object({
+  model_target_label: z.string().min(1),
+  reasoning_effort: z.enum(["low", "medium", "high"]).nullable(),
+});
+
 const setupActionSchema = z.object({
   type: z.literal("create_git_worktree"),
   source_project_path: z.string().min(1),
@@ -166,6 +171,7 @@ export const chatRouter = router({
         agentId: z.string().min(1),
         clientRequestId: z.string().min(1).max(64),
         message: z.string().min(1),
+        inferenceProfile: inferenceProfileSchema,
         attachments: z.array(z.string().min(1)).optional(),
         existingProjectPaths: z.array(z.string().min(1)),
         setupActions: z.array(setupActionSchema),
@@ -179,6 +185,7 @@ export const chatRouter = router({
           body: {
             client_request_id: input.clientRequestId,
             message: input.message,
+            inference_profile: input.inferenceProfile,
             existing_project_paths: input.existingProjectPaths,
             setup_actions: input.setupActions,
             attachments: input.attachments,
@@ -416,6 +423,7 @@ export const chatRouter = router({
         clientRequestId: z.string().min(1).max(64),
         sourceProjectPath: z.string().min(1),
         startingRef: z.string().min(1),
+        inferenceProfile: inferenceProfileSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -427,6 +435,7 @@ export const chatRouter = router({
             agent_id: input.agentId,
             client_request_id: input.clientRequestId,
             message: "",
+            inference_profile: input.inferenceProfile,
             action: {
               type: "create_git_worktree",
               source_project_path: input.sourceProjectPath,
@@ -663,6 +672,7 @@ export const chatRouter = router({
         clientRequestId: z.string().min(1).max(64),
         message: z.string(),
         action: inputActionSchema.nullable().optional(),
+        inferenceProfile: inferenceProfileSchema.nullable(),
         attachments: z.array(z.string().min(1)).optional(),
       }),
     )
@@ -676,6 +686,7 @@ export const chatRouter = router({
             client_request_id: input.clientRequestId,
             message: input.message,
             action: input.action ?? null,
+            inference_profile: input.inferenceProfile,
             attachments: input.attachments,
           },
           throwOnError: true,
@@ -700,6 +711,7 @@ export const chatRouter = router({
         clientRequestId: z.string().min(1).max(64),
         messageId: z.string().min(1),
         message: z.string().min(1),
+        inferenceProfile: inferenceProfileSchema,
         attachments: z.array(z.string().min(1)).optional(),
       }),
     )
@@ -713,6 +725,7 @@ export const chatRouter = router({
             client_request_id: input.clientRequestId,
             message_id: input.messageId,
             message: input.message,
+            inference_profile: input.inferenceProfile,
             attachments: input.attachments,
           },
           throwOnError: true,

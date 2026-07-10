@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import (
+    AgentRunPhase,
     AgentRunStatus,
     AgentSessionKind,
     AgentSessionStartReason,
@@ -134,7 +135,30 @@ class _RunRepo:
     def __init__(self) -> None:
         self.created: AgentRunCreate | None = None
         self.terminal_status: AgentRunStatus | None = None
-        self._state: AgentRunState | None = None
+        self.retry_state_updates: list[object | None] = []
+        now = datetime.datetime.now(datetime.UTC)
+        self._state: AgentRunState | None = AgentRunState(
+            id="0" * 32,
+            session_id="session-1",
+            run_index=1,
+            phase=AgentRunPhase.IDLE,
+            status=AgentRunStatus.RUNNING,
+            requested_model_target_label="default",
+            requested_reasoning_effort=None,
+            inference_profile_source=None,
+            resolved_model_selection=None,
+            resolved_reasoning_effort=None,
+            resolved_at=now,
+            effective_context_window_tokens=128_000,
+            effective_auto_compaction_threshold_tokens=115_200,
+            inference_profile_failure_code=None,
+            inference_profile_failure_message=None,
+            parent_agent_run_id=None,
+            active_tool_calls=[],
+            created_at=now,
+            started_at=now,
+            updated_at=now,
+        )
 
     async def get_by_id(
         self,
@@ -206,8 +230,9 @@ class _RunRepo:
         run_id: str,
         retry_state: object | None,
     ) -> object:
-        """Record retry-state clear without mutating this lightweight test repo."""
-        del session, run_id, retry_state
+        """Record durable retry-state updates."""
+        del session, run_id
+        self.retry_state_updates.append(retry_state)
         return object()
 
 
@@ -617,6 +642,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -626,8 +652,8 @@ async def test_event_engine_adapter_runs_execution() -> None:
         )
     ]
 
-    assert run_repo.created is not None
-    assert run_repo.created.id == "0" * 32
+    assert run_repo.created is None
+    assert run_repo.retry_state_updates == []
     assert execution.request is not None
     assert execution.prepared_model_call is not None
     prepared_request = execution.prepared_model_call.native_request
@@ -660,6 +686,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             credential_kwargs={"api_key": "test"},
             workspace_id="workspace-1",
             agent_id="agent-1",
+            auto_compaction_threshold_tokens=None,
         ),
         RunContext(
             user_id="user-1",
@@ -703,6 +730,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -746,6 +774,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             credential_kwargs={"api_key": "test"},
             workspace_id="workspace-1",
             agent_id="agent-1",
+            auto_compaction_threshold_tokens=None,
         ),
         RunContext(
             user_id="user-1",
@@ -793,6 +822,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -836,6 +866,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -891,6 +922,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 },
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -942,6 +974,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
                 max_output_tokens=123,
                 max_input_tokens=64_000,
                 compaction_max_input_tokens=32_000,
@@ -1024,6 +1057,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
             ),
             _run_context(),
         )
@@ -1096,6 +1130,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
             ),
             _run_context(),
         )
@@ -1204,6 +1239,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
                 max_input_tokens=12_000,
                 compaction_max_input_tokens=12_000,
             ),
@@ -1256,6 +1292,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
             credential_kwargs={"api_key": "test"},
             workspace_id="workspace-1",
             agent_id="agent-1",
+            auto_compaction_threshold_tokens=None,
         ),
         _run_context(),
     )

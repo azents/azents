@@ -17,26 +17,21 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
-from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction
-from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile
+from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ChatInputWriteRequest(BaseModel):
+class RequestedInferenceProfile(BaseModel):
     """
-    REST composer input write request.
+    Agent-owned target label and optional explicit reasoning effort.
     """ # noqa: E501
-    agent_id: StrictStr = Field(description="Agent ID")
-    client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
-    message: StrictStr = Field(description="Input message content")
-    action: Optional[ChatInputWriteRequestAction] = None
-    inference_profile: Optional[RequestedInferenceProfile]
-    attachments: Optional[List[StrictStr]] = None
+    model_target_label: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Agent-owned selectable model target label")
+    reasoning_effort: Optional[ModelReasoningEffort]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_id", "client_request_id", "message", "action", "inference_profile", "attachments"]
+    __properties: ClassVar[List[str]] = ["model_target_label", "reasoning_effort"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -56,7 +51,7 @@ class ChatInputWriteRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ChatInputWriteRequest from a JSON string"""
+        """Create an instance of RequestedInferenceProfile from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -79,37 +74,21 @@ class ChatInputWriteRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of action
-        if self.action:
-            _dict['action'] = self.action.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of inference_profile
-        if self.inference_profile:
-            _dict['inference_profile'] = self.inference_profile.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if action (nullable) is None
+        # set to None if reasoning_effort (nullable) is None
         # and model_fields_set contains the field
-        if self.action is None and "action" in self.model_fields_set:
-            _dict['action'] = None
-
-        # set to None if inference_profile (nullable) is None
-        # and model_fields_set contains the field
-        if self.inference_profile is None and "inference_profile" in self.model_fields_set:
-            _dict['inference_profile'] = None
-
-        # set to None if attachments (nullable) is None
-        # and model_fields_set contains the field
-        if self.attachments is None and "attachments" in self.model_fields_set:
-            _dict['attachments'] = None
+        if self.reasoning_effort is None and "reasoning_effort" in self.model_fields_set:
+            _dict['reasoning_effort'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ChatInputWriteRequest from a dict"""
+        """Create an instance of RequestedInferenceProfile from a dict"""
         if obj is None:
             return None
 
@@ -117,12 +96,8 @@ class ChatInputWriteRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "agent_id": obj.get("agent_id"),
-            "client_request_id": obj.get("client_request_id"),
-            "message": obj.get("message"),
-            "action": ChatInputWriteRequestAction.from_dict(obj["action"]) if obj.get("action") is not None else None,
-            "inference_profile": RequestedInferenceProfile.from_dict(obj["inference_profile"]) if obj.get("inference_profile") is not None else None,
-            "attachments": obj.get("attachments")
+            "model_target_label": obj.get("model_target_label"),
+            "reasoning_effort": obj.get("reasoning_effort")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
@@ -130,5 +105,3 @@ class ChatInputWriteRequest(BaseModel):
                 _obj.additional_properties[_key] = obj.get(_key)
 
         return _obj
-
-

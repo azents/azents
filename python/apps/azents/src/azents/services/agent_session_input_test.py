@@ -17,12 +17,13 @@ from azents.core.enums import (
     LLMProvider,
     WorkspaceUserRole,
 )
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
@@ -53,6 +54,11 @@ from .input_buffer import (
     InputBufferEnqueue,
     InputBufferEnqueueResult,
     InputBufferService,
+)
+
+_TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
+    model_target_label="Primary",
+    reasoning_effort=None,
 )
 
 
@@ -211,6 +217,7 @@ def _input_buffer_service(
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
+        agent_run_repository=AgentRunRepository(),
     )
 
 
@@ -318,6 +325,7 @@ class TestAgentSessionInputService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id="user-1",
         )
 
@@ -370,6 +378,7 @@ class TestAgentSessionInputService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id="user-1",
         )
 
@@ -427,6 +436,7 @@ class TestAgentSessionInputService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
             existing_project_paths=[
                 "/workspace/agent/project-a/nested",
@@ -526,6 +536,7 @@ class TestAgentSessionInputService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
         )
 
@@ -589,6 +600,7 @@ class TestAgentSessionInputService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
         )
 
@@ -644,6 +656,7 @@ class TestAgentSessionInputService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
         )
         assert isinstance(result, Success)
@@ -701,6 +714,7 @@ class TestAgentSessionInputService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
             client_request_id="client-request-1",
         )
@@ -714,6 +728,7 @@ class TestAgentSessionInputService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
             client_request_id="client-request-1",
         )

@@ -427,6 +427,7 @@ Class | Method | HTTP request | Description
  - [RefreshTokenResponse](azentspublicclient/docs/RefreshTokenResponse.md)
  - [RequestSignupEmailRequest](azentspublicclient/docs/RequestSignupEmailRequest.md)
  - [RequestSignupEmailResponse](azentspublicclient/docs/RequestSignupEmailResponse.md)
+ - [RequestedInferenceProfile](azentspublicclient/docs/RequestedInferenceProfile.md)
  - [ResetAgentRuntimeRequest](azentspublicclient/docs/ResetAgentRuntimeRequest.md)
  - [ResponseChatV1ReadAgentWorkspacePath](azentspublicclient/docs/ResponseChatV1ReadAgentWorkspacePath.md)
  - [RuntimeDesiredState](azentspublicclient/docs/RuntimeDesiredState.md)

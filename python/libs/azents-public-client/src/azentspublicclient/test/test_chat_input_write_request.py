@@ -39,6 +39,7 @@ class TestChatInputWriteRequest(unittest.TestCase):
                 client_request_id = '0',
                 message = '',
                 action = None,
+                inference_profile = { },
                 attachments = [
                     ''
                     ]
@@ -48,6 +49,7 @@ class TestChatInputWriteRequest(unittest.TestCase):
                 agent_id = '',
                 client_request_id = '0',
                 message = '',
+                inference_profile = { },
         )
         """
 

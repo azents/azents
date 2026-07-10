@@ -70,6 +70,8 @@ class RunRequest:
     credential_kwargs: dict[str, object]
     workspace_id: str
     agent_id: str
+    auto_compaction_threshold_tokens: int | None
+    """Exact auto-compaction threshold, or None to derive it from input limits."""
     model_capabilities: ModelCapabilities = dataclasses.field(
         default_factory=ModelCapabilities,
     )

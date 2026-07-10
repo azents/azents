@@ -9279,6 +9279,29 @@
             "title": "Agent Id",
             "description": "Agent ID"
           },
+          "last_model_target_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Model Target Label",
+            "description": "Most recently activated model target label"
+          },
+          "last_reasoning_effort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most recently activated reasoning effort, or null for Default"
+          },
           "title": {
             "anyOf": [
               {
@@ -9338,6 +9361,8 @@
         "required": [
           "id",
           "agent_id",
+          "last_model_target_label",
+          "last_reasoning_effort",
           "title",
           "title_source",
           "status",
@@ -10792,6 +10817,10 @@
             "title": "Message",
             "description": "Edited message content"
           },
+          "inference_profile": {
+            "$ref": "#/components/schemas/RequestedInferenceProfile",
+            "description": "Requested inference profile for the edited model run"
+          },
           "attachments": {
             "anyOf": [
               {
@@ -10813,7 +10842,8 @@
           "agent_id",
           "client_request_id",
           "message_id",
-          "message"
+          "message",
+          "inference_profile"
         ],
         "title": "ChatEditMessageWriteRequest",
         "description": "REST user message edit request."
@@ -11319,6 +11349,17 @@
             "title": "Action",
             "description": "Optional selected chat action"
           },
+          "inference_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequestedInferenceProfile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested inference profile for run-producing input, or null for a non-model command"
+          },
           "attachments": {
             "anyOf": [
               {
@@ -11339,7 +11380,8 @@
         "required": [
           "agent_id",
           "client_request_id",
-          "message"
+          "message",
+          "inference_profile"
         ],
         "title": "ChatInputWriteRequest",
         "description": "REST composer input write request."
@@ -11523,6 +11565,10 @@
             "title": "Message",
             "description": "Message content"
           },
+          "inference_profile": {
+            "$ref": "#/components/schemas/RequestedInferenceProfile",
+            "description": "Requested inference profile for the first model run"
+          },
           "existing_project_paths": {
             "items": {
               "type": "string"
@@ -11559,6 +11605,7 @@
         "required": [
           "client_request_id",
           "message",
+          "inference_profile",
           "existing_project_paths",
           "setup_actions"
         ],
@@ -15149,6 +15196,35 @@
         ],
         "title": "RequestSignupEmailResponse",
         "description": "Signup email response."
+      },
+      "RequestedInferenceProfile": {
+        "properties": {
+          "model_target_label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Model Target Label",
+            "description": "Agent-owned selectable model target label"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit reasoning effort, or null for model Default"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "model_target_label",
+          "reasoning_effort"
+        ],
+        "title": "RequestedInferenceProfile",
+        "description": "Agent-owned target label and optional explicit reasoning effort."
       },
       "ResetAgentRuntimeRequest": {
         "properties": {

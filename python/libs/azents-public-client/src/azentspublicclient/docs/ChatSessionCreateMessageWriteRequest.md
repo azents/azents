@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **client_request_id** | **str** | Client-generated idempotency key | 
 **message** | **str** | Message content | 
+**inference_profile** | [**RequestedInferenceProfile**](RequestedInferenceProfile.md) | Requested inference profile for the first model run |
 **existing_project_paths** | **List[str]** | Existing Project paths to register on the created session | 
 **setup_actions** | [**List[CreateGitWorktreeAction]**](CreateGitWorktreeAction.md) | Ordered setup actions to enqueue before the first message | 
 **attachments** | **List[str]** |  | [optional] 

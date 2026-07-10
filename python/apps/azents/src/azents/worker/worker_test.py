@@ -23,6 +23,7 @@ from azents.core.enums import (
     AgentRunStatus,
     EventKind,
 )
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_events import (
@@ -107,11 +108,13 @@ class _InputBufferService:
         *,
         session_id: str,
         model: str | None,
+        required_inference_profile: RequestedInferenceProfile | None,
+        active_run_id: str | None,
         limit: int | None = None,
         include_action_messages: bool = True,
     ) -> PromotedInputBuffers:
         """Store flush call arguments and return specified result."""
-        del limit, include_action_messages
+        del required_inference_profile, active_run_id, limit, include_action_messages
         self.calls.append((session_id, model))
         return self.promoted
 
@@ -519,7 +522,7 @@ class _Host:
         self.lifecycle_events.append("mark_session_idle")
         return True
 
-    async def has_running_agent_run(self, session_id: str) -> bool:
+    async def has_active_agent_run(self, session_id: str) -> bool:
         """Return test-specified active AgentRun existence."""
         del session_id
         return self.running_agent_run_exists
@@ -1113,6 +1116,11 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
     )
     promotion = _InputBufferService(
         PromotedInputBuffers(
+            requested_inference_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=None,
+            ),
+            promoted_event_ids=[],
             user_messages=[user_message],
             events=[event],
             deleted_buffer_ids=["buffer-1"],
@@ -1149,6 +1157,11 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
     poll = executor.make_boundary_poll(
         message=_wake_up(session_id="session-1", agent_id="agent-1"),
         model="gpt-test",
+        requested_inference_profile=RequestedInferenceProfile(
+            model_target_label="default",
+            reasoning_effort=None,
+        ),
+        run_id="run-001",
         poll_fn=None,
         mark_context_invalidated=lambda: None,
     )

@@ -1627,6 +1627,25 @@ export function useChatSessionContainer(
   props: ChatSessionContainerProps,
 ): ChatSessionContainerOutput {
   const { sessionId, agent, onConnectionStatusChange } = props;
+  const agentSessionQuery = trpc.chat.getAgentSession.useQuery({
+    agentId: agent.id,
+    sessionId,
+  });
+  const inferenceProfile = useMemo(
+    () =>
+      agentSessionQuery.data == null
+        ? null
+        : {
+            model_target_label:
+              agentSessionQuery.data.last_model_target_label ??
+              agent.main_model_label,
+            reasoning_effort:
+              agentSessionQuery.data.last_model_target_label != null
+                ? agentSessionQuery.data.last_reasoning_effort
+                : (agent.model_parameters?.reasoning_effort ?? null),
+          },
+    [agent.main_model_label, agent.model_parameters, agentSessionQuery.data],
+  );
 
   const [chatViewState, setChatViewState] = useState<ChatViewState>({
     type: "LOADING_HISTORY",
@@ -2380,11 +2399,17 @@ export function useChatSessionContainer(
       setWasRestCommandBlocked(false);
       const attachmentUris = attachments?.map((attachment) => attachment.uri);
       const writableAction = writableChatAction(action);
+      if (writableAction?.type !== "command" && inferenceProfile == null) {
+        return Promise.resolve(false);
+      }
+      const requestedInferenceProfile =
+        writableAction?.type === "command" ? null : inferenceProfile;
       const writeKey = JSON.stringify({
         type: "input",
         sessionId,
         message,
         action: writableAction ?? null,
+        inferenceProfile: requestedInferenceProfile,
         attachments: attachmentUris ?? [],
       });
       const clientRequestId = clientRequestIdForWrite(writeKey);
@@ -2395,6 +2420,7 @@ export function useChatSessionContainer(
           clientRequestId,
           message,
           action: writableAction,
+          inferenceProfile: requestedInferenceProfile,
           attachments: attachmentUris,
         }),
       );
@@ -2402,6 +2428,7 @@ export function useChatSessionContainer(
     [
       agent.id,
       clientRequestIdForWrite,
+      inferenceProfile,
       runWriteMutation,
       sendInputMutation,
       sessionId,
@@ -2414,7 +2441,7 @@ export function useChatSessionContainer(
       message: string,
       attachments?: UploadedFile[],
     ): Promise<boolean> => {
-      if (isResponsePending) {
+      if (isResponsePending || inferenceProfile == null) {
         return Promise.resolve(false);
       }
       setWasRestCommandBlocked(false);
@@ -2424,6 +2451,7 @@ export function useChatSessionContainer(
         sessionId,
         messageId,
         message,
+        inferenceProfile,
         attachments: attachmentUris ?? [],
       });
       const clientRequestId = clientRequestIdForWrite(writeKey);
@@ -2434,6 +2462,7 @@ export function useChatSessionContainer(
           clientRequestId,
           messageId,
           message,
+          inferenceProfile,
           attachments: attachmentUris,
         }),
       );
@@ -2442,6 +2471,7 @@ export function useChatSessionContainer(
       agent.id,
       clientRequestIdForWrite,
       editMessageMutation,
+      inferenceProfile,
       isResponsePending,
       runWriteMutation,
       sessionId,

@@ -484,6 +484,10 @@ export function useAgentDraftChatContainer(
           agentId: agent.id,
           clientRequestId: crypto.randomUUID(),
           message,
+          inferenceProfile: {
+            model_target_label: agent.main_model_label,
+            reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
+          },
           attachments: attachmentUris,
           existingProjectPaths: selectedProjectPaths,
           setupActions: setupActionsFromWorkspaceItems(workspaceItems),
@@ -504,6 +508,8 @@ export function useAgentDraftChatContainer(
     },
     [
       agent.id,
+      agent.main_model_label,
+      agent.model_parameters?.reasoning_effort,
       canSendMessage,
       createMessageMutation,
       handle,

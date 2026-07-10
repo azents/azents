@@ -533,8 +533,14 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
         )
+        newest_active = await repo.get_active_by_session_id(
+            rdb_session,
+            session_id=event_session.id,
+        )
         assert still_active is not None
         assert still_active.id == active.id
+        assert newest_active is not None
+        assert newest_active.id == pending.id
         assert await repo.list_input_event_ids(rdb_session, run_id=pending.id) == [
             event.id,
             second_event.id,

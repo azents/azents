@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **client_request_id** | **str** | Client-generated idempotency key | 
 **message_id** | **str** | Existing user_message event ID to edit | 
 **message** | **str** | Edited message content | 
+**inference_profile** | [**RequestedInferenceProfile**](RequestedInferenceProfile.md) | Requested inference profile for the edited model run |
 **attachments** | **List[str]** |  | [optional] 
 
 ## Example

@@ -851,6 +851,28 @@ class AgentRunRepository:
                 latest[session_id] = self._build(rdb)
         return latest
 
+    async def get_active_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> AgentRunState | None:
+        """Fetch the newest pending or running run for a session."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(
+                RDBAgentRun.session_id == session_id,
+                RDBAgentRun.status.in_(
+                    [AgentRunStatus.PENDING, AgentRunStatus.RUNNING]
+                ),
+            )
+            .order_by(RDBAgentRun.run_index.desc())
+            .limit(1)
+        )
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
     async def get_running_by_session_id(
         self,
         session: AsyncSession,

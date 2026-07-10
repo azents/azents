@@ -126,6 +126,7 @@ def _service(
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
+        agent_run_repository=AgentRunRepository(),
     )
     return ChatSessionService(
         message_repository=MessageRepository(),
@@ -311,10 +312,13 @@ class TestChatSessionInputBuffer:
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
         )
         promoted = await input_buffer_service.flush_session_input_buffers(
             session_id=session_id,
             model="test-model",
+            required_inference_profile=None,
+            active_run_id=None,
         )
         assert promoted.inserted_count == 1
         assert promoted.deleted_buffer_ids == [promoted.user_messages[0].external_id]

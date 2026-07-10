@@ -239,6 +239,7 @@ class EventAutoCompactionFilter:
         compactor: ManualCompactor,
         summarize: SummaryGenerator,
         max_input_tokens: int,
+        auto_compaction_threshold_tokens: int | None,
         compaction_id_factory: Callable[[], str],
         on_compaction_started: Callable[[], Awaitable[None]] | None = None,
         summary_enricher: SummaryEnricher | None = None,
@@ -247,8 +248,10 @@ class EventAutoCompactionFilter:
         self._compactor = compactor
         self._summarize = summarize
         self._max_input_tokens = max_input_tokens
-        self._threshold_tokens = compute_auto_compaction_threshold_tokens(
-            max_input_tokens
+        self._threshold_tokens = (
+            auto_compaction_threshold_tokens
+            if auto_compaction_threshold_tokens is not None
+            else compute_auto_compaction_threshold_tokens(max_input_tokens)
         )
         self._compaction_id_factory = compaction_id_factory
         self._on_compaction_started = on_compaction_started

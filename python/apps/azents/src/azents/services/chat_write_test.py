@@ -18,6 +18,7 @@ from azents.core.enums import (
     InputBufferKind,
     LLMProvider,
 )
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.types import (
     RunMarkerPayload,
     SystemErrorPayload,
@@ -34,7 +35,7 @@ from azents.rdb.models.event import JSONValue, RDBEvent
 from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
@@ -156,6 +157,7 @@ def _service(
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
+        agent_run_repository=AgentRunRepository(),
     )
     return ChatWriteService(
         agent_session_repository=AgentSessionRepository(),
@@ -288,6 +290,7 @@ class TestChatWriteService:
                 model_file_service=_ModelFileService(),
                 agent_session_repository=AgentSessionRepository(),
                 event_transcript_repository=EventTranscriptRepository(),
+                agent_run_repository=AgentRunRepository(),
             ),
             session_manager=rdb_session_manager,
         )
@@ -422,6 +425,10 @@ class TestChatWriteService:
             client_request_id="edit-at-head",
             message_id=target.id,
             text="edited",
+            inference_profile=RequestedInferenceProfile(
+                model_target_label="Primary",
+                reasoning_effort=None,
+            ),
             metadata={"source": "chat"},
             attachments=[],
             file_parts=[],

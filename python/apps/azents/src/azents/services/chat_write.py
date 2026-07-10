@@ -13,6 +13,7 @@ from azents.core.enums import (
     EventKind,
     InputBufferKind,
 )
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.types import FileOutputPart, SystemErrorPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -98,6 +99,7 @@ class ChatWriteService:
         client_request_id: str,
         message_id: str,
         text: str,
+        inference_profile: RequestedInferenceProfile,
         metadata: dict[str, str],
         attachments: list[str],
         file_parts: list[FileOutputPart],
@@ -153,8 +155,8 @@ class ChatWriteService:
                 InputBufferEnqueue(
                     session_id=session_id,
                     kind=InputBufferKind.EDITED_USER_MESSAGE,
-                    requested_model_target_label=None,
-                    requested_reasoning_effort=None,
+                    requested_model_target_label=inference_profile.model_target_label,
+                    requested_reasoning_effort=inference_profile.reasoning_effort,
                     actor_user_id=user_id,
                     content=text,
                     idempotency_key=client_request_id,

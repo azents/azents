@@ -13,6 +13,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     InputBufferKind,
 )
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.engine.run.input import InputMessage
 from azents.rdb.deps import get_session_manager
@@ -130,6 +131,7 @@ class AgentSessionInputService:
         agent_id: str,
         agent_session_id: str,
         message: InputMessage,
+        inference_profile: RequestedInferenceProfile,
         user_id: str,
         client_request_id: str | None = None,
     ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
@@ -154,6 +156,7 @@ class AgentSessionInputService:
                 session,
                 agent_session=agent_session,
                 message=message,
+                inference_profile=inference_profile,
                 user_id=user_id,
                 client_request_id=client_request_id,
             )
@@ -177,6 +180,7 @@ class AgentSessionInputService:
         agent_session_id: str,
         action: dict[str, JSONValue],
         message: InputMessage,
+        inference_profile: RequestedInferenceProfile,
         user_id: str,
         client_request_id: str | None = None,
     ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
@@ -202,8 +206,8 @@ class AgentSessionInputService:
                 InputBufferEnqueue(
                     session_id=agent_session.id,
                     kind=InputBufferKind.ACTION_MESSAGE,
-                    requested_model_target_label=None,
-                    requested_reasoning_effort=None,
+                    requested_model_target_label=inference_profile.model_target_label,
+                    requested_reasoning_effort=inference_profile.reasoning_effort,
                     actor_user_id=user_id,
                     content=message.text,
                     idempotency_key=client_request_id,
@@ -231,6 +235,7 @@ class AgentSessionInputService:
         *,
         agent_id: str,
         message: InputMessage,
+        inference_profile: RequestedInferenceProfile,
         user_id: str,
         existing_project_paths: list[str],
         setup_actions: list[CreateGitWorktreeAction],
@@ -295,6 +300,7 @@ class AgentSessionInputService:
                 agent_session=agent_session,
                 workspace_items=workspace_items,
                 message=message,
+                inference_profile=inference_profile,
                 user_id=user_id,
                 client_request_id=client_request_id,
             )
@@ -302,6 +308,7 @@ class AgentSessionInputService:
                 session,
                 agent_session=agent_session,
                 message=message,
+                inference_profile=inference_profile,
                 user_id=user_id,
                 client_request_id=client_request_id,
             )
@@ -325,6 +332,7 @@ class AgentSessionInputService:
         agent_session: AgentSession,
         workspace_items: list[NewSessionWorkspaceItem],
         message: InputMessage,
+        inference_profile: RequestedInferenceProfile,
         user_id: str,
         client_request_id: str | None,
     ) -> None:
@@ -346,8 +354,8 @@ class AgentSessionInputService:
                         InputBufferEnqueue(
                             session_id=agent_session.id,
                             kind=InputBufferKind.ACTION_MESSAGE,
-                            requested_model_target_label=None,
-                            requested_reasoning_effort=None,
+                            requested_model_target_label=inference_profile.model_target_label,
+                            requested_reasoning_effort=inference_profile.reasoning_effort,
                             actor_user_id=user_id,
                             content="",
                             idempotency_key=(
@@ -370,6 +378,7 @@ class AgentSessionInputService:
         *,
         agent_session: AgentSession,
         message: InputMessage,
+        inference_profile: RequestedInferenceProfile,
         user_id: str,
         client_request_id: str | None,
     ) -> InputBuffer:
@@ -379,8 +388,8 @@ class AgentSessionInputService:
             InputBufferEnqueue(
                 session_id=agent_session.id,
                 kind=InputBufferKind.USER_MESSAGE,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
+                requested_model_target_label=inference_profile.model_target_label,
+                requested_reasoning_effort=inference_profile.reasoning_effort,
                 actor_user_id=user_id,
                 content=message.text,
                 idempotency_key=client_request_id,

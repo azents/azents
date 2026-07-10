@@ -82,13 +82,13 @@ class _AgentRunRepository:
         self.running_run = running_run
         self.terminal_session_ids: list[str] = []
 
-    async def get_running_by_session_id(
+    async def get_active_by_session_id(
         self,
         session: AsyncSession,
         *,
         session_id: str,
     ) -> AgentRunState | None:
-        """Return test-specified running run."""
+        """Return test-specified active run."""
         del session, session_id
         return self.running_run
 

@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
+from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -31,9 +32,10 @@ class ChatEditMessageWriteRequest(BaseModel):
     client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
     message_id: StrictStr = Field(description="Existing user_message event ID to edit")
     message: StrictStr = Field(description="Edited message content")
+    inference_profile: RequestedInferenceProfile = Field(description="Requested inference profile for the edited model run")
     attachments: Optional[List[StrictStr]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_id", "client_request_id", "message_id", "message", "attachments"]
+    __properties: ClassVar[List[str]] = ["agent_id", "client_request_id", "message_id", "message", "inference_profile", "attachments"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -76,6 +78,9 @@ class ChatEditMessageWriteRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of inference_profile
+        if self.inference_profile:
+            _dict['inference_profile'] = self.inference_profile.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -102,6 +107,7 @@ class ChatEditMessageWriteRequest(BaseModel):
             "client_request_id": obj.get("client_request_id"),
             "message_id": obj.get("message_id"),
             "message": obj.get("message"),
+            "inference_profile": RequestedInferenceProfile.from_dict(obj["inference_profile"]) if obj.get("inference_profile") is not None else None,
             "attachments": obj.get("attachments")
         })
         # store additional fields in additional_properties
