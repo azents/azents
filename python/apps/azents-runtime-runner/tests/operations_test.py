@@ -592,11 +592,12 @@ async def test_process_terminate_session_terminates_only_owned_processes(
     client = _FakeClient()
     operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
 
+    long_running = "python -c 'import time; time.sleep(30)'"
     await operations.handle(
         _operation(
             operation_type="process.start",
             payload={
-                "command": "sleep 10",
+                "command": long_running,
                 "yield_time_ms": 0,
                 "owner_session_id": "session-1",
             },
@@ -604,11 +605,12 @@ async def test_process_terminate_session_terminates_only_owned_processes(
     )
     owned_process_id = client.events[-1].payload["process_id"]
     assert isinstance(owned_process_id, str)
+    assert client.events[-1].payload["status"] == "running"
     await operations.handle(
         _operation(
             operation_type="process.start",
             payload={
-                "command": "sleep 10",
+                "command": long_running,
                 "yield_time_ms": 0,
                 "owner_session_id": "session-2",
             },
@@ -616,6 +618,7 @@ async def test_process_terminate_session_terminates_only_owned_processes(
     )
     other_process_id = client.events[-1].payload["process_id"]
     assert isinstance(other_process_id, str)
+    assert client.events[-1].payload["status"] == "running"
 
     await operations.handle(
         _operation(

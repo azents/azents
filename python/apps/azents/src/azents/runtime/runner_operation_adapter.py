@@ -42,6 +42,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str | None,
         command: str,
         timeout_seconds: int,
         env: dict[str, str] | None,
@@ -53,6 +54,7 @@ class RuntimeRunnerOperationAdapter:
             self._client.run_bash(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
                 command=command,
                 timeout_seconds=timeout_seconds,
                 env=env,
@@ -154,6 +156,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str | None,
         path: str,
         offset: int,
         max_bytes: int | None,
@@ -164,6 +167,7 @@ class RuntimeRunnerOperationAdapter:
             self._client.read_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
                 path=path,
                 offset=offset,
                 max_bytes=max_bytes,
@@ -177,6 +181,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str | None,
         path: str,
         data: bytes,
         deadline_at: datetime,
@@ -186,6 +191,7 @@ class RuntimeRunnerOperationAdapter:
             self._client.write_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
                 path=path,
                 data=data,
                 deadline_at=deadline_at,
@@ -201,6 +207,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str | None,
         path: str,
         recursive: bool = False,
         exclude_patterns: list[str] | None = None,
@@ -211,6 +218,7 @@ class RuntimeRunnerOperationAdapter:
             self._client.list_files(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
                 path=path,
                 recursive=recursive,
                 exclude_patterns=exclude_patterns,
@@ -234,6 +242,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str | None,
         path: str,
         deadline_at: datetime,
     ) -> RuntimeFileStatResult:
@@ -242,6 +251,7 @@ class RuntimeRunnerOperationAdapter:
             self._client.stat_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
                 path=path,
                 deadline_at=deadline_at,
             )
@@ -261,6 +271,7 @@ class RuntimeRunnerOperationAdapter:
         *,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str | None,
         path: str,
         pattern: str,
         recursive: bool = True,
@@ -276,6 +287,7 @@ class RuntimeRunnerOperationAdapter:
             self._client.grep_files(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
                 path=path,
                 pattern=pattern,
                 recursive=recursive,

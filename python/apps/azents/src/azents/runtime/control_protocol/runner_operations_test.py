@@ -52,6 +52,7 @@ async def test_run_bash_folds_stdout_stderr_and_final_exit_code() -> None:
         harness.client.run_bash(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             command="echo ok",
             timeout_seconds=30,
             env={"A": "B"},
@@ -105,6 +106,7 @@ async def test_run_bash_filters_interleaved_shared_reply_stream() -> None:
         harness.client.run_bash(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             command="echo first",
             timeout_seconds=30,
             env=None,
@@ -122,6 +124,7 @@ async def test_run_bash_filters_interleaved_shared_reply_stream() -> None:
         harness.client.run_bash(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             command="echo second",
             timeout_seconds=30,
             env=None,
@@ -178,6 +181,7 @@ async def test_run_bash_cancel_check_records_cancelled_final() -> None:
         await harness.client.run_bash(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             command="sleep 60",
             timeout_seconds=30,
             env=None,
@@ -257,6 +261,7 @@ async def test_read_file_collects_file_chunks_until_final() -> None:
         harness.client.read_file(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             path="/workspace/agent/report.txt",
             offset=0,
             max_bytes=None,
@@ -303,6 +308,7 @@ async def test_read_file_deadline_records_final_error_when_runner_drops_reply() 
         await harness.client.read_file(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             path="/workspace/agent/missing-reply.txt",
             offset=0,
             max_bytes=None,
@@ -326,6 +332,7 @@ async def test_write_file_uses_body_stream_chunks() -> None:
         harness.client.write_file(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             path="/workspace/agent/out.txt",
             data=b"abcdefg",
             deadline_at=_now() + timedelta(seconds=30),
@@ -366,6 +373,7 @@ async def test_list_files_returns_final_entries() -> None:
         harness.client.list_files(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             path="/workspace/agent",
             deadline_at=_now() + timedelta(seconds=30),
         )
@@ -407,6 +415,7 @@ async def test_stat_file_returns_final_metadata() -> None:
         harness.client.stat_file(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             path="/workspace/agent/AGENTS.md",
             deadline_at=_now() + timedelta(seconds=30),
         )
@@ -454,6 +463,7 @@ async def test_delete_file_returns_final_path() -> None:
         harness.client.delete_file(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             path="/workspace/agent/old.txt",
             recursive=False,
             deadline_at=_now() + timedelta(seconds=30),
@@ -494,6 +504,7 @@ async def test_mkdir_file_returns_final_path() -> None:
         harness.client.mkdir_file(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             path="/workspace/agent/reports",
             parents=True,
             deadline_at=_now() + timedelta(seconds=30),
@@ -534,6 +545,7 @@ async def test_move_file_returns_final_paths() -> None:
         harness.client.move_file(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             source_path="/workspace/agent/a.txt",
             destination_path="/workspace/agent/b.txt",
             overwrite=False,
@@ -580,6 +592,7 @@ async def test_grep_files_returns_final_matches() -> None:
         harness.client.grep_files(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             path="/workspace/agent",
             pattern="needle",
             recursive=True,
@@ -717,11 +730,11 @@ async def test_write_process_stdin_dispatches_empty_poll_and_missing_result() ->
         harness.client.write_process_stdin(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             process_id="proc_missing",
             stdin="",
             yield_time_ms=0,
             max_output_bytes=2048,
-            owner_session_id="session-1",
             deadline_at=_now() + timedelta(seconds=30),
         )
     )
@@ -872,6 +885,7 @@ async def test_create_git_worktree_dispatches_and_folds_text_output() -> None:
         harness.client.create_git_worktree(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             source_project_path="/workspace/agent/repo",
             worktree_path="/workspace/agent/.azents/worktrees/session/repo",
             branch_name="azents/session",
@@ -929,6 +943,7 @@ async def test_list_git_refs_returns_final_refs() -> None:
         harness.client.list_git_refs(
             runtime_id="runtime-1",
             runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
             source_project_path="/workspace/agent/repo",
             deadline_at=_now() + timedelta(seconds=30),
             text_output_callback=None,

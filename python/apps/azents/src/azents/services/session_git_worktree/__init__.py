@@ -339,6 +339,7 @@ class SessionGitWorktreeService:
             result = await self.runner_operations.list_git_refs(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 source_project_path=normalized_source_path,
                 deadline_at=_git_operation_deadline(),
                 text_output_callback=None,
@@ -670,6 +671,7 @@ class SessionGitWorktreeService:
                 result = await runner_operations.create_git_worktree(
                     runtime_id=runtime.id,
                     runner_generation=runtime.runner_generation,
+                    owner_session_id=current.session_id,
                     source_project_path=current.source_project_path,
                     worktree_path=current.worktree_path,
                     branch_name=current.branch_name,
@@ -1392,6 +1394,7 @@ class SessionGitWorktreeService:
             await runner_operations.remove_git_worktree(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=session_id,
                 source_project_path=allocation.source_project_path,
                 worktree_path=allocation.worktree_path,
                 force=False,
@@ -1402,6 +1405,7 @@ class SessionGitWorktreeService:
                 await runner_operations.delete_git_branch(
                     runtime_id=runtime.id,
                     runner_generation=runtime.runner_generation,
+                    owner_session_id=session_id,
                     source_project_path=allocation.source_project_path,
                     branch_name=allocation.branch_name,
                     deadline_at=_git_operation_deadline(),
@@ -1459,6 +1463,7 @@ class SessionGitWorktreeService:
             listed = await runner_operations.list_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=allocation.session_id,
                 path=parent_path,
                 recursive=False,
                 deadline_at=_git_operation_deadline(),
@@ -1468,6 +1473,7 @@ class SessionGitWorktreeService:
             await runner_operations.delete_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=allocation.session_id,
                 path=parent_path,
                 recursive=False,
                 deadline_at=_git_operation_deadline(),

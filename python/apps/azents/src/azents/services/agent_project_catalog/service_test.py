@@ -35,6 +35,7 @@ class _FakeRunnerOperations(RuntimeRunnerOperationClient):
         *,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str | None = None,
         path: str,
         deadline_at: datetime.datetime,
     ) -> RuntimeFileStatResult:

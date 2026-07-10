@@ -518,6 +518,7 @@ async def _ensure_real_directory_in_runtime(
         await runner_operations.list_files(
             runtime_id=runtime.id,
             runner_generation=runtime.runner_generation,
+            owner_session_id=None,
             path=path,
             deadline_at=_runner_project_validation_deadline(),
         )
