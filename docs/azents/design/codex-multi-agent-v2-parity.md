@@ -363,6 +363,7 @@ Model-visible statuses follow the Codex V2 union, adapted to Azents lifecycle te
 - active initialization maps to `pending_init`;
 - active execution maps to `running`;
 - an interrupted resident agent maps to `interrupted`;
+- a permanently cancelled resident child maps to `shutdown`;
 - a completed run maps to `{"completed": <message-or-null>}`;
 - a failed run maps to `{"errored": "<error>"}`;
 - an absent target maps to `not_found` only inside status projections, never as a successful messaging or wait result.
@@ -390,9 +391,9 @@ The existing terminal projection remains available to the UI tree and operationa
 
 ## Mailbox Activity and Wait
 
-Pending `agent_message` input is mailbox activity. Other newly queued session input is steered input. `wait_agent` observes activity for the current active turn by polling the durable pending-input boundary:
+Pending `agent_message` input is mailbox activity. Only `InputBufferKind.USER_MESSAGE` and `InputBufferKind.EDITED_USER_MESSAGE` submitted into the current active turn are steered input. Background completions, goal continuations, action messages, and internal/control buffers are neither mailbox nor steering activity and do not complete `wait_agent`. `wait_agent` observes activity for the current active turn by polling this explicit durable-input classification:
 
-- existing pending activity completes immediately;
+- existing pending mailbox or steered-user activity completes immediately;
 - new activity completes the wait;
 - no activity before the deadline times out;
 - content remains in the input buffer and is promoted by the normal model-call boundary path;
@@ -522,8 +523,9 @@ The child immediate-final-delivery sentence, `spawn_agent` final-answer sentence
 | Nested delivery | Grandchild result reaches only its direct parent |
 | Queue-only idle parent | Final answer remains pending and does not wake an idle parent |
 | Wait completion | Pending/new mailbox activity returns `Wait completed.` and content arrives separately |
-| Wait steer | New non-agent input returns `Wait interrupted by new input.` |
-| Wait timeout | No activity returns `Wait timed out.` with `timed_out=true` |
+| Wait steer | New user or edited-user input returns `Wait interrupted by new input.` |
+| Wait non-steering input | Action, goal-continuation, background-completion, and internal/control buffers do not complete the wait |
+| Wait timeout | No classified activity returns `Wait timed out.` with `timed_out=true` |
 | Recovery/idempotency | Retried terminal finalization leaves exactly one parent mailbox item/event for the child run |
 | UI unread lifecycle | Queued final answer is unread; parent promotion clears it monotonically; `wait_agent` does not change it |
 | Terminal payloads | Completed-empty, errored/truncated, interrupted, and permanent-shutdown cases match the frozen payload matrix |
