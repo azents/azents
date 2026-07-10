@@ -17277,6 +17277,11 @@
             "$ref": "#/components/schemas/XaiOAuthSessionStatus",
             "description": "Session status"
           },
+          "interval_seconds": {
+            "type": "integer",
+            "title": "Interval Seconds",
+            "description": "Current provider polling interval"
+          },
           "integration": {
             "anyOf": [
               {
@@ -17292,7 +17297,8 @@
         "type": "object",
         "required": [
           "session_id",
-          "status"
+          "status",
+          "interval_seconds"
         ],
         "title": "XaiOAuthDeviceStatusResponse",
         "description": "Device OAuth status response."

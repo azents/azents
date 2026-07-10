@@ -37,6 +37,7 @@ class TestXaiOAuthDeviceStatusResponse(unittest.TestCase):
             return XaiOAuthDeviceStatusResponse(
                 session_id = '',
                 status = 'pending',
+                interval_seconds = 56,
                 integration = azentspublicclient.models.llm_provider_integration_response.LLMProviderIntegrationResponse(
                     id = '', 
                     provider = 'openai', 
@@ -50,6 +51,7 @@ class TestXaiOAuthDeviceStatusResponse(unittest.TestCase):
             return XaiOAuthDeviceStatusResponse(
                 session_id = '',
                 status = 'pending',
+                interval_seconds = 56,
         )
         """
 

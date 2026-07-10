@@ -35,6 +35,7 @@ class XaiOAuthDeviceStatusOutput(BaseModel):
 
     session_id: str = Field(description="OAuth session ID")
     status: XaiOAuthSessionStatus = Field(description="Session status")
+    interval_seconds: int = Field(description="Current provider polling interval")
     integration: LLMProviderIntegration | None = Field(
         default=None, description="Integration stored when connection completes"
     )
@@ -62,10 +63,10 @@ class ProviderPending:
 
 
 @dataclasses.dataclass(frozen=True)
-class ProviderDisabled:
-    """xAI OAuth provider is disabled or not configured."""
+class ProviderSlowDown:
+    """Provider requested a longer device polling interval."""
 
-    reason: str
+    session_id: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -100,7 +101,7 @@ XaiOAuthError = (
     SessionNotFound
     | InvalidSession
     | ProviderPending
-    | ProviderDisabled
+    | ProviderSlowDown
     | ProviderRejected
     | ProviderEntitlementDenied
     | ProviderUnavailable

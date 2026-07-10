@@ -38,4 +38,4 @@ Details of all living specs. Synchronized from frontmatter.
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-08 | 14 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-06 | 12 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-08 | 6 |
-| [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 1 |
+| [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 2 |

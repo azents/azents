@@ -35,7 +35,6 @@ async def ensure_runtime_tokens(
     integration: LLMProviderIntegrationWithSecrets,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
-    client_id: str | None,
 ) -> Result[
     LLMProviderIntegrationWithSecrets,
     ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
@@ -47,8 +46,6 @@ async def ensure_runtime_tokens(
         integration.config, XaiOAuthConfig
     ):
         return Failure(ProviderRejected(reason="xAI OAuth integration is invalid"))
-    if client_id is None or not client_id.strip():
-        return Failure(ProviderRejected(reason="xAI OAuth client ID is not configured"))
     retryable_statuses = {
         XaiOAuthConnectionStatus.CONNECTED.value,
         XaiOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE.value,
@@ -60,10 +57,7 @@ async def ensure_runtime_tokens(
         return Success(integration)
 
     async with httpx.AsyncClient(timeout=20.0) as http_client:
-        refresh_result = await XaiOAuthClient(
-            http_client,
-            client_id=client_id.strip(),
-        ).refresh_tokens(
+        refresh_result = await XaiOAuthClient(http_client).refresh_tokens(
             refresh_token=integration.secrets.refresh_token,
             connection_method=XaiOAuthConnectionMethod(
                 integration.config.connection_method

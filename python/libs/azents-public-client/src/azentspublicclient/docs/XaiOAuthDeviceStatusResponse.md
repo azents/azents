@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **session_id** | **str** | OAuth session ID | 
 **status** | [**XaiOAuthSessionStatus**](XaiOAuthSessionStatus.md) | Session status | 
+**interval_seconds** | **int** | Current provider polling interval |
 **integration** | [**LLMProviderIntegrationResponse**](LLMProviderIntegrationResponse.md) |  | [optional] 
 
 ## Example

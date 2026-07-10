@@ -12,9 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
-from azents.core.config import Config
 from azents.core.credentials import PROVIDER_SECRET_TYPES
-from azents.core.deps import get_config
 from azents.core.enums import LLMProvider
 from azents.repos.llm_catalog.data import CatalogNotFound
 from azents.repos.llm_provider_integration.data import NotFound
@@ -67,26 +65,13 @@ _BASE_AVAILABLE_PROVIDERS: tuple[LLMProvider, ...] = (
     LLMProvider.AWS_BEDROCK,
     LLMProvider.GOOGLE_VERTEX_AI,
     LLMProvider.CHATGPT_OAUTH,
+    LLMProvider.XAI_OAUTH,
 )
-
-
-def _xai_oauth_available(config: Config) -> bool:
-    """Return whether xAI OAuth is enabled and has required configuration."""
-    client_id = config.xai_oauth.client_id
-    return bool(config.xai_oauth.enabled and client_id and client_id.strip())
-
-
-def _available_providers(config: Config) -> tuple[LLMProvider, ...]:
-    """Return provider options available for new workspace integrations."""
-    if _xai_oauth_available(config):
-        return (*_BASE_AVAILABLE_PROVIDERS, LLMProvider.XAI_OAUTH)
-    return _BASE_AVAILABLE_PROVIDERS
 
 
 @router.get("/workspaces/{handle}/llm-provider-integrations/providers")
 async def list_integration_providers(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    config: Annotated[Config, Depends(get_config)],
 ) -> LLMProviderCapabilityListResponse:
     """List provider options available to create in this workspace."""
     if not member.has_permission(Permissions.LLM_INTEGRATIONS_READ):
@@ -102,7 +87,7 @@ async def list_integration_providers(
                 credential_type=PROVIDER_SECRET_TYPES[provider],
                 experimental=provider == LLMProvider.XAI_OAUTH,
             )
-            for provider in _available_providers(config)
+            for provider in _BASE_AVAILABLE_PROVIDERS
         ]
     )
 
@@ -115,7 +100,6 @@ async def create_integration(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[LLMProviderIntegrationService, Depends()],
     catalog_sync_service: Annotated[IntegrationCatalogProjectionService, Depends()],
-    config: Annotated[Config, Depends(get_config)],
     background_tasks: BackgroundTasks,
     *,
     request_body: LLMProviderIntegrationCreateRequest,
@@ -129,14 +113,6 @@ async def create_integration(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No LLM integration management permission.",
         )
-    if request_body.provider == LLMProvider.XAI_OAUTH and not _xai_oauth_available(
-        config
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="xAI OAuth provider is not available.",
-        )
-
     name = request_body.name or _PROVIDER_DISPLAY_NAMES.get(
         request_body.provider, request_body.provider.value
     )

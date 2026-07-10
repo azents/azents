@@ -3,6 +3,8 @@
 import enum
 
 XAI_OAUTH_ISSUER = "https://auth.x.ai"
+# Public native-app client identity used by the Grok CLI OAuth flow.
+XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
 XAI_OAUTH_DISCOVERY_URL = f"{XAI_OAUTH_ISSUER}/.well-known/openid-configuration"
 XAI_OAUTH_DEVICE_CODE_URL = f"{XAI_OAUTH_ISSUER}/oauth2/device/code"
 XAI_OAUTH_TOKEN_URL = f"{XAI_OAUTH_ISSUER}/oauth2/token"

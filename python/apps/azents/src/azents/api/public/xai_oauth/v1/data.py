@@ -36,6 +36,7 @@ class XaiOAuthDeviceStatusResponse(BaseModel):
 
     session_id: str = Field(description="OAuth session ID")
     status: XaiOAuthSessionStatus = Field(description="Session status")
+    interval_seconds: int = Field(description="Current provider polling interval")
     integration: LLMProviderIntegrationResponse | None = Field(
         default=None, description="Stored provider integration when connected"
     )
@@ -48,6 +49,7 @@ class XaiOAuthDeviceStatusResponse(BaseModel):
         return cls(
             session_id=data.session_id,
             status=data.status,
+            interval_seconds=data.interval_seconds,
             integration=(
                 LLMProviderIntegrationResponse.convert_from(data.integration)
                 if data.integration is not None
