@@ -55,6 +55,10 @@
   color: var(--mantine-color-dimmed);
 }
 
+.thinkingBody {
+  cursor: pointer;
+}
+
 .thinkingLabel {
   flex: 1;
   min-width: 0;

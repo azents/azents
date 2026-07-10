@@ -1047,6 +1047,7 @@
     "disconnected": "切断",
     "thinking": "考え中…",
     "thinkingLabel": "Thinking",
+    "collapseThinking": "思考過程を折りたたむ",
     "goalContinuationIndicator": "Goal continuation が入力されました",
     "interruptedIndicator": "ユーザーの操作により中断されました",
     "pendingInput": {

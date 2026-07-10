@@ -403,6 +403,14 @@ function getThinkingPreview(reasoningSummary: string): string | null {
   return preview.length > 0 ? preview : null;
 }
 
+function isElementVisibleInViewport(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+  const viewportHeight =
+    window.innerHeight || document.documentElement.clientHeight;
+
+  return rect.top >= 0 && rect.bottom <= viewportHeight;
+}
+
 function ThinkingBlock({
   hasContent,
   reasoningSummary,
@@ -411,7 +419,9 @@ function ThinkingBlock({
   reasoningSummary: string;
 }): React.ReactElement {
   const t = useTranslations("chat");
-  const [thinkingOpened, { toggle: toggleThinking }] = useDisclosure(false);
+  const thinkingHeaderRef = useRef<HTMLButtonElement>(null);
+  const [thinkingOpened, { close: closeThinking, toggle: toggleThinking }] =
+    useDisclosure(false);
   const sanitizedReasoningSummary = useMemo(
     () => removeHtmlComments(reasoningSummary).trim(),
     [reasoningSummary],
@@ -423,6 +433,55 @@ function ThinkingBlock({
   const canExpand = sanitizedReasoningSummary.length > 0;
   const label =
     thinkingOpened || preview === null ? t("thinkingLabel") : preview;
+
+  function collapseFromThinkingBody(): void {
+    const shouldScrollToHeader = thinkingHeaderRef.current
+      ? !isElementVisibleInViewport(thinkingHeaderRef.current)
+      : false;
+
+    closeThinking();
+
+    if (shouldScrollToHeader) {
+      requestAnimationFrame(() => {
+        thinkingHeaderRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+    }
+  }
+
+  function handleThinkingBodyClick(
+    event: React.MouseEvent<HTMLDivElement>,
+  ): void {
+    const interactiveElement =
+      event.target instanceof Element
+        ? event.target.closest(
+            'a, button, input, select, textarea, [role="button"]',
+          )
+        : null;
+
+    if (interactiveElement && interactiveElement !== event.currentTarget) {
+      return;
+    }
+
+    collapseFromThinkingBody();
+  }
+
+  function handleThinkingBodyKeyDown(
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ): void {
+    if (
+      event.target !== event.currentTarget ||
+      (event.key !== "Enter" && event.key !== " ")
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    collapseFromThinkingBody();
+  }
+
   const headerContent = (
     <>
       {canExpand && (
@@ -457,6 +516,7 @@ function ThinkingBlock({
     <Box mb={hasContent ? "xs" : 0}>
       {canExpand ? (
         <UnstyledButton
+          ref={thinkingHeaderRef}
           className={classes.thinkingHeader}
           onClick={toggleThinking}
           aria-expanded={thinkingOpened}
@@ -477,7 +537,15 @@ function ThinkingBlock({
       {canExpand && (
         <Collapse expanded={thinkingOpened}>
           <ScrollArea.Autosize mah={rem(300)} mt={rem(4)}>
-            <Box c="dimmed">
+            <Box
+              c="dimmed"
+              role="button"
+              tabIndex={0}
+              aria-label={t("collapseThinking")}
+              onClick={handleThinkingBodyClick}
+              onKeyDown={handleThinkingBodyKeyDown}
+              className={classes.thinkingBody}
+            >
               <MarkdownContent>{sanitizedReasoningSummary}</MarkdownContent>
             </Box>
           </ScrollArea.Autosize>

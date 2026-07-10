@@ -1047,6 +1047,7 @@
     "disconnected": "끊김",
     "thinking": "생각 중...",
     "thinkingLabel": "Thinking",
+    "collapseThinking": "사고 과정 접기",
     "goalContinuationIndicator": "Goal continuation 입력됨",
     "interruptedIndicator": "사용자 요청으로 중단됨",
     "pendingInput": {
