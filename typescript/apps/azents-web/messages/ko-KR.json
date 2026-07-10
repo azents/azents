@@ -632,7 +632,7 @@
           "backToParentTooltip": "상위 에이전트로 돌아가기: {name} ({path})",
           "navigationMenu": "서브에이전트 이동 옵션",
           "readOnlyNotice": "서브에이전트 세션은 읽기 전용입니다. 새 지시는 상위 에이전트에서 보내세요.",
-          "inputDisabledPlaceholder": "서브에이전트 세션이라 직접 입력할 수 없습니다. 새 지시는 상위 에이전트에서 보내세요.",
+          "inputDisabledPlaceholder": "상위 에이전트에서 지시하세요.",
           "unread": "읽지 않음",
           "runIndex": "Run {index}",
           "status": {

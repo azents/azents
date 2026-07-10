@@ -632,7 +632,7 @@
           "backToParentTooltip": "Retour au parent : {name} ({path})",
           "navigationMenu": "Options de navigation du sous-agent",
           "readOnlyNotice": "Les sessions de sous-agent sont en lecture seule. Envoyez les nouvelles instructions depuis l’agent parent.",
-          "inputDisabledPlaceholder": "Cette session de sous-agent ne permet pas la saisie directe. Envoyez les instructions depuis l’agent parent.",
+          "inputDisabledPlaceholder": "Utilisez l’agent parent.",
           "unread": "Non lu",
           "runIndex": "Run {index}",
           "status": {

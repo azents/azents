@@ -632,7 +632,7 @@
           "backToParentTooltip": "親エージェントに戻る: {name} ({path})",
           "navigationMenu": "サブエージェントの移動オプション",
           "readOnlyNotice": "サブエージェントセッションは読み取り専用です。新しい指示は親エージェントから送信してください。",
-          "inputDisabledPlaceholder": "サブエージェントセッションのため直接入力できません。新しい指示は親エージェントから送信してください。",
+          "inputDisabledPlaceholder": "親エージェントで指示してください。",
           "unread": "未読",
           "runIndex": "Run {index}",
           "status": {

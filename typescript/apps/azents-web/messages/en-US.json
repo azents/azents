@@ -632,7 +632,7 @@
           "backToParentTooltip": "Back to parent: {name} ({path})",
           "navigationMenu": "Subagent navigation options",
           "readOnlyNotice": "Subagent sessions are read-only. Send new instructions from the parent agent.",
-          "inputDisabledPlaceholder": "This is a subagent session, so direct input is disabled. Send instructions from the parent agent.",
+          "inputDisabledPlaceholder": "Use the parent agent.",
           "unread": "Unread",
           "runIndex": "Run {index}",
           "status": {
