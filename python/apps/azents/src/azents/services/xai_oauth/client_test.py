@@ -8,13 +8,18 @@ from urllib.parse import parse_qs
 import httpx
 from azcommon.result import Failure, Success
 
-from azents.core.xai_oauth import XAI_OAUTH_SCOPE, XaiOAuthConnectionMethod
+from azents.core.xai_oauth import (
+    XAI_OAUTH_CLIENT_ID,
+    XAI_OAUTH_SCOPE,
+    XaiOAuthConnectionMethod,
+)
 
 from .client import XaiOAuthClient
 from .data import (
     ProviderEntitlementDenied,
     ProviderPending,
     ProviderRejected,
+    ProviderSlowDown,
     ProviderUnavailable,
 )
 
@@ -28,21 +33,20 @@ def _jwt_payload(payload: dict[str, object]) -> str:
 
 def _make_client(transport: httpx.AsyncBaseTransport) -> XaiOAuthClient:
     """Create client using Mock transport."""
-    return XaiOAuthClient(
-        httpx.AsyncClient(transport=transport), client_id="client-123"
-    )
+    return XaiOAuthClient(httpx.AsyncClient(transport=transport))
 
 
 class TestXaiOAuthClient:
     """XaiOAuthClient tests."""
 
     async def test_request_device_user_code(self) -> None:
-        """Parse Device user-code response."""
+        """Parse Device user-code response with the public Grok CLI client."""
+        assert XAI_OAUTH_CLIENT_ID == "b1a00492-073a-47ea-816f-4c329264a828"
 
         async def handler(request: httpx.Request) -> httpx.Response:
             assert request.url.path == "/oauth2/device/code"
             body = parse_qs(request.content.decode())
-            assert body["client_id"] == ["client-123"]
+            assert body["client_id"] == [XAI_OAUTH_CLIENT_ID]
             assert body["scope"] == [XAI_OAUTH_SCOPE]
             return httpx.Response(
                 200,
@@ -80,6 +84,20 @@ class TestXaiOAuthClient:
         assert isinstance(result, Failure)
         assert isinstance(result.error, ProviderPending)
 
+    async def test_poll_device_tokens_slow_down(self) -> None:
+        """Preserve the provider request to increase the polling interval."""
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, json={"error": "slow_down"})
+
+        result = await _make_client(httpx.MockTransport(handler)).poll_device_tokens(
+            device_code="device-code-123",
+            connection_method=XaiOAuthConnectionMethod.DEVICE,
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, ProviderSlowDown)
+
     async def test_poll_device_tokens_success(self) -> None:
         """Convert device grant response to token set."""
         id_token = _jwt_payload({"sub": "account-123", "email": "user@example.com"})
@@ -89,7 +107,7 @@ class TestXaiOAuthClient:
             assert body["grant_type"] == [
                 "urn:ietf:params:oauth:grant-type:device_code"
             ]
-            assert body["client_id"] == ["client-123"]
+            assert body["client_id"] == [XAI_OAUTH_CLIENT_ID]
             assert body["device_code"] == ["device-code-123"]
             return httpx.Response(
                 200,
@@ -121,7 +139,7 @@ class TestXaiOAuthClient:
             body = parse_qs(request.content.decode())
             assert body["grant_type"] == ["refresh_token"]
             assert body["refresh_token"] == ["old-refresh-token"]
-            assert body["client_id"] == ["client-123"]
+            assert body["client_id"] == [XAI_OAUTH_CLIENT_ID]
             return httpx.Response(
                 200,
                 json={

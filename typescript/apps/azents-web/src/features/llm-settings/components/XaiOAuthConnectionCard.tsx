@@ -86,7 +86,14 @@ export function XaiOAuthConnectionCard({
     );
 
   useEffect(() => {
-    if (deviceStatusQuery.data?.status === "connected") {
+    if (deviceStatusQuery.data?.status === "pending") {
+      const intervalMs = deviceStatusQuery.data.interval_seconds * 1000;
+      setDeviceState((current) =>
+        current.type === "PENDING" && current.intervalMs !== intervalMs
+          ? { ...current, intervalMs }
+          : current,
+      );
+    } else if (deviceStatusQuery.data?.status === "connected") {
       setDeviceState({ type: "CONNECTED" });
       void utils.llmProviderIntegration.list.invalidate({ handle });
       onConnected?.();
@@ -100,7 +107,14 @@ export function XaiOAuthConnectionCard({
         message: t("statusError", { status: deviceStatusQuery.data.status }),
       });
     }
-  }, [deviceStatusQuery.data?.status, handle, onConnected, t, utils]);
+  }, [
+    deviceStatusQuery.data?.interval_seconds,
+    deviceStatusQuery.data?.status,
+    handle,
+    onConnected,
+    t,
+    utils,
+  ]);
 
   useEffect(() => {
     if (deviceStatusQuery.isError) {

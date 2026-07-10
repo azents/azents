@@ -9,11 +9,9 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
-from azents.core.config import XaiOAuthConfig as XaiOAuthProviderConfig
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
 from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_config, get_credential_cipher
+from azents.core.deps import get_credential_cipher
 from azents.core.enums import LLMProvider
 from azents.core.xai_oauth import (
     XaiOAuthConnectionMethod,
@@ -33,10 +31,10 @@ from azents.repos.xai_oauth_session.data import (
 from .client import XaiOAuthClient
 from .data import (
     InvalidSession,
-    ProviderDisabled,
     ProviderEntitlementDenied,
     ProviderPending,
     ProviderRejected,
+    ProviderSlowDown,
     ProviderUnavailable,
     SessionNotFound,
     SessionTransitionFailed,
@@ -48,6 +46,7 @@ from .data import (
 )
 
 _SESSION_TTL = datetime.timedelta(minutes=15)
+_SLOW_DOWN_INCREMENT_SECONDS = 5
 
 
 async def _get_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -70,31 +69,11 @@ def _get_integration_repo(
     return LLMProviderIntegrationRepository(cipher)
 
 
-def _get_xai_oauth_config(
-    config: Annotated[Config, Depends(get_config)],
-) -> XaiOAuthProviderConfig:
-    """Return xAI OAuth provider config."""
-    return config.xai_oauth
-
-
 def _get_client(
     http_client: Annotated[httpx.AsyncClient, Depends(_get_http_client)],
-    config: Annotated[XaiOAuthProviderConfig, Depends(_get_xai_oauth_config)],
-) -> XaiOAuthClient | None:
-    """Create xAI OAuth client dependency when the provider is configured."""
-    client_id = _optional_client_id(config)
-    if client_id is None:
-        return None
-    return XaiOAuthClient(http_client, client_id=client_id)
-
-
-def _optional_client_id(config: XaiOAuthProviderConfig) -> str | None:
-    """Return configured xAI OAuth client id when the provider is available."""
-    if not config.enabled:
-        return None
-    if config.client_id is None or not config.client_id.strip():
-        return None
-    return config.client_id.strip()
+) -> XaiOAuthClient:
+    """Create xAI OAuth client dependency."""
+    return XaiOAuthClient(http_client)
 
 
 class XaiOAuthService:
@@ -109,7 +88,7 @@ class XaiOAuthService:
         integration_repo: Annotated[
             LLMProviderIntegrationRepository, Depends(_get_integration_repo)
         ],
-        client: Annotated[XaiOAuthClient | None, Depends(_get_client)],
+        client: Annotated[XaiOAuthClient, Depends(_get_client)],
     ) -> None:
         """Inject service dependencies."""
         self._session_manager = session_manager
@@ -117,34 +96,14 @@ class XaiOAuthService:
         self._integration_repo = integration_repo
         self._client = client
 
-    def _available_client(self) -> Result[XaiOAuthClient, ProviderDisabled]:
-        """Return configured xAI OAuth client or a disabled-provider error."""
-        if self._client is None:
-            return Failure(
-                ProviderDisabled(
-                    reason="xAI OAuth provider is disabled or not configured"
-                )
-            )
-        return Success(self._client)
-
     async def start_device(
         self, *, workspace_id: str, user_id: str
     ) -> Result[
         XaiOAuthDeviceStartOutput,
-        ProviderDisabled
-        | ProviderRejected
-        | ProviderEntitlementDenied
-        | ProviderUnavailable,
+        ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
     ]:
         """Start Device OAuth flow."""
-        client_result = self._available_client()
-        match client_result:
-            case Success(client):
-                code_result = await client.request_device_user_code()
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(client_result)
+        code_result = await self._client.request_device_user_code()
         match code_result:
             case Success(user_code):
                 expires_at = datetime.datetime.now(datetime.UTC) + min(
@@ -191,17 +150,10 @@ class XaiOAuthService:
         )
         match session_result:
             case Success(oauth_session):
-                client_result = self._available_client()
-                match client_result:
-                    case Success(client):
-                        poll_result = await client.poll_device_tokens(
-                            device_code=oauth_session.device_code,
-                            connection_method=XaiOAuthConnectionMethod.DEVICE,
-                        )
-                    case Failure(error):
-                        return Failure(error)
-                    case _:
-                        assert_never(client_result)
+                poll_result = await self._client.poll_device_tokens(
+                    device_code=oauth_session.device_code,
+                    connection_method=XaiOAuthConnectionMethod.DEVICE,
+                )
             case Failure(error):
                 return Failure(error)
             case _:
@@ -220,6 +172,7 @@ class XaiOAuthService:
                             XaiOAuthDeviceStatusOutput(
                                 session_id=session_id,
                                 status=XaiOAuthSessionStatus.CONNECTED,
+                                interval_seconds=oauth_session.interval_seconds,
                                 integration=output.integration,
                             )
                         )
@@ -232,8 +185,29 @@ class XaiOAuthService:
                     XaiOAuthDeviceStatusOutput(
                         session_id=session_id,
                         status=XaiOAuthSessionStatus.PENDING,
+                        interval_seconds=oauth_session.interval_seconds,
                     )
                 )
+            case Failure(ProviderSlowDown()):
+                async with self._session_manager() as session:
+                    interval_result = await self._session_repo.increase_poll_interval(
+                        session,
+                        session_id,
+                        seconds=_SLOW_DOWN_INCREMENT_SECONDS,
+                    )
+                match interval_result:
+                    case Success(value):
+                        return Success(
+                            XaiOAuthDeviceStatusOutput(
+                                session_id=session_id,
+                                status=XaiOAuthSessionStatus.PENDING,
+                                interval_seconds=value.interval_seconds,
+                            )
+                        )
+                    case Failure():
+                        return Failure(SessionTransitionFailed(session_id=session_id))
+                    case _:
+                        assert_never(interval_result)
             case Failure(error):
                 return Failure(error)
             case _:
@@ -256,7 +230,11 @@ class XaiOAuthService:
         match result:
             case Success(value):
                 return Success(
-                    XaiOAuthDeviceStatusOutput(session_id=value.id, status=value.status)
+                    XaiOAuthDeviceStatusOutput(
+                        session_id=value.id,
+                        status=value.status,
+                        interval_seconds=value.interval_seconds,
+                    )
                 )
             case Failure():
                 return Failure(SessionTransitionFailed(session_id=session_id))

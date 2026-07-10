@@ -455,7 +455,6 @@ def _executor(
             web_url="http://localhost:3000",
             oauth_secret_key="test-secret",
             mcp_proxy_url=None,
-            xai_oauth_client_id=None,
             failed_run_max_retries=failed_run_max_retries,
             failed_run_base_backoff_seconds=1,
             failed_run_backoff_multiplier=2,

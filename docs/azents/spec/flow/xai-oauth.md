@@ -21,7 +21,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-07-10
-spec_version: 1
+spec_version: 2
 ---
 
 # xAI OAuth Flow
@@ -30,25 +30,21 @@ spec_version: 1
 
 xAI OAuth flow is an experimental provider connection flow that lets a workspace run agents with a user-authorized xAI account credential. Provider enum is `xai_oauth`, separate from the future xAI API key provider because subscription OAuth uses different billing, entitlement, setup, and refresh behavior.
 
-The provider is disabled by default. It is available only when both server settings are configured:
-
-- `AZ_XAI_OAUTH_ENABLED=true`
-- `AZ_XAI_OAUTH_CLIENT_ID=<operator-owned OAuth client id>`
-
-When unavailable, the provider capability list omits `xai_oauth`, the LLM Settings create modal hides the provider option, and direct xAI OAuth device start returns not found.
+The provider is experimental but available without operator OAuth configuration. Azents uses the public native-application client identity registered for the Grok CLI flow, matching the built-in public-client model used by ChatGPT OAuth. The provider capability list always includes `xai_oauth`, and the LLM Settings create modal marks it experimental.
 
 ## Provider Constants
 
 | Value | Current setting |
 |---|---|
 | issuer | `https://auth.x.ai` |
+| public client id | `b1a00492-073a-47ea-816f-4c329264a828` |
 | discovery | `https://auth.x.ai/.well-known/openid-configuration` |
 | device code | `https://auth.x.ai/oauth2/device/code` |
 | token | `https://auth.x.ai/oauth2/token` |
 | scope | `openid profile email offline_access api:access grok-cli:access` |
 | runtime base URL | `https://api.x.ai/v1` |
 
-The OAuth client id comes only from configuration. It is not hard-coded from another application.
+The OAuth client id is a public native-app identifier, not a secret. Device authorization sends it with the requested scope, and device polling and refresh send the same identifier to the token endpoint. The RFC 8628 device grant does not use a PKCE verifier; PKCE applies to the separate authorization-code flow.
 
 ## Data Model
 
@@ -119,8 +115,12 @@ sequenceDiagram
     Web->>API: GET /device/{session_id}
     API->>Token: POST /oauth2/token with device_code grant
     alt authorization pending
-        Token-->>API: authorization_pending or slow_down
-        API-->>Web: pending status
+        Token-->>API: authorization_pending
+        API-->>Web: pending status + current interval
+    else provider requests slower polling
+        Token-->>API: slow_down
+        API->>DB: Increase session interval by 5 seconds
+        API-->>Web: pending status + increased interval
     else authorized
         Token-->>API: access/refresh/id token
         API->>DB: Store encrypted integration secrets + config
@@ -130,7 +130,7 @@ sequenceDiagram
 
 Rules:
 
-- Device polling interval follows provider response from device start.
+- Device polling starts with the provider response interval. Each `slow_down` response atomically increases the stored interval by five seconds, and the UI adopts the returned interval for subsequent polls.
 - User cancel transitions session to terminal cancelled state with `DELETE /device/{session_id}`.
 - Device poll/cancel verifies current member has same workspace/user as session owner.
 - `device_code`, access token, refresh token, and id token are not exposed in public responses.
@@ -202,12 +202,13 @@ Rules:
 
 - Device sessions are bound to workspace and user.
 - Device code, access token, refresh token, and id token are never returned in API responses or UI.
-- OAuth client id is operator configuration, not copied from another app.
-- The provider is disabled by default and hidden when unavailable.
+- OAuth client id is the public Grok CLI native-app client identity and is not treated as a secret.
+- The provider remains marked experimental in provider capability responses and the UI.
 - Entitlement failures are quarantined as `entitlement_denied` to avoid repeated refresh storms.
 
 ## Changelog
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-10 | 2 | Adopted the public Grok CLI client identity and made the experimental provider available without operator OAuth configuration | OpenCode xAI OAuth and ChatGPT OAuth parity review |
 | 2026-07-10 | 1 | Wrote current xAI OAuth device, runtime refresh, catalog, and UI behavior | `docs/azents/design/xai-oauth-provider.md` |

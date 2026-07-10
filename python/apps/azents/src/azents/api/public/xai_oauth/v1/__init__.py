@@ -11,10 +11,10 @@ from azents.core.auth.permissions import Permissions
 from azents.services.xai_oauth import XaiOAuthService
 from azents.services.xai_oauth.data import (
     InvalidSession,
-    ProviderDisabled,
     ProviderEntitlementDenied,
     ProviderPending,
     ProviderRejected,
+    ProviderSlowDown,
     ProviderUnavailable,
     SessionNotFound,
     SessionTransitionFailed,
@@ -120,15 +120,10 @@ def _raise_oauth_error(error: object) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="OAuth session is invalid or expired.",
             )
-        case ProviderPending():
+        case ProviderPending() | ProviderSlowDown():
             raise HTTPException(
                 status_code=status.HTTP_202_ACCEPTED,
                 detail="xAI authorization is still pending.",
-            )
-        case ProviderDisabled():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="xAI OAuth provider is not available.",
             )
         case ProviderRejected():
             raise HTTPException(

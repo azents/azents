@@ -43,7 +43,7 @@ _8 documents_
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-08 | 14 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-06 | 12 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-08 | 6 |
-| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 1 |
+| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 2 |
 
 _14 documents_
 

@@ -10,6 +10,7 @@ from azcommon.result import Failure, Result, Success
 from pydantic import ValidationError
 
 from azents.core.xai_oauth import (
+    XAI_OAUTH_CLIENT_ID,
     XAI_OAUTH_DEVICE_CODE_URL,
     XAI_OAUTH_SCOPE,
     XAI_OAUTH_TOKEN_URL,
@@ -21,6 +22,7 @@ from .data import (
     ProviderEntitlementDenied,
     ProviderPending,
     ProviderRejected,
+    ProviderSlowDown,
     ProviderUnavailable,
     TokenSet,
 )
@@ -31,10 +33,9 @@ _DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 class XaiOAuthClient:
     """xAI OAuth endpoint invocation client."""
 
-    def __init__(self, http_client: httpx.AsyncClient, *, client_id: str) -> None:
-        """Inject HTTP client and configured OAuth client id."""
+    def __init__(self, http_client: httpx.AsyncClient) -> None:
+        """Inject HTTP client."""
         self._http_client = http_client
-        self._client_id = client_id
 
     async def request_device_user_code(
         self,
@@ -46,7 +47,7 @@ class XaiOAuthClient:
         try:
             response = await self._http_client.post(
                 XAI_OAUTH_DEVICE_CODE_URL,
-                data={"client_id": self._client_id, "scope": XAI_OAUTH_SCOPE},
+                data={"client_id": XAI_OAUTH_CLIENT_ID, "scope": XAI_OAUTH_SCOPE},
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
                     "Accept": "application/json",
@@ -87,6 +88,7 @@ class XaiOAuthClient:
     ) -> Result[
         TokenSet,
         ProviderPending
+        | ProviderSlowDown
         | ProviderRejected
         | ProviderEntitlementDenied
         | ProviderUnavailable,
@@ -97,7 +99,7 @@ class XaiOAuthClient:
                 XAI_OAUTH_TOKEN_URL,
                 data={
                     "grant_type": _DEVICE_CODE_GRANT_TYPE,
-                    "client_id": self._client_id,
+                    "client_id": XAI_OAUTH_CLIENT_ID,
                     "device_code": device_code,
                 },
                 headers={
@@ -127,7 +129,7 @@ class XaiOAuthClient:
             if error == "authorization_pending":
                 return Failure(ProviderPending(session_id=device_code))
             if error == "slow_down":
-                return Failure(ProviderPending(session_id=device_code))
+                return Failure(ProviderSlowDown(session_id=device_code))
         return Failure(_provider_error(response))
 
     async def refresh_tokens(
@@ -146,7 +148,7 @@ class XaiOAuthClient:
                 data={
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
-                    "client_id": self._client_id,
+                    "client_id": XAI_OAUTH_CLIENT_ID,
                 },
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",

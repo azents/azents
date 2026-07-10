@@ -213,7 +213,6 @@ async def _ensure_provider_runtime_tokens(
     integration: LLMProviderIntegrationWithSecrets,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
-    xai_oauth_client_id: str | None,
 ) -> Result[LLMProviderIntegrationWithSecrets, RuntimeTokenRefreshError]:
     """Refresh provider OAuth credentials before Runtime execution."""
     if integration.provider == LLMProvider.XAI_OAUTH:
@@ -221,7 +220,6 @@ async def _ensure_provider_runtime_tokens(
             integration=integration,
             integration_repository=integration_repository,
             session_manager=session_manager,
-            client_id=xai_oauth_client_id,
         )
     else:
         result = await ensure_chatgpt_oauth_runtime_tokens(
@@ -283,7 +281,6 @@ async def resolve_invoke_input(
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
-    xai_oauth_client_id: str | None = None,
 ) -> Result[RunRequest, ResolveError]:
     """Load Agent/Integration and build RunRequest."""
     return await resolve_invoke_input_with_model_source(
@@ -294,7 +291,6 @@ async def resolve_invoke_input(
         session_manager=session_manager,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
-        xai_oauth_client_id=xai_oauth_client_id,
     )
 
 
@@ -307,7 +303,6 @@ async def resolve_invoke_input_with_model_source(
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
-    xai_oauth_client_id: str | None = None,
 ) -> Result[RunRequest, ResolveError]:
     """Load Agent while separately specifying source agent for LLM model selection."""
     async with session_manager() as session:
@@ -350,7 +345,6 @@ async def resolve_invoke_input_with_model_source(
             integration=integration,
             integration_repository=integration_repository,
             session_manager=session_manager,
-            xai_oauth_client_id=xai_oauth_client_id,
         )
         match refreshed_integration:
             case Success(value):
@@ -386,7 +380,6 @@ async def resolve_invoke_input_with_model_source(
                 integration=loaded_lightweight_integration,
                 integration_repository=integration_repository,
                 session_manager=session_manager,
-                xai_oauth_client_id=xai_oauth_client_id,
             )
             match refreshed_lightweight_integration:
                 case Success(value):

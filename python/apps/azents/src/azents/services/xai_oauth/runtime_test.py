@@ -115,35 +115,10 @@ class TestEnsureRuntimeTokens:
             session_manager=cast(
                 SessionManager[AsyncSession], _SessionManager(rdb_session)
             ),
-            client_id="client-123",
         )
 
         assert isinstance(result, Success)
         assert result.value.id == integration_id
-
-    async def test_missing_client_id_blocks_xai_oauth_runtime(
-        self, rdb_session: AsyncSession
-    ) -> None:
-        """Missing client ID disables runtime use even before token expiry."""
-        expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
-        assert integration is not None
-
-        result = await ensure_runtime_tokens(
-            integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
-            ),
-            client_id=None,
-        )
-
-        assert isinstance(result, Failure)
-        assert isinstance(result.error, ProviderRejected)
 
     async def test_near_expiry_refresh_persists_rotated_tokens(
         self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
@@ -185,7 +160,6 @@ class TestEnsureRuntimeTokens:
             session_manager=cast(
                 SessionManager[AsyncSession], _SessionManager(rdb_session)
             ),
-            client_id="client-123",
         )
 
         assert isinstance(result, Success)
@@ -224,7 +198,6 @@ class TestEnsureRuntimeTokens:
             session_manager=cast(
                 SessionManager[AsyncSession], _SessionManager(rdb_session)
             ),
-            client_id="client-123",
         )
         updated = await repo.get_by_id(rdb_session, integration_id)
 
@@ -266,7 +239,6 @@ class TestEnsureRuntimeTokens:
             session_manager=cast(
                 SessionManager[AsyncSession], _SessionManager(rdb_session)
             ),
-            client_id="client-123",
         )
         after_failure = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert isinstance(first, Failure)
@@ -303,7 +275,6 @@ class TestEnsureRuntimeTokens:
             session_manager=cast(
                 SessionManager[AsyncSession], _SessionManager(rdb_session)
             ),
-            client_id="client-123",
         )
 
         assert isinstance(second, Success)

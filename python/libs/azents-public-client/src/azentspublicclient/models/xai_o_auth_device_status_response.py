@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_provider_integration_response import LLMProviderIntegrationResponse
 from azentspublicclient.models.xai_o_auth_session_status import XaiOAuthSessionStatus
@@ -30,9 +30,10 @@ class XaiOAuthDeviceStatusResponse(BaseModel):
     """ # noqa: E501
     session_id: StrictStr = Field(description="OAuth session ID")
     status: XaiOAuthSessionStatus = Field(description="Session status")
+    interval_seconds: StrictInt = Field(description="Current provider polling interval")
     integration: Optional[LLMProviderIntegrationResponse] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["session_id", "status", "integration"]
+    __properties: ClassVar[List[str]] = ["session_id", "status", "interval_seconds", "integration"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -102,6 +103,7 @@ class XaiOAuthDeviceStatusResponse(BaseModel):
         _obj = cls.model_validate({
             "session_id": obj.get("session_id"),
             "status": obj.get("status"),
+            "interval_seconds": obj.get("interval_seconds"),
             "integration": LLMProviderIntegrationResponse.from_dict(obj["integration"]) if obj.get("integration") is not None else None
         })
         # store additional fields in additional_properties

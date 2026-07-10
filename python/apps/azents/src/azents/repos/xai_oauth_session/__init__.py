@@ -84,6 +84,31 @@ class XaiOAuthSessionRepository:
             return None
         return self._build_with_secrets(rdb)
 
+    async def increase_poll_interval(
+        self,
+        session: AsyncSession,
+        session_id: str,
+        *,
+        seconds: int,
+    ) -> Result[XaiOAuthSession, NotFound]:
+        """Increase the polling interval of an unexpired pending session."""
+        result = await session.execute(
+            sa.update(RDBXaiOAuthSession)
+            .where(
+                RDBXaiOAuthSession.id == session_id,
+                RDBXaiOAuthSession.status == XaiOAuthSessionStatus.PENDING,
+                RDBXaiOAuthSession.expires_at > datetime.datetime.now(datetime.UTC),
+            )
+            .values(
+                interval_seconds=RDBXaiOAuthSession.interval_seconds + seconds,
+            )
+            .returning(RDBXaiOAuthSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return Failure(NotFound(session_id=session_id))
+        return Success(self._build(rdb))
+
     async def consume(
         self,
         session: AsyncSession,
