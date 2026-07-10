@@ -11,6 +11,7 @@ import { Box, Group, rem, Stack, Text, UnstyledButton } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { memo, useState } from "react";
+import inlineControlClasses from "./ChatInlineControl.module.css";
 
 interface TurnDividerProps {
   usage?: Record<string, unknown> | null;
@@ -50,12 +51,12 @@ export const TurnDivider = memo(function TurnDivider({
     <Box mt="xs" mb="sm">
       <Group gap="xs" align="center">
         <UnstyledButton
+          className={inlineControlClasses.root}
           onClick={() => setOpened((current) => !current)}
           style={{
             color: "var(--mantine-color-dimmed)",
             display: "inline-flex",
-            alignItems: "center",
-            gap: rem(4),
+            gap: rem(6),
           }}
         >
           <IconChevronRight
@@ -65,7 +66,7 @@ export const TurnDivider = memo(function TurnDivider({
               transition: "transform 120ms ease",
             }}
           />
-          <Text size="xs" c="dimmed">
+          <Text size="xs" c="dimmed" className={inlineControlClasses.label}>
             {t("turnUsage.tokens", { count: formatNumber(totalTokens) })}
           </Text>
         </UnstyledButton>

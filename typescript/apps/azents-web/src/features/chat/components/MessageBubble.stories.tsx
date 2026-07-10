@@ -206,6 +206,20 @@ export const WithAttachments = {
   },
 } satisfies Story;
 
+export const SkillLoadedIndicator = {
+  args: {
+    message: createChatMessage({
+      id: "skill-loaded",
+      role: "skill_loaded",
+      content:
+        "---\nname: ship-pr\n---\n\n# Ship PR\n\nCreate and monitor a pull request.",
+      metadata: {
+        name: "ship-pr",
+      },
+    }),
+  },
+} satisfies Story;
+
 export const GoalContinuationIndicator = {
   args: {
     message: createChatMessage({
