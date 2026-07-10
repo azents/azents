@@ -74,6 +74,18 @@ spec:
               value: {{ .Values.runtimeProviderKubernetes.storage.size | quote }}
             - name: AZ_RUNTIME_RUNNER_RESOURCES
               value: {{ .Values.runtimeProviderKubernetes.runnerResources | toJson | quote }}
+            - name: AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION
+              value: {{ .Values.runtimeProviderKubernetes.runnerLimits.maxConcurrentOperationsPerSession | quote }}
+            - name: AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS
+              value: {{ .Values.runtimeProviderKubernetes.runnerLimits.maxConcurrentSystemOperations | quote }}
+            - name: AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS
+              value: {{ .Values.runtimeProviderKubernetes.runnerLimits.maxConcurrentOperations | quote }}
+            - name: AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER
+              value: {{ .Values.runtimeProviderKubernetes.runnerLimits.maxPendingOperationsPerOwner | quote }}
+            - name: AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS
+              value: {{ .Values.runtimeProviderKubernetes.runnerLimits.maxPendingOperations | quote }}
+            - name: AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS
+              value: {{ .Values.runtimeProviderKubernetes.runnerLimits.maxConcurrentControlOperations | quote }}
             - name: AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS
               value: {{ $runtimePodImagePullSecrets | toJson | quote }}
             - name: AZ_RUNTIME_PROVIDER_POD_ANNOTATIONS

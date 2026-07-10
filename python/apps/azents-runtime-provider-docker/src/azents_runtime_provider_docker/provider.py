@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import stat
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -56,6 +57,14 @@ _ENV_PROVIDER_GENERATION = "AZ_RUNTIME_PROVIDER_GENERATION"
 _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
 _ENV_WORKSPACE_PATH = "AZ_AGENT_WORKSPACE_PATH"
+RUNNER_LIMIT_ENV_NAMES = (
+    "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
+    "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
+    "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS",
+    "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER",
+    "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS",
+    "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS",
+)
 
 
 class InvalidRuntimeId(ValueError):
@@ -64,6 +73,10 @@ class InvalidRuntimeId(ValueError):
 
 class InvalidWorkspacePath(ValueError):
     """Provider workspace mount path is missing or not absolute."""
+
+
+class InvalidRunnerEnvironment(ValueError):
+    """Runner environment contains a variable not managed by the Provider."""
 
 
 class InvalidResetFinalDesiredState(ValueError):
@@ -77,6 +90,7 @@ class DockerRuntimeProviderConfig:
     provider_id: str
     host_data_root: Path
     docker_network: str
+    runner_env: Mapping[str, str]
     workspace_mount_path: str = "/workspace/agent"
     tmp_mount_path: str = "/tmp/agent"
 
@@ -90,8 +104,15 @@ class DockerRuntimeProvider:
         :param docker: Docker API implementation
         :param config: Provider process configuration
         """
+        unknown_runner_env = set(config.runner_env).difference(RUNNER_LIMIT_ENV_NAMES)
+        if unknown_runner_env:
+            raise InvalidRunnerEnvironment(
+                f"unsupported Runner environment variables: "
+                f"{', '.join(sorted(unknown_runner_env))}"
+            )
         self._docker = docker
         self._config = config
+        self._runner_env = dict(config.runner_env)
         self._workspace_mount_path = _absolute_posix_path(config.workspace_mount_path)
         self._tmp_mount_path = _absolute_posix_path(config.tmp_mount_path)
 
@@ -271,6 +292,11 @@ class DockerRuntimeProvider:
         for key, value in self._stable_env(command).items():
             if env.get(key) != value:
                 return False
+        managed_runner_env = {
+            key: env[key] for key in RUNNER_LIMIT_ENV_NAMES if key in env
+        }
+        if managed_runner_env != self._runner_env:
+            return False
         return set(container.binds) == set(self._binds(command.identity.runtime_id))
 
     def _labels(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
@@ -303,6 +329,7 @@ class DockerRuntimeProvider:
     def _stable_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
         identity = command.identity
         env = {
+            **self._runner_env,
             _ENV_CONTROL_ENDPOINT: command.auth.control_endpoint,
             _ENV_RUNTIME_ID: identity.runtime_id,
             _ENV_AGENT_ID: identity.agent_id,

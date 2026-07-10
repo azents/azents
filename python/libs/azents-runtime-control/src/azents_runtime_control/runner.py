@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import enum
+import json
 import logging
 import time
 from collections import Counter, deque
@@ -281,6 +282,8 @@ class RunnerRunLoop:
         self._active_operation_tasks: dict[asyncio.Task[None], _ActiveOperation] = {}
         self._pending_control_operations: deque[_PendingOperation] = deque()
         self._active_control_tasks: dict[asyncio.Task[None], _ActiveOperation] = {}
+        self._queue_rejection_count = 0
+        self._pre_execution_timeout_count = 0
         self._scheduler_wake = asyncio.Event()
         self._client.set_operation_handler(self._receive_operation)
 
@@ -306,27 +309,14 @@ class RunnerRunLoop:
                 "runner_generation": accepted.generation,
             },
         )
-        await self._client.report_runner_state(
-            RunnerStateReport(
-                runtime_id=accepted.runtime_id,
-                runner_id=accepted.runner_id,
-                runner_generation=accepted.generation,
-                runner_state=RuntimeRunnerState.READY,
-                capabilities=self._registration.capabilities,
-                active_operation_ids=(),
-                health=self._registration.health,
-                diagnostic={},
-                workspace_path=self._registration.workspace_path,
-                reported_at=self._clock(),
-            )
-        )
+        await self._report_state()
         return accepted
 
     async def run_once(self, *, block_ms: int = 500) -> bool:
         """Receive, admit, or schedule one unit of Runner work."""
         accepted = self._require_accepted()
         await self._heartbeat_if_due(accepted)
-        self._reap_finished_operations()
+        await self._reap_finished_operations()
         has_pending = bool(
             self._pending_operation_count or self._pending_control_operations
         )
@@ -353,11 +343,13 @@ class RunnerRunLoop:
                 len(self._pending_control_operations)
                 >= self._max_pending_operations_per_owner
             ):
+                self._queue_rejection_count += 1
                 await self._append_final_error(
                     operation,
                     error_code="operation_queue_full",
                     error_message="Runner control operation queue is full",
                 )
+                await self._report_state()
             else:
                 self._pending_control_operations.append(
                     _PendingOperation(operation, self._monotonic())
@@ -389,6 +381,7 @@ class RunnerRunLoop:
             owner_pending_count >= self._max_pending_operations_per_owner
             or self._pending_operation_count >= self._max_pending_operations
         ):
+            self._queue_rejection_count += 1
             await self._append_final_error(
                 operation,
                 error_code="operation_queue_full",
@@ -401,8 +394,10 @@ class RunnerRunLoop:
                     "error_code": "operation_queue_full",
                     "owner_pending_operations": owner_pending_count,
                     "runtime_pending_operations": self._pending_operation_count,
+                    "queue_rejection_count": self._queue_rejection_count,
                 },
             )
+            await self._report_state()
             return
         if pending is None:
             pending = deque()
@@ -439,6 +434,7 @@ class RunnerRunLoop:
             else:
                 self._remove_empty_owner(owner)
             if self._deadline_expired(queued.operation):
+                self._pre_execution_timeout_count += 1
                 await self._append_final_error(
                     queued.operation,
                     error_code="operation_timeout",
@@ -446,14 +442,21 @@ class RunnerRunLoop:
                 )
                 _LOGGER.info(
                     "Runtime Runner pending operation expired",
-                    extra=self._operation_log_extra(queued.operation),
+                    extra={
+                        **self._operation_log_extra(queued.operation),
+                        "pre_execution_timeout_count": (
+                            self._pre_execution_timeout_count
+                        ),
+                    },
                 )
+                await self._report_state()
                 return True
             if not await self._client.start_runner_operation(queued.operation):
                 _LOGGER.info(
                     "Runtime Runner pending operation canceled before execution",
                     extra=self._operation_log_extra(queued.operation),
                 )
+                await self._report_state()
                 return True
             started_at = self._monotonic()
             task = asyncio.create_task(self._operations.handle(queued.operation))
@@ -472,6 +475,7 @@ class RunnerRunLoop:
                     "runtime_active_operations": len(self._active_operation_tasks),
                 },
             )
+            await self._report_state()
             return True
         return False
 
@@ -482,6 +486,7 @@ class RunnerRunLoop:
             return False
         queued = self._pending_control_operations.popleft()
         if self._deadline_expired(queued.operation):
+            self._pre_execution_timeout_count += 1
             await self._append_final_error(
                 queued.operation,
                 error_code="operation_timeout",
@@ -489,12 +494,14 @@ class RunnerRunLoop:
                     "Runner control operation deadline expired before execution"
                 ),
             )
+            await self._report_state()
             return True
         if not await self._client.start_runner_operation(queued.operation):
             _LOGGER.info(
                 "Runtime Runner pending control operation canceled before execution",
                 extra=self._operation_log_extra(queued.operation),
             )
+            await self._report_state()
             return True
         started_at = self._monotonic()
         task = asyncio.create_task(self._operations.handle(queued.operation))
@@ -511,6 +518,7 @@ class RunnerRunLoop:
                 "control_active_operations": len(self._active_control_tasks),
             },
         )
+        await self._report_state()
         return True
 
     async def _wait_for_scheduler_wake(self, *, block_ms: int) -> None:
@@ -556,19 +564,29 @@ class RunnerRunLoop:
             )
         self._last_heartbeat_at = now
 
-    def _reap_finished_operations(self) -> None:
-        self._reap_task_set(self._active_operation_tasks, control=False)
-        self._reap_task_set(self._active_control_tasks, control=True)
+    async def _reap_finished_operations(self) -> None:
+        reaped_ordinary = self._reap_task_set(
+            self._active_operation_tasks,
+            control=False,
+        )
+        reaped_control = self._reap_task_set(
+            self._active_control_tasks,
+            control=True,
+        )
+        if reaped_ordinary or reaped_control:
+            await self._report_state()
 
     def _reap_task_set(
         self,
         tasks: dict[asyncio.Task[None], _ActiveOperation],
         *,
         control: bool,
-    ) -> None:
+    ) -> bool:
+        reaped = False
         for task in tuple(tasks):
             if not task.done():
                 continue
+            reaped = True
             active = tasks.pop(task)
             if not control:
                 self._active_by_owner[active.owner] -= 1
@@ -583,10 +601,78 @@ class RunnerRunLoop:
                         (self._monotonic() - active.started_at) * 1000,
                         3,
                     ),
+                    "owner_active_operations": self._active_by_owner[active.owner],
                     "runtime_active_operations": len(self._active_operation_tasks),
                     "control_operation": control,
                 },
             )
+        return reaped
+
+    async def _report_state(self) -> None:
+        accepted = self._require_accepted()
+        active_operations = (
+            *self._active_operation_tasks.values(),
+            *self._active_control_tasks.values(),
+        )
+        busy = bool(
+            self._pending_operation_count
+            or self._pending_control_operations
+            or active_operations
+        )
+        await self._client.report_runner_state(
+            RunnerStateReport(
+                runtime_id=accepted.runtime_id,
+                runner_id=accepted.runner_id,
+                runner_generation=accepted.generation,
+                runner_state=(
+                    RuntimeRunnerState.BUSY if busy else RuntimeRunnerState.READY
+                ),
+                capabilities=self._registration.capabilities,
+                active_operation_ids=tuple(
+                    f"operation:{active.operation.request_id}"
+                    for active in active_operations
+                ),
+                health=self._registration.health,
+                diagnostic=self._state_diagnostic(),
+                workspace_path=self._registration.workspace_path,
+                reported_at=self._clock(),
+            )
+        )
+
+    def _state_diagnostic(self) -> dict[str, str]:
+        session_pending = {
+            owner: len(pending)
+            for owner, pending in self._pending_by_owner.items()
+            if owner is not None and pending
+        }
+        session_active = {
+            owner: count
+            for owner, count in self._active_by_owner.items()
+            if owner is not None and count
+        }
+        system_pending = self._pending_by_owner.get(None)
+        return {
+            "runtime_pending_operations": str(self._pending_operation_count),
+            "runtime_active_operations": str(len(self._active_operation_tasks)),
+            "system_pending_operations": str(
+                len(system_pending) if system_pending is not None else 0
+            ),
+            "system_active_operations": str(self._active_by_owner[None]),
+            "session_pending_operations": json.dumps(
+                session_pending,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "session_active_operations": json.dumps(
+                session_active,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "control_pending_operations": str(len(self._pending_control_operations)),
+            "control_active_operations": str(len(self._active_control_tasks)),
+            "queue_rejection_count": str(self._queue_rejection_count),
+            "pre_execution_timeout_count": str(self._pre_execution_timeout_count),
+        }
 
     async def _append_final_error(
         self,

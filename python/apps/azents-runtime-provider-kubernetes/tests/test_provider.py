@@ -41,7 +41,9 @@ from azents_runtime_provider_kubernetes.models import (
     RuntimeProviderObservedState,
 )
 from azents_runtime_provider_kubernetes.provider import (
+    RUNNER_LIMIT_ENV_NAMES,
     InvalidResetFinalDesiredState,
+    InvalidRunnerEnvironment,
     InvalidWorkspacePath,
     KubernetesRuntimeProvider,
     KubernetesRuntimeProviderConfig,
@@ -153,6 +155,13 @@ class FakeKubernetesApi(KubernetesApi):
 
 
 def _provider(api: FakeKubernetesApi) -> KubernetesRuntimeProvider:
+    return _provider_with_runner_env(api, {})
+
+
+def _provider_with_runner_env(
+    api: FakeKubernetesApi,
+    runner_env: Mapping[str, str],
+) -> KubernetesRuntimeProvider:
     return KubernetesRuntimeProvider(
         api,
         KubernetesRuntimeProviderConfig(
@@ -165,8 +174,14 @@ def _provider(api: FakeKubernetesApi) -> KubernetesRuntimeProvider:
                 limits={"cpu": "1500m", "memory": "2Gi"},
                 claims=None,
             ),
+            runner_env=runner_env,
         ),
     )
+
+
+def test_provider_rejects_unmanaged_runner_environment() -> None:
+    with pytest.raises(InvalidRunnerEnvironment, match="UNMANAGED"):
+        _provider_with_runner_env(FakeKubernetesApi(), {"UNMANAGED": "value"})
 
 
 def _command(
@@ -261,6 +276,37 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_applies_configured_runner_limits() -> None:
+    api = FakeKubernetesApi()
+    runner_env = {
+        name: str(index + 1) for index, name in enumerate(RUNNER_LIMIT_ENV_NAMES)
+    }
+    provider = _provider_with_runner_env(api, runner_env)
+
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
+    env = {item.name: item.value for item in pod.spec.containers[0].env}
+    assert {name: env[name] for name in RUNNER_LIMIT_ENV_NAMES} == runner_env
+
+
+@pytest.mark.asyncio
+async def test_start_replaces_pod_when_runner_limit_is_removed() -> None:
+    api = FakeKubernetesApi()
+    limit_name = "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS"
+    old_provider = _provider_with_runner_env(api, {limit_name: "12"})
+    new_provider = _provider_with_runner_env(api, {})
+    await old_provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    await new_provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
+    env = {item.name: item.value for item in pod.spec.containers[0].env}
+    assert limit_name not in env
+
+
+@pytest.mark.asyncio
 async def test_start_allows_omitted_runner_resources() -> None:
     api = FakeKubernetesApi()
     provider = KubernetesRuntimeProvider(
@@ -271,6 +317,7 @@ async def test_start_allows_omitted_runner_resources() -> None:
             storage_class_name="gp3",
             pvc_storage_request="20Gi",
             runner_resources=None,
+            runner_env={},
         ),
     )
 
@@ -302,6 +349,7 @@ async def test_start_preserves_generic_runner_resource_requirements() -> None:
             storage_class_name="gp3",
             pvc_storage_request="20Gi",
             runner_resources=resources,
+            runner_env={},
         ),
     )
 
@@ -329,6 +377,7 @@ async def test_start_reuses_pod_with_kubernetes_default_tolerations() -> None:
             storage_class_name="gp3",
             pvc_storage_request="20Gi",
             runner_resources=None,
+            runner_env={},
             pod_tolerations=(configured_toleration,),
         ),
     )
@@ -520,6 +569,7 @@ async def test_start_applies_configured_pod_annotations() -> None:
                 limits={"cpu": "1500m", "memory": "2Gi"},
                 claims=None,
             ),
+            runner_env={},
             pod_annotations={"descheduler/no-evict": "true"},
         ),
     )
@@ -548,6 +598,7 @@ async def test_start_applies_configured_runtime_pod_scheduling() -> None:
                 limits={"cpu": "1500m", "memory": "2Gi"},
                 claims=None,
             ),
+            runner_env={},
             pod_node_selector={"azents.azents.io/runtime-isolation": "true"},
             pod_tolerations=(
                 Toleration(
@@ -585,6 +636,7 @@ async def test_start_applies_configured_runtime_pod_image_pull_secrets() -> None
             storage_class_name="gp3",
             pvc_storage_request="20Gi",
             runner_resources=None,
+            runner_env={},
             image_pull_secrets=(LocalObjectReference(name="ecr-pull-secret"),),
         ),
     )
@@ -608,6 +660,7 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
             storage_class_name="gp3",
             pvc_storage_request="20Gi",
             runner_resources=None,
+            runner_env={},
         ),
     )
     new_provider = KubernetesRuntimeProvider(
@@ -618,6 +671,7 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
             storage_class_name="gp3",
             pvc_storage_request="20Gi",
             runner_resources=None,
+            runner_env={},
             image_pull_secrets=(LocalObjectReference(name="ecr-pull-secret"),),
         ),
     )
@@ -801,6 +855,7 @@ def test_invalid_workspace_path_is_rejected() -> None:
                     limits={"cpu": "1500m", "memory": "2Gi"},
                     claims=None,
                 ),
+                runner_env={},
                 workspace_mount_path="relative/path",
             ),
         )

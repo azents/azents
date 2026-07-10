@@ -20,6 +20,7 @@ from azents_runtime_control.provider import (
 
 from azents_runtime_provider_docker.aiodocker_api import AioDockerApi
 from azents_runtime_provider_docker.provider import (
+    RUNNER_LIMIT_ENV_NAMES,
     DockerRuntimeProvider,
     DockerRuntimeProviderConfig,
 )
@@ -76,6 +77,7 @@ async def _run_control_loop(
             provider_id=settings.provider_id,
             host_data_root=settings.host_data_root,
             docker_network=settings.docker_network,
+            runner_env=settings.runner_env,
             workspace_mount_path=settings.workspace_path,
             tmp_mount_path=settings.tmp_path,
         ),
@@ -160,6 +162,7 @@ class ProviderSettings:
             "/workspace/agent",
         )
         self.tmp_path = os.environ.get("AZ_RUNTIME_PROVIDER_TMP_PATH", "/tmp/agent")
+        self.runner_env = _runner_env_from_env()
         self.auth_credential_id = _required_env(
             "AZ_RUNTIME_PROVIDER_AUTH_CREDENTIAL_ID"
         )
@@ -173,6 +176,14 @@ class ProviderSettings:
 
 def _settings_from_env() -> ProviderSettings:
     return ProviderSettings()
+
+
+def _runner_env_from_env() -> dict[str, str]:
+    return {
+        name: value
+        for name in RUNNER_LIMIT_ENV_NAMES
+        if (value := os.environ.get(name)) is not None
+    }
 
 
 def _control_connection_id(base_connection_id: str) -> str:

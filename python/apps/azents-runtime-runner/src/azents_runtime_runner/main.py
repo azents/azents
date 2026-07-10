@@ -2,9 +2,11 @@
 
 import asyncio
 import dataclasses
+import json
 import logging
 import os
 import uuid
+from datetime import UTC, datetime
 
 import grpc
 from azents_runtime_control.grpc_runner_client import (
@@ -46,6 +48,32 @@ _DEFAULT_MAX_PENDING_OPERATIONS_PER_OWNER = 100
 _DEFAULT_MAX_PENDING_OPERATIONS = 1_000
 _DEFAULT_MAX_CONCURRENT_CONTROL_OPERATIONS = 4
 _LOGGER = logging.getLogger(__name__)
+_STANDARD_LOG_RECORD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__) | {
+    "asctime",
+    "message",
+}
+
+
+class StructuredLogFormatter(logging.Formatter):
+    """Serialize Runner logs and structured extras as one JSON object."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        payload.update(
+            {
+                key: value
+                for key, value in record.__dict__.items()
+                if key not in _STANDARD_LOG_RECORD_FIELDS
+            }
+        )
+        if record.exc_info is not None:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, default=str, separators=(",", ":"))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -62,9 +90,11 @@ class RunnerLimitConfig:
 
 def main() -> None:
     """Start the Runtime Runner process."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(StructuredLogFormatter())
     logging.basicConfig(
         level=os.environ.get("AZ_LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=[handler],
     )
     asyncio.run(run_runtime_runner())
 
@@ -98,6 +128,20 @@ async def run_runtime_runner() -> None:
             "runner_id": runner_id,
             "workspace_path": workspace_path,
             "control_endpoint": endpoint,
+            "max_concurrent_operations_per_session": (
+                limit_config.max_concurrent_operations_per_session
+            ),
+            "max_concurrent_system_operations": (
+                limit_config.max_concurrent_system_operations
+            ),
+            "max_concurrent_operations": limit_config.max_concurrent_operations,
+            "max_pending_operations_per_owner": (
+                limit_config.max_pending_operations_per_owner
+            ),
+            "max_pending_operations": limit_config.max_pending_operations,
+            "max_concurrent_control_operations": (
+                limit_config.max_concurrent_control_operations
+            ),
         },
     )
     while True:

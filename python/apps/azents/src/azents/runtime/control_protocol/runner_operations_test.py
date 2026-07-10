@@ -68,6 +68,7 @@ async def test_run_bash_folds_stdout_stderr_and_final_exit_code() -> None:
     )
     assert request is not None
     assert request.operation_type == "bash"
+    assert request.payload["owner_session_id"] == "session-1"
     assert request.payload["payload"] == {
         "command": "echo ok",
         "timeout_seconds": 30,
@@ -986,6 +987,35 @@ async def test_list_git_refs_returns_final_refs() -> None:
     assert result.head_commit == "abc123"
     assert result.refs[0].name == "main"
     assert result.refs[0].default is True
+
+
+@pytest.mark.asyncio
+async def test_background_operation_preserves_session_ownership() -> None:
+    """Background dispatch keeps the durable parent Session owner."""
+    harness = await _make_harness()
+
+    await harness.client.start_background_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            operation_type="bash",
+            owner_session_id="session-parent",
+            payload={"command": "sleep 1"},
+            deadline_at=_now() + timedelta(seconds=30),
+            body_stream_id=None,
+            background=False,
+        )
+    )
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+
+    assert request is not None
+    assert request.payload["background"] is True
+    assert request.payload["owner_session_id"] == "session-parent"
 
 
 @pytest.mark.asyncio
