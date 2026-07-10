@@ -1316,7 +1316,9 @@
       "completion": "Completion",
       "cached": "Cache read",
       "cacheCreation": "Cache write",
-      "reasoning": "Reasoning"
+      "reasoning": "Reasoning",
+      "modelIdentity": "{model} · {provider}",
+      "unknownProvenance": "Run provenance is not available yet."
     },
     "editMessage": "Edit",
     "editingMessage": "Editing message",
@@ -1504,6 +1506,46 @@
       "phaseStopping": "Stopping",
       "retryAction": "Retry run",
       "retryUnavailable": "Retry is available only for the latest failed run while the session is idle."
+    },
+    "composerProfile": {
+      "model": "Model",
+      "effortLabel": "Reasoning effort",
+      "defaultEffort": "Default",
+      "effort": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
+      },
+      "send": "Send"
+    },
+    "inferenceProvenance": {
+      "title": "Inference profile",
+      "detailsAriaLabel": "Open inference details for {target}",
+      "requestedModel": "Requested model",
+      "requestedEffort": "Requested effort",
+      "defaultEffort": "Default",
+      "effortLow": "Low",
+      "effortMedium": "Medium",
+      "effortHigh": "High",
+      "awaitingActivation": "Waiting for run activation",
+      "run": "Run",
+      "runValue": "#{index} · {status}",
+      "effectiveEffort": "Effective effort",
+      "provider": "Provider",
+      "model": "Resolved model",
+      "modelIdentifier": "Model identifier",
+      "developer": "Developer",
+      "contextWindow": "Context window",
+      "compactionThreshold": "Auto-compaction threshold",
+      "failureCode": "Failure code",
+      "failureMessage": "Failure",
+      "statusPending": "Pending",
+      "statusRunning": "Running",
+      "statusCompleted": "Completed",
+      "statusStopped": "Stopped",
+      "statusFailed": "Failed",
+      "statusInterrupted": "Interrupted",
+      "statusCancelled": "Cancelled"
     }
   },
   "oauth": {

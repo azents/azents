@@ -142,6 +142,21 @@ class SessionLifecycleService:
         )
         return bool(active)
 
+    async def get_inference_run_summary(
+        self,
+        *,
+        run_id: str,
+    ) -> InferenceRunSummary:
+        """Load the current safe run summary for live projection."""
+        async with self.session_manager() as db_session:
+            summary = await self.agent_run_repository.get_inference_run_summary_by_id(
+                db_session,
+                run_id=run_id,
+            )
+            if summary is None:
+                raise ValueError("AgentRun not found")
+            return summary
+
     async def list_inference_run_event_projections(
         self,
         *,

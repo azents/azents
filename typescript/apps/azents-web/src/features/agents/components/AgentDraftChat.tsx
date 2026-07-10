@@ -16,6 +16,7 @@ import { AgentSettingsHeader } from "./AgentSettingsHeader";
 import { NewSessionProjectSelector } from "./NewSessionProjectSelector";
 import type { AgentDraftChatContainerOutput } from "../containers/useAgentDraftChatContainer";
 import type { UploadedFile } from "@/features/chat/hooks/useFileUpload";
+import type { RequestedInferenceProfile } from "@azents/public-client";
 
 export function AgentDraftChat(
   props: AgentDraftChatContainerOutput,
@@ -81,9 +82,21 @@ export function AgentDraftChat(
     };
   }, []);
 
+  const defaultInferenceProfile = useMemo<RequestedInferenceProfile>(
+    () => ({
+      model_target_label: agent.main_model_label,
+      reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
+    }),
+    [agent.main_model_label, agent.model_parameters?.reasoning_effort],
+  );
+
   const handleSendMessage = useCallback(
-    async (message: string, attachments?: UploadedFile[]): Promise<boolean> => {
-      return onSendMessage(message, attachments);
+    async (
+      message: string,
+      inferenceProfile: RequestedInferenceProfile,
+      attachments?: UploadedFile[],
+    ): Promise<boolean> => {
+      return onSendMessage(message, inferenceProfile, attachments);
     },
     [onSendMessage],
   );
@@ -135,10 +148,12 @@ export function AgentDraftChat(
             goal={null}
             todo={null}
             uploadAll={uploadAll}
-            onSendInput={(message, action, attachments) =>
+            selectableModelOptions={agent.selectable_model_options}
+            defaultInferenceProfile={defaultInferenceProfile}
+            onSendInput={(message, action, inferenceProfile, attachments) =>
               action
                 ? Promise.resolve(false)
-                : handleSendMessage(message, attachments)
+                : handleSendMessage(message, inferenceProfile, attachments)
             }
             clearFiles={clearFiles}
             resetDoneFiles={resetDoneFiles}

@@ -38,6 +38,7 @@ class TestChatLiveRunStateResponse(unittest.TestCase):
                 run_id = '',
                 phase = 'idle',
                 status = 'pending',
+                inference_run_summary = { },
                 retry = azentspublicclient.models.chat_live_run_retry_state_response.ChatLiveRunRetryStateResponse(
                     status = '', 
                     last_error_message = '', 
@@ -64,6 +65,7 @@ class TestChatLiveRunStateResponse(unittest.TestCase):
                 run_id = '',
                 phase = 'idle',
                 status = 'pending',
+                inference_run_summary = { },
         )
         """
 

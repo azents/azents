@@ -34,7 +34,6 @@ import { useEffect, useMemo, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
 import { SubagentTreePanel } from "@/features/agents/components/SubagentTreePanel";
 import { useSubagentTreePanelContainer } from "@/features/agents/containers/useSubagentTreePanelContainer";
-import { formatModelSelectionSummary } from "@/features/agents/model-selection";
 import { useChatSessionContainer } from "../containers/useChatSessionContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
@@ -44,6 +43,7 @@ import type { ConnectionStatus } from "../types";
 import type {
   AgentResponse,
   AgentSessionResponse,
+  InferenceRunSummary,
   SubagentTreeNodeResponse,
 } from "@azents/public-client";
 
@@ -153,9 +153,16 @@ export function ChatSessionView({
       root,
     };
   }, [subagentTreePanel.state]);
-  const effectiveContextWindowTokens =
-    agent.effective_context_window_tokens ?? null;
-  const modelName = formatModelSelectionSummary(agent.model_selection);
+  const terminalRunSummaries = useMemo<InferenceRunSummary[]>(() => {
+    const byRunId = new Map<string, InferenceRunSummary>();
+    for (const message of output.messages) {
+      const summary = message.inferenceRunSummary;
+      if (summary) {
+        byRunId.set(summary.run_id, summary);
+      }
+    }
+    return [...byRunId.values()];
+  }, [output.messages]);
 
   return (
     <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
@@ -170,11 +177,8 @@ export function ChatSessionView({
           <Group gap="xs" wrap="nowrap">
             <TokenUsageIndicator
               usage={output.tokenUsage}
-              effectiveContextWindowTokens={effectiveContextWindowTokens}
-              autoCompactionThresholdTokens={
-                agent.effective_auto_compaction_threshold_tokens
-              }
-              modelName={modelName}
+              activeRunSummary={output.liveRun?.inferenceRunSummary ?? null}
+              terminalRunSummaries={terminalRunSummaries}
             />
             <ActionIcon
               variant="subtle"
@@ -284,6 +288,7 @@ export function ChatSessionView({
           isWritePending={output.isWritePending}
           isModelResponsePending={output.isModelResponsePending}
           liveRun={output.liveRun}
+          defaultInferenceProfile={output.defaultInferenceProfile}
           handle={handle}
           onSendInput={output.onSendInput}
           onDeletePendingInputBuffer={output.onDeletePendingInputBuffer}

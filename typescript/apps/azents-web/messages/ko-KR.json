@@ -1316,7 +1316,9 @@
       "completion": "응답",
       "cached": "캐시 읽기",
       "cacheCreation": "캐시 쓰기",
-      "reasoning": "추론"
+      "reasoning": "추론",
+      "modelIdentity": "{model} · {provider}",
+      "unknownProvenance": "아직 실행 출처 정보를 확인할 수 없습니다."
     },
     "editMessage": "편집",
     "editingMessage": "메시지 편집 중",
@@ -1504,6 +1506,46 @@
       "phaseStopping": "중지 중",
       "retryAction": "실행 재시도",
       "retryUnavailable": "세션이 유휴 상태이고 최신 실패 실행일 때만 재시도할 수 있습니다."
+    },
+    "composerProfile": {
+      "model": "모델",
+      "effortLabel": "추론 수준",
+      "defaultEffort": "기본값",
+      "effort": {
+        "low": "낮음",
+        "medium": "중간",
+        "high": "높음"
+      },
+      "send": "보내기"
+    },
+    "inferenceProvenance": {
+      "title": "추론 프로필",
+      "detailsAriaLabel": "{target} 추론 상세 열기",
+      "requestedModel": "요청한 모델",
+      "requestedEffort": "요청한 추론 수준",
+      "defaultEffort": "기본값",
+      "effortLow": "낮음",
+      "effortMedium": "중간",
+      "effortHigh": "높음",
+      "awaitingActivation": "Run 활성화를 기다리는 중",
+      "run": "Run",
+      "runValue": "#{index} · {status}",
+      "effectiveEffort": "적용된 추론 수준",
+      "provider": "Provider",
+      "model": "해결된 모델",
+      "modelIdentifier": "모델 식별자",
+      "developer": "개발사",
+      "contextWindow": "Context window",
+      "compactionThreshold": "Auto-compaction 기준",
+      "failureCode": "실패 코드",
+      "failureMessage": "실패",
+      "statusPending": "대기 중",
+      "statusRunning": "실행 중",
+      "statusCompleted": "완료",
+      "statusStopped": "중지됨",
+      "statusFailed": "실패",
+      "statusInterrupted": "중단됨",
+      "statusCancelled": "취소됨"
     }
   },
   "oauth": {

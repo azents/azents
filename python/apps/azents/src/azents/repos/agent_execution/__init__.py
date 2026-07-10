@@ -827,7 +827,7 @@ class AgentRunRepository:
         run = await self.get_latest_by_input_event_id(session, event_id=event_id)
         if run is None:
             return None
-        return self._build_inference_run_summary(run)
+        return self.build_inference_run_summary(run)
 
     async def list_latest_inference_run_summaries_by_event_ids(
         self,
@@ -855,13 +855,11 @@ class AgentRunRepository:
         summaries: dict[str, InferenceRunSummary] = {}
         for event_id, rdb in result.all():
             if event_id not in summaries:
-                summaries[event_id] = self._build_inference_run_summary(
-                    self._build(rdb)
-                )
+                summaries[event_id] = self.build_inference_run_summary(self._build(rdb))
         return summaries
 
     @staticmethod
-    def _build_inference_run_summary(run: AgentRunState) -> InferenceRunSummary:
+    def build_inference_run_summary(run: AgentRunState) -> InferenceRunSummary:
         """Build the safe public summary for one run."""
         requested_profile = (
             RequestedInferenceProfile(
@@ -943,6 +941,36 @@ class AgentRunRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def get_inference_run_summary_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+    ) -> InferenceRunSummary | None:
+        """Fetch one allowlisted run summary by AgentRun ID."""
+        run = await self.get_by_id(session, run_id)
+        if run is None:
+            return None
+        return self.build_inference_run_summary(run)
+
+    async def list_inference_run_summaries_by_ids(
+        self,
+        session: AsyncSession,
+        *,
+        run_ids: Sequence[str],
+    ) -> dict[str, InferenceRunSummary]:
+        """Fetch allowlisted summaries keyed by AgentRun ID."""
+        unique_run_ids = list(dict.fromkeys(run_ids))
+        if not unique_run_ids:
+            return {}
+        result = await session.scalars(
+            sa.select(RDBAgentRun).where(RDBAgentRun.id.in_(unique_run_ids))
+        )
+        return {
+            rdb.id: self.build_inference_run_summary(self._build(rdb))
+            for rdb in result.all()
+        }
 
     async def get_failed_by_terminal_result_event_id(
         self,

@@ -68,7 +68,10 @@ import type {
   TodoStateSnapshot,
 } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
-import type { AgentResponse } from "@azents/public-client";
+import type {
+  AgentResponse,
+  RequestedInferenceProfile,
+} from "@azents/public-client";
 
 /** older messages load trigger scroll position (px) */
 const LOAD_MORE_THRESHOLD = 100;
@@ -131,6 +134,7 @@ interface BoundaryControls {
 interface EditingMessageState {
   messageId: string;
   content: string;
+  inferenceProfile: RequestedInferenceProfile | null;
 }
 
 /** message row with directly not rendered as completion markerwhether checks.. */
@@ -354,6 +358,7 @@ interface ChatViewProps {
   /** not yet model turn  to not injected pending input buffers */
   pendingInputBuffers: PendingInputBuffer[];
   activeAgent: AgentResponse | null;
+  defaultInferenceProfile: RequestedInferenceProfile;
   sessionId?: string | null;
   isResponsePending: boolean;
   isWritePending: boolean;
@@ -364,7 +369,8 @@ interface ChatViewProps {
   handle: string;
   onSendInput: (
     message: string,
-    action?: ChatAction | null,
+    action: ChatAction | null,
+    inferenceProfile: RequestedInferenceProfile,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
   /** delete pending input buffer */
@@ -393,6 +399,7 @@ interface ChatViewProps {
   onSubmitMessageEdit: (
     messageId: string,
     message: string,
+    inferenceProfile: RequestedInferenceProfile,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
   /** retry the latest terminal failed run */
@@ -435,6 +442,7 @@ export function ChatView({
   messages,
   pendingInputBuffers,
   activeAgent,
+  defaultInferenceProfile,
   sessionId = null,
   isResponsePending,
   isWritePending,
@@ -568,7 +576,11 @@ export function ChatView({
         return;
       }
       clearFiles();
-      setEditingMessage({ messageId: message.id, content: message.content });
+      setEditingMessage({
+        messageId: message.id,
+        content: message.content,
+        inferenceProfile: message.inferenceProfile ?? null,
+      });
     },
     [clearFiles],
   );
@@ -580,11 +592,12 @@ export function ChatView({
   const handleSubmitInput = useCallback(
     async (
       message: string,
-      action?: ChatAction | null,
+      action: ChatAction | null,
+      inferenceProfile: RequestedInferenceProfile,
       attachments?: UploadedFile[],
     ): Promise<boolean> => {
       if (!editingMessage) {
-        return onSendInput(message, action, attachments);
+        return onSendInput(message, action, inferenceProfile, attachments);
       }
       if (isResponsePending || action) {
         return false;
@@ -592,6 +605,7 @@ export function ChatView({
       const sent = await onSubmitMessageEdit(
         editingMessage.messageId,
         message,
+        inferenceProfile,
         attachments,
       );
       if (sent) {
@@ -1297,6 +1311,13 @@ export function ChatView({
                 agentId={activeAgent?.id ?? null}
                 sessionId={sessionId}
                 isMobile={isMobile}
+                selectableModelOptions={
+                  activeAgent?.selectable_model_options ?? []
+                }
+                defaultInferenceProfile={defaultInferenceProfile}
+                editingInferenceProfile={
+                  editingMessage?.inferenceProfile ?? null
+                }
                 isUploading={isUploading || isWritePending}
                 pendingFiles={readOnlyNotice === null ? pendingFiles : []}
                 goal={

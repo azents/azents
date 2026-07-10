@@ -1824,6 +1824,9 @@ class ChatLiveRunStateResponse(BaseModel):
     run_id: str = Field(description="AgentRun ID")
     phase: AgentRunPhase = Field(description="Current run phase")
     status: AgentRunStatus = Field(description="Current run status")
+    inference_run_summary: InferenceRunSummary = Field(
+        description="Allowlisted provenance for the active run",
+    )
     retry: ChatLiveRunRetryStateResponse | None = Field(
         default=None,
         description="Current failed-run retry state",
@@ -1837,6 +1840,7 @@ class ChatLiveRunStateResponse(BaseModel):
             run_id=run.run_id,
             phase=run.phase,
             status=run.status,
+            inference_run_summary=run.inference_run_summary,
             retry=None
             if run.retry is None
             else ChatLiveRunRetryStateResponse.from_domain(run.retry),

@@ -653,6 +653,9 @@ class RunExecutor:
             raise ValueError("Recoverable AgentRun is already terminal")
         if run_request is None:
             raise ValueError("AgentRun resolution produced no request")
+        inference_run_summary = await self.session_lifecycle.get_inference_run_summary(
+            run_id=run_id,
+        )
         now = loop.time()
         logger.info(
             "Run invoke input resolved",
@@ -933,6 +936,7 @@ class RunExecutor:
                     run_id=run_id,
                     phase=active_phase or AgentRunPhase.IDLE,
                     status=AgentRunStatus.RUNNING,
+                    inference_run_summary=inference_run_summary,
                     retry=_chat_live_retry_state(live_retry_state),
                 ),
             )

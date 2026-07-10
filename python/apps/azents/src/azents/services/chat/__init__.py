@@ -21,7 +21,7 @@ from azents.core.enums import (
     InputBufferKind,
 )
 from azents.engine.events.action_messages import CreateGitWorktreeAction
-from azents.engine.events.types import AgentRunState, Event
+from azents.engine.events.types import AgentRunState, Event, TurnMarkerPayload
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
 from azents.rdb.deps import get_session_manager
@@ -950,6 +950,22 @@ class ChatSessionService:
                     event_ids=[event.id for event in items],
                 )
             )
+            usage_run_ids_by_event_id = {
+                event.id: event.payload.run_id
+                for event in items
+                if isinstance(event.payload, TurnMarkerPayload)
+            }
+            usage_run_summaries = await run_repo.list_inference_run_summaries_by_ids(
+                session,
+                run_ids=list(usage_run_ids_by_event_id.values()),
+            )
+            inference_run_summaries.update(
+                {
+                    event_id: summary
+                    for event_id, run_id in usage_run_ids_by_event_id.items()
+                    if (summary := usage_run_summaries.get(run_id)) is not None
+                }
+            )
             return Success(
                 PaginatedEvents(
                     items=items,
@@ -1045,6 +1061,7 @@ class ChatSessionService:
                         run_id=run.id,
                         phase=run.phase,
                         status=run.status,
+                        inference_run_summary=run_repo.build_inference_run_summary(run),
                         retry=None
                         if run.retry_state is None
                         else ChatLiveRunRetryState(

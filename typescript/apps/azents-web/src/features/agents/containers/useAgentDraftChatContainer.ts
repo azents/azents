@@ -18,6 +18,7 @@ import type {
   AgentProjectPresetResponse,
   AgentResponse,
   GitRefEntryResponse,
+  RequestedInferenceProfile,
 } from "@azents/public-client";
 
 const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
@@ -80,6 +81,7 @@ export interface AgentDraftChatContainerOutput {
   onStartRuntimeForProjectPicker: () => void;
   onSendMessage: (
     message: string,
+    inferenceProfile: RequestedInferenceProfile,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
 }
@@ -473,7 +475,11 @@ export function useAgentDraftChatContainer(
   );
 
   const onSendMessage = useCallback(
-    async (message: string, attachments?: UploadedFile[]): Promise<boolean> => {
+    async (
+      message: string,
+      inferenceProfile: RequestedInferenceProfile,
+      attachments?: UploadedFile[],
+    ): Promise<boolean> => {
       if (writeInFlight || !canSendMessage) {
         return false;
       }
@@ -484,10 +490,7 @@ export function useAgentDraftChatContainer(
           agentId: agent.id,
           clientRequestId: crypto.randomUUID(),
           message,
-          inferenceProfile: {
-            model_target_label: agent.main_model_label,
-            reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
-          },
+          inferenceProfile,
           attachments: attachmentUris,
           existingProjectPaths: selectedProjectPaths,
           setupActions: setupActionsFromWorkspaceItems(workspaceItems),
@@ -508,8 +511,6 @@ export function useAgentDraftChatContainer(
     },
     [
       agent.id,
-      agent.main_model_label,
-      agent.model_parameters?.reasoning_effort,
       canSendMessage,
       createMessageMutation,
       handle,

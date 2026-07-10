@@ -14,6 +14,10 @@ const meta = {
       metadata: { source: "web" },
       createdAt: "2026-05-19T00:00:00Z",
       status: "pending",
+      requestedInferenceProfile: {
+        model_target_label: "quality",
+        reasoning_effort: "high",
+      },
     },
     onDelete: () => {},
   },
@@ -36,6 +40,10 @@ export const Optimistic: StoryObj<typeof OptimisticInputBubble> = {
       metadata: { source: "web" },
       createdAt: "2026-05-19T00:00:00Z",
       status: "sending",
+      requestedInferenceProfile: {
+        model_target_label: "fast",
+        reasoning_effort: null,
+      },
     },
   },
 };
@@ -50,6 +58,10 @@ export const WithAttachment: Story = {
       metadata: { source: "web" },
       createdAt: "2026-05-19T00:00:00Z",
       status: "pending",
+      requestedInferenceProfile: {
+        model_target_label: "quality",
+        reasoning_effort: "high",
+      },
     },
   },
 };
@@ -68,6 +80,10 @@ export const WithSkillAction: Story = {
       metadata: { source: "web" },
       createdAt: "2026-05-19T00:00:00Z",
       status: "pending",
+      requestedInferenceProfile: {
+        model_target_label: "quality",
+        reasoning_effort: "high",
+      },
     },
   },
 };
@@ -82,6 +98,10 @@ export const Deleting: Story = {
       metadata: { source: "web" },
       createdAt: "2026-05-19T00:00:00Z",
       status: "deleting",
+      requestedInferenceProfile: {
+        model_target_label: "quality",
+        reasoning_effort: null,
+      },
     },
   },
 };

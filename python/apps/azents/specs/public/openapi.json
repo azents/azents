@@ -11541,6 +11541,10 @@
             "$ref": "#/components/schemas/AgentRunStatus",
             "description": "Current run status"
           },
+          "inference_run_summary": {
+            "$ref": "#/components/schemas/InferenceRunSummary",
+            "description": "Allowlisted provenance for the active run"
+          },
           "retry": {
             "anyOf": [
               {
@@ -11557,7 +11561,8 @@
         "required": [
           "run_id",
           "phase",
-          "status"
+          "status",
+          "inference_run_summary"
         ],
         "title": "ChatLiveRunStateResponse",
         "description": "Current live run state response."

@@ -13,6 +13,7 @@ import {
   Collapse,
   Group,
   Paper,
+  Popover,
   rem,
   ScrollArea,
   Stack,
@@ -52,6 +53,12 @@ import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { RunRetryCard } from "./RunRetryCard";
 import { ToolCallCard } from "./ToolCallCard";
 import type { ChatMessage } from "../types";
+import type {
+  AgentRunStatus,
+  InferenceRunSummary,
+  ModelReasoningEffort,
+  RequestedInferenceProfile,
+} from "@azents/public-client";
 
 interface FailedRunRetryAction {
   canRetry: boolean;
@@ -588,16 +595,204 @@ function TextMessageContent({
   );
 }
 
+function formatRunStatus(status: AgentRunStatus, t: ChatTranslator): string {
+  switch (status) {
+    case "pending":
+      return t("inferenceProvenance.statusPending");
+    case "running":
+      return t("inferenceProvenance.statusRunning");
+    case "completed":
+      return t("inferenceProvenance.statusCompleted");
+    case "stopped":
+      return t("inferenceProvenance.statusStopped");
+    case "failed":
+      return t("inferenceProvenance.statusFailed");
+    case "interrupted":
+      return t("inferenceProvenance.statusInterrupted");
+    case "cancelled":
+      return t("inferenceProvenance.statusCancelled");
+  }
+}
+
+function formatReasoningEffort(
+  effort: ModelReasoningEffort | null,
+  t: ChatTranslator,
+): string {
+  switch (effort) {
+    case null:
+      return t("inferenceProvenance.defaultEffort");
+    case "low":
+      return t("inferenceProvenance.effortLow");
+    case "medium":
+      return t("inferenceProvenance.effortMedium");
+    case "high":
+      return t("inferenceProvenance.effortHigh");
+  }
+}
+
+function ProvenanceRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}): React.ReactElement {
+  return (
+    <Group justify="space-between" gap="lg" wrap="nowrap" align="flex-start">
+      <Text size="xs" c="dimmed">
+        {label}
+      </Text>
+      <Text size="xs" fw={500} ta="right" style={{ overflowWrap: "anywhere" }}>
+        {value}
+      </Text>
+    </Group>
+  );
+}
+
+function MessageInferenceProvenance({
+  profile,
+  summary,
+}: {
+  profile: RequestedInferenceProfile;
+  summary: InferenceRunSummary | null;
+}): React.ReactElement {
+  const t = useTranslations("chat");
+  const [opened, setOpened] = useState(false);
+  const requestedProfile = summary?.requested_profile ?? profile;
+  const resolved = summary?.resolved_profile ?? null;
+
+  return (
+    <Popover
+      opened={opened}
+      onChange={setOpened}
+      position="bottom-end"
+      withArrow
+      shadow="md"
+      width={rem(340)}
+    >
+      <Popover.Target>
+        <UnstyledButton
+          c="dimmed"
+          aria-label={t("inferenceProvenance.detailsAriaLabel", {
+            target: requestedProfile.model_target_label,
+          })}
+          aria-expanded={opened}
+          aria-haspopup="dialog"
+          onClick={() => setOpened(true)}
+          onFocus={() => setOpened(true)}
+          onBlur={() => setOpened(false)}
+          onMouseEnter={() => setOpened(true)}
+          onMouseLeave={() => setOpened(false)}
+        >
+          <Text component="span" size="xs" inherit>
+            {requestedProfile.model_target_label}
+          </Text>
+        </UnstyledButton>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <Stack gap="xs">
+          <Text size="sm" fw={600}>
+            {t("inferenceProvenance.title")}
+          </Text>
+          <ProvenanceRow
+            label={t("inferenceProvenance.requestedModel")}
+            value={requestedProfile.model_target_label}
+          />
+          <ProvenanceRow
+            label={t("inferenceProvenance.requestedEffort")}
+            value={formatReasoningEffort(requestedProfile.reasoning_effort, t)}
+          />
+          {summary === null ? (
+            <Text size="xs" c="dimmed">
+              {t("inferenceProvenance.awaitingActivation")}
+            </Text>
+          ) : (
+            <>
+              <ProvenanceRow
+                label={t("inferenceProvenance.run")}
+                value={t("inferenceProvenance.runValue", {
+                  index: summary.run_index,
+                  status: formatRunStatus(summary.status, t),
+                })}
+              />
+              {resolved !== null && (
+                <>
+                  <ProvenanceRow
+                    label={t("inferenceProvenance.effectiveEffort")}
+                    value={formatReasoningEffort(
+                      summary.resolved_reasoning_effort,
+                      t,
+                    )}
+                  />
+                  <ProvenanceRow
+                    label={t("inferenceProvenance.provider")}
+                    value={resolved.provider}
+                  />
+                  <ProvenanceRow
+                    label={t("inferenceProvenance.model")}
+                    value={resolved.model_display_name}
+                  />
+                  <ProvenanceRow
+                    label={t("inferenceProvenance.modelIdentifier")}
+                    value={resolved.model_identifier}
+                  />
+                  <ProvenanceRow
+                    label={t("inferenceProvenance.developer")}
+                    value={resolved.model_developer}
+                  />
+                  <ProvenanceRow
+                    label={t("inferenceProvenance.contextWindow")}
+                    value={
+                      summary.effective_context_window_tokens === null
+                        ? "—"
+                        : summary.effective_context_window_tokens.toLocaleString()
+                    }
+                  />
+                  <ProvenanceRow
+                    label={t("inferenceProvenance.compactionThreshold")}
+                    value={
+                      summary.effective_auto_compaction_threshold_tokens ===
+                      null
+                        ? "—"
+                        : summary.effective_auto_compaction_threshold_tokens.toLocaleString()
+                    }
+                  />
+                </>
+              )}
+              {summary.failure_code !== null && (
+                <ProvenanceRow
+                  label={t("inferenceProvenance.failureCode")}
+                  value={summary.failure_code}
+                />
+              )}
+              {summary.failure_message !== null && (
+                <ProvenanceRow
+                  label={t("inferenceProvenance.failureMessage")}
+                  value={summary.failure_message}
+                />
+              )}
+            </>
+          )}
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
 function MessageActionRow({
   content,
   createdAt,
   align,
+  inferenceProfile = null,
+  inferenceRunSummary = null,
   editable = false,
   onEdit,
 }: {
-  content: string;
+  content: string | null;
   createdAt: string;
   align: MessageActionAlign;
+  inferenceProfile?: RequestedInferenceProfile | null;
+  inferenceRunSummary?: InferenceRunSummary | null;
   editable?: boolean;
   onEdit?: () => void;
 }): React.ReactElement {
@@ -606,14 +801,15 @@ function MessageActionRow({
     align === "assistant"
       ? `${classes.actionRow} ${classes.actionRowAssistant}`
       : `${classes.actionRow} ${classes.actionRowUser}`;
-  const copyButton = (
-    <ChatCopyButton
-      value={content}
-      copyLabel={t("copy")}
-      copiedLabel={t("copied")}
-      position={align === "user" ? "left" : "right"}
-    />
-  );
+  const copyButton =
+    content === null ? null : (
+      <ChatCopyButton
+        value={content}
+        copyLabel={t("copy")}
+        copiedLabel={t("copied")}
+        position={align === "user" ? "left" : "right"}
+      />
+    );
 
   return (
     <Group
@@ -623,6 +819,17 @@ function MessageActionRow({
       className={actionRowClassName}
     >
       {align === "user" && <MessageTimestamp createdAt={createdAt} />}
+      {align === "user" && inferenceProfile !== null && (
+        <>
+          <Text component="span" size="xs" c="dimmed" aria-hidden="true">
+            ·
+          </Text>
+          <MessageInferenceProvenance
+            profile={inferenceProfile}
+            summary={inferenceRunSummary}
+          />
+        </>
+      )}
       {copyButton}
       {editable && onEdit && (
         <Tooltip label={t("editMessage")} withArrow position="left">
@@ -662,11 +869,14 @@ function UserTextMessage({
           attachmentFiles={message.attachments}
           opacity={1}
           actions={
-            message.content && message.status !== "partial" ? (
+            message.status !== "partial" &&
+            (message.content !== null || message.inferenceProfile) ? (
               <MessageActionRow
                 content={message.content}
                 createdAt={message.createdAt}
                 align="user"
+                inferenceProfile={message.inferenceProfile}
+                inferenceRunSummary={message.inferenceRunSummary}
                 editable={editable}
                 onEdit={onEdit}
               />
@@ -717,15 +927,18 @@ function UserTextMessage({
             </Paper>
           )}
 
-          {message.content && message.status !== "partial" && (
-            <MessageActionRow
-              content={message.content}
-              createdAt={message.createdAt}
-              align="user"
-              editable={editable}
-              onEdit={onEdit}
-            />
-          )}
+          {message.status !== "partial" &&
+            (message.content !== null || message.inferenceProfile) && (
+              <MessageActionRow
+                content={message.content}
+                createdAt={message.createdAt}
+                align="user"
+                inferenceProfile={message.inferenceProfile}
+                inferenceRunSummary={message.inferenceRunSummary}
+                editable={editable}
+                onEdit={onEdit}
+              />
+            )}
         </MessageSurface>
       </Box>
     </Group>

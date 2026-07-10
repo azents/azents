@@ -799,6 +799,7 @@ class _EventService:
                     run_id="2123456789abcdef0123456789abcdef",
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                     status=AgentRunStatus.RUNNING,
+                    inference_run_summary=self.inference_run_summary,
                 ),
                 session_run_state=AgentSessionRunState.RUNNING,
             )
@@ -1472,6 +1473,22 @@ class TestEventRoutes:
             "run_id": "2123456789abcdef0123456789abcdef",
             "phase": "waiting_for_model",
             "status": "running",
+            "inference_run_summary": {
+                "run_id": "2123456789abcdef0123456789abcdef",
+                "run_index": 2,
+                "status": "running",
+                "requested_profile": {
+                    "model_target_label": "reasoning",
+                    "reasoning_effort": "high",
+                },
+                "source": "explicit_input",
+                "resolved_profile": None,
+                "resolved_reasoning_effort": "high",
+                "effective_context_window_tokens": 128000,
+                "effective_auto_compaction_threshold_tokens": 115200,
+                "failure_code": None,
+                "failure_message": None,
+            },
         }
         assert dump["session_run_state"] == "running"
 

@@ -63,6 +63,7 @@ class ChatLiveRunState:
     run_id: str
     phase: AgentRunPhase
     status: AgentRunStatus
+    inference_run_summary: InferenceRunSummary
     retry: ChatLiveRunRetryState | None = None
 
 
