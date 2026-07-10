@@ -1460,6 +1460,9 @@
       "title": "Skill loaded: {name}",
       "unknownSkill": "Skill"
     },
+    "agentMessage": {
+      "title": "Message from agent {name}"
+    },
     "addWorkspace": "Add workspace",
     "addExistingProject": "Add existing Project",
     "addRepositoryWorkspace": "Add repository",

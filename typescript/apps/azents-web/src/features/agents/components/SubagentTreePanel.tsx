@@ -20,7 +20,6 @@ import {
   IconAlertCircle,
   IconCircleCheck,
   IconClock,
-  IconGitBranch,
   IconMessageCircle,
   IconPlayerPause,
   IconRobot,
@@ -331,7 +330,7 @@ export function SubagentTreePanel({
         <Group gap="xs" justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             <ThemeIcon variant="light" radius="xl">
-              <IconGitBranch size={rem(16)} />
+              <IconRobot size={rem(16)} />
             </ThemeIcon>
             <Box style={{ minWidth: 0 }}>
               <Text fw={700} size="sm">

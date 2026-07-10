@@ -16,7 +16,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-09
-spec_version: 19
+spec_version: 20
 ---
 
 # Chat Session Resync
@@ -143,13 +143,13 @@ durable projection after refetch. Child detail views also use the tree projectio
 back button to the parent SessionAgent and an overflow menu with parent/root navigation options, so
 users can move back up the session-agent tree without relying on the drawer. Child detail composers are
 read-only for humans and render a disabled direct-input placeholder while preserving the stop control
-for running child sessions; new instructions to a subagent must be sent by its parent agent through
+for running child sessions; new instructions to a subagent must be sent by another agent through
 the collaboration tools.
 
-Durable and live `agent_message` events render in the child chat timeline as parent-agent task bubbles.
-The bubble content is the delivered task/message and its metadata identifies the source SessionAgent
-path, preserving the parent command that caused the child run while visually separating it from direct
-human user messages.
+Durable and live `agent_message` events render in the chat timeline as collapsed, left-aligned
+internal-agent rows labeled with the source SessionAgent name. Expanding a row reveals the delivered
+message body; it does not use the direct human user-message bubble treatment. Subagent navigation,
+tree, tab, and internal-message surfaces use a robot icon as their representative symbol.
 
 ## 6. Timeline State Rules
 
@@ -313,6 +313,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-09** — v20. Rendered internal agent messages as collapsed source-labeled rows and standardized subagent surfaces on the robot icon.
 - **2026-07-09** — v19. Documented Subagent Tree status propagation/sorting and disabled child detail input with retained stop control.
 - **2026-07-09** — v18. Clarified child detail read-only behavior, compact back/menu navigation, and parent-agent task bubble rendering.
 - **2026-07-09** — v17. Clarified non-root unread result semantics, child parent/root navigation, and `agent_message` timeline rendering.
