@@ -26,6 +26,8 @@ from azents.core.enums import (
     InputBufferKind,
     SessionAgentKind,
 )
+from azents.core.inference_profile import InferenceProfileSource
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
@@ -35,10 +37,12 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.testing.model_selection import make_test_model_selection
 
 from .subagent import SpawnAgentInput, SubagentToolkit
 
 _NOW = datetime.datetime.now(datetime.UTC)
+_PARENT_RUN_ID = "parent-run".rjust(32, "0")
 
 
 async def _noop_publish(event: object) -> None:
@@ -176,6 +180,7 @@ class _AgentSessionRepository:
         self.created_children: list[SessionAgent] = []
         self.locked_session_agents: list[str] = []
         self.marked_running: list[str] = []
+        self.last_profiles: list[tuple[str, str, ModelReasoningEffort | None]] = []
         self.last_task_updates: list[tuple[str, str | None]] = []
         self.message_sent_updates: list[str] = []
         self.observation_updates: list[tuple[str, int | None, str | None]] = []
@@ -349,6 +354,19 @@ class _AgentSessionRepository:
         self.target.parent_observed_event_id = parent_observed_event_id
         return self.target
 
+    async def set_last_inference_profile(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        model_target_label: str,
+        reasoning_effort: ModelReasoningEffort | None,
+    ) -> AgentSession:
+        """Record the inherited child session profile."""
+        del session
+        self.last_profiles.append((session_id, model_target_label, reasoning_effort))
+        return self.sessions[session_id]
+
     async def mark_running_for_input_wakeup(
         self,
         session: AsyncSession,
@@ -372,7 +390,33 @@ class _AgentRunRepository:
     """AgentRunRepository fake for subagent tool tests."""
 
     def __init__(self) -> None:
-        """Initialize latest child run fixture."""
+        """Initialize parent and latest child run fixtures."""
+        self.parent_run = AgentRunState(
+            id=_PARENT_RUN_ID,
+            session_id="root-session",
+            run_index=1,
+            phase=AgentRunPhase.EXECUTING_TOOLS,
+            status=AgentRunStatus.RUNNING,
+            requested_model_target_label="Quality",
+            requested_reasoning_effort=ModelReasoningEffort.HIGH,
+            inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+            resolved_model_selection=make_test_model_selection(),
+            resolved_reasoning_effort=ModelReasoningEffort.HIGH,
+            resolved_at=_NOW,
+            effective_context_window_tokens=64_000,
+            effective_auto_compaction_threshold_tokens=51_200,
+            inference_profile_failure_code=None,
+            inference_profile_failure_message=None,
+            parent_agent_run_id=None,
+            terminal_result_event_id=None,
+            terminal_result_message=None,
+            created_at=_NOW,
+            started_at=_NOW,
+            ended_at=None,
+            updated_at=_NOW,
+        )
+        self.get_by_id_calls: list[str] = []
+        self.pending_creates: list[dict[str, object]] = []
         self.latest_by_session_id = {
             "child-session": AgentRunState(
                 id="run".rjust(32, "0"),
@@ -399,6 +443,28 @@ class _AgentRunRepository:
                 updated_at=_NOW,
             )
         }
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Return the exact spawning parent run fixture."""
+        del session
+        self.get_by_id_calls.append(run_id)
+        if run_id != self.parent_run.id:
+            return None
+        return self.parent_run
+
+    async def create_pending(
+        self,
+        session: AsyncSession,
+        **kwargs: object,
+    ) -> AgentRunState:
+        """Record inherited pending child run creation."""
+        del session
+        self.pending_creates.append(kwargs)
+        return self.parent_run
 
     async def list_latest_by_session_ids(
         self,
@@ -509,7 +575,7 @@ async def _make_toolkit() -> tuple[
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -597,7 +663,7 @@ async def test_subagent_static_prompt_matches_codex_root_prompt() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -652,7 +718,7 @@ async def test_send_message_is_queue_only() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -684,7 +750,7 @@ async def test_send_message_from_child_can_target_root() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )
@@ -724,7 +790,7 @@ async def test_followup_task_wakes_target_child() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -758,7 +824,7 @@ async def test_followup_task_from_child_rejects_root() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )
@@ -783,7 +849,7 @@ async def test_interrupt_agent_rejects_root_and_self() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )
@@ -804,7 +870,7 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )
@@ -836,7 +902,7 @@ async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -889,7 +955,7 @@ async def test_wait_agent_waits_for_running_child_result() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -947,7 +1013,7 @@ async def test_wait_agent_timeout_waits_until_deadline() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1040,7 +1106,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         repo,
         input_service,
         broker,
-        _run_repo,
+        run_repo,
         published_events,
     ) = await _make_toolkit()
     state = await toolkit.update_context(
@@ -1048,7 +1114,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _publish_to(published_events)),
             session_id="root-session",
         )
@@ -1064,6 +1130,24 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         "status": "spawned",
     }
     assert repo.locked_session_agents == ["root-agent"]
+    assert run_repo.get_by_id_calls == [_PARENT_RUN_ID]
+    assert run_repo.pending_creates == [
+        {
+            "session_id": child.agent_session_id,
+            "requested_model_target_label": "Quality",
+            "requested_reasoning_effort": ModelReasoningEffort.HIGH,
+            "inference_profile_source": InferenceProfileSource.PARENT_RUN,
+            "parent_agent_run_id": _PARENT_RUN_ID,
+            "resolved_model_selection": run_repo.parent_run.resolved_model_selection,
+            "resolved_reasoning_effort": ModelReasoningEffort.HIGH,
+            "resolved_at": _NOW,
+            "effective_context_window_tokens": 64_000,
+            "effective_auto_compaction_threshold_tokens": 51_200,
+        }
+    ]
+    assert repo.last_profiles == [
+        (child.agent_session_id, "Quality", ModelReasoningEffort.HIGH)
+    ]
     assert input_service.enqueued[0].metadata["message_kind"] == "spawn_agent"
     assert input_service.enqueued[0].content == "Review it"
     assert repo.locked_session_agents == ["root-agent"]
@@ -1071,6 +1155,64 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionWakeUp)
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
+
+
+@pytest.mark.parametrize(
+    ("parent_run_id", "parent_updates", "expected_error"),
+    [
+        ("arbitrary-run", {}, "Current AgentRun was not found"),
+        (
+            _PARENT_RUN_ID,
+            {"session_id": "other-session"},
+            "Current AgentRun was not found",
+        ),
+        (
+            _PARENT_RUN_ID,
+            {"status": AgentRunStatus.COMPLETED},
+            "Current AgentRun is not running",
+        ),
+        (
+            _PARENT_RUN_ID,
+            {"resolved_model_selection": None},
+            "Current AgentRun has incomplete inference profile provenance",
+        ),
+    ],
+)
+async def test_spawn_agent_rejects_invalid_parent_run(
+    parent_run_id: str,
+    parent_updates: dict[str, object],
+    expected_error: str,
+) -> None:
+    """spawn_agent accepts only the complete run executing the parent turn."""
+    (
+        toolkit,
+        repo,
+        input_service,
+        broker,
+        run_repo,
+        _published_events,
+    ) = await _make_toolkit()
+    run_repo.parent_run = run_repo.parent_run.model_copy(update=parent_updates)
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=parent_run_id,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+
+    with pytest.raises(FunctionToolError, match=expected_error):
+        await tool.handler(json.dumps({"name": "reviewer", "task": "Review it"}))
+
+    assert repo.created_children == []
+    assert run_repo.pending_creates == []
+    assert repo.last_profiles == []
+    assert input_service.enqueued == []
+    assert broker.messages == []
 
 
 async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
@@ -1092,7 +1234,7 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1134,7 +1276,7 @@ async def test_spawn_agent_does_not_insert_boundary_without_forked_history() -> 
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1166,7 +1308,7 @@ async def test_spawn_agent_rejects_when_active_subagent_limit_is_reached() -> No
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1225,7 +1367,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1257,7 +1399,7 @@ async def test_spawn_agent_rejects_when_depth_limit_is_reached() -> None:
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
-            run_id="run-1",
+            run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )

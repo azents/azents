@@ -21,6 +21,7 @@ from azents.core.enums import (
     InputBufferKind,
     SessionAgentKind,
 )
+from azents.core.inference_profile import InferenceProfileSource
 from azents.core.tools import (
     PublishEventFn,
     ResolveContext,
@@ -217,7 +218,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
-                self._spawn_agent_tool(),
+                self._spawn_agent_tool(parent_run_id=context.run_id),
                 self._send_message_tool(),
                 self._followup_task_tool(),
                 self._wait_agent_tool(),
@@ -250,7 +251,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             ]
         )
 
-    def _spawn_agent_tool(self) -> FunctionTool:
+    def _spawn_agent_tool(self, *, parent_run_id: str) -> FunctionTool:
         async def spawn_agent(input: SpawnAgentInput) -> str:
             """Create a child subagent and return its identity."""
             if input.agent_type != "default":
@@ -265,6 +266,16 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             async with self.session_manager() as session:
                 current = await self._current_session_agent(session)
                 await self._enforce_spawn_limits(session, current)
+                parent_run = await self._validated_spawn_parent_run(
+                    session,
+                    current=current,
+                    parent_run_id=parent_run_id,
+                )
+                requested_model_target_label = parent_run.requested_model_target_label
+                if requested_model_target_label is None:
+                    raise FunctionToolError(
+                        "Current AgentRun has incomplete inference profile provenance"
+                    )
                 try:
                     child = (
                         await self.agent_session_repository.create_child_session_agent(
@@ -280,6 +291,29 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     raise FunctionToolError(str(exc)) from None
                 child_session = await self._session_or_error(
                     session, child.agent_session_id
+                )
+                await self.agent_run_repository.create_pending(
+                    session,
+                    session_id=child.agent_session_id,
+                    requested_model_target_label=requested_model_target_label,
+                    requested_reasoning_effort=parent_run.requested_reasoning_effort,
+                    inference_profile_source=InferenceProfileSource.PARENT_RUN,
+                    parent_agent_run_id=parent_run.id,
+                    resolved_model_selection=parent_run.resolved_model_selection,
+                    resolved_reasoning_effort=parent_run.resolved_reasoning_effort,
+                    resolved_at=parent_run.resolved_at,
+                    effective_context_window_tokens=(
+                        parent_run.effective_context_window_tokens
+                    ),
+                    effective_auto_compaction_threshold_tokens=(
+                        parent_run.effective_auto_compaction_threshold_tokens
+                    ),
+                )
+                await self.agent_session_repository.set_last_inference_profile(
+                    session,
+                    session_id=child.agent_session_id,
+                    model_target_label=requested_model_target_label,
+                    reasoning_effort=parent_run.requested_reasoning_effort,
                 )
                 forked = await self._fork_events(
                     session,
@@ -574,6 +608,34 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         if current is None:
             raise FunctionToolError("Current SessionAgent was not found")
         return current
+
+    async def _validated_spawn_parent_run(
+        self,
+        session: AsyncSession,
+        *,
+        current: SessionAgent,
+        parent_run_id: str,
+    ) -> AgentRunState:
+        """Load and validate the exact run invoking ``spawn_agent``."""
+        parent_run = await self.agent_run_repository.get_by_id(
+            session,
+            parent_run_id,
+        )
+        if parent_run is None or parent_run.session_id != current.agent_session_id:
+            raise FunctionToolError("Current AgentRun was not found")
+        if parent_run.status != AgentRunStatus.RUNNING:
+            raise FunctionToolError("Current AgentRun is not running")
+        if (
+            parent_run.requested_model_target_label is None
+            or parent_run.resolved_model_selection is None
+            or parent_run.resolved_at is None
+            or parent_run.effective_context_window_tokens is None
+            or parent_run.effective_auto_compaction_threshold_tokens is None
+        ):
+            raise FunctionToolError(
+                "Current AgentRun has incomplete inference profile provenance"
+            )
+        return parent_run
 
     async def _resolve_target(
         self,

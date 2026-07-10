@@ -438,7 +438,7 @@ class TestChatWriteService:
             text="edited",
             inference_profile=RequestedInferenceProfile(
                 model_target_label="Primary",
-                reasoning_effort=None,
+                reasoning_effort=ModelReasoningEffort.HIGH,
             ),
             metadata={"source": "chat"},
             attachments=[],
@@ -449,6 +449,10 @@ class TestChatWriteService:
         assert result.input_buffer is not None
         assert result.input_buffer.kind == InputBufferKind.EDITED_USER_MESSAGE
         assert result.input_buffer.content == "edited"
+        assert result.input_buffer.requested_model_target_label == "Primary"
+        assert (
+            result.input_buffer.requested_reasoning_effort == ModelReasoningEffort.HIGH
+        )
         async with rdb_session_manager() as session:
             rows = (
                 await session.execute(

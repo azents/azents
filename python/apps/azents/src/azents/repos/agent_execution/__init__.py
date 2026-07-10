@@ -598,6 +598,52 @@ class AgentRunRepository:
         await session.refresh(rdb)
         return self._build(rdb)
 
+    async def activate_inherited_pending(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        activated_at: datetime.datetime,
+    ) -> AgentRunState:
+        """Activate a pre-resolved child run without replacing its provenance."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(
+                RDBAgentRun.id == run_id,
+                RDBAgentRun.status == AgentRunStatus.PENDING,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            raise ValueError("Pending AgentRun not found")
+        if rdb.inference_profile_source != InferenceProfileSource.PARENT_RUN:
+            raise ValueError("Pending AgentRun is not inherited from a parent run")
+        if rdb.parent_agent_run_id is None:
+            raise ValueError("Inherited AgentRun has no parent run")
+        if rdb.requested_model_target_label is None:
+            raise ValueError("Inherited AgentRun has no requested model target")
+        if rdb.resolved_model_selection is None or rdb.resolved_at is None:
+            raise ValueError("Inherited AgentRun has incomplete resolved provenance")
+        if (
+            rdb.effective_context_window_tokens is None
+            or rdb.effective_auto_compaction_threshold_tokens is None
+        ):
+            raise ValueError("Inherited AgentRun has incomplete effective limits")
+
+        rdb.status = AgentRunStatus.RUNNING
+        rdb.started_at = activated_at
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == rdb.session_id)
+            .values(
+                last_model_target_label=rdb.requested_model_target_label,
+                last_reasoning_effort=rdb.requested_reasoning_effort,
+            )
+        )
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
     async def fail_pending_profile_resolution(
         self,
         session: AsyncSession,
