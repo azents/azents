@@ -1412,6 +1412,10 @@
         "toolkitPrompts": "Toolkit Prompts",
         "toolkitPromptsDescription": "{count} prompts de toolkit",
         "toolkitListDescription": "Fragments de prompt de toolkit non vides capturés avant composition.",
+        "developerPrompts": "Prompts développeur",
+        "developerPromptsDescription": "{count} prompts développeur autonomes",
+        "developerListDescription": "Instructions développeur autonomes envoyées avant la conversation.",
+        "noDeveloperPrompts": "Aucun prompt développeur autonome n’a été capturé.",
         "finalPrompt": "Final Prompt",
         "finalPromptDescription": "Instructions composées envoyées à l’adaptateur de modèle.",
         "noToolkitPrompts": "Aucun fragment de prompt de toolkit capturé.",
@@ -1426,6 +1430,7 @@
         "source": {
           "agent": "Agent",
           "toolkit": "Toolkit",
+          "developer_prompt": "Développeur",
           "turn_injected": "Injected",
           "final": "Final"
         },

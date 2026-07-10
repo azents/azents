@@ -355,6 +355,7 @@ class AgentEngineAdapter:
                 agent_prompt=request.agent_prompt,
                 static_toolkit_prompts=catalog.static_prompt_fragment_inputs,
                 dynamic_toolkit_prompts=catalog.dynamic_prompt_fragment_inputs,
+                developer_prompts=catalog.developer_prompt_inputs,
                 injected_prompts=injected_prompts,
             )
             lowerer = LiteLLMResponsesLowerer(
@@ -404,6 +405,7 @@ class AgentEngineAdapter:
                     transcript,
                     model=model,
                     system_prompt=system_prompt_result.prompt,
+                    developer_prompts=system_prompt_result.developer_prompts,
                 )
             except asyncio.CancelledError:
                 await on_turn_end("cancelled")

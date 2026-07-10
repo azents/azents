@@ -71,7 +71,7 @@ class SessionContextSystemPromptFragment(BaseModel):
     """Context inspector system prompt fragment."""
 
     id: str
-    source: Literal["agent", "toolkit", "turn_injected", "final"]
+    source: Literal["agent", "toolkit", "developer_prompt", "turn_injected", "final"]
     label: str
     content: str
     preview: str
@@ -102,6 +102,9 @@ class SessionContextSystemPrompt(BaseModel):
     toolkit_prompts: list[SessionContextSystemPromptFragment] = Field(
         default_factory=list
     )
+    developer_prompts: list[SessionContextSystemPromptFragment] = Field(
+        default_factory=list
+    )
     injected_prompts: list[SessionContextSystemPromptFragment] = Field(
         default_factory=list
     )
@@ -122,6 +125,10 @@ class SessionContextSystemPrompt(BaseModel):
             toolkit_prompts=[
                 SessionContextSystemPromptFragment.from_payload(fragment)
                 for fragment in payload.toolkit_prompts
+            ],
+            developer_prompts=[
+                SessionContextSystemPromptFragment.from_payload(fragment)
+                for fragment in payload.developer_prompts
             ],
             injected_prompts=[
                 SessionContextSystemPromptFragment.from_payload(fragment)
@@ -351,15 +358,20 @@ def _build_breakdown(
 
 
 def _system_prompt_chars(system_prompt: SessionContextSystemPrompt) -> int:
-    """Calculate character count of system prompt fragment."""
+    """Calculate character count of system and standalone developer inputs."""
+    developer_chars = sum(
+        fragment.length for fragment in system_prompt.developer_prompts
+    )
     if system_prompt.final_prompt is not None:
-        return system_prompt.final_prompt.length
+        return system_prompt.final_prompt.length + developer_chars
     fragments = [
         system_prompt.agent_prompt,
         *system_prompt.toolkit_prompts,
         *system_prompt.injected_prompts,
     ]
-    return sum(fragment.length for fragment in fragments if fragment is not None)
+    return developer_chars + sum(
+        fragment.length for fragment in fragments if fragment is not None
+    )
 
 
 def _content_chars(content: object) -> int:

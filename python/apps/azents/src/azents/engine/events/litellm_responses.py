@@ -253,6 +253,7 @@ class LiteLLMResponsesLowerer:
         *,
         model: str,
         system_prompt: str | None = None,
+        developer_prompts: Sequence[str] | None = None,
     ) -> NativeModelRequest:
         """Convert Event transcript to LiteLLM Responses request."""
         input_items: list[dict[str, object]] = []
@@ -267,6 +268,11 @@ class LiteLLMResponsesLowerer:
             input_items.append({"role": "system", "content": instructions})
         else:
             kwargs["instructions"] = instructions
+
+        input_items.extend(
+            {"role": "developer", "content": prompt}
+            for prompt in developer_prompts or ()
+        )
 
         for event in transcript:
             native_item = self._compatible_native_item(event)

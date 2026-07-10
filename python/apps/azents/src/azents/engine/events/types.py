@@ -322,7 +322,13 @@ class SystemPromptFragmentPayload(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: str = Field(min_length=1)
-    source: Literal["agent", "toolkit", "turn_injected", "final"]
+    source: Literal[
+        "agent",
+        "toolkit",
+        "developer_prompt",
+        "turn_injected",
+        "final",
+    ]
     label: str = Field(min_length=1)
     content: str
     preview: str
@@ -337,6 +343,7 @@ class SystemPromptAnalysisPayload(BaseModel):
 
     agent_prompt: SystemPromptFragmentPayload | None = None
     toolkit_prompts: list[SystemPromptFragmentPayload] = Field(default_factory=list)
+    developer_prompts: list[SystemPromptFragmentPayload] = Field(default_factory=list)
     injected_prompts: list[SystemPromptFragmentPayload] = Field(default_factory=list)
     final_prompt: SystemPromptFragmentPayload | None = None
 

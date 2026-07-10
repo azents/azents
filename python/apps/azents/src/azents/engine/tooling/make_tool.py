@@ -108,6 +108,7 @@ def make_tool(
     name: str | None = None,
     description: str | None = None,
     input_model: type[BaseModel] | None = None,
+    input_schema: dict[str, object] | None = None,
     supports_background: bool = False,
 ) -> FunctionTool:
     """Create Tool from Python function.
@@ -140,6 +141,8 @@ def make_tool(
     :param description: Tool description; uses ``fn.__doc__`` when unspecified
     :param input_model: Explicit input model; extracted from function annotation
         when unspecified
+    :param input_schema: Explicit model-facing JSON schema; validation still uses
+        the Pydantic input model
     :param supports_background: When True, enable schema injection plus
         BackgroundHandle wrapping
     :return: FunctionTool instance
@@ -156,11 +159,15 @@ def make_tool(
         raise ValueError(msg)
 
     model = input_model or _extract_input_model(fn)
-    input_schema: dict[str, object] = (
-        model.model_json_schema() if model is not None else dict(_EMPTY_SCHEMA)
+    resolved_input_schema = (
+        input_schema
+        if input_schema is not None
+        else model.model_json_schema()
+        if model is not None
+        else dict(_EMPTY_SCHEMA)
     )
     if supports_background:
-        input_schema = _inject_background_property(input_schema)
+        resolved_input_schema = _inject_background_property(resolved_input_schema)
 
     inner_handler = _build_handler(fn, model)
     handler: FunctionToolHandler
@@ -173,7 +180,7 @@ def make_tool(
         spec=FunctionToolSpec(
             name=tool_name,
             description=tool_description,
-            input_schema=input_schema,
+            input_schema=resolved_input_schema,
         ),
         handler=handler,
     )

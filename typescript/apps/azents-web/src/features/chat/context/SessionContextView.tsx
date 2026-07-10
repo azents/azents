@@ -69,6 +69,7 @@ const DEFAULT_BREAKDOWN_COLOR: BreakdownColor = {
 const PROMPT_SOURCE_COLORS: Record<string, string> = {
   agent: "violet",
   toolkit: "blue",
+  developer_prompt: "cyan",
   turn_injected: "orange",
   final: "teal",
 };
@@ -100,7 +101,7 @@ function stringifyJson(value: unknown): string {
 }
 
 function promptDetailId(
-  group: "agent" | "toolkit" | "injected" | "final",
+  group: "agent" | "toolkit" | "developer" | "injected" | "final",
   id: string,
 ): string {
   return `${group}:${id}`;
@@ -314,6 +315,10 @@ export function SessionSystemPromptView({
       id: promptDetailId("toolkit", prompt.id),
       prompt,
     })) ?? []),
+    ...(systemPrompt?.developer_prompts.map((prompt) => ({
+      id: promptDetailId("developer", prompt.id),
+      prompt,
+    })) ?? []),
     ...(systemPrompt?.injected_prompts.map((prompt) => ({
       id: promptDetailId("injected", prompt.id),
       prompt,
@@ -361,7 +366,7 @@ export function SessionSystemPromptView({
           />
         ) : (
           <Stack gap="md">
-            <SimpleGrid cols={{ base: 1, md: 3 }} spacing="sm">
+            <SimpleGrid cols={{ base: 1, md: 4 }} spacing="sm">
               <PromptSummaryCard
                 label={t("systemPrompt.agentPrompt")}
                 description={t("systemPrompt.agentPromptDescription")}
@@ -385,6 +390,16 @@ export function SessionSystemPromptView({
                 count={totalPromptLength(systemPrompt.toolkit_prompts)}
                 preview={systemPrompt.toolkit_prompts[0]?.preview ?? null}
                 disabled={systemPrompt.toolkit_prompts.length === 0}
+                onOpen={null}
+              />
+              <PromptSummaryCard
+                label={t("systemPrompt.developerPrompts")}
+                description={t("systemPrompt.developerPromptsDescription", {
+                  count: systemPrompt.developer_prompts.length.toLocaleString(),
+                })}
+                count={totalPromptLength(systemPrompt.developer_prompts)}
+                preview={systemPrompt.developer_prompts[0]?.preview ?? null}
+                disabled={systemPrompt.developer_prompts.length === 0}
                 onOpen={null}
               />
               <PromptSummaryCard
@@ -435,6 +450,40 @@ export function SessionSystemPromptView({
               ) : (
                 <Text size="sm" c="dimmed">
                   {t("systemPrompt.noToolkitPrompts")}
+                </Text>
+              )}
+            </Stack>
+
+            <Stack gap="sm">
+              <Divider />
+              <Group justify="space-between">
+                <Box>
+                  <Text fw={600}>{t("systemPrompt.developerPrompts")}</Text>
+                  <Text size="xs" c="dimmed">
+                    {t("systemPrompt.developerListDescription")}
+                  </Text>
+                </Box>
+                <Badge variant="light" color="cyan">
+                  {systemPrompt.developer_prompts.length.toLocaleString()}
+                </Badge>
+              </Group>
+              {systemPrompt.developer_prompts.length > 0 ? (
+                <Stack gap="xs">
+                  {systemPrompt.developer_prompts.map((prompt) => (
+                    <PromptListItem
+                      key={prompt.id}
+                      prompt={prompt}
+                      onOpen={() =>
+                        setSelectedPromptId(
+                          promptDetailId("developer", prompt.id),
+                        )
+                      }
+                    />
+                  ))}
+                </Stack>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  {t("systemPrompt.noDeveloperPrompts")}
                 </Text>
               )}
             </Stack>
@@ -603,6 +652,7 @@ function SystemPromptLinkCard({
     ? [
         systemPrompt.agent_prompt,
         ...systemPrompt.toolkit_prompts,
+        ...systemPrompt.developer_prompts,
         ...systemPrompt.injected_prompts,
         systemPrompt.final_prompt,
       ].filter(Boolean).length

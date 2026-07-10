@@ -1515,9 +1515,9 @@ class SessionContextSystemPromptFragmentResponse(BaseModel):
     """Session context system prompt fragment response."""
 
     id: str = Field(description="Prompt fragment ID")
-    source: Literal["agent", "toolkit", "turn_injected", "final"] = Field(
-        description="Prompt fragment source"
-    )
+    source: Literal[
+        "agent", "toolkit", "developer_prompt", "turn_injected", "final"
+    ] = Field(description="Prompt fragment source")
     label: str = Field(description="Display label")
     content: str = Field(description="Full prompt content")
     preview: str = Field(description="Prompt preview")
@@ -1548,6 +1548,9 @@ class SessionContextSystemPromptResponse(BaseModel):
     toolkit_prompts: list[SessionContextSystemPromptFragmentResponse] = Field(
         description="Toolkit prompt fragments"
     )
+    developer_prompts: list[SessionContextSystemPromptFragmentResponse] = Field(
+        description="Standalone developer prompt fragments"
+    )
     injected_prompts: list[SessionContextSystemPromptFragmentResponse] = Field(
         description="Turn injected prompt fragments"
     )
@@ -1570,6 +1573,10 @@ class SessionContextSystemPromptResponse(BaseModel):
             toolkit_prompts=[
                 SessionContextSystemPromptFragmentResponse.from_domain(fragment)
                 for fragment in prompt.toolkit_prompts
+            ],
+            developer_prompts=[
+                SessionContextSystemPromptFragmentResponse.from_domain(fragment)
+                for fragment in prompt.developer_prompts
             ],
             injected_prompts=[
                 SessionContextSystemPromptFragmentResponse.from_domain(fragment)

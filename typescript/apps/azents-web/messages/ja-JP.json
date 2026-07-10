@@ -1412,6 +1412,10 @@
         "toolkitPrompts": "Toolkit Prompts",
         "toolkitPromptsDescription": "{count} toolkit prompts",
         "toolkitListDescription": "構成前に取得された空でない toolkit prompt fragments です。",
+        "developerPrompts": "開発者プロンプト",
+        "developerPromptsDescription": "独立した開発者プロンプト {count} 件",
+        "developerListDescription": "会話入力の前にモデルへ送信された独立した開発者指示です。",
+        "noDeveloperPrompts": "独立した開発者プロンプトは記録されていません。",
         "finalPrompt": "Final Prompt",
         "finalPromptDescription": "Model adapter に渡された構成済み instructions です。",
         "noToolkitPrompts": "Toolkit prompt fragments はありません。",
@@ -1426,6 +1430,7 @@
         "source": {
           "agent": "Agent",
           "toolkit": "Toolkit",
+          "developer_prompt": "開発者",
           "turn_injected": "Injected",
           "final": "Final"
         },

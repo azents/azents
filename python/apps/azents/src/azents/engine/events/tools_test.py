@@ -81,6 +81,20 @@ class _DynamicPromptToolkit(Toolkit[_ToolkitConfig]):
         return "dynamic tool prompt"
 
 
+class _DeveloperPromptToolkit(Toolkit[_ToolkitConfig]):
+    """Toolkit returning ordered standalone developer prompts."""
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return an enabled state without tools."""
+        del context
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
+
+    async def get_developer_prompts(self, context: TurnContext) -> list[str]:
+        """Return role and mode prompts in model-input order."""
+        del context
+        return ["role guidance", "", "delegation mode"]
+
+
 class _InlineToolkit(Toolkit[_ToolkitConfig]):
     """Test toolkit returning a single FunctionTool."""
 
@@ -161,6 +175,7 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
     assert catalog.static_prompt_fragment_inputs[0].label == "demo"
     assert catalog.static_prompt_fragment_inputs[0].content == "tool prompt"
     assert catalog.dynamic_prompt_fragment_inputs == []
+    assert catalog.developer_prompt_inputs == []
     assert catalog.native_tools[0]["name"] == "demo__echo"
     assert catalog.native_tools[0]["strict"] is False
 
@@ -196,6 +211,41 @@ async def test_build_tool_catalog_separates_dynamic_prompt_layer() -> None:
     assert catalog.dynamic_prompt_fragment_inputs[0].content == "dynamic tool prompt"
     assert (
         catalog.dynamic_prompt_fragment_inputs[0].metadata["prompt_layer"] == "dynamic"
+    )
+
+
+async def test_build_tool_catalog_collects_ordered_developer_prompts() -> None:
+    """Developer prompts stay separate and preserve declared order."""
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_DeveloperPromptToolkit(),
+                slug="subagent",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    assert catalog.static_prompt_fragment_inputs == []
+    assert catalog.dynamic_prompt_fragment_inputs == []
+    assert [prompt.content for prompt in catalog.developer_prompt_inputs] == [
+        "role guidance",
+        "delegation mode",
+    ]
+    assert [prompt.id for prompt in catalog.developer_prompt_inputs] == [
+        "toolkit-0-developer-0",
+        "toolkit-0-developer-2",
+    ]
+    assert all(
+        prompt.metadata["prompt_layer"] == "developer"
+        for prompt in catalog.developer_prompt_inputs
     )
 
 

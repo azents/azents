@@ -29,10 +29,11 @@ class SessionContextSystemPromptResponse(BaseModel):
     """ # noqa: E501
     agent_prompt: Optional[SessionContextSystemPromptFragmentResponse] = None
     toolkit_prompts: List[SessionContextSystemPromptFragmentResponse] = Field(description="Toolkit prompt fragments")
+    developer_prompts: List[SessionContextSystemPromptFragmentResponse] = Field(description="Standalone developer prompt fragments")
     injected_prompts: List[SessionContextSystemPromptFragmentResponse] = Field(description="Turn injected prompt fragments")
     final_prompt: Optional[SessionContextSystemPromptFragmentResponse] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_prompt", "toolkit_prompts", "injected_prompts", "final_prompt"]
+    __properties: ClassVar[List[str]] = ["agent_prompt", "toolkit_prompts", "developer_prompts", "injected_prompts", "final_prompt"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -85,6 +86,13 @@ class SessionContextSystemPromptResponse(BaseModel):
                 if _item_toolkit_prompts:
                     _items.append(_item_toolkit_prompts.to_dict())
             _dict['toolkit_prompts'] = _items
+        # override the default output from pydantic by calling `to_dict()` of each item in developer_prompts (list)
+        _items = []
+        if self.developer_prompts:
+            for _item_developer_prompts in self.developer_prompts:
+                if _item_developer_prompts:
+                    _items.append(_item_developer_prompts.to_dict())
+            _dict['developer_prompts'] = _items
         # override the default output from pydantic by calling `to_dict()` of each item in injected_prompts (list)
         _items = []
         if self.injected_prompts:
@@ -124,6 +132,7 @@ class SessionContextSystemPromptResponse(BaseModel):
         _obj = cls.model_validate({
             "agent_prompt": SessionContextSystemPromptFragmentResponse.from_dict(obj["agent_prompt"]) if obj.get("agent_prompt") is not None else None,
             "toolkit_prompts": [SessionContextSystemPromptFragmentResponse.from_dict(_item) for _item in obj["toolkit_prompts"]] if obj.get("toolkit_prompts") is not None else None,
+            "developer_prompts": [SessionContextSystemPromptFragmentResponse.from_dict(_item) for _item in obj["developer_prompts"]] if obj.get("developer_prompts") is not None else None,
             "injected_prompts": [SessionContextSystemPromptFragmentResponse.from_dict(_item) for _item in obj["injected_prompts"]] if obj.get("injected_prompts") is not None else None,
             "final_prompt": SessionContextSystemPromptFragmentResponse.from_dict(obj["final_prompt"]) if obj.get("final_prompt") is not None else None
         })

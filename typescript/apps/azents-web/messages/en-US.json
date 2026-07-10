@@ -1412,6 +1412,10 @@
         "toolkitPrompts": "Toolkit Prompts",
         "toolkitPromptsDescription": "{count} toolkit prompts",
         "toolkitListDescription": "Non-empty toolkit prompt fragments captured before composition.",
+        "developerPrompts": "Developer prompts",
+        "developerPromptsDescription": "{count} standalone developer prompts",
+        "developerListDescription": "Standalone developer instructions sent before the conversation input.",
+        "noDeveloperPrompts": "No standalone developer prompts were captured.",
         "finalPrompt": "Final Prompt",
         "finalPromptDescription": "Composed instructions sent to the model adapter.",
         "noToolkitPrompts": "No toolkit prompt fragments were captured.",
@@ -1426,6 +1430,7 @@
         "source": {
           "agent": "Agent",
           "toolkit": "Toolkit",
+          "developer_prompt": "Developer",
           "turn_injected": "Injected",
           "final": "Final"
         },

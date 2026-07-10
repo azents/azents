@@ -1,13 +1,16 @@
 """Subagent collaboration Toolkit."""
 
+# ruff: noqa: E501
+
 import asyncio
 import dataclasses
 import json
+import re
 import time
 from textwrap import dedent
 from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
@@ -39,6 +42,11 @@ from azents.engine.events.fork_context import (
 from azents.engine.events.types import AgentRunState, Event, SystemReminderPayload
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
+from azents.engine.tools.subagent_prompt import (
+    EXPLICIT_REQUEST_ONLY_MODE_TEXT,
+    build_root_usage_hint,
+    build_subagent_usage_hint,
+)
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -53,36 +61,48 @@ class SubagentToolkitConfig(BaseModel):
     """Subagent collaboration Toolkit configuration."""
 
 
-class SpawnAgentInput(BaseModel):
+class _ClosedToolInput(BaseModel):
+    """Base model for closed collaboration-tool inputs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SpawnAgentInput(_ClosedToolInput):
     """spawn_agent tool input."""
 
-    name: str = Field(description="Child agent name within the current agent")
-    task: str = Field(description="Initial task for the child agent")
-    agent_type: Literal["default"] = Field(
-        default="default",
-        description="Agent type. Only the default type is supported.",
+    task_name: str = Field(
+        description="Task name for the new agent. Use lowercase letters, digits, and underscores."
     )
+    message: str = Field(description="Initial plain-text task for the new agent.")
     fork_turns: str = Field(
         default="all",
         description=(
-            "Context fork selection: 'none', 'all', or a positive integer string. "
-            "Defaults to 'all'."
+            "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, "
+            "or a positive integer string such as `3` to fork only the most recent "
+            "turns."
         ),
     )
 
 
-class SendMessageInput(BaseModel):
+class SendMessageInput(_ClosedToolInput):
     """send_message tool input."""
 
-    agent_name: str = Field(description="Target agent path or name")
-    message: str = Field(description="Message to queue for the target agent")
+    target: str = Field(
+        description="Relative or canonical task name to message (from spawn_agent)."
+    )
+    message: str = Field(description="Message text to queue on the target agent.")
 
 
-class FollowupTaskInput(BaseModel):
+class FollowupTaskInput(_ClosedToolInput):
     """followup_task tool input."""
 
-    agent_name: str = Field(description="Target agent path or name")
-    task: str = Field(description="Follow-up task to assign and wake")
+    target: str = Field(
+        description=(
+            "Relative or canonical task name to send a follow-up task to "
+            "(from spawn_agent)."
+        )
+    )
+    message: str = Field(description="Message text to send to the target agent.")
 
 
 class WaitAgentInput(BaseModel):
@@ -105,13 +125,141 @@ class WaitAgentInput(BaseModel):
     )
 
 
-class InterruptAgentInput(BaseModel):
+class InterruptAgentInput(_ClosedToolInput):
     """interrupt_agent tool input."""
 
-    agent_name: str = Field(description="Target agent path or name")
+    target: str = Field(
+        description=("Relative or canonical task name to interrupt (from spawn_agent).")
+    )
 
+
+class ListAgentsInput(_ClosedToolInput):
+    """list_agents tool input."""
+
+    path_prefix: str | None = Field(
+        default=None,
+        description=(
+            "Task-path prefix filter without a trailing slash. "
+            "Omit to list all live agents."
+        ),
+    )
+
+
+_SPAWN_AGENT_DESCRIPTION = """Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name "task_3" the agent will have canonical task name `/root/task1/task_3`.
+You are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.
+The spawned agent will have almost the same tools as you, except for Azents root/user-facing capabilities that are not available in subagent mode, and the ability to spawn its own subagents.
+Only call this tool for a concrete, bounded subtask that can run independently alongside useful local work; otherwise continue locally.
+The new agent's canonical task name will be provided to it along with the message.
+
+Note that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context."""
+_SEND_MESSAGE_DESCRIPTION = (
+    "Send a message to an existing agent. The message will be delivered promptly. "
+    "Does not trigger a new turn."
+)
+_FOLLOWUP_TASK_DESCRIPTION = (
+    "Send a follow-up task to an existing non-root target agent and trigger a turn "
+    "if it is idle. If the target is already running, deliver the task promptly at "
+    "message boundaries while sampling, or after the pending tool call completes."
+)
+_LIST_AGENTS_DESCRIPTION = (
+    "List live agents in the current root SessionAgent tree. Optionally filter by "
+    "task-path prefix."
+)
+_INTERRUPT_AGENT_DESCRIPTION = (
+    "Interrupt an agent's current turn, if any, and return its previous status. "
+    "The agent remains available for messages and follow-up tasks."
+)
+
+_SPAWN_AGENT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "task_name": {
+            "type": "string",
+            "description": (
+                "Task name for the new agent. Use lowercase letters, digits, and "
+                "underscores."
+            ),
+        },
+        "message": {
+            "type": "string",
+            "description": "Initial plain-text task for the new agent.",
+        },
+        "fork_turns": {
+            "type": "string",
+            "description": (
+                "Optional number of turns to fork. Defaults to `all`. Use `none`, "
+                "`all`, or a positive integer string such as `3` to fork only the "
+                "most recent turns."
+            ),
+        },
+    },
+    "required": ["task_name", "message"],
+    "additionalProperties": False,
+}
+_SEND_MESSAGE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "target": {
+            "type": "string",
+            "description": (
+                "Relative or canonical task name to message (from spawn_agent)."
+            ),
+        },
+        "message": {
+            "type": "string",
+            "description": "Message text to queue on the target agent.",
+        },
+    },
+    "required": ["target", "message"],
+    "additionalProperties": False,
+}
+_FOLLOWUP_TASK_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "target": {
+            "type": "string",
+            "description": (
+                "Relative or canonical task name to send a follow-up task to "
+                "(from spawn_agent)."
+            ),
+        },
+        "message": {
+            "type": "string",
+            "description": "Message text to send to the target agent.",
+        },
+    },
+    "required": ["target", "message"],
+    "additionalProperties": False,
+}
+_LIST_AGENTS_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "path_prefix": {
+            "type": "string",
+            "description": (
+                "Task-path prefix filter without a trailing slash. "
+                "Omit to list all live agents."
+            ),
+        }
+    },
+    "additionalProperties": False,
+}
+_INTERRUPT_AGENT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "target": {
+            "type": "string",
+            "description": (
+                "Relative or canonical task name to interrupt (from spawn_agent)."
+            ),
+        }
+    },
+    "required": ["target"],
+    "additionalProperties": False,
+}
 
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
+_TASK_NAME_PATTERN = re.compile(r"^[a-z0-9_]+$")
 
 _TERMINAL_STATUSES = {
     AgentRunStatus.COMPLETED,
@@ -126,7 +274,7 @@ _WAIT_AGENT_POLL_INTERVAL_SECONDS = 0.1
 @dataclasses.dataclass(frozen=True)
 class _TargetResolution:
     current: SessionAgent
-    target: SessionAgent | None
+    target: SessionAgent
 
 
 class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
@@ -176,53 +324,34 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         )
 
     async def get_static_prompt(self, context: TurnContext) -> str:
-        """Return subagent collaboration guidance."""
+        """Keep collaboration guidance out of the assembled system prompt."""
         del context
+        return ""
+
+    async def get_developer_prompts(self, context: TurnContext) -> list[str]:
+        """Return role-specific collaboration guidance and delegation mode."""
+        self.session_id = context.session_id or self.session_id
+        async with self.session_manager() as session:
+            current = await self._current_session_agent(session)
         max_concurrency = self.subagent_settings.max_subagents + 1
-        max_depth = self.subagent_settings.max_depth
-        return dedent(
-            f"""\
-            You are an agent in a team of agents collaborating to fulfill the
-            user's goals.
-
-            At the start of your turn, you are the active agent.
-            There are {max_concurrency} available concurrency slots, meaning
-            that up to {max_concurrency} agents can be active at once,
-            including you. The maximum subagent depth below the root agent is
-            {max_depth}.
-            You can spawn sub-agents to handle subtasks, and those sub-agents
-            can spawn their own sub-agents when depth allows.
-            All agents in the team are similarly capable and have access to
-            almost the same set of tools, except for Azents root/user-facing
-            capabilities that are not available in subagent mode.
-
-            You can use `spawn_agent` to create a new agent, `followup_task`
-            to give an existing agent a new task and wake it, and
-            `send_message` to pass a message to a running agent without
-            waking it.
-            Child agents can also spawn their own sub-agents.
-            You can decide how much context you want to propagate to your
-            sub-agents with the `fork_turns` parameter, which defaults to
-            `all`.
-            Use `wait_agent` to observe unread terminal child results when
-            you need completion output from child agents.
-
-            When you provide a final response, that content is delivered back
-            to your parent agent as a terminal child result.
-            """
+        role_hint = (
+            build_root_usage_hint(max_concurrency)
+            if current.kind == SessionAgentKind.ROOT
+            else build_subagent_usage_hint(max_concurrency)
         )
+        return [role_hint, EXPLICIT_REQUEST_ONLY_MODE_TEXT]
 
     def _spawn_agent_tool(self) -> FunctionTool:
         async def spawn_agent(input: SpawnAgentInput) -> str:
-            """Create a child subagent and return its identity."""
-            if input.agent_type != "default":
-                raise FunctionToolError("Only the default agent_type is supported")
+            """Create a child subagent and return its canonical task name."""
+            _validate_task_name(input.task_name)
             try:
                 fork_selection = parse_fork_turns(input.fork_turns)
-            except InvalidForkTurns as exc:
-                raise FunctionToolError(str(exc)) from None
-            if not input.task.strip():
-                raise FunctionToolError("task is required")
+            except InvalidForkTurns:
+                raise FunctionToolError(
+                    "fork_turns must be `none`, `all`, or a positive integer string"
+                ) from None
+            _validate_message(input.message)
 
             async with self.session_manager() as session:
                 current = await self._current_session_agent(session)
@@ -232,10 +361,10 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                         await self.agent_session_repository.create_child_session_agent(
                             session,
                             parent_session_agent_id=current.id,
-                            name=input.name,
-                            agent_type=input.agent_type,
-                            title=input.name,
-                            last_task_message=input.task,
+                            name=input.task_name,
+                            agent_type="default",
+                            title=input.task_name,
+                            last_task_message=input.message,
                         )
                     )
                 except ValueError as exc:
@@ -271,33 +400,27 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     source=current,
                     target=child,
                     message_kind="spawn_agent",
-                    content=input.task,
+                    content=input.message,
                     wake=True,
                 )
 
             await self._wake_session(child_session)
             await self._publish_tree_changed(child)
-            return _json(
-                {
-                    "agent_name": child.name,
-                    "agent_path": child.path,
-                    "status": "spawned",
-                }
-            )
+            return _json({"task_name": child.path})
 
-        return make_tool(spawn_agent, name="spawn_agent")
+        return make_tool(
+            spawn_agent,
+            name="spawn_agent",
+            description=_SPAWN_AGENT_DESCRIPTION,
+            input_schema=_SPAWN_AGENT_SCHEMA,
+        )
 
     def _send_message_tool(self) -> FunctionTool:
         async def send_message(input: SendMessageInput) -> str:
             """Queue a message for a target agent without waking it."""
-            if not input.message.strip():
-                raise FunctionToolError("message is required")
+            _validate_message(input.message)
             async with self.session_manager() as session:
-                resolution = await self._resolve_target(session, input.agent_name)
-                if resolution.target is None:
-                    return _json(
-                        {"status": "not_found", "agent_name": input.agent_name}
-                    )
+                resolution = await self._resolve_target_or_error(session, input.target)
                 await self._enqueue_agent_message(
                     session,
                     source=resolution.current,
@@ -313,27 +436,21 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     last_task_message=input.message,
                 )
             await self._publish_tree_changed(resolution.target)
-            return _json(
-                {
-                    "status": "queued",
-                    "agent_name": resolution.target.name,
-                    "agent_path": resolution.target.path,
-                }
-            )
+            return ""
 
-        return make_tool(send_message, name="send_message")
+        return make_tool(
+            send_message,
+            name="send_message",
+            description=_SEND_MESSAGE_DESCRIPTION,
+            input_schema=_SEND_MESSAGE_SCHEMA,
+        )
 
     def _followup_task_tool(self) -> FunctionTool:
         async def followup_task(input: FollowupTaskInput) -> str:
             """Assign a follow-up task to an existing agent and wake it."""
-            if not input.task.strip():
-                raise FunctionToolError("task is required")
+            _validate_message(input.message)
             async with self.session_manager() as session:
-                resolution = await self._resolve_target(session, input.agent_name)
-                if resolution.target is None:
-                    return _json(
-                        {"status": "not_found", "agent_name": input.agent_name}
-                    )
+                resolution = await self._resolve_target_or_error(session, input.target)
                 if resolution.target.kind == SessionAgentKind.ROOT:
                     raise FunctionToolError(
                         "Follow-up tasks can't target the root agent"
@@ -347,26 +464,25 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     source=resolution.current,
                     target=resolution.target,
                     message_kind="followup_task",
-                    content=input.task,
+                    content=input.message,
                     wake=True,
                 )
                 session_agent_repo = self.agent_session_repository
                 await session_agent_repo.update_session_agent_last_task_message(
                     session,
                     session_agent_id=resolution.target.id,
-                    last_task_message=input.task,
+                    last_task_message=input.message,
                 )
             await self._wake_session(target_session)
             await self._publish_tree_changed(resolution.target)
-            return _json(
-                {
-                    "status": "assigned",
-                    "agent_name": resolution.target.name,
-                    "agent_path": resolution.target.path,
-                }
-            )
+            return ""
 
-        return make_tool(followup_task, name="followup_task")
+        return make_tool(
+            followup_task,
+            name="followup_task",
+            description=_FOLLOWUP_TASK_DESCRIPTION,
+            input_schema=_FOLLOWUP_TASK_SCHEMA,
+        )
 
     def _wait_agent_tool(self) -> FunctionTool:
         async def wait_agent(input: WaitAgentInput) -> str:
@@ -462,9 +578,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         async def interrupt_agent(input: InterruptAgentInput) -> str:
             """Interrupt the target agent's current run without deleting it."""
             async with self.session_manager() as session:
-                resolution = await self._resolve_target(session, input.agent_name)
-                if resolution.target is None:
-                    return _json({"previous_status": "not_found"})
+                resolution = await self._resolve_target_or_error(session, input.target)
                 if resolution.target.kind == SessionAgentKind.ROOT:
                     raise FunctionToolError("root is not a spawned agent")
                 if resolution.target.id == resolution.current.id:
@@ -495,32 +609,54 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             await self._publish_tree_changed(resolution.target)
             return _json({"previous_status": previous_status})
 
-        return make_tool(interrupt_agent, name="interrupt_agent")
+        return make_tool(
+            interrupt_agent,
+            name="interrupt_agent",
+            description=_INTERRUPT_AGENT_DESCRIPTION,
+            input_schema=_INTERRUPT_AGENT_SCHEMA,
+        )
 
     def _list_agents_tool(self) -> FunctionTool:
-        async def list_agents() -> str:
+        async def list_agents(input: ListAgentsInput) -> str:
             """List agents in the current root SessionAgent tree."""
             async with self.session_manager() as session:
                 current = await self._current_session_agent(session)
+                resolved_prefix = (
+                    _resolve_agent_path(current.path, input.path_prefix)
+                    if input.path_prefix is not None
+                    else None
+                )
                 tree = await self.agent_session_repository.list_session_agent_tree(
                     session,
                     root_session_agent_id=current.root_session_agent_id,
                 )
                 rows = []
                 for agent in tree:
+                    if resolved_prefix is not None and not _path_matches_prefix(
+                        agent.path, resolved_prefix
+                    ):
+                        continue
                     rows.append(
                         {
-                            "agent_name": agent.name,
-                            "agent_path": agent.path,
+                            "agent_name": agent.path,
                             "agent_status": await self._project_agent_status(
                                 session, agent
                             ),
-                            "last_task_message": agent.last_task_message,
+                            "last_task_message": (
+                                "Main thread"
+                                if agent.kind == SessionAgentKind.ROOT
+                                else agent.last_task_message
+                            ),
                         }
                     )
             return _json({"agents": rows})
 
-        return make_tool(list_agents, name="list_agents")
+        return make_tool(
+            list_agents,
+            name="list_agents",
+            description=_LIST_AGENTS_DESCRIPTION,
+            input_schema=_LIST_AGENTS_SCHEMA,
+        )
 
     def _current_session_id(self) -> str:
         """Return current AgentSession ID or raise a tool-level error."""
@@ -543,15 +679,31 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         agent_name: str,
     ) -> _TargetResolution:
         current = await self._current_session_agent(session)
+        resolved_path = _resolve_agent_path(current.path, agent_name)
         try:
             target = await self.agent_session_repository.resolve_session_agent_path(
                 session,
                 current_session_agent_id=current.id,
                 path=agent_name,
             )
-        except ValueError:
+        except ValueError as exc:
+            raise FunctionToolError(str(exc)) from None
+        if (
+            target is not None
+            and target.root_session_agent_id != current.root_session_agent_id
+        ):
             target = None
+        if target is None:
+            raise FunctionToolError(f"live agent path `{resolved_path}` not found")
         return _TargetResolution(current=current, target=target)
+
+    async def _resolve_target_or_error(
+        self,
+        session: AsyncSession,
+        agent_name: str,
+    ) -> _TargetResolution:
+        """Resolve a model-facing target or raise a tool-level error."""
+        return await self._resolve_target(session, agent_name)
 
     async def _wait_targets(
         self,
@@ -774,7 +926,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self,
         session: AsyncSession,
         agent: SessionAgent,
-    ) -> str:
+    ) -> JSONValue:
         agent_session = await self.agent_session_repository.get_by_id(
             session,
             agent.agent_session_id,
@@ -789,18 +941,18 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         )
         run = latest.get(agent.agent_session_id)
         if run is None:
-            return "idle"
+            return "pending_init"
         if run.status == AgentRunStatus.COMPLETED:
-            return "completed"
+            return {"completed": run.terminal_result_message}
         if run.status == AgentRunStatus.FAILED:
-            return "errored"
+            return {"errored": run.terminal_result_message or "Agent run failed."}
         if run.status in {
             AgentRunStatus.STOPPED,
             AgentRunStatus.INTERRUPTED,
             AgentRunStatus.CANCELLED,
         }:
             return "interrupted"
-        return run.status.value
+        return "pending_init"
 
 
 class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
@@ -845,6 +997,55 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
         )
         toolkit.set_session_id(context.session_id)
         return toolkit
+
+
+def _validate_task_name(task_name: str) -> None:
+    """Validate a model-facing child task name."""
+    if not task_name:
+        raise FunctionToolError("agent_name must not be empty")
+    if task_name in {"root", ".", ".."}:
+        raise FunctionToolError(f"agent_name `{task_name}` is reserved")
+    if "/" in task_name:
+        raise FunctionToolError("agent_name must not contain `/`")
+    if not _TASK_NAME_PATTERN.fullmatch(task_name):
+        raise FunctionToolError(
+            "agent_name must use only lowercase letters, digits, and underscores"
+        )
+
+
+def _validate_message(message: str) -> None:
+    """Reject empty collaboration messages with the Codex V2 error text."""
+    if not message.strip():
+        raise FunctionToolError("Empty message can't be sent to an agent")
+
+
+def _resolve_agent_path(current_path: str, reference: str) -> str:
+    """Resolve and validate a relative or canonical agent path."""
+    if not reference:
+        raise FunctionToolError("agent path must not be empty")
+    if reference.endswith("/"):
+        kind = "absolute" if reference.startswith("/") else "relative"
+        raise FunctionToolError(f"{kind} agent path must not end with `/`")
+    resolved = reference if reference.startswith("/") else f"{current_path}/{reference}"
+    if resolved != "/root" and not resolved.startswith("/root/"):
+        raise FunctionToolError("absolute agent paths must start with `/root`")
+    if resolved == "/root":
+        return resolved
+    for segment in resolved.removeprefix("/root/").split("/"):
+        if not segment:
+            raise FunctionToolError("agent_name must not be empty")
+        if segment in {"root", ".", ".."}:
+            raise FunctionToolError(f"agent_name `{segment}` is reserved")
+        if not _TASK_NAME_PATTERN.fullmatch(segment):
+            raise FunctionToolError(
+                "agent_name must use only lowercase letters, digits, and underscores"
+            )
+    return resolved
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    """Return whether a canonical path matches a segment-safe prefix."""
+    return path == prefix or path.startswith(f"{prefix}/")
 
 
 def _session_agent_depth(agent: SessionAgent) -> int:

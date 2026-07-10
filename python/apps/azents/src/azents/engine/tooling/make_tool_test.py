@@ -122,6 +122,18 @@ class TestInputSchema:
         tool = make_tool(no_params_tool)
         assert tool.spec.input_schema == {"type": "object", "properties": {}}
 
+    def test_explicit_schema_overrides_model_facing_schema(self) -> None:
+        """Expose an exact schema while retaining Pydantic validation."""
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        }
+        tool = make_tool(async_greet, input_schema=schema)
+
+        assert tool.spec.input_schema is schema
+
 
 # ---------------------------------------------------------------------------
 # handler execution tests
@@ -165,6 +177,22 @@ class TestHandler:
         tool = make_tool(async_greet)
         with pytest.raises(FunctionToolError):
             await tool.handler(json.dumps({"greeting": "Hi"}))  # name missing
+
+    @pytest.mark.anyio()
+    async def test_explicit_schema_keeps_pydantic_validation(self) -> None:
+        """Validate handler input with the function's Pydantic model."""
+        tool = make_tool(
+            async_greet,
+            input_schema={
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+        )
+
+        with pytest.raises(FunctionToolError):
+            await tool.handler(json.dumps({"greeting": "Hi"}))
 
 
 # ---------------------------------------------------------------------------

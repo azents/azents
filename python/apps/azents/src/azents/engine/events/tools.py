@@ -42,11 +42,12 @@ class ToolCatalog:
     tools: dict[str, FunctionTool]
     static_prompt_fragment_inputs: list[ToolkitPromptInput]
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput]
+    developer_prompt_inputs: list[ToolkitPromptInput]
     active_toolkit_bindings: list[ToolkitBinding]
 
     @property
     def prompt_fragment_inputs(self) -> list[ToolkitPromptInput]:
-        """Return all toolkit prompt inputs in model assembly order."""
+        """Return toolkit prompts assembled into the system prompt."""
         return [
             *self.static_prompt_fragment_inputs,
             *self.dynamic_prompt_fragment_inputs,
@@ -76,6 +77,7 @@ async def build_tool_catalog(
     tools: dict[str, FunctionTool] = {}
     static_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput] = []
+    developer_prompt_inputs: list[ToolkitPromptInput] = []
     active_toolkit_bindings: list[ToolkitBinding] = []
     for index, binding in enumerate(toolkit_bindings):
         update_started_at = time.monotonic()
@@ -136,6 +138,23 @@ async def build_tool_catalog(
                     content=dynamic_prompt,
                 )
             )
+        for developer_index, developer_prompt in enumerate(
+            await binding.toolkit.get_developer_prompts(context)
+        ):
+            content = developer_prompt.strip()
+            if not content:
+                continue
+            developer_prompt_inputs.append(
+                ToolkitPromptInput(
+                    id=f"toolkit-{index}-developer-{developer_index}",
+                    label=label,
+                    content=content,
+                    metadata={
+                        **_toolkit_prompt_metadata(binding),
+                        "prompt_layer": "developer",
+                    },
+                )
+            )
         bound_tools: list[FunctionTool] = []
         for tool in state.tools:
             bound = (
@@ -147,6 +166,7 @@ async def build_tool_catalog(
         tools=tools,
         static_prompt_fragment_inputs=static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=dynamic_prompt_fragment_inputs,
+        developer_prompt_inputs=developer_prompt_inputs,
         active_toolkit_bindings=active_toolkit_bindings,
     )
 

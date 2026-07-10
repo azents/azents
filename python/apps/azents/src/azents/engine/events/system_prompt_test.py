@@ -27,6 +27,20 @@ def test_build_system_prompt_wraps_sections_and_matches_final_prompt() -> None:
                 metadata={"slug": "todo", "prompt_layer": "dynamic"},
             )
         ],
+        developer_prompts=[
+            ToolkitPromptInput(
+                id="toolkit-2-developer-0",
+                label="subagent",
+                content="role guidance",
+                metadata={"slug": "subagent", "prompt_layer": "developer"},
+            ),
+            ToolkitPromptInput(
+                id="toolkit-2-developer-1",
+                label="subagent",
+                content="delegation mode",
+                metadata={"slug": "subagent", "prompt_layer": "developer"},
+            ),
+        ],
         injected_prompts=[
             TurnInjectedPrompt(
                 persistence="hidden_internal_input",
@@ -43,7 +57,12 @@ def test_build_system_prompt_wraps_sections_and_matches_final_prompt() -> None:
         "## Dynamic toolkit prompt: todo\n\ntodo state\n\n"
         "## Turn injected prompt from hookkit\n\nhook rules"
     )
+    assert result.developer_prompts == ["role guidance", "delegation mode"]
     assert result.analysis is not None
+    assert [fragment.content for fragment in result.analysis.developer_prompts] == [
+        "role guidance",
+        "delegation mode",
+    ]
     fragments = [
         result.analysis.agent_prompt,
         *result.analysis.toolkit_prompts,
@@ -62,8 +81,36 @@ def test_build_system_prompt_returns_empty_when_no_prompt_parts() -> None:
         agent_prompt=None,
         static_toolkit_prompts=[],
         dynamic_toolkit_prompts=[],
+        developer_prompts=[],
         injected_prompts=[],
     )
 
     assert result.prompt is None
+    assert result.developer_prompts == []
     assert result.analysis is None
+
+
+def test_build_system_prompt_preserves_developer_only_analysis() -> None:
+    """Standalone developer prompts do not become system-prompt sections."""
+    result = build_system_prompt(
+        agent_prompt=None,
+        static_toolkit_prompts=[],
+        dynamic_toolkit_prompts=[],
+        developer_prompts=[
+            ToolkitPromptInput(
+                id="toolkit-0-developer-0",
+                label="subagent",
+                content="usage hint",
+                metadata={"prompt_layer": "developer"},
+            )
+        ],
+        injected_prompts=[],
+    )
+
+    assert result.prompt is None
+    assert result.developer_prompts == ["usage hint"]
+    assert result.analysis is not None
+    assert result.analysis.final_prompt is None
+    assert [fragment.content for fragment in result.analysis.developer_prompts] == [
+        "usage hint"
+    ]

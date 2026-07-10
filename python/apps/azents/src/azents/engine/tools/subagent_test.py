@@ -1,5 +1,7 @@
 """Subagent collaboration Toolkit tests."""
 
+# ruff: noqa: E501
+
 import asyncio
 import datetime
 import json
@@ -35,6 +37,11 @@ from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 
 from .subagent import SpawnAgentInput, SubagentToolkit
+from .subagent_prompt import (
+    EXPLICIT_REQUEST_ONLY_MODE_TEXT,
+    build_root_usage_hint,
+    build_subagent_usage_hint,
+)
 
 _NOW = datetime.datetime.now(datetime.UTC)
 
@@ -509,11 +516,49 @@ async def _make_toolkit() -> tuple[
     )
 
 
-async def test_subagent_static_prompt_matches_azents_semantics() -> None:
-    """Expose Codex-style team guidance with Azents delivery semantics."""
+async def test_subagent_developer_prompts_match_root_and_child_contracts() -> None:
+    """Expose exact role-specific guidance and explicit-request-only mode."""
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    context = TurnContext(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        model="gpt-5.1",
+        run_id="run-1",
+        publish_event=cast(Any, _noop_publish),
+        session_id="root-session",
+    )
 
-    prompt = await toolkit.get_static_prompt(
+    assert await toolkit.get_static_prompt(context) == ""
+    assert await toolkit.get_developer_prompts(context) == [
+        build_root_usage_hint(4),
+        EXPLICIT_REQUEST_ONLY_MODE_TEXT,
+    ]
+
+    child_context = TurnContext(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        model="gpt-5.1",
+        run_id="run-1",
+        publish_event=cast(Any, _noop_publish),
+        session_id="child-session",
+    )
+    assert await toolkit.get_developer_prompts(child_context) == [
+        build_subagent_usage_hint(4),
+        EXPLICIT_REQUEST_ONLY_MODE_TEXT,
+    ]
+
+
+def test_spawn_agent_fork_turns_defaults_to_all() -> None:
+    """spawn_agent propagates all context by default."""
+    assert SpawnAgentInput.model_fields["fork_turns"].default == "all"
+
+
+async def test_collaboration_tool_descriptions_and_schemas_match_phase_contract() -> (
+    None
+):
+    """Lock the phase-three Codex V2 tool surface exactly."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    state = await toolkit.update_context(
         TurnContext(
             user_id="user-1",
             workspace_id="workspace-1",
@@ -523,19 +568,135 @@ async def test_subagent_static_prompt_matches_azents_semantics() -> None:
             session_id="root-session",
         )
     )
+    tools = {tool.spec.name: tool.spec for tool in state.tools}
 
-    assert "There are 4 available concurrency slots" in prompt
-    assert "maximum subagent depth below the root agent is" in prompt
-    assert "1" in prompt
-    assert "almost the same set of tools" in prompt
-    assert "fork_turns` parameter, which defaults to" in prompt
-    assert "terminal child result" in prompt
-    assert "immediately delivered" not in prompt
+    assert (
+        tools["spawn_agent"].description
+        == """Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name "task_3" the agent will have canonical task name `/root/task1/task_3`.
+You are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.
+The spawned agent will have almost the same tools as you, except for Azents root/user-facing capabilities that are not available in subagent mode, and the ability to spawn its own subagents.
+Only call this tool for a concrete, bounded subtask that can run independently alongside useful local work; otherwise continue locally.
+The new agent's canonical task name will be provided to it along with the message.
+
+Note that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context."""
+    )
+    assert tools["send_message"].description == (
+        "Send a message to an existing agent. The message will be delivered "
+        "promptly. Does not trigger a new turn."
+    )
+    assert tools["followup_task"].description == (
+        "Send a follow-up task to an existing non-root target agent and trigger "
+        "a turn if it is idle. If the target is already running, deliver the task "
+        "promptly at message boundaries while sampling, or after the pending tool "
+        "call completes."
+    )
+    assert tools["list_agents"].description == (
+        "List live agents in the current root SessionAgent tree. Optionally filter "
+        "by task-path prefix."
+    )
+    assert tools["interrupt_agent"].description == (
+        "Interrupt an agent's current turn, if any, and return its previous status. "
+        "The agent remains available for messages and follow-up tasks."
+    )
+
+    assert tools["spawn_agent"].input_schema == {
+        "type": "object",
+        "properties": {
+            "task_name": {
+                "type": "string",
+                "description": (
+                    "Task name for the new agent. Use lowercase letters, digits, "
+                    "and underscores."
+                ),
+            },
+            "message": {
+                "type": "string",
+                "description": "Initial plain-text task for the new agent.",
+            },
+            "fork_turns": {
+                "type": "string",
+                "description": (
+                    "Optional number of turns to fork. Defaults to `all`. Use "
+                    "`none`, `all`, or a positive integer string such as `3` to "
+                    "fork only the most recent turns."
+                ),
+            },
+        },
+        "required": ["task_name", "message"],
+        "additionalProperties": False,
+    }
+    assert tools["send_message"].input_schema["required"] == ["target", "message"]
+    assert tools["followup_task"].input_schema["required"] == ["target", "message"]
+    assert tools["list_agents"].input_schema == {
+        "type": "object",
+        "properties": {
+            "path_prefix": {
+                "type": "string",
+                "description": (
+                    "Task-path prefix filter without a trailing slash. Omit to "
+                    "list all live agents."
+                ),
+            }
+        },
+        "additionalProperties": False,
+    }
+    assert tools["interrupt_agent"].input_schema["required"] == ["target"]
 
 
-def test_spawn_agent_fork_turns_defaults_to_all() -> None:
-    """spawn_agent propagates all context by default."""
-    assert SpawnAgentInput.model_fields["fork_turns"].default == "all"
+async def test_collaboration_tools_reject_invalid_v2_inputs() -> None:
+    """Use closed inputs and exact Codex validation messages."""
+    toolkit, _repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tools = {tool.spec.name: tool for tool in state.tools}
+
+    with pytest.raises(
+        FunctionToolError,
+        match="Empty message can't be sent to an agent",
+    ):
+        await tools["send_message"].handler(
+            json.dumps({"target": "child", "message": "  "})
+        )
+    with pytest.raises(
+        FunctionToolError,
+        match="fork_turns must be `none`, `all`, or a positive integer string",
+    ):
+        await tools["spawn_agent"].handler(
+            json.dumps(
+                {
+                    "task_name": "worker",
+                    "message": "Work",
+                    "fork_turns": "0",
+                }
+            )
+        )
+    with pytest.raises(
+        FunctionToolError,
+        match="agent_name must use only lowercase letters, digits, and underscores",
+    ):
+        await tools["spawn_agent"].handler(
+            json.dumps({"task_name": "Bad-name", "message": "Work"})
+        )
+    with pytest.raises(
+        FunctionToolError, match="live agent path `/root/missing` not found"
+    ):
+        await tools["send_message"].handler(
+            json.dumps({"target": "missing", "message": "Work"})
+        )
+    with pytest.raises(FunctionToolError, match="Extra inputs are not permitted"):
+        await tools["send_message"].handler(
+            json.dumps({"target": "child", "message": "Work", "legacy": True})
+        )
+
+    assert input_service.enqueued == []
 
 
 async def test_send_message_is_queue_only() -> None:
@@ -564,13 +725,9 @@ async def test_send_message_is_queue_only() -> None:
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "send_message")
 
-    result = await tool.handler(json.dumps({"agent_name": "child", "message": "note"}))
+    result = await tool.handler(json.dumps({"target": "child", "message": "note"}))
 
-    assert json.loads(cast(str, result)) == {
-        "status": "queued",
-        "agent_name": "child",
-        "agent_path": "/root/child",
-    }
+    assert result == ""
     assert input_service.enqueued[0].kind == InputBufferKind.AGENT_MESSAGE
     assert input_service.enqueued[0].metadata["message_kind"] == "send_message"
     assert input_service.enqueued[0].content == "note"
@@ -597,14 +754,10 @@ async def test_send_message_from_child_can_target_root() -> None:
     tool = next(tool for tool in state.tools if tool.spec.name == "send_message")
 
     result = await tool.handler(
-        json.dumps({"agent_name": "/root", "message": "status update"})
+        json.dumps({"target": "/root", "message": "status update"})
     )
 
-    assert json.loads(cast(str, result)) == {
-        "status": "queued",
-        "agent_name": "root",
-        "agent_path": "/root",
-    }
+    assert result == ""
     assert input_service.enqueued[0].metadata["source_path"] == "/root/child"
     assert input_service.enqueued[0].metadata["target_path"] == "/root"
     assert repo.last_task_updates == [("root-agent", "status update")]
@@ -636,13 +789,9 @@ async def test_followup_task_wakes_target_child() -> None:
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "followup_task")
 
-    result = await tool.handler(json.dumps({"agent_name": "child", "task": "work"}))
+    result = await tool.handler(json.dumps({"target": "child", "message": "work"}))
 
-    assert json.loads(cast(str, result)) == {
-        "status": "assigned",
-        "agent_name": "child",
-        "agent_path": "/root/child",
-    }
+    assert result == ""
     assert input_service.enqueued[0].kind == InputBufferKind.AGENT_MESSAGE
     assert input_service.enqueued[0].metadata["message_kind"] == "followup_task"
     assert input_service.enqueued[0].content == "work"
@@ -674,7 +823,7 @@ async def test_followup_task_from_child_rejects_root() -> None:
         FunctionToolError,
         match="Follow-up tasks can't target the root agent",
     ):
-        await tool.handler(json.dumps({"agent_name": "/root", "task": "work"}))
+        await tool.handler(json.dumps({"target": "/root", "message": "work"}))
 
     assert input_service.enqueued == []
     assert broker.messages == []
@@ -696,9 +845,9 @@ async def test_interrupt_agent_rejects_root_and_self() -> None:
     tool = next(tool for tool in state.tools if tool.spec.name == "interrupt_agent")
 
     with pytest.raises(FunctionToolError, match="root is not a spawned agent"):
-        await tool.handler(json.dumps({"agent_name": "/root"}))
+        await tool.handler(json.dumps({"target": "/root"}))
     with pytest.raises(FunctionToolError, match="an agent cannot interrupt itself"):
-        await tool.handler(json.dumps({"agent_name": "."}))
+        await tool.handler(json.dumps({"target": "/root/child"}))
 
 
 async def test_list_agents_from_child_includes_root_tree() -> None:
@@ -718,8 +867,58 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
 
     result = await tool.handler("{}")
 
-    agents = json.loads(cast(str, result))["agents"]
-    assert [agent["agent_path"] for agent in agents] == ["/root", "/root/child"]
+    assert json.loads(cast(str, result)) == {
+        "agents": [
+            {
+                "agent_name": "/root",
+                "agent_status": "pending_init",
+                "last_task_message": "Main thread",
+            },
+            {
+                "agent_name": "/root/child",
+                "agent_status": {"completed": "child result"},
+                "last_task_message": None,
+            },
+        ]
+    }
+
+
+async def test_list_agents_filters_on_canonical_segment_boundaries() -> None:
+    """Resolve relative prefixes without matching textual sibling prefixes."""
+    toolkit, repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    sibling = _session_agent(
+        id="childish-agent",
+        path="/root/childish",
+        agent_session_id="childish-session",
+        name="childish",
+    )
+    repo.tree.append(sibling)
+    repo.sessions[sibling.agent_session_id] = _agent_session(
+        id=sibling.agent_session_id
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "list_agents")
+
+    result = await tool.handler(json.dumps({"path_prefix": "child"}))
+
+    assert json.loads(cast(str, result)) == {
+        "agents": [
+            {
+                "agent_name": "/root/child",
+                "agent_status": {"completed": "child result"},
+                "last_task_message": None,
+            }
+        ]
+    }
 
 
 async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
@@ -960,14 +1159,12 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
 
-    result = await tool.handler(json.dumps({"name": "reviewer", "task": "Review it"}))
+    result = await tool.handler(
+        json.dumps({"task_name": "reviewer", "message": "Review it"})
+    )
 
     child = repo.created_children[0]
-    assert json.loads(cast(str, result)) == {
-        "agent_name": "reviewer",
-        "agent_path": "/root/reviewer",
-        "status": "spawned",
-    }
+    assert json.loads(cast(str, result)) == {"task_name": "/root/reviewer"}
     assert repo.locked_session_agents == ["root-agent"]
     assert input_service.enqueued[0].metadata["message_kind"] == "spawn_agent"
     assert input_service.enqueued[0].content == "Review it"
@@ -1004,7 +1201,7 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
 
-    await tool.handler(json.dumps({"name": "reviewer", "task": "Review only"}))
+    await tool.handler(json.dumps({"task_name": "reviewer", "message": "Review only"}))
 
     assert [event.kind for event in event_repo.appended] == [
         EventKind.USER_MESSAGE,
@@ -1046,7 +1243,7 @@ async def test_spawn_agent_does_not_insert_boundary_without_forked_history() -> 
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
 
-    await tool.handler(json.dumps({"name": "reviewer", "task": "Review only"}))
+    await tool.handler(json.dumps({"task_name": "reviewer", "message": "Review only"}))
 
     assert event_repo.appended == []
 
@@ -1079,7 +1276,7 @@ async def test_spawn_agent_rejects_when_active_subagent_limit_is_reached() -> No
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
 
     with pytest.raises(FunctionToolError, match="max_subagents 1 is already reached"):
-        await tool.handler(json.dumps({"name": "extra", "task": "Work"}))
+        await tool.handler(json.dumps({"task_name": "extra", "message": "Work"}))
 
     assert repo.created_children == []
     assert input_service.enqueued == []
@@ -1126,7 +1323,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
 
     with pytest.raises(FunctionToolError, match="max_subagents 1 is already reached"):
-        await tool.handler(json.dumps({"name": "extra", "task": "Work"}))
+        await tool.handler(json.dumps({"task_name": "extra", "message": "Work"}))
 
     assert repo.created_children == []
     assert input_service.enqueued == []
@@ -1158,7 +1355,7 @@ async def test_spawn_agent_rejects_when_depth_limit_is_reached() -> None:
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
 
     with pytest.raises(FunctionToolError, match="max_depth 1 would be exceeded"):
-        await tool.handler(json.dumps({"name": "nested", "task": "Work"}))
+        await tool.handler(json.dumps({"task_name": "nested", "message": "Work"}))
 
     assert repo.created_children == []
     assert input_service.enqueued == []

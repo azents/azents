@@ -15637,6 +15637,7 @@
             "enum": [
               "agent",
               "toolkit",
+              "developer_prompt",
               "turn_injected",
               "final"
             ],
@@ -15706,6 +15707,14 @@
             "title": "Toolkit Prompts",
             "description": "Toolkit prompt fragments"
           },
+          "developer_prompts": {
+            "items": {
+              "$ref": "#/components/schemas/SessionContextSystemPromptFragmentResponse"
+            },
+            "type": "array",
+            "title": "Developer Prompts",
+            "description": "Standalone developer prompt fragments"
+          },
           "injected_prompts": {
             "items": {
               "$ref": "#/components/schemas/SessionContextSystemPromptFragmentResponse"
@@ -15729,6 +15738,7 @@
         "type": "object",
         "required": [
           "toolkit_prompts",
+          "developer_prompts",
           "injected_prompts"
         ],
         "title": "SessionContextSystemPromptResponse",

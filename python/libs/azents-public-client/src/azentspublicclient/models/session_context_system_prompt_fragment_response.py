@@ -39,8 +39,8 @@ class SessionContextSystemPromptFragmentResponse(BaseModel):
     @field_validator('source')
     def source_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['agent', 'toolkit', 'turn_injected', 'final']):
-            raise ValueError("must be one of enum values ('agent', 'toolkit', 'turn_injected', 'final')")
+        if value not in set(['agent', 'toolkit', 'developer_prompt', 'turn_injected', 'final']):
+            raise ValueError("must be one of enum values ('agent', 'toolkit', 'developer_prompt', 'turn_injected', 'final')")
         return value
 
     model_config = ConfigDict(

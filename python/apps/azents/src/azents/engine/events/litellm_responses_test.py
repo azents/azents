@@ -149,6 +149,112 @@ class TestLiteLLMResponsesLowerer:
             {"type": "message"},
         ]
 
+    def test_developer_prompts_precede_transcript_in_declared_order(self) -> None:
+        """Standalone developer inputs remain separate from base instructions."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        transcript = [
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(content="hello"),
+            )
+        ]
+
+        request = lowerer.lower(
+            transcript,
+            model="gpt-5.1",
+            system_prompt="Base instructions.",
+            developer_prompts=["root usage", "explicit request only"],
+        )
+
+        assert request.kwargs["instructions"] == "Base instructions."
+        assert request.input == [
+            {"role": "developer", "content": "root usage"},
+            {"role": "developer", "content": "explicit request only"},
+            {"role": "user", "content": "hello"},
+        ]
+
+    def test_xai_system_input_precedes_developer_prompts(self) -> None:
+        """xAI keeps its system input before standalone developer inputs."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="xai",
+            model="grok-4",
+            provider_id=LLMProvider.XAI,
+        )
+
+        request = lowerer.lower(
+            [],
+            model="grok-4",
+            system_prompt="Base instructions.",
+            developer_prompts=["root usage", "explicit request only"],
+        )
+
+        assert "instructions" not in request.kwargs
+        assert request.input == [
+            {"role": "system", "content": "Base instructions."},
+            {"role": "developer", "content": "root usage"},
+            {"role": "developer", "content": "explicit request only"},
+        ]
+
+    def test_anthropic_preserves_developer_prompts_with_cache_hints(self) -> None:
+        """Anthropic cache hints preserve developer roles, text, and order."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="anthropic",
+            model="claude-sonnet-4-5",
+            provider_id=LLMProvider.ANTHROPIC,
+        )
+
+        request = lowerer.lower(
+            [],
+            model="claude-sonnet-4-5",
+            system_prompt="Base instructions.",
+            developer_prompts=["role usage", "delegation mode"],
+        )
+
+        assert request.kwargs["instructions"] == "Base instructions."
+        assert request.input == [
+            {
+                "role": "developer",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "role usage",
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+            },
+            {
+                "role": "developer",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "delegation mode",
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+            },
+        ]
+
+    def test_gemini_preserves_developer_prompts(self) -> None:
+        """Gemini receives standalone developer inputs unchanged."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="gemini",
+            model="gemini-2.5-pro",
+            provider_id=LLMProvider.GOOGLE_GEMINI,
+        )
+
+        request = lowerer.lower(
+            [],
+            model="gemini-2.5-pro",
+            system_prompt="Base instructions.",
+            developer_prompts=["role usage", "delegation mode"],
+        )
+
+        assert request.kwargs["instructions"] == "Base instructions."
+        assert request.input == [
+            {"role": "developer", "content": "role usage"},
+            {"role": "developer", "content": "delegation mode"},
+        ]
+
     def test_skill_loaded_event_injects_skill_body_before_user_message(self) -> None:
         """Skill loaded events lower to model-visible Skill body injection."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")

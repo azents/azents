@@ -42,8 +42,9 @@ class ToolkitState:
 
     Prompt content is intentionally excluded from this state machine. Static
     prompt content is collected through ``Toolkit.get_static_prompt()`` once at
-    run start, and dynamic prompt content is collected through
-    ``Toolkit.get_dynamic_prompt()`` on the dynamic prompt path.
+    run start, dynamic prompt content is collected through
+    ``Toolkit.get_dynamic_prompt()``, and standalone developer inputs are
+    collected through ``Toolkit.get_developer_prompts()``.
     """
 
     status: ToolkitStatus
@@ -247,6 +248,16 @@ class Toolkit(ABC, Generic[ConfigT]):
         """
         del context
         return ""
+
+    async def get_developer_prompts(self, context: TurnContext) -> list[str]:
+        """Return ordered standalone developer inputs for the current turn.
+
+        Developer prompts remain separate from the assembled system prompt and
+        are lowered before conversation input. Most toolkits return no developer
+        prompts.
+        """
+        del context
+        return []
 
     async def __aenter__(self) -> Toolkit[ConfigT]:
         """Start background work when session starts, optional."""
