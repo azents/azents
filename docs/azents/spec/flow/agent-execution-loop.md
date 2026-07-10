@@ -38,7 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-10
-spec_version: 67
+spec_version: 68
 ---
 
 # Agent Execution Loop
@@ -210,6 +210,8 @@ transport credential kwargs, generation kwargs, client function tool passthrough
 tool lowering. Agent `model_parameters.builtin_tools` stores semantic ids such as `web_search`; the
 lowerer maps them to provider/model-developer native shapes and fails before provider call if the
 selected model capability does not support the requested hosted tool.
+
+Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
 
 Generated image/file output and provider-hosted tool output from the model are normalized as
 provider tool call/result events with attachments or text payloads. These provider tool events do not
@@ -502,6 +504,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-10** — v68. Documented shared xAI API-key/OAuth transport lowering while preserving OAuth-only credential refresh.
 - **2026-07-09** — v66. Documented forked-history `<system-reminder>` boundaries, explicit agent-message envelopes, and Codex v2 agent targeting and list visibility.
 - **2026-07-09** — v65. Clarified that selectable model labels are resolved before run start and runtime receives effective model snapshots only.
 - **2026-07-09** — v64. Documented `spawn_agent` active subagent and depth limit enforcement before child-session side effects.

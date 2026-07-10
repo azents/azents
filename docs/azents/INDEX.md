@@ -15,11 +15,11 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-09 | 41 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-10 | 42 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-09 | 91 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-09 | 4 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-10 | 2 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-10 | 3 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-10 | 52 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-08 | 6 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-08 | 36 |
@@ -30,7 +30,7 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-10 | 67 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-10 | 68 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-10 | 13 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
@@ -43,9 +43,10 @@ _8 documents_
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-08 | 14 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-06 | 12 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-08 | 6 |
-| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 2 |
+| [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |
+| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 3 |
 
-_14 documents_
+_15 documents_
 
 ## Architecture Decision Records (ADR)
 
@@ -187,4 +188,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 368
+- Total documents: 369

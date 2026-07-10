@@ -19,7 +19,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-07-10
-spec_version: 2
+spec_version: 3
 ---
 
 # Model Catalog Domain Spec
@@ -32,7 +32,7 @@ The model catalog stores projected model choices for Agent and Workspace model s
 
 Catalogs have two ownership scopes.
 
-- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, ChatGPT OAuth, xAI OAuth, Anthropic, and Google Gemini using the active lowerer target projection source.
+- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, ChatGPT OAuth, xAI API key, xAI OAuth, Anthropic, and Google Gemini using the active lowerer target projection source.
 - Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock and Google Vertex AI.
 
 A public model picker starts from an enabled LLM provider integration. Reads first try the integration catalog. If an integration catalog does not exist, the read path falls back to the provider system catalog.
@@ -91,7 +91,7 @@ Starting sync while the latest attempt for the catalog is still running returns 
 
 The deterministic E2E fixture integration can sync a deterministic test catalog for stable product tests. This fixture support is not a production provider behavior.
 
-System catalog sync is not user-triggered from the public picker. It is invoked by periodic execution infrastructure and can be operated separately from normal user reads. Admin model catalog operations can list system catalog states, refresh all supported system catalogs, or refresh one supported provider catalog.
+System catalog sync is not user-triggered from the public picker. It is invoked by periodic execution infrastructure and can be operated separately from normal user reads. Admin model catalog operations can list system catalog states, refresh all supported system catalogs, or refresh one supported provider catalog, including the stable `xai` catalog.
 
 ## Submit normalization
 
@@ -117,9 +117,10 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-10 | 3 | Added the separate xAI API-key system catalog projected from the shared LiteLLM xAI family |
 | 2026-07-09 | 2 | Documented selectable model option submit normalization through stored catalog projection |
 | 2026-06-21 | 1 | Initial model catalog domain spec |
 
 ## Current implementation notes
 
-The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use LiteLLM projection source data for the active lowerer target. xAI OAuth system catalog entries are projected from LiteLLM provider family `xai`; provider-facing identifiers remove the `xai/` prefix, and runtime invocation reconstructs the LiteLLM `xai/` route prefix.
+The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use LiteLLM projection source data for the active lowerer target. The separate `xai` and `xai_oauth` system catalogs are both projected from LiteLLM provider family `xai`; provider-facing identifiers remove the `xai/` prefix, and runtime invocation reconstructs the LiteLLM `xai/` route prefix.
