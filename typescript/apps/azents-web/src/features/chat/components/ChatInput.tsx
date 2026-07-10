@@ -48,6 +48,7 @@ import type {
 } from "@azents/public-client";
 
 const DRAFT_STORAGE_KEY_PREFIX = "azents.chat.inputDraft";
+const ALL_REASONING_EFFORTS: ModelReasoningEffort[] = ["low", "medium", "high"];
 
 function getDraftStorageKey(
   agentId: string | null,
@@ -284,10 +285,14 @@ function effortLevelsForTarget(
   options: AgentResponse["selectable_model_options"],
   targetLabel: string,
 ): ModelReasoningEffort[] {
-  return (
-    options.find((option) => option.label === targetLabel)?.model_selection
-      .normalized_capabilities.reasoning?.effort_levels ?? []
-  );
+  const reasoning = options.find((option) => option.label === targetLabel)
+    ?.model_selection.normalized_capabilities.reasoning;
+  if (!reasoning?.supported) {
+    return [];
+  }
+  return reasoning.effort_levels?.length
+    ? reasoning.effort_levels
+    : ALL_REASONING_EFFORTS;
 }
 
 function normalizeProfileForOptions(

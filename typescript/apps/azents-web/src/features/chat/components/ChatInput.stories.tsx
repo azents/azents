@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
@@ -26,6 +27,16 @@ const reasoningModel: AgentModelSelection = {
   model_snapshot: {},
   source_metadata: null,
   last_refreshed_at: "2026-05-14T00:00:00Z",
+};
+
+const unrestrictedReasoningModel: AgentModelSelection = {
+  ...reasoningModel,
+  model_identifier: "gpt-5.6",
+  model_display_name: "GPT 5.6",
+  normalized_capabilities: {
+    ...reasoningModel.normalized_capabilities,
+    reasoning: { supported: true, effort_levels: [] },
+  },
 };
 
 const noEffortModel: AgentModelSelection = {
@@ -196,6 +207,29 @@ export const Mobile = {
       </StorybookCanvas>
     ),
   ],
+} satisfies Story;
+
+export const MobileUnrestrictedReasoningEffort = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-mobile-unrestricted-reasoning",
+    isMobile: true,
+    selectableModelOptions: [
+      { label: "Default", model_selection: unrestrictedReasoningModel },
+    ],
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await expect(page.getByLabelText("Reasoning effort")).toBeVisible();
+  },
 } satisfies Story;
 
 export const EditingMessage = {
