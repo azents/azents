@@ -1900,7 +1900,9 @@ export function useChatSessionContainer(
         const actionExecution = actionExecutionResultFromEvent(responseEvent);
         setHistoryMessages((prev) =>
           mapEvents([responseEvent], {
-            initialMessages: prev,
+            initialMessages: prev.filter(
+              (message) => message.metadata?.event_id !== responseEvent.id,
+            ),
             renderIncompleteToolCalls: true,
           }),
         );

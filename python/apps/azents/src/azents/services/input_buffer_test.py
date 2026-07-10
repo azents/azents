@@ -23,7 +23,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.engine.events.action_messages import SkillAction
+from azents.engine.events.action_messages import ActionMessagePayload, SkillAction
 from azents.engine.events.types import (
     AgentMessagePayload,
     FileOutputPart,
@@ -182,8 +182,8 @@ async def _create_action_buffer(
             InputBufferCreate(
                 session_id=session_id,
                 kind=InputBufferKind.ACTION_MESSAGE,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
+                requested_model_target_label="Fast",
+                requested_reasoning_effort=ModelReasoningEffort.HIGH,
                 actor_user_id=user_id,
                 content=content,
                 idempotency_key=None,
@@ -819,7 +819,10 @@ class TestInputBufferService:
         result = await service.flush_session_input_buffers(
             session_id=session_id,
             model="gpt-5.4",
-            required_inference_profile=None,
+            required_inference_profile=RequestedInferenceProfile(
+                model_target_label="Fast",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
             active_run_id=None,
         )
 
@@ -829,6 +832,16 @@ class TestInputBufferService:
             EventKind.SKILL_LOADED,
             EventKind.USER_MESSAGE,
         ]
+        action_event = result.events[0]
+        assert isinstance(action_event.payload, ActionMessagePayload)
+        assert action_event.payload.requested_inference_profile is not None
+        assert (
+            action_event.payload.requested_inference_profile.model_target_label
+            == "Fast"
+        )
+        assert action_event.payload.requested_inference_profile.reasoning_effort == (
+            ModelReasoningEffort.HIGH
+        )
         skill_event = result.events[1]
         assert skill_event.external_id == f"{buffer_id}:skill_loaded"
         assert isinstance(skill_event.payload, SkillLoadedPayload)

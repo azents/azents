@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 from azents.core.config import Config
 from azents.core.deps import get_appctx
 from azents.core.enums import EventKind, InputBufferKind
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import ActionMessagePayload, ChatAction
 from azents.engine.events.types import (
@@ -186,6 +187,18 @@ def _is_live_projection(event: Event, projection: str) -> bool:
     )
 
 
+def _input_buffer_requested_profile(
+    input_buffer: InputBuffer,
+) -> RequestedInferenceProfile | None:
+    """Build the requested profile exposed by a pending input buffer."""
+    if input_buffer.requested_model_target_label is None:
+        return None
+    return RequestedInferenceProfile(
+        model_target_label=input_buffer.requested_model_target_label,
+        reasoning_effort=input_buffer.requested_reasoning_effort,
+    )
+
+
 def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
     """Convert InputBuffer to non-durable live event projection."""
     if input_buffer.kind == InputBufferKind.ACTION_MESSAGE:
@@ -194,6 +207,7 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
         payload = ActionMessagePayload(
             action=_chat_action_adapter.validate_python(input_buffer.action),
             message=input_buffer.content,
+            requested_inference_profile=_input_buffer_requested_profile(input_buffer),
         )
     elif input_buffer.kind == InputBufferKind.AGENT_MESSAGE:
         payload = _agent_message_adapter.validate_python(
@@ -226,6 +240,7 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
             content=content,
             attachments=[],
             metadata=metadata,
+            requested_inference_profile=_input_buffer_requested_profile(input_buffer),
         )
     return Event(
         id=input_buffer.id,

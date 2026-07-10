@@ -6,8 +6,8 @@ Agent-owned target label and optional explicit reasoning effort.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**model_target_label** | **str** | Agent-owned selectable model target label |
-**reasoning_effort** | [**ModelReasoningEffort**](ModelReasoningEffort.md) |  |
+**model_target_label** | **str** | Agent-owned selectable model target label | 
+**reasoning_effort** | [**ModelReasoningEffort**](ModelReasoningEffort.md) |  | 
 
 ## Example
 
@@ -27,3 +27,5 @@ requested_inference_profile_dict = requested_inference_profile_instance.to_dict(
 requested_inference_profile_from_dict = RequestedInferenceProfile.from_dict(requested_inference_profile_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

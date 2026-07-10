@@ -151,6 +151,9 @@ azentspublicclient/docs/HealthStatus.md
 azentspublicclient/docs/HealthV1Api.md
 azentspublicclient/docs/ImageFile.md
 azentspublicclient/docs/ImageThumbnails.md
+azentspublicclient/docs/InferenceProfileFailureCode.md
+azentspublicclient/docs/InferenceProfileSource.md
+azentspublicclient/docs/InferenceRunSummary.md
 azentspublicclient/docs/InputActionAttachmentPolicyResponse.md
 azentspublicclient/docs/InputActionAvailabilityHintResponse.md
 azentspublicclient/docs/InputActionDefinitionResponse.md
@@ -229,6 +232,7 @@ azentspublicclient/docs/RequestSignupEmailRequest.md
 azentspublicclient/docs/RequestSignupEmailResponse.md
 azentspublicclient/docs/RequestedInferenceProfile.md
 azentspublicclient/docs/ResetAgentRuntimeRequest.md
+azentspublicclient/docs/ResolvedInferenceProfileSummary.md
 azentspublicclient/docs/ResponseChatV1ReadAgentWorkspacePath.md
 azentspublicclient/docs/RuntimeDesiredState.md
 azentspublicclient/docs/RuntimeLifecycleCommandType.md
@@ -430,6 +434,9 @@ azentspublicclient/models/health_status.py
 azentspublicclient/models/http_validation_error.py
 azentspublicclient/models/image_file.py
 azentspublicclient/models/image_thumbnails.py
+azentspublicclient/models/inference_profile_failure_code.py
+azentspublicclient/models/inference_profile_source.py
+azentspublicclient/models/inference_run_summary.py
 azentspublicclient/models/input_action_attachment_policy_response.py
 azentspublicclient/models/input_action_availability_hint_response.py
 azentspublicclient/models/input_action_definition_response.py
@@ -505,6 +512,7 @@ azentspublicclient/models/request_signup_email_request.py
 azentspublicclient/models/request_signup_email_response.py
 azentspublicclient/models/requested_inference_profile.py
 azentspublicclient/models/reset_agent_runtime_request.py
+azentspublicclient/models/resolved_inference_profile_summary.py
 azentspublicclient/models/response_chat_v1_read_agent_workspace_path.py
 azentspublicclient/models/runtime_desired_state.py
 azentspublicclient/models/runtime_lifecycle_command_type.py
@@ -704,6 +712,9 @@ azentspublicclient/test/test_health_v1_api.py
 azentspublicclient/test/test_http_validation_error.py
 azentspublicclient/test/test_image_file.py
 azentspublicclient/test/test_image_thumbnails.py
+azentspublicclient/test/test_inference_profile_failure_code.py
+azentspublicclient/test/test_inference_profile_source.py
+azentspublicclient/test/test_inference_run_summary.py
 azentspublicclient/test/test_input_action_attachment_policy_response.py
 azentspublicclient/test/test_input_action_availability_hint_response.py
 azentspublicclient/test/test_input_action_definition_response.py
@@ -782,6 +793,7 @@ azentspublicclient/test/test_request_signup_email_request.py
 azentspublicclient/test/test_request_signup_email_response.py
 azentspublicclient/test/test_requested_inference_profile.py
 azentspublicclient/test/test_reset_agent_runtime_request.py
+azentspublicclient/test/test_resolved_inference_profile_summary.py
 azentspublicclient/test/test_response_chat_v1_read_agent_workspace_path.py
 azentspublicclient/test/test_runtime_desired_state.py
 azentspublicclient/test/test_runtime_lifecycle_command_type.py

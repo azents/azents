@@ -570,6 +570,10 @@ class TestEventExecutionRepositories:
             rdb_session,
             event_id=event.id,
         )
+        summaries = await repo.list_latest_inference_run_summaries_by_event_ids(
+            rdb_session,
+            event_ids=[event.id, second_event.id, event.id],
+        )
 
         assert activated.status == AgentRunStatus.RUNNING
         assert activated.started_at == resolved_at
@@ -581,6 +585,8 @@ class TestEventExecutionRepositories:
         assert summary.run_id == pending.id
         assert summary.resolved_profile is not None
         assert summary.resolved_profile.model_identifier == "resolved-model"
+        assert summaries[event.id].run_id == pending.id
+        assert summaries[second_event.id].run_id == pending.id
         assert "integration" not in summary.model_dump(mode="json")
 
     async def test_input_event_association_rejects_another_session(

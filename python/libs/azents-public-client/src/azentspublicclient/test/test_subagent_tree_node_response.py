@@ -64,7 +64,7 @@ class TestSubagentTreeNodeResponse(unittest.TestCase):
                         unread_result = True, 
                         latest_run_id = '', 
                         latest_run_index = 56, 
-                        latest_run_status = 'pending',
+                        latest_run_status = 'pending', 
                         terminal_result_event_id = '', 
                         terminal_result_message = '', 
                         children = [

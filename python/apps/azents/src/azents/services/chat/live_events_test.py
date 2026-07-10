@@ -7,7 +7,9 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
-from azents.core.enums import EventKind
+from azents.core.enums import EventKind, InputBufferKind
+from azents.core.llm_catalog import ModelReasoningEffort
+from azents.engine.events.action_messages import ActionMessagePayload, SkillAction
 from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
@@ -17,8 +19,14 @@ from azents.engine.events.types import (
     NativeArtifact,
     ReasoningPayload,
 )
+from azents.repos.input_buffer.data import InputBuffer
 
-from .live_events import InMemoryLiveEventStore, LiveEventStore, RedisLiveEventStore
+from .live_events import (
+    InMemoryLiveEventStore,
+    LiveEventStore,
+    RedisLiveEventStore,
+    input_buffer_to_live_event,
+)
 
 
 def _native_artifact() -> NativeArtifact:
@@ -31,6 +39,36 @@ def _native_artifact() -> NativeArtifact:
         model="test",
         schema_version="1",
         item={},
+    )
+
+
+def test_action_input_buffer_live_event_preserves_requested_profile() -> None:
+    """Pending action projection exposes its requested inference profile."""
+    event = input_buffer_to_live_event(
+        InputBuffer(
+            id="0123456789abcdef0123456789abcdef",
+            session_id="1123456789abcdef0123456789abcdef",
+            kind=InputBufferKind.ACTION_MESSAGE,
+            requested_model_target_label="reasoning",
+            requested_reasoning_effort=ModelReasoningEffort.HIGH,
+            actor_user_id="user-1",
+            content="Review this PR",
+            idempotency_key=None,
+            metadata={"source": "chat"},
+            action=SkillAction(skill_path="/skills/review/SKILL.md").model_dump(
+                mode="json"
+            ),
+            attachments=[],
+            file_parts=[],
+            created_at=datetime.datetime(2026, 6, 4, tzinfo=datetime.UTC),
+        )
+    )
+
+    assert isinstance(event.payload, ActionMessagePayload)
+    assert event.payload.requested_inference_profile is not None
+    assert event.payload.requested_inference_profile.model_target_label == "reasoning"
+    assert event.payload.requested_inference_profile.reasoning_effort == (
+        ModelReasoningEffort.HIGH
     )
 
 

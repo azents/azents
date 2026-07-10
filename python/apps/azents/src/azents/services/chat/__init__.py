@@ -943,9 +943,17 @@ class ChatSessionService:
                 before=before,
                 after=after,
             )
+            run_repo = self.agent_run_repository
+            inference_run_summaries = (
+                await run_repo.list_latest_inference_run_summaries_by_event_ids(
+                    session,
+                    event_ids=[event.id for event in items],
+                )
+            )
             return Success(
                 PaginatedEvents(
                     items=items,
+                    inference_run_summaries=inference_run_summaries,
                     has_more=has_more,
                     has_newer=has_newer,
                 )
@@ -1016,10 +1024,21 @@ class ChatSessionService:
                 for projection in projections
                 if projection.execution.status not in terminal_action_statuses
             ]
+            run_repo = self.agent_run_repository
+            inference_run_summaries = (
+                await run_repo.list_latest_inference_run_summaries_by_event_ids(
+                    session,
+                    event_ids=[
+                        event.id
+                        for event in [*partial_history_events, *input_buffer_events]
+                    ],
+                )
+            )
             return Success(
                 ChatLiveStateSnapshot(
                     partial_history_events=partial_history_events,
                     input_buffer_events=input_buffer_events,
+                    inference_run_summaries=inference_run_summaries,
                     run=None
                     if run is None
                     else ChatLiveRunState(

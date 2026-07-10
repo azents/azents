@@ -19,6 +19,7 @@ from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.inference_profile import (
+    InferenceProfileFailureCode,
     InferenceProfileSource,
     RequestedInferenceProfile,
 )
@@ -143,6 +144,9 @@ class _SessionLifecycle:
         self.activities: list[tuple[str, str, object]] = []
         self.cleared_session_ids: list[str] = []
         self.terminal_runs: list[tuple[str, AgentRunStatus]] = []
+        self.profile_resolution_failures: list[
+            tuple[str, InferenceProfileFailureCode, str]
+        ] = []
         self.idle_session_ids: list[str] = []
         self.wake_ups: list[SessionWakeUp] = []
         self.pending_run_create_calls = 0
@@ -175,6 +179,18 @@ class _SessionLifecycle:
     async def send_session_wake_up(self, message: SessionWakeUp) -> None:
         """Record follow-up wake-ups."""
         self.wake_ups.append(message)
+
+    async def fail_agent_run_profile_resolution_if_running(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        failure_code: InferenceProfileFailureCode,
+        failure_message: str,
+    ) -> None:
+        """Record a recovered run profile-resolution failure."""
+        del session_id
+        self.profile_resolution_failures.append((run_id, failure_code, failure_message))
 
     async def mark_agent_run_terminal_if_running(
         self,
@@ -257,6 +273,15 @@ class _SessionLifecycle:
     ) -> None:
         """Accept active-run input association."""
         del session_id, kwargs
+
+    async def list_inference_run_event_projections(
+        self,
+        *,
+        run_id: str,
+    ) -> list[object]:
+        """Return no durable projections for lightweight executor tests."""
+        del run_id
+        return []
 
 
 class _AgentRepository:
@@ -849,6 +874,71 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         reasoning_effort=ModelReasoningEffort.HIGH,
     )
     assert poll_calls[0]["active_run_id"] == recoverable.id
+
+
+@pytest.mark.asyncio
+async def test_execute_persists_recovered_profile_resolution_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recovered run keeps safe resolution failure details in provenance."""
+    recoverable = _PendingRun(
+        status=AgentRunStatus.RUNNING,
+        resolved_model_selection=make_test_model_selection(),
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+    )
+    lifecycle = _SessionLifecycle(recoverable_run=recoverable)
+    executor = _executor(session_lifecycle=lifecycle)
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=False,
+        )
+
+    async def fail_recovered_resolution(
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        del args, kwargs
+        return Failure(AgentNotFound(agent_id="agent-001"))
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        fail_recovered_resolution,
+    )
+
+    dispatched: list[PublishedEvent] = []
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id
+        dispatched.append(event)
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert lifecycle.profile_resolution_failures == [
+        (
+            recoverable.id,
+            InferenceProfileFailureCode.MODEL_TARGET_RESOLUTION_FAILED,
+            "The selected model could not be prepared for this run.",
+        )
+    ]
+    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert len(dispatched) == 2
+    assert isinstance(dispatched[0], Event)
+    assert isinstance(dispatched[1], RunComplete)
 
 
 @pytest.mark.asyncio

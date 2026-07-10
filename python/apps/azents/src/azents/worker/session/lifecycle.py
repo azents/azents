@@ -16,19 +16,28 @@ from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import (
     InferenceProfileFailureCode,
     InferenceProfileSource,
+    InferenceRunSummary,
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.engine.events.types import ActiveToolCall, AgentRunState
+from azents.engine.events.types import ActiveToolCall, AgentRunState, Event
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.worker.deps import get_worker_broker
 
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
+
+
+@dataclasses.dataclass(frozen=True)
+class InferenceRunEventProjection:
+    """Durable input event paired with its latest safe run summary."""
+
+    event: Event
+    inference_run_summary: InferenceRunSummary
 
 
 @dataclasses.dataclass(frozen=True)
@@ -43,6 +52,9 @@ class SessionLifecycleService:
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    event_transcript_repository: Annotated[
+        EventTranscriptRepository, Depends(EventTranscriptRepository)
+    ]
 
     async def release_session_lock(self, session_id: str) -> None:
         """Release session lock."""
@@ -129,6 +141,38 @@ class SessionLifecycleService:
             default=True,
         )
         return bool(active)
+
+    async def list_inference_run_event_projections(
+        self,
+        *,
+        run_id: str,
+    ) -> list[InferenceRunEventProjection]:
+        """Load associated input events with their latest safe run summaries."""
+        async with self.session_manager() as db_session:
+            event_ids = await self.agent_run_repository.list_input_event_ids(
+                db_session,
+                run_id=run_id,
+            )
+            run_repo = self.agent_run_repository
+            summaries = await run_repo.list_latest_inference_run_summaries_by_event_ids(
+                db_session,
+                event_ids=event_ids,
+            )
+            projections: list[InferenceRunEventProjection] = []
+            for event_id in event_ids:
+                event = await self.event_transcript_repository.get_by_id(
+                    db_session,
+                    event_id=event_id,
+                )
+                summary = summaries.get(event_id)
+                if event is not None and summary is not None:
+                    projections.append(
+                        InferenceRunEventProjection(
+                            event=event,
+                            inference_run_summary=summary,
+                        )
+                    )
+            return projections
 
     async def heartbeat_session(self, session_id: str) -> None:
         """Refresh DB heartbeat and Redis owner heartbeat of RUNNING session."""
@@ -319,6 +363,27 @@ class SessionLifecycleService:
                 ended_at=datetime.datetime.now(datetime.UTC),
             ),
             error_log="Failed to mark session agent runs terminal",
+            session_id=session_id,
+        )
+
+    async def fail_agent_run_profile_resolution_if_running(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        failure_code: InferenceProfileFailureCode,
+        failure_message: str,
+    ) -> None:
+        """Fail a running AgentRun with safe profile-resolution details."""
+        await self.run_short_db(
+            lambda db: self.agent_run_repository.fail_profile_resolution_if_running(
+                db,
+                run_id=run_id,
+                failure_code=failure_code,
+                failure_message=failure_message,
+                ended_at=datetime.datetime.now(datetime.UTC),
+            ),
+            error_log="Failed to mark agent run profile resolution failed",
             session_id=session_id,
         )
 

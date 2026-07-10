@@ -96,3 +96,6 @@ class InferenceRunSummary(BaseModel):
     failure_code: InferenceProfileFailureCode | None = Field(
         description="Safe profile resolution failure code",
     )
+    failure_message: str | None = Field(
+        description="User-safe profile resolution failure message",
+    )

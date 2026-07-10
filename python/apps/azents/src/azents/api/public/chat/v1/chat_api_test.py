@@ -62,7 +62,12 @@ from azents.core.enums import (
     EventKind,
     InputBufferKind,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    InferenceProfileSource,
+    InferenceRunSummary,
+    RequestedInferenceProfile,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
     CommandAction,
     CreateGitWorktreeAction,
@@ -383,6 +388,7 @@ class _RestWriteChatService:
             ChatLiveStateSnapshot(
                 partial_history_events=[],
                 input_buffer_events=[self.event],
+                inference_run_summaries={},
                 run=None,
             )
         )
@@ -704,6 +710,22 @@ class _EventService:
             schema_version="1",
             created_at=datetime.datetime(2026, 6, 4, tzinfo=datetime.UTC),
         )
+        self.inference_run_summary = InferenceRunSummary(
+            run_id="2123456789abcdef0123456789abcdef",
+            run_index=2,
+            status=AgentRunStatus.RUNNING,
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="reasoning",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            source=InferenceProfileSource.EXPLICIT_INPUT,
+            resolved_profile=None,
+            resolved_reasoning_effort=ModelReasoningEffort.HIGH,
+            effective_context_window_tokens=128_000,
+            effective_auto_compaction_threshold_tokens=115_200,
+            failure_code=None,
+            failure_message=None,
+        )
 
     async def get_session(
         self,
@@ -749,6 +771,9 @@ class _EventService:
         return Success(
             PaginatedEvents(
                 items=[self.event],
+                inference_run_summaries={
+                    self.event.id: self.inference_run_summary,
+                },
                 has_more=False,
                 has_newer=False,
             )
@@ -767,6 +792,9 @@ class _EventService:
             ChatLiveStateSnapshot(
                 partial_history_events=[self.event],
                 input_buffer_events=[],
+                inference_run_summaries={
+                    self.event.id: self.inference_run_summary,
+                },
                 run=ChatLiveRunState(
                     run_id="2123456789abcdef0123456789abcdef",
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
@@ -1403,6 +1431,22 @@ class TestEventRoutes:
                     "native_format": None,
                     "schema_version": "1",
                     "created_at": "2026-06-04T00:00:00Z",
+                    "inference_run_summary": {
+                        "run_id": "2123456789abcdef0123456789abcdef",
+                        "run_index": 2,
+                        "status": "running",
+                        "requested_profile": {
+                            "model_target_label": "reasoning",
+                            "reasoning_effort": "high",
+                        },
+                        "source": "explicit_input",
+                        "resolved_profile": None,
+                        "resolved_reasoning_effort": "high",
+                        "effective_context_window_tokens": 128000,
+                        "effective_auto_compaction_threshold_tokens": 115200,
+                        "failure_code": None,
+                        "failure_message": None,
+                    },
                 }
             ],
             "has_more": False,

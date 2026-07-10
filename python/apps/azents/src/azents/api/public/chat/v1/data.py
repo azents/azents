@@ -16,7 +16,10 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    InferenceRunSummary,
+    RequestedInferenceProfile,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
     ChatAction,
@@ -1704,9 +1707,19 @@ class ChatEventResponse(BaseModel):
     native_format: str | None = Field(default=None, description="Native format")
     schema_version: str = Field(description="Event schema version")
     created_at: datetime.datetime = Field(description="Created at")
+    inference_run_summary: InferenceRunSummary | None = Field(
+        default=None,
+        description="Latest associated inference run provenance",
+        exclude_if=lambda value: value is None,
+    )
 
     @classmethod
-    def from_domain(cls, event: Event) -> Self:
+    def from_domain(
+        cls,
+        event: Event,
+        *,
+        inference_run_summary: InferenceRunSummary | None = None,
+    ) -> Self:
         """Convert from Event domain model."""
         return cls(
             id=event.id,
@@ -1721,6 +1734,7 @@ class ChatEventResponse(BaseModel):
             native_format=event.native_format,
             schema_version=event.schema_version,
             created_at=event.created_at,
+            inference_run_summary=inference_run_summary,
         )
 
 

@@ -48,7 +48,8 @@ class TestPartialHistoryResponse(unittest.TestCase):
                         model = '', 
                         native_format = '', 
                         schema_version = '', 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        inference_run_summary = { }, )
                     ]
             )
         else:
@@ -66,7 +67,8 @@ class TestPartialHistoryResponse(unittest.TestCase):
                         model = '', 
                         native_format = '', 
                         schema_version = '', 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        inference_run_summary = { }, )
                     ],
         )
         """

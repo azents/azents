@@ -54,7 +54,8 @@ class TestChatWriteResponse(unittest.TestCase):
                             model = '', 
                             native_format = '', 
                             schema_version = '', 
-                            created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                            created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                            inference_run_summary = { }, )
                         ], 
                     input_buffer_events = [
                         azentspublicclient.models.chat_event_response.ChatEventResponse(
@@ -74,7 +75,7 @@ class TestChatWriteResponse(unittest.TestCase):
                     run = azentspublicclient.models.chat_live_run_state_response.ChatLiveRunStateResponse(
                         run_id = '', 
                         phase = 'idle', 
-                        status = 'pending',
+                        status = 'pending', 
                         retry = azentspublicclient.models.chat_live_run_retry_state_response.ChatLiveRunRetryStateResponse(
                             status = '', 
                             last_error_message = '', 
@@ -158,7 +159,8 @@ class TestChatWriteResponse(unittest.TestCase):
                             model = '', 
                             native_format = '', 
                             schema_version = '', 
-                            created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                            created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                            inference_run_summary = { }, )
                         ], 
                     input_buffer_events = [
                         azentspublicclient.models.chat_event_response.ChatEventResponse(
@@ -178,7 +180,7 @@ class TestChatWriteResponse(unittest.TestCase):
                     run = azentspublicclient.models.chat_live_run_state_response.ChatLiveRunStateResponse(
                         run_id = '', 
                         phase = 'idle', 
-                        status = 'pending',
+                        status = 'pending', 
                         retry = azentspublicclient.models.chat_live_run_retry_state_response.ChatLiveRunRetryStateResponse(
                             status = '', 
                             last_error_message = '', 

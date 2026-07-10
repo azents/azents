@@ -21,6 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.event_kind import EventKind
+from azentspublicclient.models.inference_run_summary import InferenceRunSummary
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -40,8 +41,9 @@ class ChatEventResponse(BaseModel):
     native_format: Optional[StrictStr] = None
     schema_version: StrictStr = Field(description="Event schema version")
     created_at: datetime = Field(description="Created at")
+    inference_run_summary: Optional[InferenceRunSummary] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "session_id", "kind", "payload", "model_order", "external_id", "adapter", "provider", "model", "native_format", "schema_version", "created_at"]
+    __properties: ClassVar[List[str]] = ["id", "session_id", "kind", "payload", "model_order", "external_id", "adapter", "provider", "model", "native_format", "schema_version", "created_at", "inference_run_summary"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -84,6 +86,9 @@ class ChatEventResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of inference_run_summary
+        if self.inference_run_summary:
+            _dict['inference_run_summary'] = self.inference_run_summary.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -114,6 +119,11 @@ class ChatEventResponse(BaseModel):
         if self.native_format is None and "native_format" in self.model_fields_set:
             _dict['native_format'] = None
 
+        # set to None if inference_run_summary (nullable) is None
+        # and model_fields_set contains the field
+        if self.inference_run_summary is None and "inference_run_summary" in self.model_fields_set:
+            _dict['inference_run_summary'] = None
+
         return _dict
 
     @classmethod
@@ -137,7 +147,8 @@ class ChatEventResponse(BaseModel):
             "model": obj.get("model"),
             "native_format": obj.get("native_format"),
             "schema_version": obj.get("schema_version"),
-            "created_at": obj.get("created_at")
+            "created_at": obj.get("created_at"),
+            "inference_run_summary": InferenceRunSummary.from_dict(obj["inference_run_summary"]) if obj.get("inference_run_summary") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

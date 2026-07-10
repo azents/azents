@@ -10999,6 +10999,17 @@
             "format": "date-time",
             "title": "Created At",
             "description": "Created at"
+          },
+          "inference_run_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceRunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest associated inference run provenance"
           }
         },
         "type": "object",
@@ -12560,6 +12571,157 @@
         "type": "object",
         "title": "ImageThumbnails",
         "description": "3-tier thumbnails for API response."
+      },
+      "InferenceProfileFailureCode": {
+        "type": "string",
+        "enum": [
+          "model_target_not_found",
+          "model_target_resolution_failed",
+          "reasoning_effort_unsupported"
+        ],
+        "title": "InferenceProfileFailureCode",
+        "description": "User-safe inference profile resolution failure code."
+      },
+      "InferenceProfileSource": {
+        "type": "string",
+        "enum": [
+          "explicit_input",
+          "session_last_used",
+          "agent_default",
+          "parent_run",
+          "retry_original"
+        ],
+        "title": "InferenceProfileSource",
+        "description": "Source of requested inference intent for an AgentRun."
+      },
+      "InferenceRunSummary": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id",
+            "description": "Associated AgentRun ID"
+          },
+          "run_index": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Run Index",
+            "description": "Session-local AgentRun index"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentRunStatus",
+            "description": "Latest associated run status"
+          },
+          "requested_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequestedInferenceProfile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested inference intent when available"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceProfileSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested inference profile source when available"
+          },
+          "resolved_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolvedInferenceProfileSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Safe resolved model summary when resolution succeeded"
+          },
+          "resolved_reasoning_effort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Effective explicit effort, or null for model Default"
+          },
+          "effective_context_window_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Context Window Tokens",
+            "description": "Context window limit fixed for the run"
+          },
+          "effective_auto_compaction_threshold_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Auto Compaction Threshold Tokens",
+            "description": "Auto-compaction threshold fixed for the run"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceProfileFailureCode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Safe profile resolution failure code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message",
+            "description": "User-safe profile resolution failure message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "run_id",
+          "run_index",
+          "status",
+          "requested_profile",
+          "source",
+          "resolved_profile",
+          "resolved_reasoning_effort",
+          "effective_context_window_tokens",
+          "effective_auto_compaction_threshold_tokens",
+          "failure_code",
+          "failure_message"
+        ],
+        "title": "InferenceRunSummary",
+        "description": "Compact allowlisted inference provenance for a user message."
       },
       "InputActionAttachmentPolicyResponse": {
         "properties": {
@@ -15239,6 +15401,38 @@
         ],
         "title": "ResetAgentRuntimeRequest",
         "description": "Agent Runtime reset request."
+      },
+      "ResolvedInferenceProfileSummary": {
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/LLMProvider",
+            "description": "Resolved hosting provider"
+          },
+          "model_identifier": {
+            "type": "string",
+            "title": "Model Identifier",
+            "description": "Resolved provider model identifier"
+          },
+          "model_display_name": {
+            "type": "string",
+            "title": "Model Display Name",
+            "description": "Resolved model display name"
+          },
+          "model_developer": {
+            "$ref": "#/components/schemas/LLMModelDeveloper",
+            "description": "Resolved model developer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "model_identifier",
+          "model_display_name",
+          "model_developer"
+        ],
+        "title": "ResolvedInferenceProfileSummary",
+        "description": "Allowlisted resolved model identity safe for public projection."
       },
       "RuntimeDesiredState": {
         "type": "string",

@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from azents.core.inference_profile import RequestedInferenceProfile
+
 
 class CommandAction(BaseModel):
     """Idle-only prioritized command action."""
@@ -64,3 +66,8 @@ class ActionMessagePayload(BaseModel):
 
     action: ChatAction = Field(description="Selected action")
     message: str = Field(description="User-authored action input")
+    requested_inference_profile: RequestedInferenceProfile | None = Field(
+        default=None,
+        description="Requested profile for a model-producing action",
+        exclude_if=lambda value: value is None,
+    )

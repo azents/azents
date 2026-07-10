@@ -10,7 +10,7 @@ Name | Type | Description | Notes
 **client_request_id** | **str** | Client-generated idempotency key | 
 **message** | **str** | Input message content | 
 **action** | [**ChatInputWriteRequestAction**](ChatInputWriteRequestAction.md) |  | [optional] 
-**inference_profile** | [**RequestedInferenceProfile**](RequestedInferenceProfile.md) |  |
+**inference_profile** | [**RequestedInferenceProfile**](RequestedInferenceProfile.md) |  | 
 **attachments** | **List[str]** |  | [optional] 
 
 ## Example

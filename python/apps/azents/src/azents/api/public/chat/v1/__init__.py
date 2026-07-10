@@ -498,11 +498,17 @@ async def _build_chat_write_snapshot(
     match live_result:
         case Success(live):
             partial_history_events = [
-                ChatEventResponse.from_domain(event)
+                ChatEventResponse.from_domain(
+                    event,
+                    inference_run_summary=live.inference_run_summaries.get(event.id),
+                )
                 for event in live.partial_history_events
             ]
             input_buffer_events = [
-                ChatEventResponse.from_domain(event)
+                ChatEventResponse.from_domain(
+                    event,
+                    inference_run_summary=live.inference_run_summaries.get(event.id),
+                )
                 for event in live.input_buffer_events
             ]
             return ChatWriteSnapshotResponse(
@@ -2262,7 +2268,15 @@ async def list_history_events(
                 next_cursor = value.items[0].id
                 previous_cursor = value.items[-1].id
             return ChatEventPageResponse(
-                items=[ChatEventResponse.from_domain(event) for event in value.items],
+                items=[
+                    ChatEventResponse.from_domain(
+                        event,
+                        inference_run_summary=value.inference_run_summaries.get(
+                            event.id
+                        ),
+                    )
+                    for event in value.items
+                ],
                 has_more=value.has_more,
                 has_newer=value.has_newer,
                 next_cursor=next_cursor,
@@ -2300,11 +2314,17 @@ async def list_live_events(
     match result:
         case Success(value):
             partial_history = [
-                ChatEventResponse.from_domain(event)
+                ChatEventResponse.from_domain(
+                    event,
+                    inference_run_summary=value.inference_run_summaries.get(event.id),
+                )
                 for event in value.partial_history_events
             ]
             input_buffers = [
-                ChatEventResponse.from_domain(event)
+                ChatEventResponse.from_domain(
+                    event,
+                    inference_run_summary=value.inference_run_summaries.get(event.id),
+                )
                 for event in value.input_buffer_events
             ]
             return LiveEventListResponse(

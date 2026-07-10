@@ -465,7 +465,11 @@ class InputBufferService:
         if buffer.action is None:
             raise ValueError("Action message input buffer requires action payload")
         action = _CHAT_ACTION_ADAPTER.validate_python(buffer.action)
-        action_payload = ActionMessagePayload(action=action, message=buffer.content)
+        action_payload = ActionMessagePayload(
+            action=action,
+            message=buffer.content,
+            requested_inference_profile=_requested_inference_profile(buffer),
+        )
         promoted = [
             _PromotedInputBuffer(
                 buffer=buffer,

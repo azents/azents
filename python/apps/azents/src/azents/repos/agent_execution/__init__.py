@@ -625,6 +625,34 @@ class AgentRunRepository:
         await session.refresh(rdb)
         return self._build(rdb)
 
+    async def fail_profile_resolution_if_running(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        failure_code: InferenceProfileFailureCode,
+        failure_message: str,
+        ended_at: datetime.datetime,
+    ) -> AgentRunState | None:
+        """Finalize a running run with safe typed profile failure data."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
+        )
+        if rdb is None:
+            return None
+        if rdb.status != AgentRunStatus.RUNNING:
+            return self._build(rdb)
+        rdb.status = AgentRunStatus.FAILED
+        rdb.phase = AgentRunPhase.IDLE
+        rdb.active_tool_calls = []
+        rdb.retry_state = None
+        rdb.inference_profile_failure_code = failure_code
+        rdb.inference_profile_failure_message = failure_message
+        rdb.ended_at = ended_at
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
     async def associate_input_events(
         self,
         session: AsyncSession,
@@ -752,6 +780,42 @@ class AgentRunRepository:
         run = await self.get_latest_by_input_event_id(session, event_id=event_id)
         if run is None:
             return None
+        return self._build_inference_run_summary(run)
+
+    async def list_latest_inference_run_summaries_by_event_ids(
+        self,
+        session: AsyncSession,
+        *,
+        event_ids: Sequence[str],
+    ) -> dict[str, InferenceRunSummary]:
+        """Project each event's latest associated run through the public allowlist."""
+        unique_event_ids = list(dict.fromkeys(event_ids))
+        if not unique_event_ids:
+            return {}
+        result = await session.execute(
+            sa.select(RDBAgentRunInputEvent.event_id, RDBAgentRun)
+            .join(
+                RDBAgentRun,
+                RDBAgentRun.id == RDBAgentRunInputEvent.agent_run_id,
+            )
+            .where(RDBAgentRunInputEvent.event_id.in_(unique_event_ids))
+            .order_by(
+                RDBAgentRunInputEvent.event_id.asc(),
+                RDBAgentRun.run_index.desc(),
+                RDBAgentRun.created_at.desc(),
+            )
+        )
+        summaries: dict[str, InferenceRunSummary] = {}
+        for event_id, rdb in result.all():
+            if event_id not in summaries:
+                summaries[event_id] = self._build_inference_run_summary(
+                    self._build(rdb)
+                )
+        return summaries
+
+    @staticmethod
+    def _build_inference_run_summary(run: AgentRunState) -> InferenceRunSummary:
+        """Build the safe public summary for one run."""
         requested_profile = (
             RequestedInferenceProfile(
                 model_target_label=run.requested_model_target_label,
@@ -780,6 +844,7 @@ class AgentRunRepository:
                 run.effective_auto_compaction_threshold_tokens
             ),
             failure_code=run.inference_profile_failure_code,
+            failure_message=run.inference_profile_failure_message,
         )
 
     async def mark_session_running_terminal(

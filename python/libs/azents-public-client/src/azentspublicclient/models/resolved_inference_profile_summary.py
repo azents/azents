@@ -17,21 +17,23 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List, Optional
-from typing_extensions import Annotated
-from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from typing import Any, ClassVar, Dict, List
+from azentspublicclient.models.llm_model_developer import LLMModelDeveloper
+from azentspublicclient.models.llm_provider import LLMProvider
 from typing import Optional, Set
 from typing_extensions import Self
 
-class RequestedInferenceProfile(BaseModel):
+class ResolvedInferenceProfileSummary(BaseModel):
     """
-    Agent-owned target label and optional explicit reasoning effort.
+    Allowlisted resolved model identity safe for public projection.
     """ # noqa: E501
-    model_target_label: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Agent-owned selectable model target label")
-    reasoning_effort: Optional[ModelReasoningEffort]
+    provider: LLMProvider = Field(description="Resolved hosting provider")
+    model_identifier: StrictStr = Field(description="Resolved provider model identifier")
+    model_display_name: StrictStr = Field(description="Resolved model display name")
+    model_developer: LLMModelDeveloper = Field(description="Resolved model developer")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["model_target_label", "reasoning_effort"]
+    __properties: ClassVar[List[str]] = ["provider", "model_identifier", "model_display_name", "model_developer"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -51,7 +53,7 @@ class RequestedInferenceProfile(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of RequestedInferenceProfile from a JSON string"""
+        """Create an instance of ResolvedInferenceProfileSummary from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -79,16 +81,11 @@ class RequestedInferenceProfile(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if reasoning_effort (nullable) is None
-        # and model_fields_set contains the field
-        if self.reasoning_effort is None and "reasoning_effort" in self.model_fields_set:
-            _dict['reasoning_effort'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of RequestedInferenceProfile from a dict"""
+        """Create an instance of ResolvedInferenceProfileSummary from a dict"""
         if obj is None:
             return None
 
@@ -96,8 +93,10 @@ class RequestedInferenceProfile(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "model_target_label": obj.get("model_target_label"),
-            "reasoning_effort": obj.get("reasoning_effort")
+            "provider": obj.get("provider"),
+            "model_identifier": obj.get("model_identifier"),
+            "model_display_name": obj.get("model_display_name"),
+            "model_developer": obj.get("model_developer")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
