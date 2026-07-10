@@ -160,7 +160,17 @@ export const ThinkingOnly = {
       content: null,
       status: "partial",
       reasoningSummary:
-        "Need to verify provider coverage, then check whether each component can render from static props.",
+        "<!-- internal marker -->\n\n## Verifying provider coverage with a deliberately long preview that truncates consistently across mobile and desktop\n\nNeed to check whether each component can render from static props.\n\n<!— -->",
+    }),
+  },
+} satisfies Story;
+
+export const ThinkingWithoutSummary = {
+  args: {
+    message: createChatMessage({
+      id: "assistant-thinking-without-summary",
+      content: null,
+      status: "partial",
     }),
   },
 } satisfies Story;
