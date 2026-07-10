@@ -35,6 +35,7 @@ const PROVIDER_VALUES = [
   "aws_bedrock",
   "google_vertex_ai",
   "chatgpt_oauth",
+  "xai",
   "xai_oauth",
 ] as const;
 
@@ -67,6 +68,8 @@ function labelForProvider(provider: string, labels: ProviderLabels): string {
       return labels.google_vertex_ai;
     case "chatgpt_oauth":
       return labels.chatgpt_oauth;
+    case "xai":
+      return labels.xai;
     case "xai_oauth":
       return labels.xai_oauth;
     default:
@@ -157,6 +160,7 @@ function IntegrationFormContent({
     aws_bedrock: t("providers.aws_bedrock"),
     google_vertex_ai: t("providers.google_vertex_ai"),
     chatgpt_oauth: t("providers.chatgpt_oauth"),
+    xai: t("providers.xai"),
     xai_oauth: t("providers.xai_oauth"),
   };
   const availableProviders = new Set(availableProviderValues);
@@ -256,7 +260,9 @@ function IntegrationFormContent({
       )}
 
       {/* Setup guide */}
-      {provider && !isOAuthProvider && <SetupGuide credType={credType} />}
+      {provider && !isOAuthProvider && (
+        <SetupGuide credType={credType} provider={provider} />
+      )}
     </Stack>
   );
 }
