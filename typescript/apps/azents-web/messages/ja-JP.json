@@ -440,6 +440,7 @@
         "callbackUnavailable": "利用可否は xAI によって制御され、サブスクリプション階層や allowlist 状態によって 403 が返る場合があります。",
         "connected": "接続済み",
         "deviceInstruction": "<link>xAI 認証ページ</link>を開き、以下のコードを入力してください。",
+        "openVerificationPage": "xAI 認証ページを開く",
         "copyCode": "コードをコピー",
         "copied": "コピーしました",
         "connectWithDeviceCode": "デバイスコードで接続",

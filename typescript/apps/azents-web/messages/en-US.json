@@ -440,6 +440,7 @@
         "callbackUnavailable": "Availability is controlled by xAI and may return 403 depending on your subscription tier or allowlist status.",
         "connected": "Connected",
         "deviceInstruction": "Open <link>xAI verification</link> and enter the code below.",
+        "openVerificationPage": "Open xAI verification page",
         "copyCode": "Copy code",
         "copied": "Copied",
         "connectWithDeviceCode": "Connect with device code",

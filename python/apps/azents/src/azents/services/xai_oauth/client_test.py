@@ -53,7 +53,10 @@ class TestXaiOAuthClient:
                 json={
                     "device_code": "device-code-123",
                     "user_code": "ABCD-EFGH",
-                    "verification_uri": "https://auth.x.ai/activate",
+                    "verification_uri": "https://accounts.x.ai/oauth2/device",
+                    "verification_uri_complete": (
+                        "https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH"
+                    ),
                     "interval": 7,
                     "expires_in": 900,
                 },
@@ -66,7 +69,9 @@ class TestXaiOAuthClient:
         assert isinstance(result, Success)
         assert result.value.device_code == "device-code-123"
         assert result.value.user_code == "ABCD-EFGH"
-        assert result.value.verification_uri == "https://auth.x.ai/activate"
+        assert result.value.verification_uri == (
+            "https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH"
+        )
         assert result.value.interval_seconds == 7
         assert result.value.expires_in_seconds == 900
 
