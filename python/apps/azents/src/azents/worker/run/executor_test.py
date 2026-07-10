@@ -5,6 +5,7 @@ import contextlib
 import datetime
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -17,7 +18,11 @@ from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.tools import ToolkitProvider
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
-from azents.engine.events.engine_events import RunComplete, RunPhaseChanged
+from azents.engine.events.engine_events import (
+    RunComplete,
+    RunPhaseChanged,
+    SubagentTreeChanged,
+)
 from azents.engine.events.types import (
     Event,
     RunMarkerPayload,
@@ -167,8 +172,15 @@ class _AgentRepository:
 class _AgentSessionRepository:
     """AgentSessionRepository test double."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        current_session_agent: object | None = None,
+        tree_session_agents: list[object] | None = None,
+    ) -> None:
         self.cleared_commands: list[tuple[str, str]] = []
+        self.current_session_agent = current_session_agent
+        self.tree_session_agents = tree_session_agents or []
 
     async def get_by_id(
         self,
@@ -178,6 +190,25 @@ class _AgentSessionRepository:
         """Return no persisted AgentSession settings."""
         del session, agent_session_id
         return None
+
+    async def list_session_agent_tree(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_agent_id: str,
+    ) -> list[object]:
+        """Return the configured SessionAgent tree."""
+        del session, root_session_agent_id
+        return self.tree_session_agents
+
+    async def get_session_agent_by_session_id(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> object | None:
+        """Return the configured current SessionAgent."""
+        del session, session_id
+        return self.current_session_agent
 
     async def clear_pending_command(
         self,
@@ -1017,10 +1048,22 @@ async def test_execute_clears_activity_after_run_complete(
 ) -> None:
     """RunComplete is the boundary that clears live run activity."""
     order: list[str] = []
-    dispatched: list[PublishedEvent] = []
+    dispatched: list[tuple[str, PublishedEvent]] = []
     live_event_projector = _LiveEventProjector()
+    session_repository = _AgentSessionRepository(
+        current_session_agent=SimpleNamespace(
+            id="child-session-agent",
+            root_session_agent_id="root-session-agent",
+        ),
+        tree_session_agents=[
+            SimpleNamespace(agent_session_id="session-001"),
+            SimpleNamespace(agent_session_id="parent-session"),
+            SimpleNamespace(agent_session_id="root-session"),
+        ],
+    )
     executor = _executor(
         _SessionLifecycle(order),
+        agent_session_repository=session_repository,
         live_event_projector=live_event_projector,
     )
     message = SessionWakeUp(
@@ -1072,8 +1115,7 @@ async def test_execute_clears_activity_after_run_complete(
         session_id: str,
         event: PublishedEvent,
     ) -> None:
-        del session_id
-        dispatched.append(event)
+        dispatched.append((session_id, event))
 
     result = await executor.execute(
         message,
@@ -1088,7 +1130,24 @@ async def test_execute_clears_activity_after_run_complete(
     assert result.terminal_event_observed is True
     assert result.run_id is not None
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
-    assert any(isinstance(event, RunComplete) for event in dispatched)
+    assert any(isinstance(event, RunComplete) for _, event in dispatched)
+    tree_changes = [
+        (session_id, event)
+        for session_id, event in dispatched
+        if isinstance(event, SubagentTreeChanged)
+    ]
+    assert [session_id for session_id, _ in tree_changes] == [
+        "session-001",
+        "parent-session",
+        "root-session",
+        "session-001",
+        "parent-session",
+        "root-session",
+    ]
+    assert all(
+        event.changed_session_agent_id == "child-session-agent"
+        for _, event in tree_changes
+    )
     assert order == ["clear_session_activity"]
     assert live_event_projector.live_run_cleared_session_ids == ["session-001"]
 

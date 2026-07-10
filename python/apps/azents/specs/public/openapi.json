@@ -15931,6 +15931,19 @@
             "title": "Last Task Message",
             "description": "Latest task text"
           },
+          "last_message_sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message Sent At",
+            "description": "Latest agent-to-agent or terminal message sent time"
+          },
           "unread_result": {
             "type": "boolean",
             "title": "Unread Result",

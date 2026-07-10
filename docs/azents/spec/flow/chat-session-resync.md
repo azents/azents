@@ -15,8 +15,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-09
-spec_version: 20
+last_verified_at: 2026-07-10
+spec_version: 21
 ---
 
 # Chat Session Resync
@@ -133,13 +133,17 @@ projected status, latest task/message preview, unread terminal result flag, late
 terminal result source event id, terminal result message preview, and children. The unread terminal
 result flag applies only to non-root child nodes because root sessions do not have a parent observer.
 Projected status treats a parent-interrupted subtree as interrupted for all descendants that do not
-have a newer terminal run. Children are sorted with active work first: running, failed/completed,
-interrupted, then pending, with stable secondary ordering by latest activity and path.
-Refresh/reconnect must reconstruct tree state by refetching this endpoint from durable DB state.
+have a newer terminal run. Siblings that have sent messages are sorted by their latest explicit
+agent-to-agent or terminal-result message time, newest first. Siblings without sent messages follow
+status order—running, failed/completed, interrupted, then pending/idle—with name as the stable
+fallback. The parent-child hierarchy is never flattened by this ordering.
 
-`subagent_tree_changed` is not source-of-truth state. The frontend invalidates all cached Subagent
-Tree queries when it receives the event so both root and child detail views converge on the same
-durable projection after refetch. Child detail views also use the tree projection to render a compact
+Refresh/reconnect must reconstruct tree state by refetching this endpoint from durable DB state.
+While the Subagents tab or drawer is visible, the frontend also polls the endpoint every five seconds;
+session detail views refetch on window focus. Agent-message and run-lifecycle tree changes publish
+`subagent_tree_changed` to every SessionAgent view in the same tree, and the frontend immediately
+invalidates cached tree queries. These events remain invalidation signals rather than source-of-truth
+state. Child detail views also use the tree projection to render a compact
 back button to the parent SessionAgent and an overflow menu with parent/root navigation options, so
 users can move back up the session-agent tree without relying on the drawer. Child detail composers are
 read-only for humans and render a disabled direct-input placeholder while preserving the stop control
@@ -313,6 +317,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-10** — v21. Prioritized recent agent message senders within each sibling group and added periodic, focus, and lifecycle-event tree refresh.
 - **2026-07-09** — v20. Rendered internal agent messages as collapsed source-labeled rows and standardized subagent surfaces on the robot icon.
 - **2026-07-09** — v19. Documented Subagent Tree status propagation/sorting and disabled child detail input with retained stop control.
 - **2026-07-09** — v18. Clarified child detail read-only behavior, compact back/menu navigation, and parent-agent task bubble rendering.

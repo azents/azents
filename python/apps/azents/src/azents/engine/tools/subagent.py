@@ -683,6 +683,10 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 file_parts=[],
             ),
         )
+        await self.agent_session_repository.mark_session_agent_message_sent(
+            session,
+            session_agent_id=source.id,
+        )
         if wake:
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,

@@ -58,6 +58,14 @@ function countChildren(nodes: SubagentTreeNodeResponse[]): number {
   );
 }
 
+function messageSentAtSortValue(value?: string | null): number | null {
+  if (value === null || typeof value === "undefined") {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 function statusSortRank(status: string): number {
   switch (status) {
     case "running":
@@ -94,6 +102,19 @@ function finalizeSubagentNodes(
       };
     })
     .sort((left, right) => {
+      const leftSentAt = messageSentAtSortValue(left.last_message_sent_at);
+      const rightSentAt = messageSentAtSortValue(right.last_message_sent_at);
+      if (leftSentAt !== null || rightSentAt !== null) {
+        if (leftSentAt === null) {
+          return 1;
+        }
+        if (rightSentAt === null) {
+          return -1;
+        }
+        if (leftSentAt !== rightSentAt) {
+          return rightSentAt - leftSentAt;
+        }
+      }
       const byStatus =
         statusSortRank(left.status) - statusSortRank(right.status);
       return byStatus === 0 ? left.name.localeCompare(right.name) : byStatus;

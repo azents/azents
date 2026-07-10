@@ -431,6 +431,7 @@ class _SubagentTreeChatService:
                             agent_type="default",
                             status="running",
                             last_task_message=None,
+                            last_message_sent_at=None,
                             unread_result=False,
                             latest_run_id=None,
                             latest_run_index=None,
@@ -449,6 +450,9 @@ class _SubagentTreeChatService:
                                     agent_type="default",
                                     status="completed",
                                     last_task_message="work",
+                                    last_message_sent_at=datetime.datetime(
+                                        2026, 7, 10, 4, 5, tzinfo=datetime.UTC
+                                    ),
                                     unread_result=True,
                                     latest_run_id=("3123456789abcdef0123456789abcdef"),
                                     latest_run_index=1,
@@ -1206,6 +1210,7 @@ class TestGetSubagentTree:
             "agent_type": "default",
             "status": "completed",
             "last_task_message": "work",
+            "last_message_sent_at": "2026-07-10T04:05:00Z",
             "unread_result": True,
             "latest_run_id": "3123456789abcdef0123456789abcdef",
             "latest_run_index": 1,

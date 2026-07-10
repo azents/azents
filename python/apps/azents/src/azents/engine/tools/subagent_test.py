@@ -83,6 +83,7 @@ def _session_agent(
         if kind is SessionAgentKind.SUBAGENT
         else None,
         last_task_message=None,
+        last_message_sent_at=None,
         parent_observed_run_index=None,
         parent_observed_event_id=None,
         created_at=_NOW,
@@ -172,6 +173,7 @@ class _AgentSessionRepository:
         self.locked_session_agents: list[str] = []
         self.marked_running: list[str] = []
         self.last_task_updates: list[tuple[str, str | None]] = []
+        self.message_sent_updates: list[str] = []
         self.observation_updates: list[tuple[str, int | None, str | None]] = []
 
     async def get_session_agent_by_session_id(
@@ -293,6 +295,17 @@ class _AgentSessionRepository:
         del session
         self.last_task_updates.append((session_agent_id, last_task_message))
         return self.target
+
+    async def mark_session_agent_message_sent(
+        self,
+        session: AsyncSession,
+        *,
+        session_agent_id: str,
+    ) -> SessionAgent | None:
+        """Record the source agent message timestamp update."""
+        del session
+        self.message_sent_updates.append(session_agent_id)
+        return next(agent for agent in self.tree if agent.id == session_agent_id)
 
     async def list_descendant_session_agents(
         self,
@@ -562,6 +575,7 @@ async def test_send_message_is_queue_only() -> None:
     assert input_service.enqueued[0].metadata["message_kind"] == "send_message"
     assert input_service.enqueued[0].content == "note"
     assert repo.last_task_updates == [("child-agent", "note")]
+    assert repo.message_sent_updates == ["root-agent"]
     assert repo.marked_running == []
     assert broker.messages == []
     assert [event.type for event in published_events] == ["subagent_tree_changed"]

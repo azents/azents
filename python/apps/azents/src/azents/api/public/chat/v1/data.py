@@ -573,6 +573,10 @@ class SubagentTreeNodeResponse(BaseModel):
     agent_type: str = Field(description="Spawned agent type snapshot")
     status: str = Field(description="Projected execution status")
     last_task_message: str | None = Field(default=None, description="Latest task text")
+    last_message_sent_at: datetime.datetime | None = Field(
+        default=None,
+        description="Latest agent-to-agent or terminal message sent time",
+    )
     unread_result: bool = Field(description="Whether latest terminal result is unread")
     latest_run_id: str | None = Field(default=None, description="Latest AgentRun ID")
     latest_run_index: int | None = Field(
@@ -608,6 +612,7 @@ class SubagentTreeNodeResponse(BaseModel):
             agent_type=node.agent_type,
             status=node.status,
             last_task_message=node.last_task_message,
+            last_message_sent_at=node.last_message_sent_at,
             unread_result=node.unread_result,
             latest_run_id=node.latest_run_id,
             latest_run_index=node.latest_run_index,

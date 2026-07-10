@@ -17,6 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_run_status import AgentRunStatus
@@ -35,6 +36,7 @@ class SubagentTreeNodeResponse(BaseModel):
     agent_type: StrictStr = Field(description="Spawned agent type snapshot")
     status: StrictStr = Field(description="Projected execution status")
     last_task_message: Optional[StrictStr] = None
+    last_message_sent_at: Optional[datetime] = None
     unread_result: StrictBool = Field(description="Whether latest terminal result is unread")
     latest_run_id: Optional[StrictStr] = None
     latest_run_index: Optional[StrictInt] = None
@@ -43,7 +45,7 @@ class SubagentTreeNodeResponse(BaseModel):
     terminal_result_message: Optional[StrictStr] = None
     children: Optional[List[SubagentTreeNodeResponse]] = Field(default=None, description="Child SessionAgents")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["session_agent_id", "agent_session_id", "parent_session_agent_id", "name", "path", "agent_type", "status", "last_task_message", "unread_result", "latest_run_id", "latest_run_index", "latest_run_status", "terminal_result_event_id", "terminal_result_message", "children"]
+    __properties: ClassVar[List[str]] = ["session_agent_id", "agent_session_id", "parent_session_agent_id", "name", "path", "agent_type", "status", "last_task_message", "last_message_sent_at", "unread_result", "latest_run_id", "latest_run_index", "latest_run_status", "terminal_result_event_id", "terminal_result_message", "children"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -108,6 +110,11 @@ class SubagentTreeNodeResponse(BaseModel):
         if self.last_task_message is None and "last_task_message" in self.model_fields_set:
             _dict['last_task_message'] = None
 
+        # set to None if last_message_sent_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.last_message_sent_at is None and "last_message_sent_at" in self.model_fields_set:
+            _dict['last_message_sent_at'] = None
+
         # set to None if latest_run_id (nullable) is None
         # and model_fields_set contains the field
         if self.latest_run_id is None and "latest_run_id" in self.model_fields_set:
@@ -153,6 +160,7 @@ class SubagentTreeNodeResponse(BaseModel):
             "agent_type": obj.get("agent_type"),
             "status": obj.get("status"),
             "last_task_message": obj.get("last_task_message"),
+            "last_message_sent_at": obj.get("last_message_sent_at"),
             "unread_result": obj.get("unread_result"),
             "latest_run_id": obj.get("latest_run_id"),
             "latest_run_index": obj.get("latest_run_index"),

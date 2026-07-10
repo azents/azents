@@ -121,6 +121,9 @@ class SessionAgent(BaseModel):
         description="Parent SessionAgent ID",
     )
     last_task_message: str | None = Field(description="Latest delegated task preview")
+    last_message_sent_at: datetime.datetime | None = Field(
+        description="Latest agent-to-agent message sent time",
+    )
     parent_observed_run_index: int | None = Field(
         description="Latest terminal run index observed by parent",
     )

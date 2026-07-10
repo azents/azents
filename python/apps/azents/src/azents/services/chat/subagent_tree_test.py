@@ -109,6 +109,7 @@ def _tree_node(
     name: str,
     status: str,
     *,
+    last_message_sent_at: datetime.datetime | None = None,
     children: list[SubagentTreeNode] | None = None,
 ) -> SubagentTreeNode:
     """Create a minimal SubagentTreeNode fixture."""
@@ -121,6 +122,7 @@ def _tree_node(
         agent_type="default",
         status=status,
         last_task_message=None,
+        last_message_sent_at=last_message_sent_at,
         unread_result=False,
         latest_run_id=None,
         latest_run_index=None,
@@ -188,6 +190,24 @@ class TestSubagentTreeProjection:
             "failed-grandchild": "interrupted",
             "running-grandchild": "interrupted",
         }
+
+    def test_finalize_tree_sorts_recent_message_senders_first(self) -> None:
+        """Recent sibling senders precede status-ranked siblings without messages."""
+        older = datetime.datetime(2026, 7, 10, 4, 0, tzinfo=datetime.UTC)
+        newer = datetime.datetime(2026, 7, 10, 4, 5, tzinfo=datetime.UTC)
+        nodes = [
+            _tree_node("running-without-message", "running"),
+            _tree_node("older-sender", "completed", last_message_sent_at=older),
+            _tree_node("newer-sender", "idle", last_message_sent_at=newer),
+        ]
+
+        finalized = _finalize_subagent_tree_nodes(nodes)
+
+        assert [node.name for node in finalized] == [
+            "newer-sender",
+            "older-sender",
+            "running-without-message",
+        ]
 
     async def test_projects_nested_tree_from_child_session_access(
         self,
