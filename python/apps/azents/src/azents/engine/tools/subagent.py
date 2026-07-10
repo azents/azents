@@ -383,8 +383,13 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     targets = await self._wait_targets(
                         session, current, input.agent_name
                     )
-                    if input.agent_name is not None and not targets:
-                        return _json({"message": "not_found", "timed_out": False})
+                    if not targets:
+                        message = (
+                            "not_found"
+                            if input.agent_name is not None
+                            else "No descendant agents to wait for."
+                        )
+                        return _json({"message": message, "timed_out": False})
                     latest_runs = (
                         await self.agent_run_repository.list_latest_by_session_ids(
                             session,

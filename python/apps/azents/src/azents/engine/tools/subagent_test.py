@@ -757,7 +757,7 @@ async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
     assert repo.observation_updates == [("child-agent", 1, "event".rjust(32, "0"))]
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
 
-    second_result = await tool.handler(json.dumps({"agent_name": "child"}))
+    second_result = await tool.handler("{}")
 
     assert json.loads(cast(str, second_result)) == {
         "message": "No unread terminal result.",
@@ -870,6 +870,53 @@ async def test_wait_agent_timeout_waits_until_deadline() -> None:
         "timed_out": True,
     }
     assert repo.observation_updates == []
+
+
+async def test_wait_agent_reports_when_no_descendants_exist() -> None:
+    """wait_agent distinguishes an empty descendant set from an empty result."""
+    toolkit, repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    repo.tree = [repo.current]
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
+
+    result = await tool.handler(json.dumps({"timeout_seconds": 120}))
+
+    assert json.loads(cast(str, result)) == {
+        "message": "No descendant agents to wait for.",
+        "timed_out": False,
+    }
+
+
+async def test_wait_agent_reports_named_missing_target() -> None:
+    """wait_agent preserves the named missing-target result."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "wait_agent")
+
+    result = await tool.handler(json.dumps({"agent_name": "missing"}))
+
+    assert json.loads(cast(str, result)) == {
+        "message": "not_found",
+        "timed_out": False,
+    }
 
 
 async def test_wait_agent_rejects_current_agent_target() -> None:

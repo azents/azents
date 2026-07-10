@@ -33,7 +33,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-10
-spec_version: 52
+spec_version: 53
 ---
 
 # Toolkit
@@ -342,9 +342,10 @@ queues without waking the target, while `spawn_agent` and `followup_task` mark t
 running and send normal broker wake-up signals. `wait_agent` reads unread terminal run projections and
 advances the child observation cursor only for returned results. When no unread result is available but
 one or more selected targets are still running, `wait_agent` polls until the requested timeout expires or
-a terminal result becomes available; timeout responses are emitted only after that wait window. A target
-is considered running when either its latest run is running or its linked `AgentSession` is still marked
-running before the latest run row is available. `interrupt_agent` records stop intent only for the named
+a terminal result becomes available; timeout responses are emitted only after that wait window. When an
+untargeted call has no descendants, it returns `No descendant agents to wait for.` instead of reporting
+an empty unread-result state. A target is considered running when either its latest run is running or
+its linked `AgentSession` is still marked running before the latest run row is available. `interrupt_agent` records stop intent only for the named
 target session and returns its previous projected status; it does not close, delete, or recursively stop
 descendants.
 
@@ -541,6 +542,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-10** (spec_version 53) — Made untargeted `wait_agent` calls report explicitly when no descendants exist.
 - **2026-07-10** (spec_version 52) — Identified children in forked-history boundaries and rejected self-targeted `wait_agent` calls.
 - **2026-07-10** (spec_version 51) — Allowed `write_stdin` zero-yield calls in both write and poll modes so callers can drain currently buffered process output immediately.
 - **2026-07-09** (spec_version 50) — Added Codex-compatible subagent concurrency slot prompt text and `spawn_agent` active capacity/depth limit enforcement from Agent settings.
