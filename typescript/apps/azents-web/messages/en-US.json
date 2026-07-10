@@ -1047,6 +1047,7 @@
     "disconnected": "Disconnected",
     "thinking": "Thinking…",
     "thinkingLabel": "Thinking",
+    "collapseThinking": "Collapse thinking",
     "goalContinuationIndicator": "Goal continuation queued",
     "interruptedIndicator": "Interrupted by user",
     "pendingInput": {
