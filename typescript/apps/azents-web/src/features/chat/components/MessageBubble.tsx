@@ -23,10 +23,10 @@ import {
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import {
   IconBook,
+  IconBubble,
   IconCheck,
   IconChevronRight,
   IconClock,
-  IconMessageCircle,
   IconPencil,
   IconRobot,
   IconTargetArrow,
@@ -434,7 +434,7 @@ function ThinkingBlock({
           color="var(--mantine-color-dimmed)"
         />
       )}
-      <IconMessageCircle
+      <IconBubble
         aria-hidden="true"
         size={rem(14)}
         stroke={1.8}
