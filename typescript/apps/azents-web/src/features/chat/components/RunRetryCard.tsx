@@ -19,6 +19,7 @@ import {
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
+import inlineControlClasses from "./ChatInlineControl.module.css";
 import type {
   AgentRunPhase,
   ChatLiveRunRetryState,
@@ -109,6 +110,7 @@ function AttemptHistory({
         wrap="nowrap"
         role="button"
         tabIndex={0}
+        className={inlineControlClasses.root}
         style={{ cursor: "pointer", userSelect: "none" }}
         onClick={toggle}
         onKeyDown={(event) => {
@@ -120,16 +122,20 @@ function AttemptHistory({
       >
         <IconChevronRight
           aria-hidden="true"
-          size={14}
+          size={rem(14)}
           stroke={1.8}
           color="var(--mantine-color-dimmed)"
           style={{
-            flexShrink: 0,
             transform: opened ? "rotate(90deg)" : "none",
             transition: "transform 160ms",
           }}
         />
-        <Text size="xs" fw={600} c="dimmed">
+        <Text
+          size="xs"
+          fw={600}
+          c="dimmed"
+          className={inlineControlClasses.label}
+        >
           {t("failedRunRecovery.history", { count: sortedAttempts.length })}
         </Text>
       </Group>
@@ -220,9 +226,14 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
           )}
 
           {isLive && countdown !== null && (
-            <Group gap={rem(6)} c="dimmed" wrap="nowrap">
-              <IconClock aria-hidden="true" size={15} stroke={1.8} />
-              <Text size="xs">
+            <Group
+              gap={rem(6)}
+              c="dimmed"
+              wrap="nowrap"
+              className={inlineControlClasses.root}
+            >
+              <IconClock aria-hidden="true" size={rem(14)} stroke={1.8} />
+              <Text size="xs" className={inlineControlClasses.label}>
                 {countdown > 0
                   ? t("failedRunRecovery.nextRetryCountdown", {
                       seconds: countdown,

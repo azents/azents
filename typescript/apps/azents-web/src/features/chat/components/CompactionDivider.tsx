@@ -12,6 +12,7 @@ import { useDisclosure } from "@mantine/hooks";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useRef } from "react";
+import inlineControlClasses from "./ChatInlineControl.module.css";
 import { MarkdownContent } from "./MarkdownContent";
 
 const dashedLineStyle: React.CSSProperties = {
@@ -40,15 +41,20 @@ function SummaryToggleButton({
 
   return (
     <UnstyledButton aria-expanded={opened} onClick={onToggle}>
-      <Group gap={rem(2)} align="center">
-        <Text size="xs" c="dimmed" td="underline">
+      <Group gap={rem(4)} className={inlineControlClasses.root}>
+        <Text
+          size="xs"
+          c="dimmed"
+          td="underline"
+          className={inlineControlClasses.label}
+        >
           {opened ? t("compaction.collapse") : t("compaction.expand")}
         </Text>
         {opened ? (
-          <IconChevronDown size={rem(12)} color="var(--mantine-color-dimmed)" />
+          <IconChevronDown size={rem(14)} color="var(--mantine-color-dimmed)" />
         ) : (
           <IconChevronRight
-            size={rem(12)}
+            size={rem(14)}
             color="var(--mantine-color-dimmed)"
           />
         )}

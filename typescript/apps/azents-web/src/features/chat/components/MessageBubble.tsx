@@ -43,6 +43,7 @@ import {
   useState,
 } from "react";
 import { ChatCopyButton } from "./ChatCopyButton";
+import inlineControlClasses from "./ChatInlineControl.module.css";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
 import { MarkdownContent } from "./MarkdownContent";
@@ -487,7 +488,7 @@ function ThinkingBlock({
       {canExpand && (
         <IconChevronRight
           aria-hidden="true"
-          size={rem(12)}
+          size={rem(14)}
           className={classes.thinkingChevron}
           data-opened={thinkingOpened}
           color="var(--mantine-color-dimmed)"
@@ -505,7 +506,7 @@ function ThinkingBlock({
         size="xs"
         c="dimmed"
         fw={500}
-        className={classes.thinkingLabel}
+        className={`${classes.thinkingLabel} ${inlineControlClasses.label}`}
       >
         {label}
       </Text>
@@ -522,15 +523,19 @@ function ThinkingBlock({
           aria-expanded={thinkingOpened}
         >
           <Group
-            gap={rem(4)}
+            gap={rem(6)}
             wrap="nowrap"
-            className={classes.thinkingHeaderContent}
+            className={`${classes.thinkingHeaderContent} ${inlineControlClasses.root}`}
           >
             {headerContent}
           </Group>
         </UnstyledButton>
       ) : (
-        <Group gap={rem(4)} wrap="nowrap" className={classes.thinkingHeader}>
+        <Group
+          gap={rem(6)}
+          wrap="nowrap"
+          className={`${classes.thinkingHeader} ${inlineControlClasses.root}`}
+        >
           {headerContent}
         </Group>
       )}
@@ -757,6 +762,7 @@ function AgentMailboxMessage({
           tabIndex={0}
           aria-expanded={opened}
           aria-label={t("agentMessage.title", { name: sourcePath })}
+          className={inlineControlClasses.root}
           style={{ cursor: "pointer", userSelect: "none" }}
           onClick={toggle}
           onKeyDown={(event) => {
@@ -768,17 +774,22 @@ function AgentMailboxMessage({
         >
           <IconChevronRight
             aria-hidden="true"
-            size={14}
+            size={rem(14)}
             stroke={1.8}
             style={{
-              flexShrink: 0,
               transform: opened ? "rotate(90deg)" : "none",
               transition: "transform 160ms",
             }}
           />
-          <IconRobot aria-hidden="true" size={14} stroke={1.8} />
+          <IconRobot aria-hidden="true" size={rem(14)} stroke={1.8} />
           <Tooltip label={sourcePath} openDelay={500}>
-            <Text size="xs" fw={600} lineClamp={1} style={{ minWidth: 0 }}>
+            <Text
+              size="xs"
+              fw={600}
+              lineClamp={1}
+              className={inlineControlClasses.label}
+              style={{ minWidth: 0 }}
+            >
               {t("agentMessage.title", { name: sourceName })}
             </Text>
           </Tooltip>
@@ -837,9 +848,17 @@ function AssistantTextMessage({
 
 function GoalControlMessage({ label }: { label: string }): React.ReactElement {
   return (
-    <Group gap={rem(6)} c="dimmed" mb="md" wrap="nowrap">
-      <IconTargetArrow aria-hidden="true" size={14} stroke={1.8} />
-      <Text size="xs">{label}</Text>
+    <Group
+      gap={rem(6)}
+      c="dimmed"
+      mb="md"
+      wrap="nowrap"
+      className={inlineControlClasses.root}
+    >
+      <IconTargetArrow aria-hidden="true" size={rem(14)} stroke={1.8} />
+      <Text size="xs" className={inlineControlClasses.label}>
+        {label}
+      </Text>
     </Group>
   );
 }
@@ -876,6 +895,7 @@ function SkillLoadedControlMessage({
           wrap="nowrap"
           role="button"
           tabIndex={0}
+          className={inlineControlClasses.root}
           style={{ cursor: "pointer", userSelect: "none" }}
           onClick={toggle}
           onKeyDown={(event) => {
@@ -887,16 +907,21 @@ function SkillLoadedControlMessage({
         >
           <IconChevronRight
             aria-hidden="true"
-            size={14}
+            size={rem(14)}
             stroke={1.8}
             style={{
-              flexShrink: 0,
               transform: opened ? "rotate(90deg)" : "none",
               transition: "transform 160ms",
             }}
           />
-          <IconBook aria-hidden="true" size={14} stroke={1.8} />
-          <Text size="xs" fw={600} lineClamp={1} style={{ minWidth: 0 }}>
+          <IconBook aria-hidden="true" size={rem(14)} stroke={1.8} />
+          <Text
+            size="xs"
+            fw={600}
+            lineClamp={1}
+            className={inlineControlClasses.label}
+            style={{ minWidth: 0 }}
+          >
             {t("skillLoaded.title", { name })}
           </Text>
         </Group>
