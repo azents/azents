@@ -2,6 +2,7 @@
 title: "Session-Scoped Runner Operation Concurrency"
 created: 2026-07-10
 updated: 2026-07-10
+implemented: 2026-07-10
 tags: [architecture, backend, runtime, performance]
 ---
 # Session-Scoped Runner Operation Concurrency
