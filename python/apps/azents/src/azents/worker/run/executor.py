@@ -43,6 +43,7 @@ from azents.engine.events.engine_events import (
     RunPhaseChanged,
     RunStarted,
     RunStopped,
+    SubagentTreeChanged,
 )
 from azents.engine.events.types import ActiveToolCall, Event
 from azents.engine.hooks.dispatcher import (
@@ -415,8 +416,47 @@ class RunExecutor:
         )
         boundary_started_at = now
 
+        async def dispatch_tree_change_to_tree(
+            event: SubagentTreeChanged,
+        ) -> None:
+            """Forward a tree invalidation to every other SessionAgent view."""
+            async with self.session_manager() as session:
+                tree_agents = (
+                    await self.agent_session_repository.list_session_agent_tree(
+                        session,
+                        root_session_agent_id=event.root_session_agent_id,
+                    )
+                )
+            target_session_ids = {
+                agent.agent_session_id
+                for agent in tree_agents
+                if agent.agent_session_id != message.session_id
+            }
+            for target_session_id in sorted(target_session_ids):
+                await dispatch_event(target_session_id, event)
+
+        async def publish_session_tree_changed() -> None:
+            """Publish current run status changes to current and root tree viewers."""
+            async with self.session_manager() as session:
+                current_agent = (
+                    await self.agent_session_repository.get_session_agent_by_session_id(
+                        session,
+                        message.session_id,
+                    )
+                )
+            if current_agent is None:
+                return
+            event = SubagentTreeChanged(
+                root_session_agent_id=current_agent.root_session_agent_id,
+                changed_session_agent_id=current_agent.id,
+            )
+            await dispatch_event(message.session_id, event)
+            await dispatch_tree_change_to_tree(event)
+
         async def publish_event(event: PublishedEvent) -> None:
             await dispatch_event(message.session_id, event)
+            if isinstance(event, SubagentTreeChanged):
+                await dispatch_tree_change_to_tree(event)
 
         iface = message.interface
         iface_type = iface.type if iface is not None else None
@@ -666,6 +706,7 @@ class RunExecutor:
             message.session_id,
             RunStarted(run_id=run_id, phase=active_phase),
         )
+        await publish_session_tree_changed()
         now = loop.time()
         logger.info(
             "Run started dispatched",
@@ -940,6 +981,7 @@ class RunExecutor:
                 await self.live_event_projector.publish_live_run_cleared(
                     message.session_id
                 )
+                await publish_session_tree_changed()
             if command is not None:
                 await self._clear_pending_command(
                     message.session_id, command_id=command.id

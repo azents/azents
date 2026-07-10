@@ -1923,6 +1923,7 @@ export function useChatSessionContainer(
       switch (event.type) {
         case "run_started":
           markRunActive(event.phase ?? null);
+          void utils.chat.getSubagentTree.invalidate();
           break;
         case "run_phase_changed":
           markRunActive(event.phase);
@@ -1940,9 +1941,11 @@ export function useChatSessionContainer(
             );
           }
           markRunInactive();
+          void utils.chat.getSubagentTree.invalidate();
           break;
         case "run_stopped":
           markRunInactive();
+          void utils.chat.getSubagentTree.invalidate();
           break;
         case "runtime_error":
           setHistoryMessages((prev) => [

@@ -87,6 +87,11 @@ class RDBSessionAgent(RDBModel):
         nullable=True,
         default=None,
     )
+    last_message_sent_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
     parent_observed_run_index: Mapped[int | None] = mapped_column(
         sa.Integer,
         nullable=True,

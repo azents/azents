@@ -1,6 +1,7 @@
 """Chat session service data models."""
 
 import dataclasses
+import datetime
 from typing import Literal
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
@@ -90,6 +91,7 @@ class SubagentTreeNode:
     agent_type: str
     status: str
     last_task_message: str | None
+    last_message_sent_at: datetime.datetime | None
     unread_result: bool
     latest_run_id: str | None
     latest_run_index: int | None

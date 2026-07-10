@@ -326,6 +326,14 @@ class TestAgentSessionRepository:
         assert nested.root_session_agent_id == root_agent.id
         assert nested.parent_session_agent_id == child.id
         assert nested.path == "/root/reviewer_1/fixer-2"
+        assert child.last_message_sent_at is None
+
+        updated_child = await repo.mark_session_agent_message_sent(
+            rdb_session,
+            session_agent_id=child.id,
+        )
+        assert updated_child is not None
+        assert updated_child.last_message_sent_at is not None
 
         tree = await repo.list_session_agent_tree(
             rdb_session,

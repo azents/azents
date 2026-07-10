@@ -127,6 +127,7 @@ export function ChatSessionView({
   const subagentTreePanel = useSubagentTreePanelContainer({
     agentId: agent.id,
     sessionId,
+    pollingEnabled: subagentDrawerOpened,
   });
   const subagentNavigation = useMemo((): SubagentNavigationLinks | null => {
     if (subagentTreePanel.state.type !== "LOADED") {
