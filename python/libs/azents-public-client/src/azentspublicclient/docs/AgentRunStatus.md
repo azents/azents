@@ -4,6 +4,8 @@ Agent run status.
 
 ## Enum
 
+* `PENDING` (value: `'pending'`)
+
 * `RUNNING` (value: `'running'`)
 
 * `COMPLETED` (value: `'completed'`)

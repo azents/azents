@@ -26,6 +26,7 @@ class AgentRunStatus(str, Enum):
     """
     allowed enum values
     """
+    PENDING = 'pending'
     RUNNING = 'running'
     COMPLETED = 'completed'
     STOPPED = 'stopped'

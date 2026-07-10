@@ -178,6 +178,8 @@ async def _create_session_with_buffer(
         InputBufferCreate(
             session_id=agent_session.id,
             kind=InputBufferKind.USER_MESSAGE,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
             actor_user_id=user_id,
             content="pending input",
             idempotency_key=None,
@@ -231,6 +233,17 @@ class TestChatSessionInputBuffer:
                 session,
                 AgentRunCreate(
                     session_id=session_id,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
+                    inference_profile_source=None,
+                    resolved_model_selection=None,
+                    resolved_reasoning_effort=None,
+                    resolved_at=None,
+                    effective_context_window_tokens=None,
+                    effective_auto_compaction_threshold_tokens=None,
+                    inference_profile_failure_code=None,
+                    inference_profile_failure_message=None,
+                    parent_agent_run_id=None,
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                 ),
             )

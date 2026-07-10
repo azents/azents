@@ -9,7 +9,9 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import InputBufferKind
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.base import RDBModel
+from azents.rdb.models.inference_profile_types import model_reasoning_effort_enum
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 
@@ -46,6 +48,14 @@ class RDBInputBuffer(RDBModel):
         input_buffer_kind_enum,
         nullable=False,
     )
+    requested_model_target_label: Mapped[str | None] = mapped_column(
+        sa.String(80),
+        nullable=True,
+    )
+    requested_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
+        model_reasoning_effort_enum,
+        nullable=True,
+    )
     actor_user_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
@@ -74,6 +84,11 @@ class RDBInputBuffer(RDBModel):
         nullable=False,
     )
 
+    CK_REQUESTED_PROFILE = sa.CheckConstraint(
+        "requested_reasoning_effort IS NULL "
+        "OR requested_model_target_label IS NOT NULL",
+        name="ck_input_buffers_requested_profile",
+    )
     IX_SESSION_ID = sa.Index("ix_input_buffers_session_id", "session_id")
     IX_SESSION_ID_ID = sa.Index("ix_input_buffers_session_id_id", "session_id", "id")
     IX_KIND = sa.Index("ix_input_buffers_kind", "kind")
@@ -87,6 +102,7 @@ class RDBInputBuffer(RDBModel):
     )
 
     __table_args__ = (
+        CK_REQUESTED_PROFILE,
         IX_SESSION_ID,
         IX_SESSION_ID_ID,
         IX_KIND,

@@ -7,6 +7,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -14,6 +15,12 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
 )
+from azents.core.inference_profile import (
+    InferenceProfileFailureCode,
+    InferenceProfileSource,
+    RequestedInferenceProfile,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -85,6 +92,17 @@ async def _create_agent_runtime(
     return workspace_id, agent.id, runtime.id
 
 
+def _model_selection() -> AgentModelSelection:
+    """Create resolved model selection fixture."""
+    return AgentModelSelection.model_validate(
+        make_test_model_selection_dict(
+            integration_id="integration-1",
+            provider=LLMProvider.ANTHROPIC,
+            model_identifier="resolved-model",
+        )
+    )
+
+
 def _agent_session_repository() -> AgentSessionRepository:
     """Create AgentSessionRepository for tests."""
     return AgentSessionRepository()
@@ -109,6 +127,55 @@ def test_validate_event_payload_accepts_action_message() -> None:
 
 class TestEventExecutionRepositories:
     """Event execution repository tests."""
+
+    async def test_user_message_default_effort_round_trip(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Preserve explicit null effort for a requested Default profile."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            handle="event-profile-default-ws",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        transcript_repo = EventTranscriptRepository()
+        requested_profile = RequestedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
+
+        appended = await transcript_repo.append(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload=UserMessagePayload(
+                    content="Use the default effort",
+                    requested_inference_profile=requested_profile,
+                ).model_dump(mode="json"),
+            ),
+        )
+        loaded = await transcript_repo.get_by_id(
+            rdb_session,
+            event_id=appended.id,
+        )
+
+        assert loaded is not None
+        assert isinstance(loaded.payload, UserMessagePayload)
+        assert loaded.payload.requested_inference_profile == requested_profile
+        stored = await rdb_session.get(RDBEvent, appended.id)
+        assert stored is not None
+        assert stored.payload["requested_inference_profile"] == {
+            "model_target_label": "Quality",
+            "reasoning_effort": None,
+        }
 
     async def test_append_read_and_move_head(
         self,
@@ -378,6 +445,261 @@ class TestEventExecutionRepositories:
         )
         assert [event.id for event in reordered] == [first.id, second.id]
 
+    async def test_pending_run_activation_and_event_association(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Persist pending provenance and atomically activate session profile."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-profile",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload=UserMessagePayload(content="profile input").model_dump(
+                    mode="json"
+                ),
+            ),
+        )
+        second_event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload=UserMessagePayload(content="continued input").model_dump(
+                    mode="json"
+                ),
+            ),
+        )
+        repo = AgentRunRepository()
+        active = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                inference_profile_source=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
+        )
+        pending = await repo.create_pending(
+            rdb_session,
+            session_id=event_session.id,
+            requested_model_target_label="Quality",
+            requested_reasoning_effort=ModelReasoningEffort.HIGH,
+            inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+            parent_agent_run_id=None,
+            resolved_model_selection=None,
+            resolved_reasoning_effort=None,
+            resolved_at=None,
+            effective_context_window_tokens=None,
+            effective_auto_compaction_threshold_tokens=None,
+        )
+        await repo.associate_input_events(
+            rdb_session,
+            run_id=active.id,
+            event_ids=[event.id],
+        )
+        await repo.associate_input_events(
+            rdb_session,
+            run_id=pending.id,
+            event_ids=[event.id, event.id],
+        )
+        await repo.associate_input_events(
+            rdb_session,
+            run_id=pending.id,
+            event_ids=[event.id, second_event.id],
+        )
+
+        still_active = await repo.get_running_by_session_id(
+            rdb_session,
+            session_id=event_session.id,
+        )
+        assert still_active is not None
+        assert still_active.id == active.id
+        assert await repo.list_input_event_ids(rdb_session, run_id=pending.id) == [
+            event.id,
+            second_event.id,
+        ]
+        await repo.mark_terminal(
+            rdb_session,
+            active.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        resolved_at = datetime.datetime.now(datetime.UTC)
+        activated = await repo.activate_pending(
+            rdb_session,
+            run_id=pending.id,
+            resolved_model_selection=_model_selection(),
+            resolved_reasoning_effort=ModelReasoningEffort.HIGH,
+            resolved_at=resolved_at,
+            effective_context_window_tokens=128_000,
+            effective_auto_compaction_threshold_tokens=115_200,
+        )
+        refreshed_session = await _agent_session_repository().get_by_id(
+            rdb_session,
+            event_session.id,
+        )
+        summary = await repo.get_latest_inference_run_summary_by_event_id(
+            rdb_session,
+            event_id=event.id,
+        )
+
+        assert activated.status == AgentRunStatus.RUNNING
+        assert activated.started_at == resolved_at
+        assert activated.resolved_model_selection == _model_selection()
+        assert refreshed_session is not None
+        assert refreshed_session.last_model_target_label == "Quality"
+        assert refreshed_session.last_reasoning_effort == ModelReasoningEffort.HIGH
+        assert summary is not None
+        assert summary.run_id == pending.id
+        assert summary.resolved_profile is not None
+        assert summary.resolved_profile.model_identifier == "resolved-model"
+        assert "integration" not in summary.model_dump(mode="json")
+
+    async def test_input_event_association_rejects_another_session(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Reject an input event that does not belong to the run session."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-cross-session",
+        )
+        session_repo = _agent_session_repository()
+        run_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        other_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        other_event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=other_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload=UserMessagePayload(content="other session").model_dump(
+                    mode="json"
+                ),
+            ),
+        )
+        repo = AgentRunRepository()
+        pending = await repo.create_pending(
+            rdb_session,
+            session_id=run_session.id,
+            requested_model_target_label="Quality",
+            requested_reasoning_effort=None,
+            inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+            parent_agent_run_id=None,
+            resolved_model_selection=None,
+            resolved_reasoning_effort=None,
+            resolved_at=None,
+            effective_context_window_tokens=None,
+            effective_auto_compaction_threshold_tokens=None,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Input events must belong to the AgentRun session",
+        ):
+            await repo.associate_input_events(
+                rdb_session,
+                run_id=pending.id,
+                event_ids=[other_event.id],
+            )
+
+        assert await repo.list_input_event_ids(rdb_session, run_id=pending.id) == []
+
+    async def test_pending_resolution_failure_preserves_session_profile(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Typed pending failure leaves the previously activated profile unchanged."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-profile-failure",
+        )
+        session_repo = _agent_session_repository()
+        event_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        await session_repo.set_last_inference_profile(
+            rdb_session,
+            session_id=event_session.id,
+            model_target_label="Fast",
+            reasoning_effort=None,
+        )
+        repo = AgentRunRepository()
+        pending = await repo.create_pending(
+            rdb_session,
+            session_id=event_session.id,
+            requested_model_target_label="Deleted",
+            requested_reasoning_effort=None,
+            inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+            parent_agent_run_id=None,
+            resolved_model_selection=None,
+            resolved_reasoning_effort=None,
+            resolved_at=None,
+            effective_context_window_tokens=None,
+            effective_auto_compaction_threshold_tokens=None,
+        )
+
+        failed = await repo.fail_pending_profile_resolution(
+            rdb_session,
+            run_id=pending.id,
+            failure_code=InferenceProfileFailureCode.MODEL_TARGET_NOT_FOUND,
+            failure_message="The requested model target is unavailable.",
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+        refreshed_session = await session_repo.get_by_id(
+            rdb_session,
+            event_session.id,
+        )
+
+        assert failed.status == AgentRunStatus.FAILED
+        assert (
+            failed.inference_profile_failure_code
+            == InferenceProfileFailureCode.MODEL_TARGET_NOT_FOUND
+        )
+        assert refreshed_session is not None
+        assert refreshed_session.last_model_target_label == "Fast"
+        assert refreshed_session.last_reasoning_effort is None
+
     async def test_agent_run_phase_and_terminal_update(
         self,
         rdb_session: AsyncSession,
@@ -395,7 +717,20 @@ class TestEventExecutionRepositories:
         repo = AgentRunRepository()
         run = await repo.create(
             rdb_session,
-            AgentRunCreate(session_id=event_session.id),
+            AgentRunCreate(
+                session_id=event_session.id,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                inference_profile_source=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
         )
         assert run.run_index == 1
 
@@ -463,7 +798,20 @@ class TestEventExecutionRepositories:
         repo = AgentRunRepository()
         run = await repo.create(
             rdb_session,
-            AgentRunCreate(session_id=event_session.id),
+            AgentRunCreate(
+                session_id=event_session.id,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                inference_profile_source=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
         )
         now = datetime.datetime.now(datetime.UTC)
         retry_state = FailedRunRetryState.from_attempt(
@@ -519,12 +867,36 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                inference_profile_source=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
                 phase=AgentRunPhase.WAITING_FOR_MODEL,
             ),
         )
         current = await repo.create(
             rdb_session,
-            AgentRunCreate(session_id=event_session.id),
+            AgentRunCreate(
+                session_id=event_session.id,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                inference_profile_source=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
         )
 
         closed = await repo.get_by_id(rdb_session, stale.id)
@@ -555,7 +927,20 @@ class TestEventExecutionRepositories:
         repo = AgentRunRepository()
         run = await repo.create(
             rdb_session,
-            AgentRunCreate(session_id=event_session.id),
+            AgentRunCreate(
+                session_id=event_session.id,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                inference_profile_source=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
         )
         await repo.mark_terminal(
             rdb_session,
@@ -606,15 +991,55 @@ class TestEventExecutionRepositories:
         repo = AgentRunRepository()
 
         first = await repo.create(
-            rdb_session, AgentRunCreate(session_id=first_session.id)
+            rdb_session,
+            AgentRunCreate(
+                session_id=first_session.id,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                inference_profile_source=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
         )
         second = await repo.create(
             rdb_session,
-            AgentRunCreate(session_id=first_session.id),
+            AgentRunCreate(
+                session_id=first_session.id,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                inference_profile_source=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
         )
         other = await repo.create(
             rdb_session,
-            AgentRunCreate(session_id=second_session.id),
+            AgentRunCreate(
+                session_id=second_session.id,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                inference_profile_source=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
         )
 
         assert first.run_index == 1

@@ -98,6 +98,8 @@ def _agent_session(
         workspace_id=workspace_id,
         agent_id=agent_id,
         handle="test-session-handle",
+        last_model_target_label=None,
+        last_reasoning_effort=None,
         session_kind=session_kind,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,

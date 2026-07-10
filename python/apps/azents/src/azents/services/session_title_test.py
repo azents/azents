@@ -312,6 +312,8 @@ class _AgentSessionRepository:
             workspace_id="workspace-001",
             agent_id="agent-001",
             handle="test-session-handle",
+            last_model_target_label=None,
+            last_reasoning_effort=None,
             session_kind=AgentSessionKind.ROOT,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,

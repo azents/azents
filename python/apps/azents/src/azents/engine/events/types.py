@@ -13,7 +13,14 @@ from pydantic import (
     model_validator,
 )
 
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.inference_profile import (
+    InferenceProfileFailureCode,
+    InferenceProfileSource,
+    RequestedInferenceProfile,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.run.failure import (
     FailedRunFailureMetadata,
@@ -205,6 +212,10 @@ class UserMessagePayload(BaseModel):
     content: str | list[UserContentPart] = Field(description="User content")
     attachments: list[Attachment] = Field(default_factory=list)
     metadata: dict[str, str] = Field(default_factory=dict)
+    requested_inference_profile: RequestedInferenceProfile | None = Field(
+        default=None,
+        description="Requested inference profile, absent on historical events",
+    )
 
 
 class AgentMessagePayload(BaseModel):
@@ -590,12 +601,24 @@ class AgentRunState(BaseModel):
     run_index: int = Field(ge=1)
     phase: AgentRunPhase
     status: AgentRunStatus
+    requested_model_target_label: str | None
+    requested_reasoning_effort: ModelReasoningEffort | None
+    inference_profile_source: InferenceProfileSource | None
+    resolved_model_selection: AgentModelSelection | None
+    resolved_reasoning_effort: ModelReasoningEffort | None
+    resolved_at: datetime.datetime | None
+    effective_context_window_tokens: int | None
+    effective_auto_compaction_threshold_tokens: int | None
+    inference_profile_failure_code: InferenceProfileFailureCode | None
+    inference_profile_failure_message: str | None
+    parent_agent_run_id: str | None
     active_tool_calls: list[ActiveToolCall] = Field(default_factory=list)
     retry_state: FailedRunRetryState | None = Field(default=None)
     last_completed_event_id: str | None = Field(default=None)
     terminal_result_event_id: str | None = Field(default=None)
     terminal_result_message: str | None = Field(default=None)
     stop_requested_at: datetime.datetime | None = Field(default=None)
-    started_at: datetime.datetime
+    created_at: datetime.datetime
+    started_at: datetime.datetime | None
     ended_at: datetime.datetime | None = Field(default=None)
     updated_at: datetime.datetime

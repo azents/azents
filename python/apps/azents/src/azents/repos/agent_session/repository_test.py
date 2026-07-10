@@ -19,6 +19,7 @@ from azents.core.enums import (
     LLMProvider,
     SessionAgentKind,
 )
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.workspace import WorkspaceRepository
@@ -75,6 +76,43 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
 
 class TestAgentSessionRepository:
     """AgentSessionRepository tests."""
+
+    async def test_last_inference_profile_round_trip(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Persist explicit Default and explicit effort session profiles."""
+        workspace_id = await _create_workspace(rdb_session, "session-profile-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "session-profile")
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+
+        assert created.last_model_target_label is None
+        assert created.last_reasoning_effort is None
+
+        default_profile = await repo.set_last_inference_profile(
+            rdb_session,
+            session_id=created.id,
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
+        assert default_profile.last_model_target_label == "Quality"
+        assert default_profile.last_reasoning_effort is None
+
+        explicit_profile = await repo.set_last_inference_profile(
+            rdb_session,
+            session_id=created.id,
+            model_target_label="Quality",
+            reasoning_effort=ModelReasoningEffort.HIGH,
+        )
+        assert explicit_profile.last_reasoning_effort == ModelReasoningEffort.HIGH
 
     async def test_ensure_active_creates_one_active_session(
         self, rdb_session: AsyncSession

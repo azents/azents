@@ -92,6 +92,8 @@ class DatabaseWorkerInputQueue:
                 InputBufferEnqueue(
                     session_id=item.parent_session_id,
                     kind=InputBufferKind.BACKGROUND_COMPLETION,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
                     actor_user_id=None,
                     content=item.text,
                     idempotency_key=item.idempotency_key,

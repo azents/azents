@@ -153,6 +153,8 @@ class ChatWriteService:
                 InputBufferEnqueue(
                     session_id=session_id,
                     kind=InputBufferKind.EDITED_USER_MESSAGE,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
                     actor_user_id=user_id,
                     content=text,
                     idempotency_key=client_request_id,

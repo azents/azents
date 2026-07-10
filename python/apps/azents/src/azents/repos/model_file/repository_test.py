@@ -2,20 +2,27 @@
 
 import datetime
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRunStatus,
     AgentSessionStartReason,
     LLMProvider,
     ModelFileStatus,
 )
+from azents.core.inference_profile import InferenceProfileSource
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.model_file_pin import RDBModelFilePin
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFileCreate
+from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -203,3 +210,90 @@ async def test_list_statuses_for_session_returns_known_model_files(
         available.id: ModelFileStatus.AVAILABLE,
         deleted.id: ModelFileStatus.DELETED,
     }
+
+
+async def test_release_terminal_run_pins_preserves_pending(
+    rdb_session: AsyncSession,
+) -> None:
+    """Release terminal pins without treating pending runs as terminal."""
+    workspace_id, agent_id, session_id = await _create_agent_session(rdb_session)
+    model_file = await ModelFileRepository().create(
+        rdb_session,
+        ModelFileCreate(
+            workspace_id=workspace_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            name="pending.txt",
+            media_type="text/plain",
+            kind="document",
+            size_bytes=7,
+            created_run_index=1,
+            normalized_format="original",
+            sha256="3" * 64,
+            metadata={},
+        ),
+    )
+    run_repo = AgentRunRepository()
+    terminal = await run_repo.create(
+        rdb_session,
+        AgentRunCreate(
+            session_id=session_id,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            inference_profile_source=None,
+            resolved_model_selection=None,
+            resolved_reasoning_effort=None,
+            resolved_at=None,
+            effective_context_window_tokens=None,
+            effective_auto_compaction_threshold_tokens=None,
+            inference_profile_failure_code=None,
+            inference_profile_failure_message=None,
+            parent_agent_run_id=None,
+        ),
+    )
+    await run_repo.mark_terminal(
+        rdb_session,
+        terminal.id,
+        AgentRunStatus.COMPLETED,
+        ended_at=datetime.datetime.now(datetime.UTC),
+    )
+    pending = await run_repo.create_pending(
+        rdb_session,
+        session_id=session_id,
+        requested_model_target_label="Quality",
+        requested_reasoning_effort=None,
+        inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+        parent_agent_run_id=None,
+        resolved_model_selection=None,
+        resolved_reasoning_effort=None,
+        resolved_at=None,
+        effective_context_window_tokens=None,
+        effective_auto_compaction_threshold_tokens=None,
+    )
+    pin_repo = ModelFilePinRepository()
+    await pin_repo.pin_many(
+        rdb_session,
+        session_id=session_id,
+        run_id=terminal.id,
+        model_file_ids=[model_file.id],
+    )
+    await pin_repo.pin_many(
+        rdb_session,
+        session_id=session_id,
+        run_id=pending.id,
+        model_file_ids=[model_file.id],
+    )
+
+    released = await pin_repo.release_terminal_run_pins(rdb_session, limit=10)
+    remaining_run_ids = list(
+        (
+            await rdb_session.execute(
+                sa.select(RDBModelFilePin.run_id).where(
+                    RDBModelFilePin.model_file_id == model_file.id
+                )
+            )
+        ).scalars()
+    )
+
+    assert released == 1
+    assert remaining_run_ids == [pending.id]

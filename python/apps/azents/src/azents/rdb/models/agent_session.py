@@ -16,7 +16,9 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentSessionTitleSource,
 )
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.base import RDBModel
+from azents.rdb.models.inference_profile_types import model_reasoning_effort_enum
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 
@@ -118,6 +120,10 @@ class RDBAgentSession(RDBModel):
 
     __tablename__ = "agent_sessions"
 
+    CK_LAST_PROFILE = sa.CheckConstraint(
+        "last_reasoning_effort IS NULL OR last_model_target_label IS NOT NULL",
+        name="ck_agent_sessions_last_profile",
+    )
     UQ_HANDLE = sa.UniqueConstraint("handle", name="uq_agent_sessions_handle")
     IX_WORKSPACE_ID = sa.Index("ix_agent_sessions_workspace_id", "workspace_id")
     IX_AGENT_ID = sa.Index("ix_agent_sessions_agent_id", "agent_id")
@@ -177,6 +183,14 @@ class RDBAgentSession(RDBModel):
         nullable=False,
     )
     handle: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    last_model_target_label: Mapped[str | None] = mapped_column(
+        sa.String(80),
+        nullable=True,
+    )
+    last_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
+        model_reasoning_effort_enum,
+        nullable=True,
+    )
     session_kind: Mapped[AgentSessionKind] = mapped_column(
         agent_session_kind_enum,
         nullable=False,
@@ -349,6 +363,7 @@ class RDBAgentSession(RDBModel):
     )
 
     __table_args__ = (
+        CK_LAST_PROFILE,
         UQ_HANDLE,
         IX_WORKSPACE_ID,
         IX_AGENT_ID,

@@ -22,6 +22,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     SessionAgentKind,
 )
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.session_handle import generate_session_handle
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -842,6 +843,30 @@ class AgentSessionRepository:
         )
         await session.flush()
 
+    async def set_last_inference_profile(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        model_target_label: str,
+        reasoning_effort: ModelReasoningEffort | None,
+    ) -> AgentSession:
+        """Persist the most recently activated inference profile."""
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == session_id)
+            .values(
+                last_model_target_label=model_target_label,
+                last_reasoning_effort=reasoning_effort,
+            )
+            .returning(RDBAgentSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            raise ValueError("AgentSession not found")
+        await session.flush()
+        return self._build(rdb)
+
     async def mark_running(self, session: AsyncSession, session_id: str) -> None:
         """Transition AgentSession run state to RUNNING."""
         await session.execute(
@@ -1173,6 +1198,8 @@ class AgentSessionRepository:
             workspace_id=rdb.workspace_id,
             agent_id=rdb.agent_id,
             handle=rdb.handle,
+            last_model_target_label=rdb.last_model_target_label,
+            last_reasoning_effort=rdb.last_reasoning_effort,
             session_kind=rdb.session_kind,
             status=rdb.status,
             primary_kind=rdb.primary_kind,

@@ -158,6 +158,8 @@ class _FakeAgentSessionRepository:
             workspace_id="workspace-1",
             agent_id="agent-1",
             handle="test-session-handle",
+            last_model_target_label=None,
+            last_reasoning_effort=None,
             session_kind=AgentSessionKind.ROOT,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,

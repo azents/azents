@@ -117,6 +117,8 @@ class BackgroundTaskResultInjector:
                     InputBufferEnqueue(
                         session_id=task.parent_session_id,
                         kind=InputBufferKind.BACKGROUND_COMPLETION,
+                        requested_model_target_label=None,
+                        requested_reasoning_effort=None,
                         actor_user_id=None,
                         content=text,
                         idempotency_key=f"background-task:{task.task_id}",

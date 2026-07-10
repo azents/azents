@@ -723,6 +723,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             InputBufferEnqueue(
                 session_id=target.agent_session_id,
                 kind=InputBufferKind.AGENT_MESSAGE,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
                 actor_user_id=self.user_id,
                 content=content,
                 idempotency_key=None,

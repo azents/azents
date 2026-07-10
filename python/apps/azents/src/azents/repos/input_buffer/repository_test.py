@@ -5,6 +5,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import InputBufferKind, LLMProvider
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -98,6 +99,8 @@ def _create_payload(
     return InputBufferCreate(
         session_id=session_id,
         kind=InputBufferKind.USER_MESSAGE,
+        requested_model_target_label="Quality",
+        requested_reasoning_effort=ModelReasoningEffort.HIGH,
         actor_user_id=user_id,
         content=content,
         idempotency_key=None,
@@ -135,6 +138,8 @@ class TestInputBufferRepository:
         assert len(created.id) == 32
         assert created.session_id == session_id
         assert created.kind == InputBufferKind.USER_MESSAGE
+        assert created.requested_model_target_label == "Quality"
+        assert created.requested_reasoning_effort == ModelReasoningEffort.HIGH
         assert created.actor_user_id == user_id
         assert created.content == "hello"
         assert created.idempotency_key is None
@@ -380,6 +385,8 @@ class TestInputBufferRepository:
         assert moved.id == moved_buffer.id
         assert moved.session_id == to_session.id
         assert moved.content == "move me"
+        assert moved.requested_model_target_label == "Quality"
+        assert moved.requested_reasoning_effort == ModelReasoningEffort.HIGH
         other = await repo.get_by_id(rdb_session, other_buffer.id)
         assert other is not None
         assert other.session_id == other_session_id
