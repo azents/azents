@@ -55,6 +55,7 @@ _PROVIDER_DISPLAY_NAMES: dict[LLMProvider, str] = {
     LLMProvider.AWS_BEDROCK: "AWS Bedrock",
     LLMProvider.GOOGLE_VERTEX_AI: "Google Vertex AI",
     LLMProvider.CHATGPT_OAUTH: "ChatGPT OAuth",
+    LLMProvider.XAI: "xAI API key",
     LLMProvider.XAI_OAUTH: "xAI Grok OAuth",
 }
 
@@ -65,6 +66,7 @@ _BASE_AVAILABLE_PROVIDERS: tuple[LLMProvider, ...] = (
     LLMProvider.AWS_BEDROCK,
     LLMProvider.GOOGLE_VERTEX_AI,
     LLMProvider.CHATGPT_OAUTH,
+    LLMProvider.XAI,
     LLMProvider.XAI_OAUTH,
 )
 

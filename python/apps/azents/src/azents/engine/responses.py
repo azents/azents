@@ -26,6 +26,10 @@ DEFAULT_RESPONSES_TEXT_CONFIG: ResponseTextConfigParam = (
     )
 )
 _REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
+_PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS = {
+    LLMProvider.XAI,
+    LLMProvider.XAI_OAUTH,
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -74,7 +78,7 @@ def responses_endpoint_kwargs(
         if provider == LLMProvider.CHATGPT_OAUTH:
             store = False if store is None else store
             include = [_REASONING_ENCRYPTED_CONTENT_INCLUDE]
-    if provider == LLMProvider.XAI_OAUTH:
+    if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
         custom_llm_provider = custom_llm_provider or "xai"
         base_url = base_url or api_base
         api_base = api_base or base_url
@@ -117,11 +121,16 @@ async def call_responses_model(
         credential_kwargs,
         provider=provider,
     )
-    input_payload = _RESPONSE_INPUT_ADAPTER.validate_python(input_items)
+    request_input_items = list(input_items)
+    top_level_instructions: str | None = instructions
+    if provider in _PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS:
+        request_input_items.insert(0, {"role": "system", "content": instructions})
+        top_level_instructions = None
+    input_payload = _RESPONSE_INPUT_ADAPTER.validate_python(request_input_items)
     response = await aresponses(
         model=model,
         input=input_payload,
-        instructions=instructions,
+        instructions=top_level_instructions,
         stream=stream,
         max_output_tokens=responses_max_output_tokens(provider, max_output_tokens),
         text=text,

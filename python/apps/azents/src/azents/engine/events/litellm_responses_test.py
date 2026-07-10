@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities, ModelModalities, ModelModality
+from azents.core.xai import XAI_API_BASE_URL
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.litellm_responses import (
     LiteLLMEvent,
@@ -313,6 +314,61 @@ class TestLiteLLMResponsesLowerer:
         request = lowerer.lower([], model="claude-sonnet-4-5")
 
         assert "prompt_cache_key" not in request.kwargs
+
+    @pytest.mark.parametrize("provider_id", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
+    def test_xai_sets_provider_and_endpoint_kwargs(
+        self,
+        provider_id: LLMProvider,
+    ) -> None:
+        """Both xAI credential modes use the xAI Responses transport."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider=provider_id.value,
+            model="grok-4.5",
+            provider_id=provider_id,
+            credential_kwargs={
+                "api_key": "test-key",
+                "base_url": XAI_API_BASE_URL,
+            },
+        )
+
+        request = lowerer.lower([], model="xai/grok-4.5")
+
+        assert request.kwargs["custom_llm_provider"] == "xai"
+        assert request.kwargs["base_url"] == XAI_API_BASE_URL
+        assert request.kwargs["api_base"] == XAI_API_BASE_URL
+
+    @pytest.mark.parametrize("provider_id", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
+    def test_xai_does_not_add_anthropic_cache_control(
+        self,
+        provider_id: LLMProvider,
+    ) -> None:
+        """xAI requests keep Anthropic cache-control hints disabled."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider=provider_id.value,
+            model="grok-4.5",
+            provider_id=provider_id,
+            model_developer=LLMModelDeveloper.XAI,
+            tools=[
+                {
+                    "type": "function",
+                    "name": "read",
+                    "description": "Read a file",
+                    "parameters": {"type": "object"},
+                }
+            ],
+        )
+
+        request = lowerer.lower(
+            [
+                _event(EventKind.USER_MESSAGE, UserMessagePayload(content="one")),
+                _event(EventKind.USER_MESSAGE, UserMessagePayload(content="two")),
+            ],
+            model="xai/grok-4.5",
+        )
+
+        assert "cache_control" not in request.tools[-1]
+        assert request.input[-2] == {"role": "user", "content": "one"}
+        assert request.input[-1] == {"role": "user", "content": "two"}
 
     def test_chatgpt_oauth_requests_encrypted_reasoning_content(self) -> None:
         """ChatGPT OAuth requests encrypted reasoning for stateless replay."""
@@ -1282,6 +1338,7 @@ class TestLiteLLMResponsesLowerer:
     @pytest.mark.parametrize(
         ("provider", "provider_id"),
         [
+            ("xai", LLMProvider.XAI),
             ("xai_oauth", LLMProvider.XAI_OAUTH),
             ("xai", None),
         ],
@@ -1385,6 +1442,26 @@ class TestLiteLLMResponsesLowerer:
             {"type": "web_search"},
             {"type": "web_search", "search_context_size": "low"},
         ]
+
+    @pytest.mark.parametrize("provider_id", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
+    def test_lowers_xai_web_search_hosted_tool(
+        self,
+        provider_id: LLMProvider,
+    ) -> None:
+        """Lower web search identically for both xAI credential modes."""
+        capabilities = ModelCapabilities()
+        capabilities.built_in_tools.supported = ["web_search"]
+        lowerer = LiteLLMResponsesLowerer(
+            provider=provider_id.value,
+            model="grok-4.5",
+            provider_id=provider_id,
+            hosted_tools=[BuiltinToolSpec(name="web_search", config={})],
+            model_capabilities=capabilities,
+        )
+
+        request = lowerer.lower([], model="xai/grok-4.5")
+
+        assert request.tools == [{"type": "web_search"}]
 
     def test_lowers_google_web_search_hosted_tool(self) -> None:
         """Lower Google web_search opt-in to google_search tool shape."""

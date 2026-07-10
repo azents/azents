@@ -1,9 +1,11 @@
 """Shared LiteLLM Responses helper tests."""
 
+import pytest
 from pytest import MonkeyPatch
 
 import azents.engine.responses as responses_module
 from azents.core.enums import LLMProvider
+from azents.core.xai import XAI_API_BASE_URL
 from azents.engine.responses import call_responses_model, extract_response_text
 
 
@@ -82,6 +84,47 @@ async def test_call_responses_model_uses_openai_compatible_options(
     assert calls[0]["api_key"] == "token"
     assert calls[0]["base_url"] == "https://chatgpt.com/backend-api/codex"
     assert calls[0]["api_base"] == "https://chatgpt.com/backend-api/codex"
+
+
+@pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
+async def test_call_responses_model_uses_xai_options(
+    monkeypatch: MonkeyPatch,
+    provider: LLMProvider,
+) -> None:
+    """Both xAI credential modes use xAI transport and instruction placement."""
+    calls: list[dict[str, object]] = []
+
+    async def fake_aresponses(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return {"output_text": "xAI title"}
+
+    monkeypatch.setattr(responses_module, "aresponses", fake_aresponses)
+
+    await call_responses_model(
+        provider=provider,
+        model="xai/grok-4.5",
+        credential_kwargs={
+            "api_key": "xai-test-key",
+            "base_url": XAI_API_BASE_URL,
+            "api_base": XAI_API_BASE_URL,
+            "custom_llm_provider": "xai",
+        },
+        input_items=[{"role": "user", "content": "Generate a title"}],
+        instructions="Generate a title",
+        stream=False,
+        max_output_tokens=80,
+    )
+
+    assert calls[0]["custom_llm_provider"] == "xai"
+    assert calls[0]["api_key"] == "xai-test-key"
+    assert calls[0]["base_url"] == XAI_API_BASE_URL
+    assert calls[0]["api_base"] == XAI_API_BASE_URL
+    assert calls[0]["max_output_tokens"] == 80
+    assert calls[0]["instructions"] is None
+    assert calls[0]["input"] == [
+        {"role": "system", "content": "Generate a title"},
+        {"role": "user", "content": "Generate a title"},
+    ]
 
 
 async def test_extract_response_text_reads_response_output_text() -> None:

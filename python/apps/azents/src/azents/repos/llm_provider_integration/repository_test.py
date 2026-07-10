@@ -19,6 +19,7 @@ from azents.core.credentials import (
 )
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
+from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 
@@ -76,6 +77,36 @@ class TestLLMProviderIntegrationRepository:
         assert integration.enabled is True
         assert integration.created_at
         assert integration.updated_at
+
+    async def test_create_xai_api_key_encrypts_and_redacts_secrets(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Encrypt xAI API keys at rest and omit them from normal reads."""
+        ws_id = await _create_workspace(rdb_session)
+        repo = _make_repo()
+        api_key = "xai-test-api-key"
+
+        created = await repo.create(
+            rdb_session,
+            LLMProviderIntegrationCreate(
+                workspace_id=ws_id,
+                provider=LLMProvider.XAI,
+                name="xAI API key",
+                secrets=ApiKeySecrets(api_key=api_key),
+            ),
+        )
+
+        stored = await rdb_session.get(RDBLLMProviderIntegration, created.id)
+        redacted = await repo.get_by_id(rdb_session, created.id)
+        with_secrets = await repo.get_by_id_with_secrets(rdb_session, created.id)
+
+        assert stored is not None
+        assert api_key not in stored.encrypted_credentials
+        assert redacted is not None
+        assert not hasattr(redacted, "secrets")
+        assert with_secrets is not None
+        assert with_secrets.secrets == ApiKeySecrets(api_key=api_key)
+        assert with_secrets.config is None
 
     async def test_create_with_config(self, rdb_session: AsyncSession) -> None:
         """Create LLM Provider Integration (provider with config)."""

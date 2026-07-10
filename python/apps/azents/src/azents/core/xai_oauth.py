@@ -9,7 +9,6 @@ XAI_OAUTH_DISCOVERY_URL = f"{XAI_OAUTH_ISSUER}/.well-known/openid-configuration"
 XAI_OAUTH_DEVICE_CODE_URL = f"{XAI_OAUTH_ISSUER}/oauth2/device/code"
 XAI_OAUTH_TOKEN_URL = f"{XAI_OAUTH_ISSUER}/oauth2/token"
 XAI_OAUTH_SCOPE = "openid profile email offline_access api:access grok-cli:access"
-XAI_OAUTH_BACKEND_BASE_URL = "https://api.x.ai/v1"
 
 
 class XaiOAuthConnectionMethod(enum.StrEnum):

@@ -12930,6 +12930,7 @@
         "enum": [
           "openai",
           "chatgpt_oauth",
+          "xai",
           "xai_oauth",
           "anthropic",
           "google_gemini",

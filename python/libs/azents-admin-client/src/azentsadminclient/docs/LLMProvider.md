@@ -8,6 +8,8 @@ LLM hosting provider.
 
 * `CHATGPT_OAUTH` (value: `'chatgpt_oauth'`)
 
+* `XAI` (value: `'xai'`)
+
 * `XAI_OAUTH` (value: `'xai_oauth'`)
 
 * `ANTHROPIC` (value: `'anthropic'`)
