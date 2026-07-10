@@ -898,6 +898,28 @@ class AgentRunRepository:
             return None
         return self._build(rdb)
 
+    async def get_failed_by_terminal_result_event_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        terminal_result_event_id: str,
+    ) -> AgentRunState | None:
+        """Fetch the failed run finalized by a specific session event."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(
+                RDBAgentRun.session_id == session_id,
+                RDBAgentRun.status == AgentRunStatus.FAILED,
+                RDBAgentRun.terminal_result_event_id == terminal_result_event_id,
+            )
+            .order_by(RDBAgentRun.run_index.desc())
+            .limit(1)
+        )
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
     async def list_latest_by_session_ids(
         self,
         session: AsyncSession,

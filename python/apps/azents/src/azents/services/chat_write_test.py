@@ -10,6 +10,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRunStatus,
     AgentSessionKind,
     AgentSessionRunState,
     AgentSessionStartReason,
@@ -18,7 +19,11 @@ from azents.core.enums import (
     InputBufferKind,
     LLMProvider,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    InferenceProfileSource,
+    RequestedInferenceProfile,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import (
     RunMarkerPayload,
     SystemErrorPayload,
@@ -36,7 +41,7 @@ from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
@@ -54,7 +59,10 @@ from azents.services.chat_write import ChatWriteService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_selection_dict,
+)
 
 
 @asynccontextmanager
@@ -161,6 +169,7 @@ def _service(
     )
     return ChatWriteService(
         agent_session_repository=AgentSessionRepository(),
+        agent_run_repository=AgentRunRepository(),
         chat_write_request_repository=ChatWriteRequestRepository(),
         message_repository=MessageRepository(),
         input_buffer_service=input_buffer_service,
@@ -251,6 +260,7 @@ class TestChatWriteService:
         calls: list[str] = []
         service = ChatWriteService(
             agent_session_repository=_SubagentLockRepository(calls),
+            agent_run_repository=cast(AgentRunRepository, object()),
             chat_write_request_repository=cast(ChatWriteRequestRepository, object()),
             message_repository=cast(MessageRepository, object()),
             input_buffer_service=cast(InputBufferService, object()),
@@ -279,6 +289,7 @@ class TestChatWriteService:
         """Reject existing idempotency records from another explicit session."""
         service = ChatWriteService(
             agent_session_repository=AgentSessionRepository(),
+            agent_run_repository=AgentRunRepository(),
             chat_write_request_repository=_ExistingWriteRequestRepository(
                 "2223456789abcdef0123456789abcdef"
             ),
@@ -514,6 +525,37 @@ class TestChatWriteService:
                     ).model_dump(mode="json", exclude_none=True),
                 ),
             )
+            run_repo = AgentRunRepository()
+            original_run = await run_repo.create(
+                session,
+                AgentRunCreate(
+                    session_id=agent_session.id,
+                    requested_model_target_label="Quality",
+                    requested_reasoning_effort=ModelReasoningEffort.HIGH,
+                    inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+                    resolved_model_selection=make_test_model_selection(),
+                    resolved_reasoning_effort=ModelReasoningEffort.HIGH,
+                    resolved_at=datetime.datetime.now(datetime.UTC),
+                    effective_context_window_tokens=64_000,
+                    effective_auto_compaction_threshold_tokens=51_200,
+                    inference_profile_failure_code=None,
+                    inference_profile_failure_message=None,
+                    parent_agent_run_id=None,
+                ),
+            )
+            await run_repo.associate_input_events(
+                session,
+                run_id=original_run.id,
+                event_ids=[user_event.id],
+            )
+            await run_repo.mark_terminal(
+                session,
+                original_run.id,
+                AgentRunStatus.FAILED,
+                ended_at=datetime.datetime.now(datetime.UTC),
+                terminal_result_event_id=failed_event.id,
+                terminal_result_message="temporary failure",
+            )
 
         result = await _service(rdb_session_manager).create_idempotent_failed_run_retry(
             agent_id=agent_id,
@@ -540,12 +582,32 @@ class TestChatWriteService:
                 failed_event.id: True,
                 marker.id: True,
             }
+            associated_runs = await AgentRunRepository().list_by_input_event_id(
+                session,
+                event_id=user_event.id,
+            )
+            assert len(associated_runs) == 2
+            assert associated_runs[0].id == original_run.id
+            retry_run = associated_runs[1]
+            assert retry_run.status == AgentRunStatus.PENDING
+            assert (
+                retry_run.inference_profile_source
+                == InferenceProfileSource.RETRY_ORIGINAL
+            )
+            assert retry_run.requested_model_target_label == "Quality"
+            assert retry_run.requested_reasoning_effort == ModelReasoningEffort.HIGH
+            assert retry_run.resolved_model_selection is None
+            assert retry_run.resolved_reasoning_effort is None
+            assert retry_run.effective_context_window_tokens is None
+            assert retry_run.effective_auto_compaction_threshold_tokens is None
             session_after = await AgentSessionRepository().get_by_id(
                 session,
                 agent_session.id,
             )
             assert session_after is not None
             assert session_after.run_state == AgentSessionRunState.RUNNING
+            assert session_after.last_model_target_label is None
+            assert session_after.last_reasoning_effort is None
 
         repeated = await _service(
             rdb_session_manager
@@ -560,6 +622,12 @@ class TestChatWriteService:
 
         assert repeated.request.created is False
         assert repeated.failed_event_id == failed_event.id
+        async with rdb_session_manager() as session:
+            associated_runs = await AgentRunRepository().list_by_input_event_id(
+                session,
+                event_id=user_event.id,
+            )
+            assert len(associated_runs) == 2
 
     async def test_failed_run_retry_rejects_stale_failed_error(
         self,
