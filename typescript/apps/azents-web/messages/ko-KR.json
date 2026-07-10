@@ -312,6 +312,7 @@
       "credentialsPlaceholderEdit": "비워두면 기존 값 유지",
       "setupGuideToggle": "설정 가이드",
       "setupGuideApiKey": "프로바이더 대시보드에서 API 키를 생성한 뒤 위에 붙여넣으세요.",
+      "setupGuideXaiApiKey": "xAI Console에서 API 키를 생성한 뒤 위에 붙여넣으세요. xAI 개발자 API 사용 요금은 SuperGrok 및 X Premium 구독과 별도로 청구됩니다.",
       "setupGuideAwsTitle": "AWS Bedrock 설정",
       "setupGuideAwsStep1": "1. AWS 콘솔에서 IAM 사용자를 생성합니다 (또는 기존 사용자 사용).",
       "setupGuideAwsStep2": "2. 다음 권한 정책을 연결합니다:",
@@ -338,6 +339,7 @@
         "aws_bedrock": "AWS Bedrock",
         "google_vertex_ai": "Google Vertex AI",
         "chatgpt_oauth": "ChatGPT 구독",
+        "xai": "xAI API 키",
         "xai_oauth": "xAI Grok OAuth"
       },
       "chatgptOAuth": {

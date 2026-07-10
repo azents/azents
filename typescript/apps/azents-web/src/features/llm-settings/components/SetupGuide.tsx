@@ -18,8 +18,10 @@ export type CredentialType =
 
 export function SetupGuide({
   credType,
+  provider,
 }: {
   credType: CredentialType;
+  provider: string;
 }): React.ReactElement {
   const t = useTranslations("workspace.llmSettings");
   const [opened, { toggle }] = useDisclosure(false);
@@ -47,7 +49,9 @@ export function SetupGuide({
         >
           {credType === "api_key" && (
             <Text size="sm" c="dimmed">
-              {t("setupGuideApiKey")}
+              {provider === "xai"
+                ? t("setupGuideXaiApiKey")
+                : t("setupGuideApiKey")}
             </Text>
           )}
           {credType === "aws_credentials" && (
