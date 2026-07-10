@@ -307,7 +307,7 @@ class TestPerPromptInferenceProfile:
         )
         assert quality_resolved["model_identifier"] == "gpt-5.5"
         assert quality["resolved_reasoning_effort"] == "high"
-        assert quality["effective_context_window_tokens"] == 128_000
+        assert quality["effective_context_window_tokens"] == 64_000
 
         _write_profile(
             server_url=azents_public_server_url,
