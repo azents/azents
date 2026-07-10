@@ -80,6 +80,8 @@ from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import BuiltinToolSpec
 
 _DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
+_PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS = {LLMProvider.XAI_OAUTH}
+_PROVIDER_NAMES_WITH_INPUT_MESSAGE_INSTRUCTIONS = {"xai", "xai_oauth"}
 _PROMPT_CACHE_KEY_PREFIX = "azs"
 _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
 _REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
@@ -175,6 +177,18 @@ class UnsupportedRequiredBuiltinToolError(ValueError):
     """Raised when adapter does not support required builtin tool."""
 
 
+def _uses_input_message_instructions(
+    *,
+    provider: str,
+    provider_id: LLMProvider | None,
+) -> bool:
+    """Return whether system instructions belong in the Responses input."""
+    return (
+        provider_id in _PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS
+        or provider in _PROVIDER_NAMES_WITH_INPUT_MESSAGE_INSTRUCTIONS
+    )
+
+
 class LiteLLMResponsesLowerer:
     """Lower Event transcript to LiteLLM Responses request."""
 
@@ -243,7 +257,15 @@ class LiteLLMResponsesLowerer:
         input_items: list[dict[str, object]] = []
         kwargs = self._lower_model_kwargs()
         default_instructions = kwargs.get("instructions") or _DEFAULT_INSTRUCTIONS
-        kwargs["instructions"] = system_prompt or str(default_instructions)
+        instructions = system_prompt or str(default_instructions)
+        if _uses_input_message_instructions(
+            provider=self.provider,
+            provider_id=self._provider_id,
+        ):
+            kwargs.pop("instructions", None)
+            input_items.append({"role": "system", "content": instructions})
+        else:
+            kwargs["instructions"] = instructions
 
         for event in transcript:
             native_item = self._compatible_native_item(event)

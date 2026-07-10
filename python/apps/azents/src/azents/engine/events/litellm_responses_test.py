@@ -1279,6 +1279,58 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.kwargs["instructions"] == "You are a helpful assistant."
 
+    @pytest.mark.parametrize(
+        ("provider", "provider_id"),
+        [
+            ("xai_oauth", LLMProvider.XAI_OAUTH),
+            ("xai", None),
+        ],
+    )
+    def test_lowers_instructions_to_input_message_when_required(
+        self,
+        provider: str,
+        provider_id: LLMProvider | None,
+    ) -> None:
+        """Use a system input message when top-level instructions are unsupported."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider=provider,
+            model="grok-4.20-0309-reasoning",
+            provider_id=provider_id,
+        )
+        transcript = [
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(content="hello"),
+            )
+        ]
+
+        request = lowerer.lower(
+            transcript,
+            model="xai/grok-4.20-0309-reasoning",
+            system_prompt="Follow project rules.",
+        )
+
+        assert "instructions" not in request.kwargs
+        assert request.input == [
+            {"role": "system", "content": "Follow project rules."},
+            {"role": "user", "content": "hello"},
+        ]
+
+    def test_uses_default_input_message_instructions_when_required(self) -> None:
+        """Preserve default instructions for input-message instruction transport."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="xai_oauth",
+            model="grok-4.20-0309-reasoning",
+            provider_id=LLMProvider.XAI_OAUTH,
+        )
+
+        request = lowerer.lower([], model="xai/grok-4.20-0309-reasoning")
+
+        assert "instructions" not in request.kwargs
+        assert request.input == [
+            {"role": "system", "content": "You are a helpful assistant."}
+        ]
+
     def test_does_not_expose_hosted_tool_without_agent_opt_in(self) -> None:
         """Do not send hosted tool without Agent opt-in even if capability exists."""
         capabilities = ModelCapabilities()
