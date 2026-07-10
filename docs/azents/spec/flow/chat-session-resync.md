@@ -16,7 +16,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-10
-spec_version: 22
+spec_version: 23
 ---
 
 # Chat Session Resync
@@ -112,12 +112,14 @@ Response fields:
 | --- | --- |
 | `partial_history.items` | ordered partial history projection list to synthesize after durable history. |
 | `input_buffers` | pending user input buffer projection list not yet injected into model turn. |
-| `run` | currently running run projection. `null` if absent. Includes `run.retry` with failed-run retry status, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history when retry is active. |
+| `run` | currently running run projection. `null` if absent. Includes running profile provenance plus `run.retry` with failed-run retry status, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history when retry is active. |
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |
 | `action_executions` | current nonterminal operation TurnAction execution projections, each with execution state and durable progress events. Terminal completed/failed-final action results are recovered from durable history events. |
 
 `snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.action_executions` is the current nonterminal operation TurnAction projection list.
+
+History events and live/pending projections preserve requested profile intent. Durable human/action inputs may also include one associated allowlisted run summary. Pending or unresolved runs must display unknown physical resolution rather than deriving it from Composer or Agent defaults. Resolution failures expose the typed safe code/message and omit resolved-only fields.
 
 Action-execution retry and discard mutation responses return the updated action execution projection immediately. When the mutation schedules more runner work, the backend also sends a normal broker wake-up, and subsequent progress is reconciled through the same `action_execution_updated` WebSocket action and `/live.action_executions` baseline. Clients must upsert the returned projection by execution id and then keep accepting newer projection updates from WebSocket or REST baseline reload.
 
@@ -155,6 +157,12 @@ internal-agent rows labeled with the source SessionAgent name. Expanding a row r
 message body; it does not use the direct human user-message bubble treatment. Subagent navigation,
 tree, tab, and internal-message surfaces use a robot icon as their representative symbol.
 
+## 5.3 Composer Profile State
+
+The Composer presents separate desktop Model and effort controls and a combined mobile control. Model choices come only from the Agent's selectable target labels. Effort choices come from the selected target's normalized reasoning capabilities; switching to a target that does not support the current explicit effort visibly resets effort to Default.
+
+The local draft stores message, selected action, target label, and nullable effort atomically. Restoration precedence is local draft, newest durable or pending human requested intent, session-last-used profile, then Agent default. Edit mode initializes from the edited message's requested profile and restores the ordinary draft when edit is cancelled or completed. Commands may display the current selection but submit a null profile.
+
 ## 6. Timeline State Rules
 
 ### LATEST_FOLLOWING
@@ -165,6 +173,8 @@ tree, tab, and internal-message surfaces use a robot icon as their representativ
 - Operation TurnAction execution is live progress, not model response pending state. It does not by itself replace the composer with a stop control or block new input.
 - When `run.retry` is present, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history; the normal model dots indicator remains below the card when the run phase is `waiting_for_model` or `streaming_model`.
 - Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
+- Human and actionable input rows show compact requested target/effort provenance and the associated run's safe resolved summary when available.
+- Token/context usage binds only when `usage.runId` exactly matches the current live run or a terminal associated-run summary; it is never attributed to the newest message or current Composer selection by position.
 - Follow is active only when scroll viewport is at bottom or in iOS bottom bounce area.
 - When Follow is active, new timeline item and streaming update automatically scroll to bottom.
 - If scroll viewport leaves bottom/bounce area, immediately stop follow; subsequent new timeline items are rendered immediately but do not auto-scroll, and “new message” chip is displayed.
@@ -300,7 +310,9 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 - WebSocket open is not subscribe completion.
 - REST baseline is applied as latest source only after session subscription ack.
 - REST `/live` does not return aggregate event list and returns live state taxonomy snapshot split into `partial_history`, `input_buffers`, `run`, `session_run_state`, `todo`, and `action_executions`.
-- `live_run_updated` and REST `/live.run` are the authoritative current run snapshot sources; clients replace the stored run snapshot rather than merging individual retry fields.
+- `live_run_updated` and REST `/live.run` are the authoritative current run snapshot sources; clients replace the stored run snapshot rather than merging individual retry or profile fields.
+- Requested inference intent is restored from durable/pending data, and unresolved physical provenance is never inferred from current Agent or Composer state.
+- Usage provenance requires an exact run-id match.
 - `action_execution_updated`, action-execution mutation responses, and REST `/live.action_executions` are the authoritative current operation progress sources; clients upsert by execution id and render the progress next to the matching action-message or pending-buffer anchor.
 - REST write `snapshot` does not return aggregate `live_events` and returns live state taxonomy snapshot split into `partial_history_events`, `input_buffer_events`, `run`, `session_run_state`, `todo`, and `action_executions`.
 - Detached state does not synthesize live state below history window.
@@ -317,6 +329,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-10** — v23. Added Composer profile restoration, requested/resolved provenance rendering, safe unresolved/failure behavior, and exact run-scoped usage attribution.
 - **2026-07-10** — v22. Treated both sent and received agent messages as recent tree activity so the most recently contacted sibling appears first.
 - **2026-07-10** — v21. Prioritized recent agent message senders within each sibling group and added periodic, focus, and lifecycle-event tree refresh.
 - **2026-07-09** — v20. Rendered internal agent messages as collapsed source-labeled rows and standardized subagent surfaces on the robot icon.

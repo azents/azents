@@ -24,7 +24,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-07-08
+last_verified_at: 2026-07-10
 spec_version: 6
 ---
 

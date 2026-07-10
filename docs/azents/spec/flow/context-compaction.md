@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-06
-spec_version: 18
+last_verified_at: 2026-07-10
+spec_version: 19
 ---
 
 # Context Compaction
@@ -26,15 +26,14 @@ Context compaction keeps long session history within model input limits without 
 history. The event runtime uses append-only compaction.
 
 Automatic compaction effective context window is computed by
-`engine/context/window.py:compute_effective_context_window_tokens()`. The function takes the main model
-input window, the effective lightweight/compaction model input window, and optional Agent
+`engine/context/window.py:compute_effective_context_window_tokens()`. For each new run, the function takes the resolved per-run main model input window, the Agent's effective lightweight/compaction model input window, and optional Agent
 `model_parameters.context_window_tokens`, then uses the smallest value as `effective_max_input_tokens`.
 The Agent context window cap is stored as intent and may be larger than current model limits; model
-limits still win until the Agent model changes. Effective lightweight resolution uses the agent's stored
+limits still win. Effective lightweight resolution uses the Agent's stored
 `lightweight_model_selection` snapshot. Workspace default is copied into the Agent only at create/update
 time and is not read by runtime compaction. Automatic compaction threshold is then computed by
-`compute_auto_compaction_threshold_tokens()` as `int(effective_max_input_tokens * 0.9)`. The event
-runtime and API-facing token usage UI use this shared backend calculation as the source of truth, so
+`compute_auto_compaction_threshold_tokens()` as `int(effective_max_input_tokens * 0.9)`. Both values are stored on the activated `AgentRun` and reused unchanged across later turns, automatic retry, and recovery. The event
+runtime and API-facing token usage UI use this run-scoped calculation as the source of truth, so
 the displayed effective context window and percentage match the runtime trigger basis. The event
 runtime compares that threshold against the latest turn marker `usage.prompt_tokens` plus the
 model-visible token estimate for events appended after that marker. If no turn marker exists, it falls
