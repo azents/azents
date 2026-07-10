@@ -2,6 +2,8 @@
 
 import asyncio
 import dataclasses
+import json
+from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TypedDict
@@ -18,6 +20,7 @@ from azents_runtime_control.runner import (
     RunnerStateReport,
     RuntimeRunnerEventType,
     RuntimeRunnerOperations,
+    RuntimeRunnerState,
 )
 
 
@@ -143,6 +146,29 @@ async def test_run_once_schedules_different_sessions_concurrently() -> None:
 
 
 @pytest.mark.asyncio
+async def test_default_limits_allow_five_sessions_to_fill_runtime_capacity() -> None:
+    client = FakeRunnerControlClient()
+    operations = BlockingOperations()
+    client.operations.extend(
+        _operation(f"{owner}-{index}", owner=owner)
+        for owner in (f"session-{index}" for index in range(1, 6))
+        for index in range(1, 11)
+    )
+    loop = _loop(client, operations)
+    await loop.start()
+
+    await _run(loop, 50)
+    await _wait_for(lambda: len(operations.started) == 50)
+
+    active_by_owner = Counter(
+        request_id.rsplit("-", 1)[0] for request_id in operations.started
+    )
+    assert active_by_owner == {f"session-{index}": 10 for index in range(1, 6)}
+    assert client.reports[-1].diagnostic["runtime_active_operations"] == "50"
+    await _cancel_loop_work(loop)
+
+
+@pytest.mark.asyncio
 async def test_session_limit_does_not_block_another_session() -> None:
     client = FakeRunnerControlClient()
     operations = BlockingOperations()
@@ -201,6 +227,40 @@ async def test_owner_queue_preserves_fifo_order() -> None:
 
 
 @pytest.mark.asyncio
+async def test_owner_backlogs_are_scheduled_round_robin() -> None:
+    client = FakeRunnerControlClient()
+    operations = BlockingOperations()
+    loop = _loop(
+        client,
+        operations,
+        max_concurrent_operations_per_session=1,
+        max_concurrent_operations=1,
+    )
+    await loop.start()
+    assert client.operation_handler is not None
+    for request_id, owner in (
+        ("a-1", "session-a"),
+        ("a-2", "session-a"),
+        ("b-1", "session-b"),
+        ("b-2", "session-b"),
+    ):
+        await client.operation_handler(_operation(request_id, owner=owner))
+
+    for request_id in ("a-1", "b-1", "a-2", "b-2"):
+        await loop.run_once(block_ms=0)
+        await _wait_for(
+            lambda request_id=request_id: (
+                bool(operations.started) and operations.started[-1] == request_id
+            )
+        )
+        operations.release(request_id)
+        await _wait_for(lambda request_id=request_id: request_id in operations.finished)
+
+    assert operations.started == ["a-1", "b-1", "a-2", "b-2"]
+    await loop.run_once(block_ms=0)
+
+
+@pytest.mark.asyncio
 async def test_system_operations_use_independent_limit() -> None:
     client = FakeRunnerControlClient()
     operations = BlockingOperations()
@@ -248,7 +308,34 @@ async def test_rejects_operation_when_owner_pending_queue_is_full() -> None:
     assert client.events[0].request_id == "req-3"
     assert client.events[0].event_type == RuntimeRunnerEventType.FINAL_ERROR
     assert client.events[0].payload["error_code"] == "operation_queue_full"
+    assert client.reports[-1].diagnostic["queue_rejection_count"] == "1"
     await _cancel_loop_work(loop)
+
+
+@pytest.mark.asyncio
+async def test_rejects_operation_when_runtime_pending_queue_is_full() -> None:
+    client = FakeRunnerControlClient()
+    operations = BlockingOperations()
+    loop = _loop(
+        client,
+        operations,
+        max_concurrent_operations=1,
+        max_pending_operations_per_owner=2,
+        max_pending_operations=2,
+    )
+    await loop.start()
+    assert client.operation_handler is not None
+
+    await client.operation_handler(_operation("a-1", owner="session-a"))
+    await client.operation_handler(_operation("b-1", owner="session-b"))
+    await client.operation_handler(_operation("c-1", owner="session-c"))
+
+    assert client.events[-1].request_id == "c-1"
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload["error_code"] == "operation_queue_full"
+    diagnostic = client.reports[-1].diagnostic
+    assert diagnostic["runtime_pending_operations"] == "2"
+    assert diagnostic["queue_rejection_count"] == "1"
 
 
 @pytest.mark.asyncio
@@ -283,6 +370,49 @@ async def test_expired_pending_operation_is_not_executed() -> None:
     assert operations.started == ["active"]
     assert client.events[0].request_id == "expired"
     assert client.events[0].payload["error_code"] == "operation_timeout"
+    assert client.reports[-1].diagnostic["pre_execution_timeout_count"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_state_reports_expose_per_owner_and_runtime_counts() -> None:
+    client = FakeRunnerControlClient()
+    operations = BlockingOperations()
+    loop = _loop(
+        client,
+        operations,
+        max_concurrent_operations=2,
+        max_pending_operations_per_owner=2,
+        max_pending_operations=2,
+    )
+    await loop.start()
+    assert client.operation_handler is not None
+
+    await client.operation_handler(_operation("session", owner="session-a"))
+    await client.operation_handler(_operation("system", owner=None))
+    await client.operation_handler(_operation("rejected", owner="session-b"))
+
+    pending = client.reports[-1]
+    assert pending.runner_state == RuntimeRunnerState.BUSY
+    assert pending.diagnostic["runtime_pending_operations"] == "2"
+    session_pending = pending.diagnostic["session_pending_operations"]
+    assert isinstance(session_pending, str)
+    assert json.loads(session_pending) == {"session-a": 1}
+    assert pending.diagnostic["system_pending_operations"] == "1"
+
+    await _run(loop, 2)
+    await _wait_for(lambda: len(operations.started) == 2)
+
+    active = client.reports[-1]
+    assert active.active_operation_ids == (
+        "operation:session",
+        "operation:system",
+    )
+    assert active.diagnostic["runtime_active_operations"] == "2"
+    session_active = active.diagnostic["session_active_operations"]
+    assert isinstance(session_active, str)
+    assert json.loads(session_active) == {"session-a": 1}
+    assert active.diagnostic["system_active_operations"] == "1"
+    await _cancel_loop_work(loop)
 
 
 @pytest.mark.asyncio
@@ -310,6 +440,28 @@ async def test_canceled_pending_operation_is_not_executed() -> None:
     await _wait_for(lambda: operations.finished == ["active"])
     await loop.run_once(block_ms=0)
 
+    assert operations.started == ["active"]
+
+
+@pytest.mark.asyncio
+async def test_run_loop_shutdown_discards_pending_generation_work() -> None:
+    client = FakeRunnerControlClient()
+    operations = BlockingOperations()
+    loop = _loop(client, operations, max_concurrent_operations=1)
+    await loop.start()
+    assert client.operation_handler is not None
+    await client.operation_handler(_operation("active", owner="session-a"))
+    await client.operation_handler(_operation("stale-pending", owner="session-a"))
+    await loop.run_once(block_ms=0)
+    await _wait_for(lambda: operations.started == ["active"])
+
+    task = asyncio.create_task(loop.run_forever(block_ms=0))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    await loop.run_once(block_ms=0)
     assert operations.started == ["active"]
 
 

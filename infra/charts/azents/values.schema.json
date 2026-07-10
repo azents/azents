@@ -777,6 +777,43 @@
             }
           }
         },
+        "runnerLimits": {
+          "type": "object",
+          "required": [
+            "maxConcurrentOperationsPerSession",
+            "maxConcurrentSystemOperations",
+            "maxConcurrentOperations",
+            "maxPendingOperationsPerOwner",
+            "maxPendingOperations",
+            "maxConcurrentControlOperations"
+          ],
+          "properties": {
+            "maxConcurrentOperationsPerSession": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxConcurrentSystemOperations": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxConcurrentOperations": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxPendingOperationsPerOwner": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxPendingOperations": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxConcurrentControlOperations": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
         "runtimePod": {
           "type": "object",
           "properties": {

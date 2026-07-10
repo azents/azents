@@ -33,6 +33,7 @@ from azents_runtime_provider_kubernetes.leader import (
     LeaderElectionConfig,
 )
 from azents_runtime_provider_kubernetes.provider import (
+    RUNNER_LIMIT_ENV_NAMES,
     KubernetesRuntimeProvider,
     KubernetesRuntimeProviderConfig,
 )
@@ -105,6 +106,7 @@ async def _run_control_loop(
             storage_class_name=settings.storage_class_name,
             pvc_storage_request=settings.pvc_storage_request,
             runner_resources=settings.runner_resources,
+            runner_env=settings.runner_env,
             image_pull_secrets=settings.image_pull_secrets,
             pod_annotations=settings.pod_annotations,
             pod_node_selector=settings.pod_node_selector,
@@ -365,6 +367,7 @@ class ProviderSettings:
         self.runner_resources: ContainerResources | None = (
             _json_container_resources_env("AZ_RUNTIME_RUNNER_RESOURCES")
         )
+        self.runner_env: Mapping[str, str] = _selected_env(RUNNER_LIMIT_ENV_NAMES)
         self.image_pull_secrets: tuple[LocalObjectReference, ...] = (
             _json_local_object_references_env(
                 "AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS"
@@ -403,6 +406,10 @@ def _required_env(name: str) -> str:
     if value is None or not value:
         raise RuntimeError(f"required environment variable is missing: {name}")
     return value
+
+
+def _selected_env(names: tuple[str, ...]) -> Mapping[str, str]:
+    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 def _json_container_resources_env(name: str) -> ContainerResources | None:

@@ -184,6 +184,13 @@ runtimeProviderKubernetes:
     requests:
       cpu: "1"
       memory: 2Gi
+  runnerLimits:
+    maxConcurrentOperationsPerSession: 10
+    maxConcurrentSystemOperations: 10
+    maxConcurrentOperations: 50
+    maxPendingOperationsPerOwner: 100
+    maxPendingOperations: 1000
+    maxConcurrentControlOperations: 4
   runtimePod:
     annotations: {}
     imagePullSecrets: null

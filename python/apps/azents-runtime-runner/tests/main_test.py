@@ -1,10 +1,14 @@
 """Runtime Runner entrypoint configuration tests."""
 
+import json
+import logging
+
 import pytest
 from pytest import MonkeyPatch
 
 from azents_runtime_runner.main import (
     RunnerLimitConfig,
+    StructuredLogFormatter,
     run_runtime_runner,
     runner_limit_config_from_env,
 )
@@ -37,6 +41,32 @@ _LIMIT_ENV_NAMES = (
 def _clear_limit_env(monkeypatch: MonkeyPatch) -> None:
     for name in _LIMIT_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
+
+
+def test_structured_log_formatter_keeps_runner_diagnostics() -> None:
+    record = logging.LogRecord(
+        name="azents_runtime_control.runner",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="Runtime Runner operation scheduled",
+        args=(),
+        exc_info=None,
+    )
+    record.__dict__.update(
+        {
+            "owner_session_id": "session-1",
+            "runtime_active_operations": 2,
+            "queue_wait_ms": 12.5,
+        }
+    )
+
+    payload = json.loads(StructuredLogFormatter().format(record))
+
+    assert payload["message"] == "Runtime Runner operation scheduled"
+    assert payload["owner_session_id"] == "session-1"
+    assert payload["runtime_active_operations"] == 2
+    assert payload["queue_wait_ms"] == 12.5
 
 
 def test_runner_limit_config_from_env_defaults(monkeypatch: MonkeyPatch) -> None:

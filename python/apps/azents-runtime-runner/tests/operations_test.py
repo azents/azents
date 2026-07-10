@@ -592,7 +592,7 @@ async def test_process_terminate_session_terminates_only_owned_processes(
     client = _FakeClient()
     operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
 
-    long_running = "python -c 'import time; time.sleep(30)'"
+    long_running = "exec python -c 'import time; time.sleep(30)'"
     await operations.handle(
         _operation(
             operation_type="process.start",

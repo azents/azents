@@ -37,6 +37,7 @@ from azents_runtime_provider_docker.models import (
     RuntimeProviderObservedState,
 )
 from azents_runtime_provider_docker.provider import (
+    RUNNER_LIMIT_ENV_NAMES,
     DockerRuntimeProvider,
     DockerRuntimeProviderConfig,
     InvalidResetFinalDesiredState,
@@ -131,6 +132,7 @@ def _provider(tmp_path: Path, docker: FakeDockerApi) -> DockerRuntimeProvider:
             provider_id="provider-docker",
             host_data_root=tmp_path,
             docker_network="azents-runtime",
+            runner_env={},
         ),
     )
 
@@ -211,6 +213,75 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
         assert workspace_stat.st_mode & 0o777 == 0o755
     else:
         assert workspace_stat.st_mode & 0o777 == 0o777
+
+
+@pytest.mark.asyncio
+async def test_start_passes_runner_limit_environment_to_container(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    runner_env = {
+        name: str(index) for index, name in enumerate(RUNNER_LIMIT_ENV_NAMES, start=1)
+    }
+    provider = DockerRuntimeProvider(
+        docker,
+        DockerRuntimeProviderConfig(
+            provider_id="provider-docker",
+            host_data_root=tmp_path,
+            docker_network="azents-runtime",
+            runner_env=runner_env,
+        ),
+    )
+
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    container_env = docker.containers["azents-runtime-runtime-1"].spec.env
+    assert {name: container_env[name] for name in RUNNER_LIMIT_ENV_NAMES} == runner_env
+
+
+@pytest.mark.parametrize(
+    "replacement_env",
+    (
+        {"AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS": "25"},
+        {},
+    ),
+)
+@pytest.mark.asyncio
+async def test_start_replaces_container_when_runner_limit_environment_changes(
+    tmp_path: Path,
+    replacement_env: Mapping[str, str],
+) -> None:
+    docker = FakeDockerApi()
+    initial_env = {"AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS": "50"}
+    initial_provider = DockerRuntimeProvider(
+        docker,
+        DockerRuntimeProviderConfig(
+            provider_id="provider-docker",
+            host_data_root=tmp_path,
+            docker_network="azents-runtime",
+            runner_env=initial_env,
+        ),
+    )
+    await initial_provider.start(_command(RuntimeLifecycleCommandType.START))
+    replacement_provider = DockerRuntimeProvider(
+        docker,
+        DockerRuntimeProviderConfig(
+            provider_id="provider-docker",
+            host_data_root=tmp_path,
+            docker_network="azents-runtime",
+            runner_env=replacement_env,
+        ),
+    )
+
+    await replacement_provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    assert docker.removed == ["azents-runtime-runtime-1"]
+    container_env = docker.containers["azents-runtime-runtime-1"].spec.env
+    assert {
+        name: container_env[name]
+        for name in RUNNER_LIMIT_ENV_NAMES
+        if name in container_env
+    } == replacement_env
 
 
 @pytest.mark.asyncio
@@ -358,6 +429,7 @@ def test_invalid_workspace_path_is_rejected(tmp_path: Path) -> None:
                 provider_id="provider-docker",
                 host_data_root=tmp_path,
                 docker_network="azents-runtime",
+                runner_env={},
                 workspace_mount_path="relative/path",
             ),
         )

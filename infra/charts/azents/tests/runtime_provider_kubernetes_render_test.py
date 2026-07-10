@@ -70,6 +70,15 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
         'value: "{\\"requests\\":{\\"cpu\\":\\"1\\",\\"memory\\":\\"2Gi\\"}}"'
         in rendered
     )
+    for name, value in (
+        ("AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION", "10"),
+        ("AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS", "10"),
+        ("AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS", "50"),
+        ("AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER", "100"),
+        ("AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS", "1000"),
+        ("AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS", "4"),
+    ):
+        assert f'- name: {name}\n              value: "{value}"' in rendered
     assert "AZ_RUNTIME_RUNNER_CPU_REQUEST" not in rendered
     assert "AZ_RUNTIME_RUNNER_MEMORY_REQUEST" not in rendered
     assert "AZ_RUNTIME_RUNNER_CPU_LIMIT" not in rendered
@@ -213,6 +222,33 @@ def test_runtime_provider_kubernetes_runner_resources_render_contract() -> None:
         '\\"requests\\":{\\"cpu\\":\\"1000m\\",\\"ephemeral-storage\\":\\"1Gi\\",\\"memory\\":\\"2Gi\\"}}"'
         in rendered
     )
+
+
+def test_runtime_provider_kubernetes_runner_limits_render_contract() -> None:
+    """Runner scheduling limit overrides reach the Provider environment."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+        "runtimeProviderKubernetes.runnerLimits.maxConcurrentOperationsPerSession=2",
+        "runtimeProviderKubernetes.runnerLimits.maxConcurrentSystemOperations=3",
+        "runtimeProviderKubernetes.runnerLimits.maxConcurrentOperations=7",
+        "runtimeProviderKubernetes.runnerLimits.maxPendingOperationsPerOwner=11",
+        "runtimeProviderKubernetes.runnerLimits.maxPendingOperations=31",
+        "runtimeProviderKubernetes.runnerLimits.maxConcurrentControlOperations=2",
+    )
+
+    for name, value in (
+        ("AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION", "2"),
+        ("AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS", "3"),
+        ("AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS", "7"),
+        ("AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER", "11"),
+        ("AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS", "31"),
+        ("AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS", "2"),
+    ):
+        assert f'- name: {name}\n              value: "{value}"' in rendered
 
 
 def test_runtime_provider_kubernetes_digest_pinning_render_contract() -> None:

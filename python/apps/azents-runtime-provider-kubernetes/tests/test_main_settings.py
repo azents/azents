@@ -8,10 +8,13 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     LocalObjectReference,
 )
 from azents_runtime_provider_kubernetes.main import ProviderSettings
+from azents_runtime_provider_kubernetes.provider import RUNNER_LIMIT_ENV_NAMES
 
 
 @pytest.fixture
 def provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in RUNNER_LIMIT_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ID", "system-kubernetes")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE", "azents")
@@ -36,7 +39,24 @@ def test_provider_settings_defaults_runner_resources_to_none(
     settings = ProviderSettings()
 
     assert settings.runner_resources is None
+    assert settings.runner_env == {}
     assert settings.image_pull_secrets == ()
+
+
+def test_provider_settings_collects_runner_limit_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: None,
+) -> None:
+    expected = {
+        name: "" if index == 0 else str(index)
+        for index, name in enumerate(RUNNER_LIMIT_ENV_NAMES)
+    }
+    for name, value in expected.items():
+        monkeypatch.setenv(name, value)
+
+    settings = ProviderSettings()
+
+    assert settings.runner_env == expected
 
 
 def test_provider_settings_accepts_runner_resources_null(

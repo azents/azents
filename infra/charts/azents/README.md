@@ -75,6 +75,7 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 - Provider RBAC: leader election Lease permissions are scoped to the provider namespace, while Runtime Pod/PVC permissions are scoped to the workload namespace
 - Runtime Pod image pulls: by default, Runtime Pods inherit `global.imagePullSecrets`. Consumers may override with `runtimeProviderKubernetes.runtimePod.imagePullSecrets`. Referenced pull secrets must already exist in the workload namespace.
 - Runtime Pod resources: `runtimeProviderKubernetes.runnerResources` is passed to the Provider as Kubernetes `ResourceRequirements`. Defaults set requests to CPU `1` and memory `2Gi`; limits are intentionally omitted unless consumers set them.
+- Runner operation limits: `runtimeProviderKubernetes.runnerLimits` configures per-Session, system, Runtime, pending, and control-path concurrency. Defaults are 10 Session active, 10 system active, 50 Runtime active, 100 pending per owner, 1,000 pending per Runtime, and 4 control operations. The Provider forwards these values to new Runner Pods; restart existing Runtimes after changing them.
 - Persistence: Kubernetes Provider v1 uses PVCs in the workload namespace as canonical persistence
 - Runtime NetworkPolicy: when enabled, Runtime Pods can reach cluster DNS and
   the chart-managed `runtime-control` Service by default. `deniedCidrs` defines

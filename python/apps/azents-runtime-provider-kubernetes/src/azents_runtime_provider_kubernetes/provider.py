@@ -62,6 +62,14 @@ _ENV_PROVIDER_GENERATION = "AZ_RUNTIME_PROVIDER_GENERATION"
 _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
 _ENV_WORKSPACE_PATH = "AZ_AGENT_WORKSPACE_PATH"
+RUNNER_LIMIT_ENV_NAMES = (
+    "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
+    "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
+    "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS",
+    "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER",
+    "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS",
+    "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS",
+)
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -71,6 +79,10 @@ class InvalidRuntimeId(ValueError):
 
 class InvalidWorkspacePath(ValueError):
     """Provider workspace mount path is missing or not absolute."""
+
+
+class InvalidRunnerEnvironment(ValueError):
+    """Runner environment contains a variable not managed by the Provider."""
 
 
 class InvalidResetFinalDesiredState(ValueError):
@@ -86,6 +98,7 @@ class KubernetesRuntimeProviderConfig:
     storage_class_name: str
     pvc_storage_request: str
     runner_resources: ContainerResources | None
+    runner_env: Mapping[str, str]
     image_pull_secrets: tuple[LocalObjectReference, ...] = ()
     pod_annotations: Mapping[str, str] = dataclasses.field(default_factory=dict)
     pod_node_selector: Mapping[str, str] = dataclasses.field(default_factory=dict)
@@ -102,8 +115,15 @@ class KubernetesRuntimeProvider:
         config: KubernetesRuntimeProviderConfig,
     ) -> None:
         """Initialize the Kubernetes Provider."""
+        unknown_runner_env = set(config.runner_env).difference(RUNNER_LIMIT_ENV_NAMES)
+        if unknown_runner_env:
+            raise InvalidRunnerEnvironment(
+                f"unsupported Runner environment variables: "
+                f"{', '.join(sorted(unknown_runner_env))}"
+            )
         self._api = api
         self._config = config
+        self._runner_env = dict(config.runner_env)
         self._workspace_mount_path = _absolute_posix_path(config.workspace_mount_path)
 
     async def start(
@@ -349,6 +369,11 @@ class KubernetesRuntimeProvider:
         for key, value in self._stable_env(command).items():
             if env.get(key) != value:
                 return False
+        managed_runner_env = {
+            key: value for key, value in env.items() if key in RUNNER_LIMIT_ENV_NAMES
+        }
+        if managed_runner_env != self._runner_env:
+            return False
         expected_mount = VolumeMount(
             name=_WORKSPACE_VOLUME_NAME,
             mount_path=self._workspace_mount_path,
@@ -450,6 +475,7 @@ class KubernetesRuntimeProvider:
     def _env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
         return {
             **self._stable_env(command),
+            **self._runner_env,
             _ENV_PROVIDER_GENERATION: str(command.provider_generation),
             _ENV_DESIRED_GENERATION: str(command.desired_generation),
             _ENV_RUNNER_AUTH_CREDENTIAL_ID: command.auth.runner_auth_token,
