@@ -78,6 +78,7 @@ message RunnerOperationRequest {
   string runtime_id = 1;
   uint64 runner_generation = 2;
   string operation_type = 3;
+  optional string owner_session_id = 4;
   string reply_stream_id = 5;
   string body_stream_id = 6;
   bool background = 7;
@@ -148,7 +149,6 @@ message ProcessStartOperationPayload {
   uint32 yield_time_ms = 3;
   uint32 max_output_bytes = 4;
   map<string, string> env = 5;
-  string owner_session_id = 6;
 }
 
 message ProcessWriteOperationPayload {
@@ -156,7 +156,6 @@ message ProcessWriteOperationPayload {
   string stdin = 2;
   uint32 yield_time_ms = 3;
   uint32 max_output_bytes = 4;
-  string owner_session_id = 5;
 }
 
 message FileDeleteOperationPayload {

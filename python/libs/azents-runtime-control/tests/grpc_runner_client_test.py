@@ -50,12 +50,12 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
                 runtime_id="runtime-1",
                 runner_generation=7,
                 operation_type="process.start",
+                owner_session_id="session-1",
                 process_start=runtime_runner_control_pb2.ProcessStartOperationPayload(
                     command="python -m http.server",
                     workdir="/workspace/agent",
                     yield_time_ms=1000,
                     max_output_bytes=4096,
-                    owner_session_id="session-1",
                     env={"PYTHONUNBUFFERED": "1"},
                 ),
                 reply_stream_id="reply:req-1",
@@ -89,12 +89,12 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
     assert operation is not None
     assert operation.request_id == "req-1"
     assert operation.operation_type == "process.start"
+    assert operation.owner_session_id == "session-1"
     assert operation.payload == {
         "command": "python -m http.server",
         "workdir": "/workspace/agent",
         "yield_time_ms": 1000,
         "max_output_bytes": 4096,
-        "owner_session_id": "session-1",
         "env": {"PYTHONUNBUFFERED": "1"},
     }
     assert await client.heartbeat_runner(
@@ -138,6 +138,63 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
     assert event.final_success.process.process_id == "proc_123"
     assert event.final_success.process.status == "running"
     assert not event.final_success.process.HasField("exit_code")
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_grpc_client_backpressures_operation_delivery() -> None:
+    """The transport keeps at most one operation outside scheduler admission."""
+    second_consumed = asyncio.Event()
+    release_stream = asyncio.Event()
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        yield _operation_message("req-1")
+        yield _operation_message("req-2")
+        second_consumed.set()
+        await release_stream.wait()
+
+    client = GrpcRunnerControlClient(stream)
+    accepted = await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert not second_consumed.is_set()
+    first = await client.claim_next_runner_operation(
+        runtime_id="runtime-1",
+        generation=accepted.generation,
+        consumer_id="consumer-1",
+        block_ms=100,
+    )
+    assert first is not None
+    assert first.request_id == "req-1"
+    await asyncio.wait_for(second_consumed.wait(), timeout=1)
+    second = await client.claim_next_runner_operation(
+        runtime_id="runtime-1",
+        generation=accepted.generation,
+        consumer_id="consumer-1",
+        block_ms=100,
+    )
+    assert second is not None
+    assert second.request_id == "req-2"
+
+    release_stream.set()
     await client.close()
 
 
@@ -210,6 +267,24 @@ async def test_grpc_client_sends_control_token_metadata() -> None:
     await client.close()
 
     assert ("authorization", "Bearer control-token") in observed_metadata
+
+
+def _operation_message(
+    request_id: str,
+) -> runtime_runner_control_pb2.RunnerControlMessage:
+    return runtime_runner_control_pb2.RunnerControlMessage(
+        request_id=request_id,
+        operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
+            runtime_id="runtime-1",
+            runner_generation=7,
+            operation_type="file.stat",
+            owner_session_id="session-1",
+            file_stat=runtime_runner_control_pb2.FileStatOperationPayload(
+                path="/workspace/agent"
+            ),
+            reply_stream_id=f"reply:{request_id}",
+        ),
+    )
 
 
 def _registration() -> RunnerRegistration:

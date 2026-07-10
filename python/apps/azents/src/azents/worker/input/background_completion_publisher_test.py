@@ -46,6 +46,7 @@ async def test_background_completion_is_published_once_to_worker_input_queue() -
             runtime_id="runtime-1",
             runner_generation=runner.generation,
             operation_type="bash",
+            owner_session_id=None,
             payload={"command": "echo ok", "timeout_seconds": 30, "env": None},
             deadline_at=_now() + timedelta(seconds=30),
             body_stream_id=None,

@@ -5,8 +5,8 @@ from pytest import MonkeyPatch
 
 from azents_runtime_runner.main import (
     RunnerLimitConfig,
-    _runner_limit_config,
     run_runtime_runner,
+    runner_limit_config_from_env,
 )
 
 
@@ -39,11 +39,11 @@ def _clear_limit_env(monkeypatch: MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-def test_runner_limit_config_defaults(monkeypatch: MonkeyPatch) -> None:
+def test_runner_limit_config_from_env_defaults(monkeypatch: MonkeyPatch) -> None:
     """Use the approved defaults when limit variables are absent."""
     _clear_limit_env(monkeypatch)
 
-    assert _runner_limit_config() == RunnerLimitConfig(
+    assert runner_limit_config_from_env() == RunnerLimitConfig(
         max_concurrent_operations_per_session=10,
         max_concurrent_system_operations=10,
         max_concurrent_operations=50,
@@ -53,13 +53,13 @@ def test_runner_limit_config_defaults(monkeypatch: MonkeyPatch) -> None:
     )
 
 
-def test_runner_limit_config_reads_overrides(monkeypatch: MonkeyPatch) -> None:
+def test_runner_limit_config_from_env_reads_overrides(monkeypatch: MonkeyPatch) -> None:
     """Parse explicit positive integer overrides."""
     values = ("3", "4", "12", "20", "80", "2")
     for name, value in zip(_LIMIT_ENV_NAMES, values, strict=True):
         monkeypatch.setenv(name, value)
 
-    assert _runner_limit_config() == RunnerLimitConfig(
+    assert runner_limit_config_from_env() == RunnerLimitConfig(
         max_concurrent_operations_per_session=3,
         max_concurrent_system_operations=4,
         max_concurrent_operations=12,
@@ -70,7 +70,7 @@ def test_runner_limit_config_reads_overrides(monkeypatch: MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "invalid", "1.5"])
-def test_runner_limit_config_rejects_non_positive_integer(
+def test_runner_limit_config_from_env_rejects_non_positive_integer(
     monkeypatch: MonkeyPatch,
     value: str,
 ) -> None:
@@ -88,7 +88,7 @@ def test_runner_limit_config_rejects_non_positive_integer(
             "positive integer"
         ),
     ):
-        _runner_limit_config()
+        runner_limit_config_from_env()
 
 
 @pytest.mark.parametrize(
@@ -116,7 +116,7 @@ def test_runner_limit_config_rejects_non_positive_integer(
         ),
     ],
 )
-def test_runner_limit_config_rejects_invalid_relationships(
+def test_runner_limit_config_from_env_rejects_invalid_relationships(
     monkeypatch: MonkeyPatch,
     name: str,
     value: str,
@@ -127,10 +127,10 @@ def test_runner_limit_config_rejects_invalid_relationships(
     monkeypatch.setenv(name, value)
 
     with pytest.raises(SystemExit, match=message):
-        _runner_limit_config()
+        runner_limit_config_from_env()
 
 
-def test_runner_limit_config_rejects_owner_pending_above_runtime_pending(
+def test_runner_limit_config_from_env_rejects_owner_pending_above_runtime_pending(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Keep an owner pending bound within the Runtime pending bound."""
@@ -142,4 +142,4 @@ def test_runner_limit_config_rejects_owner_pending_above_runtime_pending(
         SystemExit,
         match="must not exceed AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS",
     ):
-        _runner_limit_config()
+        runner_limit_config_from_env()

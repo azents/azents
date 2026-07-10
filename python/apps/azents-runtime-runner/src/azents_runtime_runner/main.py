@@ -79,7 +79,7 @@ async def run_runtime_runner() -> None:
     base_connection_id = (
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
-    limit_config = _runner_limit_config()
+    limit_config = runner_limit_config_from_env()
     workspace = Workspace(workspace_path)
     registration = RunnerRegistration(
         runtime_id=runtime_id,
@@ -156,7 +156,7 @@ async def run_runtime_runner() -> None:
             await client.close()
 
 
-def _runner_limit_config() -> RunnerLimitConfig:
+def runner_limit_config_from_env() -> RunnerLimitConfig:
     config = RunnerLimitConfig(
         max_concurrent_operations_per_session=_positive_int_env(
             "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",

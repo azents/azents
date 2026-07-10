@@ -264,6 +264,7 @@ class RuntimeControlProtocolService:
         )
         payload: dict[str, JsonValue] = {
             "operation_type": operation.operation_type,
+            "owner_session_id": operation.owner_session_id,
             "payload": operation.payload,
             "background": operation.background,
         }

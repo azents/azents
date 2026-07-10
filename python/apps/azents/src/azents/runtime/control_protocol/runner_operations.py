@@ -352,6 +352,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="bash",
+                owner_session_id=None,
                 payload={
                     "command": command,
                     "timeout_seconds": timeout_seconds,
@@ -389,6 +390,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.read",
+                owner_session_id=None,
                 payload={
                     "path": path,
                     "offset": offset,
@@ -430,6 +432,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.write",
+                owner_session_id=None,
                 payload={
                     "path": path,
                     "total_bytes": len(data),
@@ -464,6 +467,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.delete",
+                owner_session_id=None,
                 payload={"path": path, "recursive": recursive},
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -495,6 +499,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.bulk_delete",
+                owner_session_id=None,
                 payload={"paths": list(paths), "recursive": recursive},
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -526,6 +531,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.mkdir",
+                owner_session_id=None,
                 payload={"path": path, "parents": parents},
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -558,6 +564,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.move",
+                owner_session_id=None,
                 payload={
                     "source_path": source_path,
                     "destination_path": destination_path,
@@ -594,6 +601,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.bulk_move",
+                owner_session_id=None,
                 payload={
                     "source_paths": list(source_paths),
                     "destination_directory": destination_directory,
@@ -633,6 +641,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.list",
+                owner_session_id=None,
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -663,6 +672,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.stat",
+                owner_session_id=None,
                 payload={"path": path},
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -713,6 +723,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="file.grep",
+                owner_session_id=None,
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -744,6 +755,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="list_git_refs",
+                owner_session_id=None,
                 payload={"source_project_path": source_project_path},
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -779,6 +791,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="create_git_worktree",
+                owner_session_id=None,
                 payload={
                     "source_project_path": source_project_path,
                     "worktree_path": worktree_path,
@@ -818,6 +831,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="remove_git_worktree",
+                owner_session_id=None,
                 payload={
                     "source_project_path": source_project_path,
                     "worktree_path": worktree_path,
@@ -855,6 +869,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="delete_git_branch",
+                owner_session_id=None,
                 payload={
                     "source_project_path": source_project_path,
                     "branch_name": branch_name,
@@ -894,7 +909,6 @@ class RuntimeRunnerOperationClient:
             "command": command,
             "yield_time_ms": yield_time_ms,
             "max_output_bytes": max_output_bytes,
-            "owner_session_id": owner_session_id,
         }
         if workdir is not None:
             payload["workdir"] = workdir
@@ -905,6 +919,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="process.start",
+                owner_session_id=owner_session_id,
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -941,12 +956,12 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="process.write",
+                owner_session_id=owner_session_id,
                 payload={
                     "process_id": process_id,
                     "stdin": stdin,
                     "yield_time_ms": yield_time_ms,
                     "max_output_bytes": max_output_bytes,
-                    "owner_session_id": owner_session_id,
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
@@ -978,6 +993,7 @@ class RuntimeRunnerOperationClient:
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 operation_type="process.terminate_session",
+                owner_session_id=None,
                 payload={"owner_session_id": owner_session_id},
                 deadline_at=deadline_at,
                 body_stream_id=None,

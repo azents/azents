@@ -67,7 +67,9 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerMessage] = (
             asyncio.Queue()
         )
-        self._operations: asyncio.Queue[RunnerOperationEnvelope] = asyncio.Queue()
+        self._operations: asyncio.Queue[RunnerOperationEnvelope] = asyncio.Queue(
+            maxsize=1
+        )
         self._pending_heartbeat_acks: dict[str, asyncio.Future[bool]] = {}
         self._accepted: asyncio.Future[RunnerRegistrationAccepted] | None = None
         self._receiver_task: asyncio.Task[None] | None = None
@@ -337,6 +339,11 @@ def _operation(
         runtime_id=operation.runtime_id,
         runner_generation=operation.runner_generation,
         operation_type=operation.operation_type,
+        owner_session_id=(
+            operation.owner_session_id
+            if operation.HasField("owner_session_id")
+            else None
+        ),
         payload=_operation_payload(operation),
         reply_stream_id=operation.reply_stream_id,
         body_stream_id=operation.body_stream_id or None,
@@ -451,7 +458,6 @@ def _operation_payload(
             "command": payload.command,
             "yield_time_ms": payload.yield_time_ms,
             "max_output_bytes": payload.max_output_bytes,
-            "owner_session_id": payload.owner_session_id,
         }
         if payload.HasField("workdir"):
             result["workdir"] = payload.workdir
@@ -465,7 +471,6 @@ def _operation_payload(
             "stdin": payload.stdin,
             "yield_time_ms": payload.yield_time_ms,
             "max_output_bytes": payload.max_output_bytes,
-            "owner_session_id": payload.owner_session_id,
         }
     if payload_kind == "file_delete":
         return {

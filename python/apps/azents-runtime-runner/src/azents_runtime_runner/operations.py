@@ -920,7 +920,7 @@ class RunnerOperations:
         if not command:
             await self._final_error(operation, "INVALID_PAYLOAD", "command is required")
             return
-        owner_session_id = _str_payload(operation.payload, "owner_session_id")
+        owner_session_id = operation.owner_session_id
         if not owner_session_id:
             await self._final_error(
                 operation,
@@ -1010,7 +1010,7 @@ class RunnerOperations:
                 "process_id is required",
             )
             return
-        owner_session_id = _str_payload(operation.payload, "owner_session_id")
+        owner_session_id = operation.owner_session_id
         if not owner_session_id:
             await self._final_error(
                 operation,

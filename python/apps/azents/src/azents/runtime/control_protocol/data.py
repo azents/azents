@@ -142,6 +142,7 @@ class RuntimeRunnerOperation:
     runtime_id: str
     runner_generation: int
     operation_type: str
+    owner_session_id: str | None
     payload: dict[str, JsonValue]
     deadline_at: datetime
     body_stream_id: str | None

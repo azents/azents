@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import TypedDict
 
 import pytest
 
@@ -294,6 +295,12 @@ async def test_control_operation_runs_while_ordinary_capacity_is_full() -> None:
     await _cancel_loop_work(loop)
 
 
+class _RunnerLimitOverrides(TypedDict, total=False):
+    max_concurrent_operations: int
+    max_concurrent_operations_per_session: int
+    max_pending_operations_per_owner: int
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -314,7 +321,10 @@ async def test_control_operation_runs_while_ordinary_capacity_is_full() -> None:
         ),
     ],
 )
-def test_rejects_invalid_limits(kwargs: dict[str, int], message: str) -> None:
+def test_rejects_invalid_limits(
+    kwargs: _RunnerLimitOverrides,
+    message: str,
+) -> None:
     with pytest.raises(ValueError, match=message):
         _loop(FakeRunnerControlClient(), BlockingOperations(), **kwargs)
 

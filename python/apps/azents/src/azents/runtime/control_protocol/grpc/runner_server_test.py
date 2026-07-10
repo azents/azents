@@ -290,12 +290,12 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
             runtime_id="runtime-1",
             runner_generation=accepted.register_accepted.generation,
             operation_type="process.start",
+            owner_session_id="session-1",
             payload={
                 "command": "python -m http.server",
                 "workdir": "/workspace/agent",
                 "yield_time_ms": 1000,
                 "max_output_bytes": 4096,
-                "owner_session_id": "session-1",
                 "env": {"PYTHONUNBUFFERED": "1"},
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
@@ -309,12 +309,13 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
     assert isinstance(result, RuntimeDispatchResult)
     assert command.operation_request.runtime_id == "runtime-1"
     assert command.operation_request.operation_type == "process.start"
+    assert command.operation_request.owner_session_id == "session-1"
+    assert command.operation_request.HasField("owner_session_id")
     assert command.operation_request.WhichOneof("payload") == "process_start"
     assert command.operation_request.process_start.command == "python -m http.server"
     assert command.operation_request.process_start.workdir == "/workspace/agent"
     assert command.operation_request.process_start.yield_time_ms == 1000
     assert command.operation_request.process_start.max_output_bytes == 4096
-    assert command.operation_request.process_start.owner_session_id == "session-1"
     assert command.operation_request.process_start.env == {"PYTHONUNBUFFERED": "1"}
 
     await inbound.put(
@@ -428,6 +429,7 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
             runtime_id="runtime-1",
             runner_generation=accepted.register_accepted.generation,
             operation_type="create_git_worktree",
+            owner_session_id=None,
             payload={
                 "source_project_path": "/workspace/agent/repo",
                 "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
@@ -443,6 +445,7 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
 
     command = await anext(stream)
     assert command.operation_request.operation_type == "create_git_worktree"
+    assert not command.operation_request.HasField("owner_session_id")
     assert command.operation_request.WhichOneof("payload") == "git_create_worktree"
     assert command.operation_request.git_create_worktree.source_project_path == (
         "/workspace/agent/repo"

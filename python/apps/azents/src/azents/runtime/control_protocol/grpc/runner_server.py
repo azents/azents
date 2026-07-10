@@ -429,6 +429,9 @@ class RuntimeRunnerControlGrpcServicer(
             body_stream_id=envelope.body_stream_id or "",
             background=bool(envelope.payload.get("background")),
         )
+        owner_session_id = envelope.payload.get("owner_session_id")
+        if isinstance(owner_session_id, str):
+            message.owner_session_id = owner_session_id
         _copy_operation_payload(message, envelope.operation_type, payload)
         if envelope.deadline_at is not None:
             message.deadline_at.CopyFrom(_timestamp(envelope.deadline_at))
@@ -674,9 +677,6 @@ def _copy_operation_payload(
         message.process_start.max_output_bytes = _int_payload(
             payload, "max_output_bytes"
         )
-        message.process_start.owner_session_id = _str_payload(
-            payload, "owner_session_id"
-        )
         env = payload.get("env")
         if isinstance(env, dict):
             message.process_start.env.update(
@@ -693,9 +693,6 @@ def _copy_operation_payload(
         message.process_write.yield_time_ms = _int_payload(payload, "yield_time_ms")
         message.process_write.max_output_bytes = _int_payload(
             payload, "max_output_bytes"
-        )
-        message.process_write.owner_session_id = _str_payload(
-            payload, "owner_session_id"
         )
         return
     if operation_type == "file.delete":
