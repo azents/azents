@@ -46,9 +46,17 @@ from .resolve import (
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
 
-def _make_agent() -> Agent:
+def _make_agent(
+    *,
+    reasoning_supported: bool = False,
+    effort_levels: list[ModelReasoningEffort] | None = None,
+) -> Agent:
     """Create Agent for tests."""
     selection = make_test_model_selection(integration_id="integ-1")
+    selection.normalized_capabilities.reasoning.supported = reasoning_supported
+    selection.normalized_capabilities.reasoning.effort_levels = (
+        [] if effort_levels is None else effort_levels
+    )
     return Agent(
         id="agent-1",
         workspace_id="ws-1",
@@ -284,10 +292,82 @@ class TestResolveInvokeInput:
 
         assert result == Failure(ModelTargetNotFound(model_target_label="deleted"))
 
+    async def test_profile_resolution_accepts_unrestricted_effort(self) -> None:
+        """Empty effort levels allow any normalized effort for reasoning models."""
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = _make_agent(
+            reasoning_supported=True,
+        )
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+            yield AsyncMock(spec=AsyncSession)
+
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.reasoning_effort == ModelReasoningEffort.HIGH
+        assert result.value.run_request.reasoning_effort == ModelReasoningEffort.HIGH
+
+    async def test_profile_resolution_rejects_effort_for_non_reasoning_model(
+        self,
+    ) -> None:
+        """Explicit effort remains invalid when reasoning is unsupported."""
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = _make_agent()
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+            yield AsyncMock(spec=AsyncSession)
+
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            agent_repository=agent_repository,
+            integration_repository=AsyncMock(),
+            session_manager=session_manager,
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert result == Failure(
+            ReasoningEffortUnsupported(
+                model_target_label="default",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            )
+        )
+
     async def test_profile_resolution_rejects_unsupported_effort(self) -> None:
         """Explicit effort is validated against the selected target snapshot."""
         agent_repository = AsyncMock()
-        agent_repository.get_by_id.return_value = _make_agent()
+        agent_repository.get_by_id.return_value = _make_agent(
+            reasoning_supported=True,
+            effort_levels=[ModelReasoningEffort.LOW],
+        )
 
         @asynccontextmanager
         async def session_manager() -> AsyncGenerator[AsyncSession, None]:
