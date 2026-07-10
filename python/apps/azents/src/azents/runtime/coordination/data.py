@@ -19,6 +19,7 @@ class RuntimeOperationStatus(enum.StrEnum):
     """Short-lived coordination status for an active Runtime operation."""
 
     ACTIVE = "active"
+    RUNNING = "running"
     CANCEL_REQUESTED = "cancel_requested"
     FINAL = "final"
 

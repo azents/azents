@@ -68,6 +68,14 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
                 reply_stream_id="reply:req-1",
             ),
         )
+        operation_start = await anext(requests)
+        sent.append(operation_start)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=operation_start.request_id,
+            operation_start_ack=runtime_runner_control_pb2.RunnerOperationStartAck(
+                allowed=True
+            ),
+        )
         heartbeat = await anext(requests)
         sent.append(heartbeat)
         yield runtime_runner_control_pb2.RunnerControlMessage(
@@ -100,6 +108,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
         "max_output_bytes": 4096,
         "env": {"PYTHONUNBUFFERED": "1"},
     }
+    assert await client.start_runner_operation(operation)
     assert await client.heartbeat_runner(
         runtime_id="runtime-1",
         generation=accepted.generation,
@@ -127,14 +136,16 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
         )
     )
     for _ in range(10):
-        if len(sent) >= 3:
+        if len(sent) >= 4:
             break
         await asyncio.sleep(0)
 
     assert sent[0].WhichOneof("payload") == "register"
     assert sent[0].register.workspace_path == "/workspace/agent"
-    assert sent[1].WhichOneof("payload") == "heartbeat"
-    event = sent[2].operation_event
+    assert sent[1].WhichOneof("payload") == "operation_start"
+    assert sent[1].operation_start.operation_id == "operation:req-1"
+    assert sent[2].WhichOneof("payload") == "heartbeat"
+    event = sent[3].operation_event
     assert event.event_type == "final_success"
     assert event.WhichOneof("payload") == "final_success"
     assert event.final_success.WhichOneof("result") == "process"
@@ -163,7 +174,10 @@ async def test_grpc_client_backpressures_operation_delivery() -> None:
 
     async def stream(
         requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
     ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
         register = await anext(requests)
         yield runtime_runner_control_pb2.RunnerControlMessage(
             request_id=register.request_id,

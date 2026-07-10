@@ -377,8 +377,13 @@ class RuntimeControlProtocolService:
         RuntimeReplyAppendResult
         | RuntimeProtocolRouteUnavailable
         | RuntimeProtocolStaleGeneration
+        | None
     ):
-        """Append a fenced Provider or Runner reply event."""
+        """Append a fenced Provider or Runner reply event.
+
+        Returns ``None`` when ``operation_id`` is set and the operation is
+        already final so late events cannot replace the final cursor.
+        """
         kind = _connection_kind(expected_target)
         connection = await self._store.get_connection(
             kind=kind,
@@ -395,20 +400,21 @@ class RuntimeControlProtocolService:
                 subject_id=expected_subject_id,
                 generation=event.generation,
             )
-        cursor = await self._store.append_reply(reply_stream_id, event)
         if operation_id is not None:
-            if event.final:
-                await self._store.update_operation_status(
-                    operation_id,
-                    status=RuntimeOperationStatus.FINAL,
-                    updated_at=event.created_at,
-                    final_event_cursor=cursor,
-                )
-            else:
-                await self._store.heartbeat_operation(
-                    operation_id,
-                    heartbeat_at=event.created_at,
-                )
+            appended = await self._store.append_reply_for_operation(
+                reply_stream_id,
+                event,
+                operation_id=operation_id,
+            )
+            if appended is None:
+                return None
+            cursor, _metadata = appended
+            return RuntimeReplyAppendResult(
+                cursor=cursor,
+                final=event.final,
+                operation_id=operation_id,
+            )
+        cursor = await self._store.append_reply(reply_stream_id, event)
         return RuntimeReplyAppendResult(
             cursor=cursor,
             final=event.final,

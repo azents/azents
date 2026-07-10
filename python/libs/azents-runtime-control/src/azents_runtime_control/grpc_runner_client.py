@@ -70,6 +70,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
         )
         self._operation_handler: RunnerOperationHandler | None = None
         self._pending_heartbeat_acks: dict[str, asyncio.Future[bool]] = {}
+        self._pending_operation_start_acks: dict[str, asyncio.Future[bool]] = {}
         self._accepted: asyncio.Future[RunnerRegistrationAccepted] | None = None
         self._receiver_task: asyncio.Task[None] | None = None
         self._connection_id: str | None = None
@@ -178,6 +179,30 @@ class GrpcRunnerControlClient(RunnerControlClient):
         del runtime_id, generation, consumer_id, block_ms
         return None
 
+    async def start_runner_operation(
+        self,
+        operation: RunnerOperationEnvelope,
+    ) -> bool:
+        """Authorize a pending operation immediately before execution."""
+        request_id = f"start:{operation.request_id}"
+        future = asyncio.get_running_loop().create_future()
+        self._pending_operation_start_acks[request_id] = future
+        await self._send(
+            runtime_runner_control_pb2.RunnerMessage(
+                connection_id=self._require_connection_id(),
+                request_id=request_id,
+                generation=operation.runner_generation,
+                operation_start=runtime_runner_control_pb2.RunnerOperationStart(
+                    runtime_id=operation.runtime_id,
+                    operation_id=f"operation:{operation.request_id}",
+                ),
+            )
+        )
+        try:
+            return await future
+        finally:
+            self._pending_operation_start_acks.pop(request_id, None)
+
     async def append_runner_event(self, event: RunnerOperationEvent) -> None:
         """Append one Runner operation event."""
         await self._send(
@@ -246,6 +271,11 @@ class GrpcRunnerControlClient(RunnerControlClient):
             if future is not None and not future.done():
                 future.set_result(True)
             return
+        if payload == "operation_start_ack":
+            future = self._pending_operation_start_acks.get(message.request_id)
+            if future is not None and not future.done():
+                future.set_result(message.operation_start_ack.allowed)
+            return
         if payload == "operation_request":
             if self._operation_handler is None:
                 raise RuntimeRunnerControlStreamClosed(
@@ -259,7 +289,10 @@ class GrpcRunnerControlClient(RunnerControlClient):
     def _fail_pending(self, exc: Exception) -> None:
         if self._accepted is not None and not self._accepted.done():
             self._accepted.set_exception(exc)
-        for future in self._pending_heartbeat_acks.values():
+        for future in (
+            *self._pending_heartbeat_acks.values(),
+            *self._pending_operation_start_acks.values(),
+        ):
             if not future.done():
                 future.set_exception(exc)
 

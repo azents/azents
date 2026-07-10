@@ -30,6 +30,7 @@ class FakeRunnerControlClient(RunnerControlClient):
         self.heartbeats: list[tuple[str, int]] = []
         self.reports: list[RunnerStateReport] = []
         self.events: list[RunnerOperationEvent] = []
+        self.canceled_request_ids: set[str] = set()
         self.operation_handler: (
             Callable[[RunnerOperationEnvelope], Awaitable[None]] | None
         ) = None
@@ -89,6 +90,13 @@ class FakeRunnerControlClient(RunnerControlClient):
         operation = self.operations.pop(0)
         self.claimed_request_ids.append(operation.request_id)
         return operation
+
+    async def start_runner_operation(
+        self,
+        operation: RunnerOperationEnvelope,
+    ) -> bool:
+        """Allow execution unless the test canceled the operation."""
+        return operation.request_id not in self.canceled_request_ids
 
     async def append_runner_event(self, event: RunnerOperationEvent) -> None:
         """Record one Runner event."""
@@ -275,6 +283,34 @@ async def test_expired_pending_operation_is_not_executed() -> None:
     assert operations.started == ["active"]
     assert client.events[0].request_id == "expired"
     assert client.events[0].payload["error_code"] == "operation_timeout"
+
+
+@pytest.mark.asyncio
+async def test_canceled_pending_operation_is_not_executed() -> None:
+    client = FakeRunnerControlClient()
+    operations = BlockingOperations()
+    client.operations.extend(
+        (
+            _operation("active", owner="session-a"),
+            _operation("canceled", owner="session-a"),
+        )
+    )
+    loop = _loop(
+        client,
+        operations,
+        max_concurrent_operations_per_session=1,
+        max_concurrent_operations=1,
+    )
+    await loop.start()
+
+    await _run(loop, 2)
+    await _wait_for(lambda: operations.started == ["active"])
+    client.canceled_request_ids.add("canceled")
+    operations.release("active")
+    await _wait_for(lambda: operations.finished == ["active"])
+    await loop.run_once(block_ms=0)
+
+    assert operations.started == ["active"]
 
 
 @pytest.mark.asyncio

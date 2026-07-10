@@ -21,7 +21,6 @@ from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeBodyChunk,
     RuntimeCoordinationTarget,
-    RuntimeOperationStatus,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeReplyRecord,
@@ -1656,7 +1655,7 @@ class RuntimeRunnerOperationClient:
             or generation is None
         ):
             return
-        cursor = await self._coordination_store.append_reply(
+        await self._coordination_store.append_reply_for_operation(
             reply_stream_id,
             RuntimeReplyEvent(
                 request_id=request_id,
@@ -1667,12 +1666,7 @@ class RuntimeRunnerOperationClient:
                 created_at=created_at,
                 final=True,
             ),
-        )
-        await self._coordination_store.update_operation_status(
-            operation_id,
-            status=RuntimeOperationStatus.FINAL,
-            updated_at=created_at,
-            final_event_cursor=cursor,
+            operation_id=operation_id,
         )
 
 

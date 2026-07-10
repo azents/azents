@@ -58,6 +58,91 @@ redis.call('DEL', KEYS[1])
 return 1
 """
 
+# Transition ACTIVE -> RUNNING when the stored status is still active.
+_TRY_START_OPERATION_SCRIPT = """
+local current = redis.call('GET', KEYS[1])
+if not current then
+  return nil
+end
+local decoded = cjson.decode(current)
+if decoded['status'] ~= 'active' then
+  return nil
+end
+decoded['status'] = 'running'
+decoded['updated_at'] = ARGV[1]
+local ttl = redis.call('TTL', KEYS[1])
+local encoded = cjson.encode(decoded)
+if ttl and ttl > 0 then
+  redis.call('SET', KEYS[1], encoded, 'EX', ttl)
+else
+  redis.call('SET', KEYS[1], encoded)
+end
+return encoded
+"""
+
+# Update status fields only while the operation is still non-final.
+_UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT = """
+local current = redis.call('GET', KEYS[1])
+if not current then
+  return nil
+end
+local decoded = cjson.decode(current)
+if decoded['status'] == 'final' then
+  return nil
+end
+decoded['status'] = ARGV[1]
+decoded['updated_at'] = ARGV[2]
+if ARGV[3] ~= '' then
+  decoded['final_event_cursor'] = ARGV[3]
+end
+if ARGV[4] ~= '' then
+  decoded['last_heartbeat_at'] = ARGV[4]
+end
+if ARGV[5] ~= '' then
+  decoded['last_event_at'] = ARGV[5]
+end
+local ttl = redis.call('TTL', KEYS[1])
+local encoded = cjson.encode(decoded)
+if ttl and ttl > 0 then
+  redis.call('SET', KEYS[1], encoded, 'EX', ttl)
+else
+  redis.call('SET', KEYS[1], encoded)
+end
+return encoded
+"""
+
+# Append a reply only when the operation is still non-final, then update metadata.
+_APPEND_REPLY_FOR_OPERATION_SCRIPT = """
+local current = redis.call('GET', KEYS[1])
+if not current then
+  return nil
+end
+local decoded = cjson.decode(current)
+if decoded['status'] == 'final' then
+  return nil
+end
+local cursor = redis.call('XADD', KEYS[2], '*', 'payload', ARGV[1])
+decoded['updated_at'] = ARGV[3]
+decoded['last_event_at'] = ARGV[3]
+if ARGV[4] ~= '' then
+  decoded['status'] = ARGV[2]
+  decoded['final_event_cursor'] = cursor
+else
+  decoded['last_heartbeat_at'] = ARGV[3]
+end
+local ttl = redis.call('TTL', KEYS[1])
+local encoded = cjson.encode(decoded)
+if ttl and ttl > 0 then
+  redis.call('SET', KEYS[1], encoded, 'EX', ttl)
+else
+  redis.call('SET', KEYS[1], encoded)
+end
+if ARGV[5] ~= '' then
+  redis.call('EXPIRE', KEYS[2], tonumber(ARGV[5]))
+end
+return cursor
+"""
+
 
 class RedisRuntimeCoordinationStore:
     """Redis Streams and keys implementation of RuntimeCoordinationStore."""
@@ -258,19 +343,74 @@ class RedisRuntimeCoordinationStore:
         updated_at: datetime,
         final_event_cursor: str | None,
     ) -> RuntimeOperationMetadata | None:
-        """Update operation status if the operation exists."""
-        metadata = await self.get_operation(operation_id)
-        if metadata is None:
-            return None
-        updated = dataclasses.replace(
-            metadata,
-            status=status,
-            updated_at=updated_at,
-            final_event_cursor=final_event_cursor,
+        """Update operation status if the operation exists and is not final."""
+        key = self._operation_key(operation_id)
+        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+            _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
+            1,
+            key,
+            status.value,
+            _datetime_to_json(updated_at) or "",
+            final_event_cursor or "",
+            "",
+            "",
         )
-        ttl = await self._positive_ttl(self._operation_key(operation_id))
-        await self.put_operation(updated, ttl_seconds=ttl)
-        return updated
+        if raw is None:
+            return await self.get_operation(operation_id)
+        return _operation_from_json(_decode_text(raw))
+
+    async def try_start_operation(
+        self,
+        operation_id: str,
+        *,
+        updated_at: datetime,
+    ) -> RuntimeOperationMetadata | None:
+        """Atomically transition an operation from ACTIVE to RUNNING."""
+        key = self._operation_key(operation_id)
+        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+            _TRY_START_OPERATION_SCRIPT,
+            1,
+            key,
+            _datetime_to_json(updated_at) or "",
+        )
+        if raw is None:
+            return None
+        return _operation_from_json(_decode_text(raw))
+
+    async def append_reply_for_operation(
+        self,
+        stream_id: str,
+        event: RuntimeReplyEvent,
+        *,
+        operation_id: str,
+    ) -> tuple[str, RuntimeOperationMetadata] | None:
+        """Append a reply and update operation metadata if not already final."""
+        operation_key = self._operation_key(operation_id)
+        stream_key = self._stream_key("reply", stream_id)
+        if event.final:
+            next_status = RuntimeOperationStatus.FINAL.value
+            mark_final = "1"
+        else:
+            next_status = ""
+            mark_final = ""
+        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+            _APPEND_REPLY_FOR_OPERATION_SCRIPT,
+            2,
+            operation_key,
+            stream_key,
+            _reply_event_to_json(event),
+            next_status,
+            _datetime_to_json(event.created_at) or "",
+            mark_final,
+            str(self._stream_ttl_seconds),
+        )
+        if raw is None:
+            return None
+        cursor = _decode_text(raw)
+        current = await self.get_operation(operation_id)
+        if current is None:
+            return None
+        return cursor, current
 
     async def heartbeat_operation(
         self,
@@ -279,17 +419,25 @@ class RedisRuntimeCoordinationStore:
         heartbeat_at: datetime,
     ) -> RuntimeOperationMetadata | None:
         """Record an operation heartbeat."""
+        key = self._operation_key(operation_id)
         metadata = await self.get_operation(operation_id)
         if metadata is None:
             return None
-        updated = dataclasses.replace(
-            metadata,
-            updated_at=heartbeat_at,
-            last_heartbeat_at=heartbeat_at,
+        if metadata.status is RuntimeOperationStatus.FINAL:
+            return metadata
+        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+            _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
+            1,
+            key,
+            metadata.status.value,
+            _datetime_to_json(heartbeat_at) or "",
+            "",
+            _datetime_to_json(heartbeat_at) or "",
+            "",
         )
-        ttl = await self._positive_ttl(self._operation_key(operation_id))
-        await self.put_operation(updated, ttl_seconds=ttl)
-        return updated
+        if raw is None:
+            return await self.get_operation(operation_id)
+        return _operation_from_json(_decode_text(raw))
 
     async def delete_operation(self, operation_id: str) -> None:
         """Delete operation metadata."""

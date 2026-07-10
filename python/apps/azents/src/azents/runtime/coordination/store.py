@@ -112,7 +112,36 @@ class RuntimeCoordinationStore(Protocol):
         updated_at: datetime,
         final_event_cursor: str | None,
     ) -> RuntimeOperationMetadata | None:
-        """Update operation status if the operation exists."""
+        """Update operation status if the operation exists and is not already final."""
+        ...
+
+    async def try_start_operation(
+        self,
+        operation_id: str,
+        *,
+        updated_at: datetime,
+    ) -> RuntimeOperationMetadata | None:
+        """Atomically transition an operation from ACTIVE to RUNNING.
+
+        :returns: Updated metadata when the start claim succeeds, otherwise
+            ``None`` when the operation is missing or not startable.
+        """
+        ...
+
+    async def append_reply_for_operation(
+        self,
+        stream_id: str,
+        event: RuntimeReplyEvent,
+        *,
+        operation_id: str,
+    ) -> tuple[str, RuntimeOperationMetadata] | None:
+        """Append a reply and update operation metadata if not already final.
+
+        Final events mark the operation final with the new cursor. Non-final
+        events refresh the operation heartbeat. Returns ``None`` when the
+        operation is missing or already final so late Runner events cannot
+        replace an authoritative final cursor.
+        """
         ...
 
     async def heartbeat_operation(

@@ -172,6 +172,13 @@ class RunnerControlClient(Protocol):
         """Claim the next operation assigned to this Runner generation."""
         ...
 
+    async def start_runner_operation(
+        self,
+        operation: RunnerOperationEnvelope,
+    ) -> bool:
+        """Authorize a pending operation immediately before execution."""
+        ...
+
     async def append_runner_event(self, event: RunnerOperationEvent) -> None:
         """Append one Runner operation event."""
         ...
@@ -442,6 +449,12 @@ class RunnerRunLoop:
                     extra=self._operation_log_extra(queued.operation),
                 )
                 return True
+            if not await self._client.start_runner_operation(queued.operation):
+                _LOGGER.info(
+                    "Runtime Runner pending operation canceled before execution",
+                    extra=self._operation_log_extra(queued.operation),
+                )
+                return True
             started_at = self._monotonic()
             task = asyncio.create_task(self._operations.handle(queued.operation))
             self._active_operation_tasks[task] = _ActiveOperation(
@@ -475,6 +488,12 @@ class RunnerRunLoop:
                 error_message=(
                     "Runner control operation deadline expired before execution"
                 ),
+            )
+            return True
+        if not await self._client.start_runner_operation(queued.operation):
+            _LOGGER.info(
+                "Runtime Runner pending control operation canceled before execution",
+                extra=self._operation_log_extra(queued.operation),
             )
             return True
         started_at = self._monotonic()

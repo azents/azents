@@ -325,6 +325,109 @@ async def test_operation_metadata_heartbeat_status_and_delete(
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_try_start_operation_is_atomic(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Only one concurrent start claim may transition ACTIVE to RUNNING."""
+    created_at = _now()
+    metadata = RuntimeOperationMetadata(
+        operation_id="op-start-1",
+        runtime_id="runtime-1",
+        target=RuntimeCoordinationTarget.RUNNER,
+        request_stream_id="runner:runtime-1",
+        reply_stream_id="reply:req-start",
+        status=RuntimeOperationStatus.ACTIVE,
+        created_at=created_at,
+        updated_at=created_at,
+        deadline_at=created_at + timedelta(seconds=30),
+        body_stream_id=None,
+        last_heartbeat_at=None,
+        last_event_at=None,
+        cancel_requested_at=None,
+        final_event_cursor=None,
+        background=False,
+        background_context=None,
+    )
+    await store.put_operation(metadata, ttl_seconds=60)
+
+    first = await store.try_start_operation(
+        "op-start-1",
+        updated_at=created_at + timedelta(seconds=1),
+    )
+    second = await store.try_start_operation(
+        "op-start-1",
+        updated_at=created_at + timedelta(seconds=2),
+    )
+    canceled = await store.update_operation_status(
+        "op-start-1",
+        status=RuntimeOperationStatus.FINAL,
+        updated_at=created_at + timedelta(seconds=3),
+        final_event_cursor="cancel-cursor",
+    )
+    after_final = await store.try_start_operation(
+        "op-start-1",
+        updated_at=created_at + timedelta(seconds=4),
+    )
+
+    assert first is not None
+    assert first.status is RuntimeOperationStatus.RUNNING
+    assert second is None
+    assert canceled is not None
+    assert canceled.status is RuntimeOperationStatus.FINAL
+    assert canceled.final_event_cursor == "cancel-cursor"
+    assert after_final is None
+
+
+@pytest.mark.asyncio
+async def test_append_reply_for_operation_rejects_late_final(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Late Runner finals must not replace an authoritative canceled cursor."""
+    created_at = _now()
+    metadata = RuntimeOperationMetadata(
+        operation_id="op-final-1",
+        runtime_id="runtime-1",
+        target=RuntimeCoordinationTarget.RUNNER,
+        request_stream_id="runner:runtime-1",
+        reply_stream_id="reply:req-final",
+        status=RuntimeOperationStatus.ACTIVE,
+        created_at=created_at,
+        updated_at=created_at,
+        deadline_at=created_at + timedelta(seconds=30),
+        body_stream_id=None,
+        last_heartbeat_at=None,
+        last_event_at=None,
+        cancel_requested_at=None,
+        final_event_cursor=None,
+        background=False,
+        background_context=None,
+    )
+    await store.put_operation(metadata, ttl_seconds=60)
+    canceled = await store.append_reply_for_operation(
+        "reply:req-final",
+        _reply("req-final", "canceled", final=True),
+        operation_id="op-final-1",
+    )
+    late = await store.append_reply_for_operation(
+        "reply:req-final",
+        _reply("req-final", "late-success", final=True),
+        operation_id="op-final-1",
+    )
+
+    assert canceled is not None
+    cursor, updated = canceled
+    assert updated.status is RuntimeOperationStatus.FINAL
+    assert updated.final_event_cursor == cursor
+    assert late is None
+    current = await store.get_operation("op-final-1")
+    assert current is not None
+    assert current.final_event_cursor == cursor
+    replies = await store.read_replies("reply:req-final", after_cursor=None, limit=10)
+    assert len(replies) == 1
+    assert replies[0].event.payload["message"] == "canceled"
+
+
 async def test_connection_registry_issues_generation_fences(
     store: RuntimeCoordinationStore,
 ) -> None:
