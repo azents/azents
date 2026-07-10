@@ -154,8 +154,9 @@ _15 documents_
 - [ADR-0099: Codex-Compatible Subagent Concurrency](adr/0099-codex-compatible-subagent-concurrency.md)
 - [ADR-0100: Label-Based Model Targets](adr/0100-label-based-model-targets.md)
 - [ADR-0101: Mark Forked History Boundaries for Subagent Tasks](adr/0101-subagent-forked-history-task-boundaries.md)
+- [ADR-0102: Codex Multi-Agent V2 Model Contract Parity](adr/0102-codex-multi-agent-v2-model-contract-parity.md)
 
-_104 documents_
+_105 documents_
 
 ## Issues (Bug Tracking)
 
@@ -188,4 +189,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 368
+- Total documents: 370
