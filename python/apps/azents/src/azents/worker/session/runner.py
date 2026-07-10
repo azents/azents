@@ -339,7 +339,7 @@ class SessionRunner:
             await self.session_lifecycle.release_session_lock(session_id)
             return
 
-        should_handover = await self.session_lifecycle.has_running_agent_run(
+        should_handover = await self.session_lifecycle.has_active_agent_run(
             session_id,
         )
 

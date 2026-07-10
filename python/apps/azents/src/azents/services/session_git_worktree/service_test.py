@@ -20,6 +20,7 @@ from azents.core.enums import (
     SessionGitWorktreeStatus,
     WorkspaceUserRole,
 )
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
     CreateGitWorktreeAction,
@@ -32,7 +33,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.action_execution.data import ActionExecutionProjection
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogEntry
@@ -77,6 +78,11 @@ from azents.services.session_git_worktree import (
 )
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
+
+_TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
+    model_target_label="Primary",
+    reasoning_effort=None,
+)
 
 
 @asynccontextmanager
@@ -521,6 +527,7 @@ def _input_service(
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
         ),
         session_manager=session_manager,
     )
@@ -541,9 +548,12 @@ async def _execute_first_setup_action(
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
+        agent_run_repository=AgentRunRepository(),
     ).flush_session_input_buffers(
         session_id=session_id,
         model=None,
+        required_inference_profile=None,
+        active_run_id=None,
         limit=1,
         include_action_messages=True,
     )
@@ -583,6 +593,7 @@ async def _create_ready_worktree_session(
             metadata={"source": "chat"},
             attachments=[],
         ),
+        inference_profile=_TEST_INFERENCE_PROFILE,
         user_id=user_id,
         existing_project_paths=[],
         setup_actions=[
@@ -973,6 +984,7 @@ class TestSessionGitWorktreeService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
             existing_project_paths=[],
             setup_actions=[
@@ -1036,6 +1048,7 @@ class TestSessionGitWorktreeService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
             existing_project_paths=[],
             setup_actions=[
@@ -1089,6 +1102,7 @@ class TestSessionGitWorktreeService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
             existing_project_paths=[],
             setup_actions=[
@@ -1134,6 +1148,7 @@ class TestSessionGitWorktreeService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
             existing_project_paths=[],
             setup_actions=[
@@ -1183,6 +1198,7 @@ class TestSessionGitWorktreeService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
             existing_project_paths=[],
             setup_actions=[
@@ -1235,6 +1251,7 @@ class TestSessionGitWorktreeService:
                 metadata={"source": "chat"},
                 attachments=[],
             ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
             user_id=user_id,
             existing_project_paths=[],
             setup_actions=[

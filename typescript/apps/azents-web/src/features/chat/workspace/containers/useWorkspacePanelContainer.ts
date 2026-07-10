@@ -141,6 +141,29 @@ export function useWorkspacePanelContainer({
     Record<string, WorkspaceEntry[]>
   >({});
   const utils = trpc.useUtils();
+  const agentQuery = trpc.agent.get.useQuery({ handle, agentId });
+  const agentSessionQuery = trpc.chat.getAgentSession.useQuery({
+    agentId,
+    sessionId,
+  });
+  const inferenceProfile = useMemo(
+    () => ({
+      model_target_label:
+        agentSessionQuery.data?.last_model_target_label ??
+        agentQuery.data?.main_model_label ??
+        "",
+      reasoning_effort:
+        agentSessionQuery.data?.last_model_target_label != null
+          ? agentSessionQuery.data.last_reasoning_effort
+          : (agentQuery.data?.model_parameters?.reasoning_effort ?? null),
+    }),
+    [
+      agentQuery.data?.main_model_label,
+      agentQuery.data?.model_parameters?.reasoning_effort,
+      agentSessionQuery.data?.last_model_target_label,
+      agentSessionQuery.data?.last_reasoning_effort,
+    ],
+  );
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectPickerDirectoryPath, setProjectPickerDirectoryPath] = useState<
     string | null
@@ -755,6 +778,14 @@ export function useWorkspacePanelContainer({
       );
       return;
     }
+    if (!agentSessionQuery.data) {
+      setRegistrationSubmitError("Session model settings are still loading.");
+      return;
+    }
+    if (!inferenceProfile.model_target_label) {
+      setRegistrationSubmitError("Agent model settings are still loading.");
+      return;
+    }
     setRegistrationSubmitError(null);
     createWorktreeProjectMutation.mutate({
       agentId,
@@ -762,10 +793,13 @@ export function useWorkspacePanelContainer({
       clientRequestId: crypto.randomUUID(),
       sourceProjectPath: registrationPath,
       startingRef: registrationStartingRef,
+      inferenceProfile,
     });
   }, [
     agentId,
+    agentSessionQuery.data,
     createWorktreeProjectMutation,
+    inferenceProfile,
     onRegisterProject,
     registrationMode,
     registrationPath,

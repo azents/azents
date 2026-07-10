@@ -138,6 +138,7 @@ def _service(
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
         ),
         session_manager=rdb_session_manager,
     )

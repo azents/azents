@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, ModelParameters
 from azents.core.enums import ExchangeFileStatus, LLMProvider
+from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
 from azents.core.tools import (
     ResolveContext,
@@ -192,12 +194,46 @@ async def _resolve_toolkit_with_logging(
     return resolved
 
 
+@dataclasses.dataclass(frozen=True)
+class ResolvedInvokeInputProfile:
+    """Run request plus the exact selected profile snapshot for activation."""
+
+    run_request: RunRequest
+    model_selection: AgentModelSelection
+    reasoning_effort: ModelReasoningEffort | None
+
+
+@dataclasses.dataclass(frozen=True)
+class _ResolvedInvokeInputModelSource:
+    """Run request and main selection resolved from one Agent snapshot."""
+
+    run_request: RunRequest
+    model_selection: AgentModelSelection
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelTargetNotFound:
+    """Requested Agent-owned model target label no longer exists."""
+
+    model_target_label: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ReasoningEffortUnsupported:
+    """Requested effort is unsupported by the selected model target."""
+
+    model_target_label: str
+    reasoning_effort: ModelReasoningEffort
+
+
 ResolveError = (
     AgentNotFound
     | AgentDisabled
     | IntegrationNotFound
     | IntegrationDisabled
     | InvalidModelParameters
+    | ModelTargetNotFound
+    | ReasoningEffortUnsupported
 )
 RuntimeTokenRefreshError = (
     ChatGPTOAuthProviderRejected
@@ -283,28 +319,113 @@ async def resolve_invoke_input(
     model_file_service: ModelFileService,
 ) -> Result[RunRequest, ResolveError]:
     """Load Agent/Integration and build RunRequest."""
-    return await resolve_invoke_input_with_model_source(
+    resolved = await resolve_invoke_input_with_model_source(
         invoke_input,
         model_source_agent_id=invoke_input.agent_id,
+        requested_profile=None,
+        resolved_model_selection=None,
         agent_repository=agent_repository,
         integration_repository=integration_repository,
         session_manager=session_manager,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
     )
+    match resolved:
+        case Success(value):
+            return Success(value.run_request)
+        case Failure(error):
+            return Failure(error)
+        case _:
+            assert_never(resolved)
 
 
-async def resolve_invoke_input_with_model_source(
+async def resolve_invoke_input_with_profile(
     invoke_input: InvokeInput,
     *,
-    model_source_agent_id: str,
+    requested_profile: RequestedInferenceProfile,
+    agent_repository: AgentRepository,
+    integration_repository: LLMProviderIntegrationRepository,
+    session_manager: SessionManager[AsyncSession],
+    exchange_file_service: ExchangeFileService,
+    model_file_service: ModelFileService,
+) -> Result[ResolvedInvokeInputProfile, ResolveError]:
+    """Build a run request from one explicit Agent-owned inference profile."""
+    resolved = await resolve_invoke_input_with_model_source(
+        invoke_input,
+        model_source_agent_id=invoke_input.agent_id,
+        requested_profile=requested_profile,
+        resolved_model_selection=None,
+        agent_repository=agent_repository,
+        integration_repository=integration_repository,
+        session_manager=session_manager,
+        exchange_file_service=exchange_file_service,
+        model_file_service=model_file_service,
+    )
+    match resolved:
+        case Success(value):
+            return Success(
+                ResolvedInvokeInputProfile(
+                    run_request=value.run_request,
+                    model_selection=value.model_selection,
+                    reasoning_effort=requested_profile.reasoning_effort,
+                )
+            )
+        case Failure(error):
+            return Failure(error)
+        case _:
+            assert_never(resolved)
+
+
+async def resolve_invoke_input_with_resolved_profile(
+    invoke_input: InvokeInput,
+    *,
+    resolved_model_selection: AgentModelSelection,
+    resolved_reasoning_effort: ModelReasoningEffort | None,
     agent_repository: AgentRepository,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
 ) -> Result[RunRequest, ResolveError]:
-    """Load Agent while separately specifying source agent for LLM model selection."""
+    """Rebuild a run request from an already activated model snapshot."""
+    resolved = await resolve_invoke_input_with_model_source(
+        invoke_input,
+        model_source_agent_id=invoke_input.agent_id,
+        requested_profile=None,
+        resolved_model_selection=resolved_model_selection,
+        agent_repository=agent_repository,
+        integration_repository=integration_repository,
+        session_manager=session_manager,
+        exchange_file_service=exchange_file_service,
+        model_file_service=model_file_service,
+    )
+    match resolved:
+        case Success(value):
+            return Success(
+                dataclasses.replace(
+                    value.run_request,
+                    reasoning_effort=resolved_reasoning_effort,
+                )
+            )
+        case Failure(error):
+            return Failure(error)
+        case _:
+            assert_never(resolved)
+
+
+async def resolve_invoke_input_with_model_source(
+    invoke_input: InvokeInput,
+    *,
+    model_source_agent_id: str,
+    requested_profile: RequestedInferenceProfile | None,
+    resolved_model_selection: AgentModelSelection | None,
+    agent_repository: AgentRepository,
+    integration_repository: LLMProviderIntegrationRepository,
+    session_manager: SessionManager[AsyncSession],
+    exchange_file_service: ExchangeFileService,
+    model_file_service: ModelFileService,
+) -> Result[_ResolvedInvokeInputModelSource, ResolveError]:
+    """Resolve a run request and main selection from one Agent snapshot."""
     async with session_manager() as session:
         agent = await agent_repository.get_by_id(session, invoke_input.agent_id)
         if agent is None:
@@ -323,6 +444,37 @@ async def resolve_invoke_input_with_model_source(
                 return Failure(AgentNotFound(agent_id=model_source_agent_id))
 
         main_selection = model_agent.model_selection
+        if resolved_model_selection is not None:
+            main_selection = resolved_model_selection
+        elif requested_profile is not None:
+            selected_option = next(
+                (
+                    option
+                    for option in model_agent.selectable_model_options
+                    if option.label == requested_profile.model_target_label
+                ),
+                None,
+            )
+            if selected_option is None:
+                return Failure(
+                    ModelTargetNotFound(
+                        model_target_label=requested_profile.model_target_label
+                    )
+                )
+            main_selection = selected_option.model_selection
+            requested_effort = requested_profile.reasoning_effort
+            if requested_effort is not None:
+                reasoning = main_selection.normalized_capabilities.reasoning
+                if (
+                    not reasoning.supported
+                    or requested_effort not in reasoning.effort_levels
+                ):
+                    return Failure(
+                        ReasoningEffortUnsupported(
+                            model_target_label=requested_profile.model_target_label,
+                            reasoning_effort=requested_effort,
+                        )
+                    )
         lightweight_selection = model_agent.lightweight_model_selection
 
         integration = await integration_repository.get_by_id_with_secrets(
@@ -438,7 +590,11 @@ async def resolve_invoke_input_with_model_source(
             )
         )
 
-    reasoning_effort = _resolve_reasoning_effort(main_selection, params)
+    reasoning_effort = (
+        requested_profile.reasoning_effort
+        if requested_profile is not None
+        else _resolve_reasoning_effort(main_selection, params)
+    )
     max_input = get_max_input_tokens(
         main_selection.normalized_capabilities.context_window.max_input_tokens,
         model,
@@ -467,31 +623,35 @@ async def resolve_invoke_input_with_model_source(
             )
 
     return Success(
-        RunRequest(
-            session_id=invoke_input.session_id,
-            user_messages=user_messages,
-            agent_prompt=agent.system_prompt,
-            toolkits=[],
-            provider=main_selection.provider,
-            model=model,
-            model_capabilities=main_selection.normalized_capabilities,
-            model_developer=model_developer,
-            credential_kwargs=credential_kwargs,
-            workspace_id=agent.workspace_id,
-            agent_id=invoke_input.agent_id,
-            temperature=params.temperature if params else None,
-            max_output_tokens=params.max_output_tokens if params else None,
-            top_p=params.top_p if params else None,
-            stop=params.stop_sequences if params else None,
-            reasoning_effort=reasoning_effort,
-            builtin_tools=builtin_tools,
-            max_input_tokens=max_input,
-            context_window_tokens=params.context_window_tokens if params else None,
-            max_turns=agent.max_turns,
-            compaction_model=compaction_model,
-            compaction_provider=compaction_provider,
-            compaction_credential_kwargs=compaction_credential_kwargs,
-            compaction_max_input_tokens=compaction_max_input_tokens,
+        _ResolvedInvokeInputModelSource(
+            run_request=RunRequest(
+                session_id=invoke_input.session_id,
+                user_messages=user_messages,
+                agent_prompt=agent.system_prompt,
+                toolkits=[],
+                provider=main_selection.provider,
+                model=model,
+                model_capabilities=main_selection.normalized_capabilities,
+                model_developer=model_developer,
+                credential_kwargs=credential_kwargs,
+                workspace_id=agent.workspace_id,
+                agent_id=invoke_input.agent_id,
+                auto_compaction_threshold_tokens=None,
+                temperature=params.temperature if params else None,
+                max_output_tokens=params.max_output_tokens if params else None,
+                top_p=params.top_p if params else None,
+                stop=params.stop_sequences if params else None,
+                reasoning_effort=reasoning_effort,
+                builtin_tools=builtin_tools,
+                max_input_tokens=max_input,
+                context_window_tokens=params.context_window_tokens if params else None,
+                max_turns=agent.max_turns,
+                compaction_model=compaction_model,
+                compaction_provider=compaction_provider,
+                compaction_credential_kwargs=compaction_credential_kwargs,
+                compaction_max_input_tokens=compaction_max_input_tokens,
+            ),
+            model_selection=main_selection,
         )
     )
 

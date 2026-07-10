@@ -18,6 +18,7 @@ Name | Type | Description | Notes
 **native_format** | **str** |  | [optional] 
 **schema_version** | **str** | Event schema version | 
 **created_at** | **datetime** | Created at | 
+**inference_run_summary** | [**InferenceRunSummary**](InferenceRunSummary.md) |  | [optional] 
 
 ## Example
 

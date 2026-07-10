@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction
+from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -30,11 +31,12 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
     """ # noqa: E501
     client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
     message: StrictStr = Field(description="Message content")
+    inference_profile: RequestedInferenceProfile = Field(description="Requested inference profile for the first model run")
     existing_project_paths: List[StrictStr] = Field(description="Existing Project paths to register on the created session")
     setup_actions: List[CreateGitWorktreeAction] = Field(description="Ordered setup actions to enqueue before the first message")
     attachments: Optional[List[StrictStr]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["client_request_id", "message", "existing_project_paths", "setup_actions", "attachments"]
+    __properties: ClassVar[List[str]] = ["client_request_id", "message", "inference_profile", "existing_project_paths", "setup_actions", "attachments"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -77,6 +79,9 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of inference_profile
+        if self.inference_profile:
+            _dict['inference_profile'] = self.inference_profile.to_dict()
         # override the default output from pydantic by calling `to_dict()` of each item in setup_actions (list)
         _items = []
         if self.setup_actions:
@@ -108,6 +113,7 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         _obj = cls.model_validate({
             "client_request_id": obj.get("client_request_id"),
             "message": obj.get("message"),
+            "inference_profile": RequestedInferenceProfile.from_dict(obj["inference_profile"]) if obj.get("inference_profile") is not None else None,
             "existing_project_paths": obj.get("existing_project_paths"),
             "setup_actions": [CreateGitWorktreeAction.from_dict(_item) for _item in obj["setup_actions"]] if obj.get("setup_actions") is not None else None,
             "attachments": obj.get("attachments")

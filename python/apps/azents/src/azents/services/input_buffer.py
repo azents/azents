@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, InputBufferKind
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
@@ -38,7 +39,7 @@ from azents.engine.tools.skill import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
@@ -79,11 +80,21 @@ class InputBufferEnqueueResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class PendingInputInferenceProfile:
+    """Requested profile projected from the next pending input."""
+
+    exists: bool
+    requested_inference_profile: RequestedInferenceProfile | None
+
+
+@dataclasses.dataclass(frozen=True)
 class PromotedInputBuffers:
     """InputBuffer flush result."""
 
+    requested_inference_profile: RequestedInferenceProfile | None
     user_messages: list[RunUserMessage]
     events: list[Event]
+    promoted_event_ids: list[str]
     deleted_buffer_ids: list[str]
     claimed_count: int
     inserted_count: int
@@ -119,6 +130,7 @@ class InputBufferService:
     event_transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ]
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
 
     async def enqueue(
         self,
@@ -163,6 +175,15 @@ class InputBufferService:
         else:
             created = False
             input_buffer = existing
+        if (
+            input_buffer.requested_model_target_label
+            != input.requested_model_target_label
+            or input_buffer.requested_reasoning_effort
+            != input.requested_reasoning_effort
+        ):
+            raise ValueError(
+                "Input idempotency key already used for another inference profile"
+            )
         return InputBufferEnqueueResult(input_buffer=input_buffer, created=created)
 
     async def enqueue_many(
@@ -232,6 +253,24 @@ class InputBufferService:
             to_session_id=to_session_id,
         )
 
+    async def peek_pending_inference_profile(
+        self,
+        session_id: str,
+    ) -> PendingInputInferenceProfile:
+        """Read the next pending input profile without consuming the buffer."""
+        async with self.session_manager() as session:
+            pending = await self.input_buffer_repository.list_for_flush(
+                session,
+                session_id,
+                limit=1,
+            )
+        return PendingInputInferenceProfile(
+            exists=bool(pending),
+            requested_inference_profile=(
+                _requested_inference_profile(pending[0]) if pending else None
+            ),
+        )
+
     async def has_pending_session_input_buffers(self, session_id: str) -> bool:
         """Check whether session still has unflushed InputBuffer."""
         async with self.session_manager() as session:
@@ -247,6 +286,8 @@ class InputBufferService:
         *,
         session_id: str,
         model: str | None,
+        required_inference_profile: RequestedInferenceProfile | None,
+        active_run_id: str | None,
         limit: int | None = None,
         include_action_messages: bool = True,
     ) -> PromotedInputBuffers:
@@ -260,8 +301,10 @@ class InputBufferService:
             )
             if not claimed:
                 return PromotedInputBuffers(
+                    requested_inference_profile=None,
                     user_messages=[],
                     events=[],
+                    promoted_event_ids=[],
                     deleted_buffer_ids=[],
                     claimed_count=0,
                     inserted_count=0,
@@ -272,6 +315,7 @@ class InputBufferService:
                 session,
                 session_id=session_id,
                 claimed=claimed,
+                required_inference_profile=required_inference_profile,
                 include_action_messages=include_action_messages,
             )
             event_inserted = await self._append_input_buffer_events(
@@ -288,31 +332,41 @@ class InputBufferService:
                         title=title,
                         event_id=event.id,
                     )
-            inserted_external_ids = {
-                event.external_id
+            events_by_external_id = {
+                event.external_id: event
                 for event in event_inserted
                 if event.external_id is not None
             }
             deduped = [
                 item
                 for item in promoted
-                if item.external_id not in inserted_external_ids
+                if item.external_id not in events_by_external_id
             ]
-            if deduped:
-                missing: list[str] = []
-                for item in deduped:
-                    existing = (
-                        await self.event_transcript_repository.get_by_external_id(
-                            session,
-                            session_id,
-                            item.external_id,
-                        )
-                    )
-                    if existing is None:
-                        missing.append(item.external_id)
-                if missing:
-                    raise RuntimeError("Conflicted input buffer event was not found")
+            missing: list[str] = []
+            for item in deduped:
+                existing = await self.event_transcript_repository.get_by_external_id(
+                    session,
+                    session_id,
+                    item.external_id,
+                )
+                if existing is None:
+                    missing.append(item.external_id)
+                else:
+                    events_by_external_id[item.external_id] = existing
+            if missing:
+                raise RuntimeError("Conflicted input buffer event was not found")
 
+            promoted_event_ids = list(
+                dict.fromkeys(
+                    events_by_external_id[item.external_id].id for item in promoted
+                )
+            )
+            if active_run_id is not None:
+                await self.agent_run_repository.associate_input_events(
+                    session,
+                    run_id=active_run_id,
+                    event_ids=promoted_event_ids,
+                )
             buffer_ids = list(dict.fromkeys(item.buffer.id for item in promoted))
             deleted_count = await self.input_buffer_repository.delete_claimed_by_ids(
                 session,
@@ -330,10 +384,14 @@ class InputBufferService:
                 )
 
         return PromotedInputBuffers(
+            requested_inference_profile=(
+                _requested_inference_profile(promoted[0].buffer) if promoted else None
+            ),
             user_messages=[
                 item.user_message for item in promoted if item.user_message is not None
             ],
             events=event_inserted,
+            promoted_event_ids=promoted_event_ids,
             deleted_buffer_ids=buffer_ids,
             claimed_count=len(buffer_ids),
             inserted_count=len(event_inserted),
@@ -346,10 +404,14 @@ class InputBufferService:
         *,
         session_id: str,
         claimed: list[InputBuffer],
+        required_inference_profile: RequestedInferenceProfile | None,
         include_action_messages: bool,
     ) -> list[_PromotedInputBuffer]:
-        """Convert the next FIFO barrier segment into durable event payloads."""
-        prefix = _next_flush_prefix(claimed)
+        """Convert the next profile-aware FIFO segment into durable events."""
+        prefix = _next_flush_prefix(
+            claimed,
+            required_inference_profile=required_inference_profile,
+        )
         if (
             prefix
             and prefix[0].kind == InputBufferKind.ACTION_MESSAGE
@@ -386,12 +448,7 @@ class InputBufferService:
                         buffer=buffer,
                         user_message=user_message,
                         event_kind=_event_kind_for_input_buffer(buffer.kind),
-                        payload=_JSON_OBJECT_ADAPTER.validate_python(
-                            user_message.payload.model_dump(
-                                mode="json",
-                                exclude_none=True,
-                            )
-                        ),
+                        payload=_user_message_payload_json(user_message),
                         external_id=user_message.external_id,
                     )
                 )
@@ -408,7 +465,11 @@ class InputBufferService:
         if buffer.action is None:
             raise ValueError("Action message input buffer requires action payload")
         action = _CHAT_ACTION_ADAPTER.validate_python(buffer.action)
-        action_payload = ActionMessagePayload(action=action, message=buffer.content)
+        action_payload = ActionMessagePayload(
+            action=action,
+            message=buffer.content,
+            requested_inference_profile=_requested_inference_profile(buffer),
+        )
         promoted = [
             _PromotedInputBuffer(
                 buffer=buffer,
@@ -538,12 +599,7 @@ class InputBufferService:
                     buffer=buffer,
                     user_message=user_message,
                     event_kind=EventKind.USER_MESSAGE,
-                    payload=_JSON_OBJECT_ADAPTER.validate_python(
-                        user_message.payload.model_dump(
-                            mode="json",
-                            exclude_none=True,
-                        )
-                    ),
+                    payload=_user_message_payload_json(user_message),
                     external_id=user_message.external_id,
                 )
             )
@@ -587,13 +643,21 @@ class InputBufferService:
                 if not file_parts:
                     file_parts = materialized.file_parts
 
-        return make_run_user_message(
+        user_message = make_run_user_message(
             content=buffer.content,
             metadata=buffer.metadata,
             attachments=attachments,
             file_parts=file_parts,
             external_id=external_id or buffer.id,
             attachment_source="input_buffer",
+        )
+        return dataclasses.replace(
+            user_message,
+            payload=user_message.payload.model_copy(
+                update={
+                    "requested_inference_profile": _requested_inference_profile(buffer)
+                }
+            ),
         )
 
     async def _append_input_buffer_events(
@@ -635,19 +699,61 @@ class _GoalActionError(Exception):
         self.message = message
 
 
-def _next_flush_prefix(claimed: list[InputBuffer]) -> list[InputBuffer]:
-    """Return the next FIFO segment respecting action-message barriers."""
+def _next_flush_prefix(
+    claimed: list[InputBuffer],
+    *,
+    required_inference_profile: RequestedInferenceProfile | None,
+) -> list[InputBuffer]:
+    """Return the next FIFO segment bounded by action and profile changes."""
     if not claimed:
         return []
     first = claimed[0]
+    first_profile = _requested_inference_profile(first)
+    effective_first_profile = first_profile or required_inference_profile
+    if (
+        required_inference_profile is not None
+        and effective_first_profile != required_inference_profile
+    ):
+        return []
     if first.kind == InputBufferKind.ACTION_MESSAGE:
         return [first]
     prefix: list[InputBuffer] = []
     for buffer in claimed:
         if buffer.kind == InputBufferKind.ACTION_MESSAGE:
             break
+        if _requested_inference_profile(buffer) != first_profile:
+            break
         prefix.append(buffer)
     return prefix
+
+
+def _requested_inference_profile(
+    buffer: InputBuffer,
+) -> RequestedInferenceProfile | None:
+    """Build typed requested profile from one durable buffer."""
+    if buffer.requested_model_target_label is None:
+        if buffer.requested_reasoning_effort is not None:
+            raise ValueError("Reasoning effort requires a model target")
+        return None
+    return RequestedInferenceProfile(
+        model_target_label=buffer.requested_model_target_label,
+        reasoning_effort=buffer.requested_reasoning_effort,
+    )
+
+
+def _user_message_payload_json(
+    user_message: RunUserMessage,
+) -> dict[str, JSONValue]:
+    """Serialize a UserMessage while preserving explicit Default effort."""
+    payload = _JSON_OBJECT_ADAPTER.validate_python(
+        user_message.payload.model_dump(mode="json", exclude_none=True)
+    )
+    requested_profile = user_message.payload.requested_inference_profile
+    if requested_profile is not None:
+        payload["requested_inference_profile"] = _JSON_OBJECT_ADAPTER.validate_python(
+            requested_profile.model_dump(mode="json")
+        )
+    return payload
 
 
 def _agent_message_payload(buffer: InputBuffer) -> AgentMessagePayload:

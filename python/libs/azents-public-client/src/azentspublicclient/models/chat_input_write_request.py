@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction
+from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -32,9 +33,10 @@ class ChatInputWriteRequest(BaseModel):
     client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
     message: StrictStr = Field(description="Input message content")
     action: Optional[ChatInputWriteRequestAction] = None
+    inference_profile: Optional[RequestedInferenceProfile]
     attachments: Optional[List[StrictStr]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_id", "client_request_id", "message", "action", "attachments"]
+    __properties: ClassVar[List[str]] = ["agent_id", "client_request_id", "message", "action", "inference_profile", "attachments"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,6 +82,9 @@ class ChatInputWriteRequest(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of action
         if self.action:
             _dict['action'] = self.action.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of inference_profile
+        if self.inference_profile:
+            _dict['inference_profile'] = self.inference_profile.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -89,6 +94,11 @@ class ChatInputWriteRequest(BaseModel):
         # and model_fields_set contains the field
         if self.action is None and "action" in self.model_fields_set:
             _dict['action'] = None
+
+        # set to None if inference_profile (nullable) is None
+        # and model_fields_set contains the field
+        if self.inference_profile is None and "inference_profile" in self.model_fields_set:
+            _dict['inference_profile'] = None
 
         # set to None if attachments (nullable) is None
         # and model_fields_set contains the field
@@ -111,6 +121,7 @@ class ChatInputWriteRequest(BaseModel):
             "client_request_id": obj.get("client_request_id"),
             "message": obj.get("message"),
             "action": ChatInputWriteRequestAction.from_dict(obj["action"]) if obj.get("action") is not None else None,
+            "inference_profile": RequestedInferenceProfile.from_dict(obj["inference_profile"]) if obj.get("inference_profile") is not None else None,
             "attachments": obj.get("attachments")
         })
         # store additional fields in additional_properties

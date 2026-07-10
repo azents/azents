@@ -498,11 +498,17 @@ async def _build_chat_write_snapshot(
     match live_result:
         case Success(live):
             partial_history_events = [
-                ChatEventResponse.from_domain(event)
+                ChatEventResponse.from_domain(
+                    event,
+                    inference_run_summary=live.inference_run_summaries.get(event.id),
+                )
                 for event in live.partial_history_events
             ]
             input_buffer_events = [
-                ChatEventResponse.from_domain(event)
+                ChatEventResponse.from_domain(
+                    event,
+                    inference_run_summary=live.inference_run_summaries.get(event.id),
+                )
                 for event in live.input_buffer_events
             ]
             return ChatWriteSnapshotResponse(
@@ -581,6 +587,7 @@ async def _write_message_via_rest(
         agent_id=request.agent_id,
         agent_session_id=resolved_session_id,
         message=message,
+        inference_profile=request.inference_profile,
         user_id=user_id,
         client_request_id=request.client_request_id,
     )
@@ -1009,6 +1016,7 @@ async def _write_new_session_message_via_rest(
         await agent_session_input_service.create_team_session_with_buffered_input(
             agent_id=agent_id,
             message=message,
+            inference_profile=request.inference_profile,
             user_id=user_id,
             existing_project_paths=request.existing_project_paths,
             setup_actions=request.setup_actions,
@@ -1071,6 +1079,7 @@ async def _write_edit_message_via_rest(
             client_request_id=request.client_request_id,
             message_id=request.message_id,
             text=request.message,
+            inference_profile=request.inference_profile,
             metadata=metadata,
             attachments=[attachment.uri for attachment in materialized.attachments],
             file_parts=materialized.file_parts,
@@ -1244,6 +1253,11 @@ async def _write_turn_action_via_rest(
     """Handle TurnAction writes as action_message input buffers."""
     if request.action is None:
         raise HTTPException(status_code=400, detail="Action is required.")
+    if request.inference_profile is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Run-producing input requires an inference profile.",
+        )
     if request.attachments:
         raise HTTPException(
             status_code=400,
@@ -1271,6 +1285,7 @@ async def _write_turn_action_via_rest(
         agent_session_id=session_id,
         action=request.action.model_dump(mode="json"),
         message=message,
+        inference_profile=request.inference_profile,
         user_id=user_id,
         client_request_id=request.client_request_id,
     )
@@ -1306,10 +1321,16 @@ async def _write_input_via_rest(
     """Dispatch one composer input by action category."""
     match request.action:
         case None:
+            if request.inference_profile is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Run-producing input requires an inference profile.",
+                )
             message_request = ChatMessageWriteRequest(
                 agent_id=request.agent_id,
                 client_request_id=request.client_request_id,
                 message=request.message,
+                inference_profile=request.inference_profile,
                 attachments=request.attachments,
             )
             return await _write_message_via_rest(
@@ -2247,7 +2268,15 @@ async def list_history_events(
                 next_cursor = value.items[0].id
                 previous_cursor = value.items[-1].id
             return ChatEventPageResponse(
-                items=[ChatEventResponse.from_domain(event) for event in value.items],
+                items=[
+                    ChatEventResponse.from_domain(
+                        event,
+                        inference_run_summary=value.inference_run_summaries.get(
+                            event.id
+                        ),
+                    )
+                    for event in value.items
+                ],
                 has_more=value.has_more,
                 has_newer=value.has_newer,
                 next_cursor=next_cursor,
@@ -2285,11 +2314,17 @@ async def list_live_events(
     match result:
         case Success(value):
             partial_history = [
-                ChatEventResponse.from_domain(event)
+                ChatEventResponse.from_domain(
+                    event,
+                    inference_run_summary=value.inference_run_summaries.get(event.id),
+                )
                 for event in value.partial_history_events
             ]
             input_buffers = [
-                ChatEventResponse.from_domain(event)
+                ChatEventResponse.from_domain(
+                    event,
+                    inference_run_summary=value.inference_run_summaries.get(event.id),
+                )
                 for event in value.input_buffer_events
             ]
             return LiveEventListResponse(

@@ -231,6 +231,10 @@ def _write_new_session_message(
             "agent_id": agent_id,
             "client_request_id": client_request_id,
             "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
     )
 
@@ -253,6 +257,10 @@ def _write_session_message(
             "agent_id": agent_id,
             "client_request_id": client_request_id,
             "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
     )
 
@@ -277,6 +285,10 @@ def _write_edit_message(
             "client_request_id": client_request_id,
             "message_id": message_id,
             "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
     )
 
@@ -315,6 +327,7 @@ def _write_command(
             "client_request_id": client_request_id,
             "message": "",
             "action": {"type": "command", "name": command},
+            "inference_profile": None,
         },
     )
 

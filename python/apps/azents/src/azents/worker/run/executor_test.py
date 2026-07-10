@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import dataclasses
 import datetime
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager
@@ -15,7 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import azents.worker.run.executor as run_executor_module
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.inference_profile import (
+    InferenceProfileFailureCode,
+    InferenceProfileSource,
+    RequestedInferenceProfile,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import ToolkitProvider
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.engine_events import (
@@ -24,6 +32,7 @@ from azents.engine.events.engine_events import (
     SubagentTreeChanged,
 )
 from azents.engine.events.types import (
+    ActiveToolCall,
     Event,
     RunMarkerPayload,
     SystemErrorPayload,
@@ -40,6 +49,7 @@ from azents.engine.run.errors import (
 )
 from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
+from azents.engine.run.resolve import ResolvedInvokeInputProfile
 from azents.engine.run.types import PollMessagesResult
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
@@ -56,10 +66,15 @@ from azents.repos.llm_provider_integration import LLMProviderIntegrationReposito
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
+from azents.services.input_buffer import (
+    InputBufferService,
+    PendingInputInferenceProfile,
+    PromotedInputBuffers,
+)
 from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_title import SessionTitleService
+from azents.testing.model_selection import make_test_model_selection
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import (
@@ -93,18 +108,50 @@ class _SessionManager:
         return _SessionScope()
 
 
+@dataclasses.dataclass(frozen=True)
+class _PendingRun:
+    """Minimal pending-run projection for executor tests."""
+
+    id: str = "run-001"
+    requested_model_target_label: str | None = "default"
+    requested_reasoning_effort: ModelReasoningEffort | None = None
+    inference_profile_source: InferenceProfileSource = (
+        InferenceProfileSource.AGENT_DEFAULT
+    )
+    resolved_model_selection: AgentModelSelection | None = None
+    resolved_reasoning_effort: ModelReasoningEffort | None = None
+    effective_context_window_tokens: int | None = None
+    effective_auto_compaction_threshold_tokens: int | None = None
+    status: AgentRunStatus = AgentRunStatus.PENDING
+    phase: AgentRunPhase = AgentRunPhase.IDLE
+    active_tool_calls: list[ActiveToolCall] = dataclasses.field(default_factory=list)
+    retry_state: FailedRunRetryState | None = None
+
+
 class _SessionLifecycle:
     """SessionLifecycleService test double."""
 
-    def __init__(self, order: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        order: list[str] | None = None,
+        *,
+        recoverable_run: _PendingRun | None = None,
+    ) -> None:
         self.order = order
+        self.recoverable_run = recoverable_run
         self.heartbeat_session_ids: list[str] = []
         self.retry_states: list[FailedRunRetryState | None] = []
         self.activities: list[tuple[str, str, object]] = []
         self.cleared_session_ids: list[str] = []
         self.terminal_runs: list[tuple[str, AgentRunStatus]] = []
+        self.profile_resolution_failures: list[
+            tuple[str, InferenceProfileFailureCode, str]
+        ] = []
         self.idle_session_ids: list[str] = []
         self.wake_ups: list[SessionWakeUp] = []
+        self.pending_run_create_calls = 0
+        self.activation_calls = 0
+        self.cancelled_pending_run_ids: list[str] = []
 
     async def set_session_activity(
         self,
@@ -133,6 +180,18 @@ class _SessionLifecycle:
         """Record follow-up wake-ups."""
         self.wake_ups.append(message)
 
+    async def fail_agent_run_profile_resolution_if_running(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        failure_code: InferenceProfileFailureCode,
+        failure_message: str,
+    ) -> None:
+        """Record a recovered run profile-resolution failure."""
+        del session_id
+        self.profile_resolution_failures.append((run_id, failure_code, failure_message))
+
     async def mark_agent_run_terminal_if_running(
         self,
         session_id: str,
@@ -158,6 +217,71 @@ class _SessionLifecycle:
     async def heartbeat_session(self, session_id: str) -> None:
         """Record the session id passed to heartbeat."""
         self.heartbeat_session_ids.append(session_id)
+
+    async def claim_recoverable_agent_run(
+        self,
+        session_id: str,
+    ) -> _PendingRun | None:
+        """Return the configured recoverable run."""
+        del session_id
+        return self.recoverable_run
+
+    async def create_or_claim_pending_agent_run(
+        self,
+        session_id: str,
+        **kwargs: object,
+    ) -> _PendingRun:
+        """Return one stable pending run for execution tests."""
+        del session_id, kwargs
+        self.pending_run_create_calls += 1
+        return _PendingRun()
+
+    async def cancel_pending_agent_run(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+    ) -> _PendingRun:
+        """Record cancellation of a new pending run with no model work."""
+        del session_id
+        self.cancelled_pending_run_ids.append(run_id)
+        return _PendingRun(status=AgentRunStatus.CANCELLED)
+
+    async def activate_pending_agent_run(
+        self,
+        session_id: str,
+        **kwargs: object,
+    ) -> _PendingRun:
+        """Accept activation before provider invocation."""
+        del session_id, kwargs
+        self.activation_calls += 1
+        return _PendingRun()
+
+    async def fail_pending_agent_run_profile(
+        self,
+        session_id: str,
+        **kwargs: object,
+    ) -> _PendingRun:
+        """Accept terminal profile failure persistence."""
+        del session_id, kwargs
+        return _PendingRun()
+
+    async def associate_agent_run_input_events(
+        self,
+        session_id: str,
+        **kwargs: object,
+    ) -> None:
+        """Accept active-run input association."""
+        del session_id, kwargs
+
+    async def list_inference_run_event_projections(
+        self,
+        *,
+        run_id: str,
+    ) -> list[object]:
+        """Return no durable projections for lightweight executor tests."""
+        del run_id
+        return []
 
 
 class _AgentRepository:
@@ -230,6 +354,26 @@ class _AgentSessionRepository:
     ) -> bool:
         """Pretend the session start hook was already claimed."""
         del session, session_id, now
+        return False
+
+
+class _InputBufferService:
+    """InputBufferService test double."""
+
+    async def peek_pending_inference_profile(
+        self,
+        session_id: str,
+    ) -> PendingInputInferenceProfile:
+        """Return one implicit pending input by default."""
+        del session_id
+        return PendingInputInferenceProfile(
+            exists=True,
+            requested_inference_profile=None,
+        )
+
+    async def has_pending_session_input_buffers(self, session_id: str) -> bool:
+        """Return no additional buffered input after execution."""
+        del session_id
         return False
 
 
@@ -493,7 +637,7 @@ def _executor(
         ),
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
-        input_buffer_service=cast(InputBufferService, object()),
+        input_buffer_service=cast(InputBufferService, _InputBufferService()),
         session_git_worktree_service=cast(SessionGitWorktreeService, object()),
         session_title_service=cast(SessionTitleService, _SessionTitleService()),
         live_event_projector=cast(LiveEventProjector, live_event_projector),
@@ -538,15 +682,20 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
     """Return a minimal run request from resolve input."""
     del args, kwargs
     return Success(
-        RunRequest(
-            session_id="session-001",
-            user_messages=[],
-            agent_prompt=None,
-            toolkits=[],
-            model="gpt-test",
-            credential_kwargs={},
-            workspace_id="workspace-001",
-            agent_id="agent-001",
+        ResolvedInvokeInputProfile(
+            run_request=RunRequest(
+                session_id="session-001",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                model="gpt-test",
+                credential_kwargs={},
+                workspace_id="workspace-001",
+                agent_id="agent-001",
+                auto_compaction_threshold_tokens=None,
+            ),
+            model_selection=make_test_model_selection(),
+            reasoning_effort=None,
         )
     )
 
@@ -561,7 +710,9 @@ def _patch_successful_resolution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Patch RunExecutor dependencies to resolve a basic run request."""
-    monkeypatch.setattr(run_executor_module, "resolve_invoke_input", _resolve_success)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", _resolve_success
+    )
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
 
 
@@ -575,7 +726,12 @@ async def test_execute_reports_resolve_failure(
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
-        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
 
     async def resolve_failure(*args: object, **kwargs: object) -> object:
         del args, kwargs
@@ -584,7 +740,7 @@ async def test_execute_reports_resolve_failure(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input",
+        "resolve_invoke_input_with_profile",
         resolve_failure,
     )
 
@@ -621,8 +777,371 @@ async def test_execute_reports_resolve_failure(
     assert isinstance(error_event, Event)
     assert error_event.kind == EventKind.SYSTEM_ERROR
     assert isinstance(error_event.payload, SystemErrorPayload)
-    assert error_event.payload.content == "AgentNotFound(agent_id='agent-001')"
+    assert (
+        error_event.payload.content
+        == "The selected model could not be prepared for this run."
+    )
     assert isinstance(dispatched[1], RunComplete)
+
+
+@pytest.mark.asyncio
+async def test_execute_recovers_activated_run_before_flushing_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A running activation is reused with its exact profile and snapshot."""
+    selection = make_test_model_selection()
+    recoverable = _PendingRun(
+        status=AgentRunStatus.RUNNING,
+        requested_model_target_label="Quality",
+        requested_reasoning_effort=ModelReasoningEffort.HIGH,
+        inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+        resolved_model_selection=selection,
+        resolved_reasoning_effort=ModelReasoningEffort.HIGH,
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+    )
+    lifecycle = _SessionLifecycle(recoverable_run=recoverable)
+    executor = _executor(session_lifecycle=lifecycle)
+    poll_calls: list[dict[str, object]] = []
+    recovered_snapshots: list[AgentModelSelection] = []
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args
+        poll_calls.append(kwargs)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=False,
+        )
+
+    async def resolve_recovered(*args: object, **kwargs: object) -> object:
+        del args
+        resolved_selection = cast(
+            AgentModelSelection,
+            kwargs["resolved_model_selection"],
+        )
+        recovered_snapshots.append(resolved_selection)
+        return Success(
+            RunRequest(
+                session_id="session-001",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                model="gpt-test",
+                credential_kwargs={},
+                workspace_id="workspace-001",
+                agent_id="agent-001",
+                auto_compaction_threshold_tokens=None,
+            )
+        )
+
+    async def resolve_new(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("A recovered run must not resolve its target again")
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_recovered,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_new,
+    )
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert result.run_id == recoverable.id
+    assert recovered_snapshots == [selection]
+    assert lifecycle.pending_run_create_calls == 0
+    assert lifecycle.activation_calls == 0
+    assert poll_calls[0]["required_inference_profile"] == RequestedInferenceProfile(
+        model_target_label="Quality",
+        reasoning_effort=ModelReasoningEffort.HIGH,
+    )
+    assert poll_calls[0]["active_run_id"] == recoverable.id
+
+
+@pytest.mark.asyncio
+async def test_execute_persists_recovered_profile_resolution_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recovered run keeps safe resolution failure details in provenance."""
+    recoverable = _PendingRun(
+        status=AgentRunStatus.RUNNING,
+        resolved_model_selection=make_test_model_selection(),
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+    )
+    lifecycle = _SessionLifecycle(recoverable_run=recoverable)
+    executor = _executor(session_lifecycle=lifecycle)
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=False,
+        )
+
+    async def fail_recovered_resolution(
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        del args, kwargs
+        return Failure(AgentNotFound(agent_id="agent-001"))
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        fail_recovered_resolution,
+    )
+
+    dispatched: list[PublishedEvent] = []
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id
+        dispatched.append(event)
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert lifecycle.profile_resolution_failures == [
+        (
+            recoverable.id,
+            InferenceProfileFailureCode.MODEL_TARGET_RESOLUTION_FAILED,
+            "The selected model could not be prepared for this run.",
+        )
+    ]
+    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert len(dispatched) == 2
+    assert isinstance(dispatched[0], Event)
+    assert isinstance(dispatched[1], RunComplete)
+
+
+@pytest.mark.asyncio
+async def test_execute_recovers_activated_command_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Command wake-ups reuse an already activated command run."""
+    selection = make_test_model_selection()
+    recoverable = _PendingRun(
+        status=AgentRunStatus.RUNNING,
+        resolved_model_selection=selection,
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+    )
+    lifecycle = _SessionLifecycle(recoverable_run=recoverable)
+    command_handler = _CommandHandler([])
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        command_registry={"compact": cast(CommandHandler, command_handler)},
+    )
+
+    async def resolve_recovered(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return Success(
+            RunRequest(
+                session_id="session-001",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                model="gpt-test",
+                credential_kwargs={},
+                workspace_id="workspace-001",
+                agent_id="agent-001",
+                auto_compaction_threshold_tokens=None,
+            )
+        )
+
+    async def resolve_new(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("A recovered command must not create a new run")
+
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_recovered,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_new,
+    )
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        command=_pending_command(),
+    )
+
+    assert result.run_id == recoverable.id
+    assert lifecycle.pending_run_create_calls == 0
+    assert lifecycle.activation_calls == 0
+    assert len(command_handler.requests) == 1
+    assert command_handler.requests[0].effective_max_input_tokens == 64_000
+    assert command_handler.requests[0].auto_compaction_threshold_tokens == 51_200
+
+
+@pytest.mark.asyncio
+async def test_execute_recovers_durable_retry_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovered runs continue from the persisted retry attempt and backoff."""
+    now = datetime.datetime.now(datetime.UTC)
+    retry_state = FailedRunRetryState(
+        failed_attempt_count=1,
+        max_retries=2,
+        last_user_message="temporary failure",
+        last_error_type="ModelCallError",
+        last_source="model",
+        last_failed_at=now - datetime.timedelta(seconds=2),
+        backoff_seconds=1,
+        next_retry_at=now - datetime.timedelta(seconds=1),
+    )
+    recoverable = _PendingRun(
+        status=AgentRunStatus.RUNNING,
+        resolved_model_selection=make_test_model_selection(),
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        retry_state=retry_state,
+    )
+    lifecycle = _SessionLifecycle(recoverable_run=recoverable)
+    finalizer = _FailedRunFinalizer()
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        engine=_AlwaysFailingEngine(),
+        failed_run_finalizer=finalizer,
+        failed_run_max_retries=2,
+    )
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=False,
+        )
+
+    async def resolve_recovered(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return Success(
+            RunRequest(
+                session_id="session-001",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                model="gpt-test",
+                credential_kwargs={},
+                workspace_id="workspace-001",
+                agent_id="agent-001",
+                auto_compaction_threshold_tokens=None,
+            )
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_recovered,
+    )
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert len(finalizer.inputs) == 1
+    assert finalizer.inputs[0].retry_state.failed_attempt_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_claims_pending_run_profile_before_flushing_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recovered pending run constrains FIFO promotion before activation."""
+    recoverable = _PendingRun(
+        requested_model_target_label="Fast",
+        requested_reasoning_effort=ModelReasoningEffort.LOW,
+        inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+    )
+    lifecycle = _SessionLifecycle(recoverable_run=recoverable)
+    executor = _executor(session_lifecycle=lifecycle)
+    poll_calls: list[dict[str, object]] = []
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args
+        poll_calls.append(kwargs)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=["event-001"],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    _patch_successful_resolution(monkeypatch)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert result.run_id == recoverable.id
+    assert lifecycle.pending_run_create_calls == 0
+    assert lifecycle.activation_calls == 1
+    assert poll_calls[0]["required_inference_profile"] == RequestedInferenceProfile(
+        model_target_label="Fast",
+        reasoning_effort=ModelReasoningEffort.LOW,
+    )
+    assert poll_calls[0]["active_run_id"] == recoverable.id
 
 
 @pytest.mark.asyncio
@@ -637,6 +1156,8 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=False,
             context_invalidated=True,
@@ -649,7 +1170,7 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input",
+        "resolve_invoke_input_with_profile",
         resolve_failure,
     )
 
@@ -681,13 +1202,23 @@ async def test_boundary_poll_processes_turn_actions(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args
         process_actions_values.append(cast(bool, kwargs["process_actions"]))
-        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
 
     poll = executor.make_boundary_poll(
         message=message,
         model="gpt-test",
+        requested_inference_profile=RequestedInferenceProfile(
+            model_target_label="default",
+            reasoning_effort=None,
+        ),
+        run_id="run-001",
         poll_fn=None,
         mark_context_invalidated=lambda: None,
     )
@@ -716,6 +1247,8 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=False,
             context_invalidated=True,
@@ -737,6 +1270,11 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
     poll = executor.make_boundary_poll(
         message=message,
         model="gpt-test",
+        requested_inference_profile=RequestedInferenceProfile(
+            model_target_label="default",
+            reasoning_effort=None,
+        ),
+        run_id="run-001",
         poll_fn=None,
         mark_context_invalidated=mark_context_invalidated,
     )
@@ -764,6 +1302,8 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     )
     promoted_batches = [
         PromotedInputBuffers(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
             user_messages=[],
             events=[
                 Event(
@@ -780,6 +1320,8 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             deduped_count=0,
         ),
         PromotedInputBuffers(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
             user_messages=[user_message],
             events=[
                 Event(
@@ -831,6 +1373,8 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         agent_id="agent-1",
         session_id="session-1",
         model="gpt-test",
+        required_inference_profile=None,
+        active_run_id=None,
         poll_fn=None,
         process_actions=True,
     )
@@ -852,7 +1396,12 @@ async def test_execute_ignores_wake_up_without_runtime_input(
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
-        return RunInputPollResult(user_messages=[], has_actionable_work=False)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=False,
+        )
 
     async def resolve_failure(*args: object, **kwargs: object) -> object:
         del args, kwargs
@@ -861,7 +1410,7 @@ async def test_execute_ignores_wake_up_without_runtime_input(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input",
+        "resolve_invoke_input_with_profile",
         resolve_failure,
     )
 
@@ -1078,22 +1627,16 @@ async def test_execute_clears_activity_after_run_complete(
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
-        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return Success(
-            RunRequest(
-                session_id="session-001",
-                user_messages=[],
-                agent_prompt=None,
-                toolkits=[],
-                model="gpt-test",
-                credential_kwargs={},
-                workspace_id="workspace-001",
-                agent_id="agent-001",
-            )
-        )
+        return await _resolve_success()
 
     async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
@@ -1102,7 +1645,7 @@ async def test_execute_clears_activity_after_run_complete(
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
-        "resolve_invoke_input",
+        "resolve_invoke_input_with_profile",
         resolve_success,
     )
     monkeypatch.setattr(
@@ -1230,29 +1773,25 @@ async def test_execute_retries_failed_run_without_durable_error(
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
-        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return Success(
-            RunRequest(
-                session_id="session-001",
-                user_messages=[],
-                agent_prompt=None,
-                toolkits=[],
-                model="gpt-test",
-                credential_kwargs={},
-                workspace_id="workspace-001",
-                agent_id="agent-001",
-            )
-        )
+        return await _resolve_success()
 
     async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
         return []
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
-    monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+    )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
     )
@@ -1280,12 +1819,11 @@ async def test_execute_retries_failed_run_without_durable_error(
 
     assert engine.calls == 2
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
-    assert len(lifecycle.retry_states) == 2
+    assert len(lifecycle.retry_states) == 1
     retry_state = lifecycle.retry_states[0]
     assert retry_state is not None
     assert retry_state.failed_attempt_count == 1
     assert retry_state.last_user_message == "model temporarily unavailable"
-    assert lifecycle.retry_states[1] is None
     retry_updates = [
         run.retry
         for _, run in live_event_projector.live_run_updates
@@ -1319,29 +1857,25 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
-        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return Success(
-            RunRequest(
-                session_id="session-001",
-                user_messages=[],
-                agent_prompt=None,
-                toolkits=[],
-                model="gpt-test",
-                credential_kwargs={},
-                workspace_id="workspace-001",
-                agent_id="agent-001",
-            )
-        )
+        return await _resolve_success()
 
     async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
         return []
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
-    monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+    )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
     )
@@ -1388,29 +1922,25 @@ async def test_execute_finalizes_when_failed_run_retry_is_stopped(
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
-        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return Success(
-            RunRequest(
-                session_id="session-001",
-                user_messages=[],
-                agent_prompt=None,
-                toolkits=[],
-                model="gpt-test",
-                credential_kwargs={},
-                workspace_id="workspace-001",
-                agent_id="agent-001",
-            )
-        )
+        return await _resolve_success()
 
     async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
         return []
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
-    monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+    )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
     )
@@ -1462,29 +1992,25 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
-        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return Success(
-            RunRequest(
-                session_id="session-001",
-                user_messages=[],
-                agent_prompt=None,
-                toolkits=[],
-                model="gpt-test",
-                credential_kwargs={},
-                workspace_id="workspace-001",
-                agent_id="agent-001",
-            )
-        )
+        return await _resolve_success()
 
     async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
         return []
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
-    monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+    )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
     )
@@ -1535,7 +2061,12 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
-        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
 
@@ -1553,9 +2084,8 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
 
     assert engine.calls == 2
     assert result.terminal_run_status == AgentRunStatus.FAILED
-    assert len(lifecycle.retry_states) == 3
-    assert lifecycle.retry_states[1] is None
-    final_retry_state = lifecycle.retry_states[2]
+    assert len(lifecycle.retry_states) == 2
+    final_retry_state = lifecycle.retry_states[1]
     assert final_retry_state is not None
     assert final_retry_state.failed_attempt_count == 2
     assert [attempt.attempt_number for attempt in final_retry_state.attempts] == [1, 2]
@@ -1583,29 +2113,25 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
-        return RunInputPollResult(user_messages=[], has_actionable_work=True)
+        return RunInputPollResult(
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return Success(
-            RunRequest(
-                session_id="session-001",
-                user_messages=[],
-                agent_prompt=None,
-                toolkits=[],
-                model="gpt-test",
-                credential_kwargs={},
-                workspace_id="workspace-001",
-                agent_id="agent-001",
-            )
-        )
+        return await _resolve_success()
 
     async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
         del args, kwargs
         return []
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
-    monkeypatch.setattr(run_executor_module, "resolve_invoke_input", resolve_success)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+    )
     monkeypatch.setattr(
         run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
     )

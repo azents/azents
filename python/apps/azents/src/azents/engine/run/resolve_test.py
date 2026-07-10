@@ -5,11 +5,13 @@ from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
-from azcommon.result import Success
+from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import AgentType, LLMProvider
+from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import (
     SessionType,
     ToolkitContext,
@@ -33,7 +35,13 @@ from azents.testing.model_selection import (
     make_test_selectable_model_options,
 )
 
-from .resolve import resolve_agent_tools, resolve_invoke_input
+from .resolve import (
+    ModelTargetNotFound,
+    ReasoningEffortUnsupported,
+    resolve_agent_tools,
+    resolve_invoke_input,
+    resolve_invoke_input_with_profile,
+)
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
@@ -213,6 +221,101 @@ class TestResolveInvokeInput:
         assert run_request.model == "gpt-4o"
         assert run_request.provider == LLMProvider.OPENAI
         assert run_request.agent_id == "agent-1"
+
+    async def test_profile_resolution_preserves_explicit_default_effort(self) -> None:
+        """Null effort remains visible model Default for the selected target."""
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = _make_agent()
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+            yield AsyncMock(spec=AsyncSession)
+
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=None,
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.reasoning_effort is None
+        assert result.value.run_request.reasoning_effort is None
+        assert result.value.model_selection == _make_agent().model_selection
+        assert agent_repository.get_by_id.await_count == 1
+
+    async def test_profile_resolution_rejects_missing_target(self) -> None:
+        """Missing requested labels fail instead of using another target."""
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = _make_agent()
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+            yield AsyncMock(spec=AsyncSession)
+
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="deleted",
+                reasoning_effort=None,
+            ),
+            agent_repository=agent_repository,
+            integration_repository=AsyncMock(),
+            session_manager=session_manager,
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert result == Failure(ModelTargetNotFound(model_target_label="deleted"))
+
+    async def test_profile_resolution_rejects_unsupported_effort(self) -> None:
+        """Explicit effort is validated against the selected target snapshot."""
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = _make_agent()
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+            yield AsyncMock(spec=AsyncSession)
+
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            agent_repository=agent_repository,
+            integration_repository=AsyncMock(),
+            session_manager=session_manager,
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert result == Failure(
+            ReasoningEffortUnsupported(
+                model_target_label="default",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            )
+        )
 
 
 class TestResolveAgentTools:

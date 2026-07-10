@@ -129,6 +129,10 @@ def _run_new_session_until_complete(
             "agent_id": agent_id,
             "client_request_id": f"file-lifecycle-init-{unique()}",
             "message": "init",
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
         timeout=10,
     )
@@ -246,6 +250,10 @@ def _run_message(
             "agent_id": agent_id,
             "client_request_id": f"file-lifecycle-message-{unique()}",
             "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
         timeout=10,
     )

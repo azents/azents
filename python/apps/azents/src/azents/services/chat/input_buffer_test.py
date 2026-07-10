@@ -13,6 +13,7 @@ from azents.core.enums import (
     LLMProvider,
     WorkspaceUserRole,
 )
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import UserMessagePayload
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.models.agent import RDBAgent
@@ -126,6 +127,7 @@ def _service(
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
+        agent_run_repository=AgentRunRepository(),
     )
     return ChatSessionService(
         message_repository=MessageRepository(),
@@ -178,8 +180,8 @@ async def _create_session_with_buffer(
         InputBufferCreate(
             session_id=agent_session.id,
             kind=InputBufferKind.USER_MESSAGE,
-            requested_model_target_label=None,
-            requested_reasoning_effort=None,
+            requested_model_target_label="main",
+            requested_reasoning_effort=ModelReasoningEffort.HIGH,
             actor_user_id=user_id,
             content="pending input",
             idempotency_key=None,
@@ -214,6 +216,13 @@ class TestChatSessionInputBuffer:
 
         assert isinstance(result, Success)
         assert [event.id for event in result.value.input_buffer_events] == [buffer_id]
+        payload = result.value.input_buffer_events[0].payload
+        assert isinstance(payload, UserMessagePayload)
+        assert payload.requested_inference_profile is not None
+        assert payload.requested_inference_profile.model_target_label == "main"
+        assert payload.requested_inference_profile.reasoning_effort == (
+            ModelReasoningEffort.HIGH
+        )
         assert result.value.partial_history_events == []
         assert result.value.session_run_state == AgentSessionRunState.IDLE
 
@@ -311,10 +320,13 @@ class TestChatSessionInputBuffer:
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
         )
         promoted = await input_buffer_service.flush_session_input_buffers(
             session_id=session_id,
             model="test-model",
+            required_inference_profile=None,
+            active_run_id=None,
         )
         assert promoted.inserted_count == 1
         assert promoted.deleted_buffer_ids == [promoted.user_messages[0].external_id]

@@ -37,6 +37,8 @@ class TestAgentSessionResponse(unittest.TestCase):
             return AgentSessionResponse(
                 id = '',
                 agent_id = '',
+                last_model_target_label = '',
+                last_reasoning_effort = 'low',
                 title = '',
                 title_source = 'manual',
                 status = 'active',
@@ -49,6 +51,8 @@ class TestAgentSessionResponse(unittest.TestCase):
             return AgentSessionResponse(
                 id = '',
                 agent_id = '',
+                last_model_target_label = '',
+                last_reasoning_effort = 'low',
                 title = '',
                 title_source = 'manual',
                 status = 'active',

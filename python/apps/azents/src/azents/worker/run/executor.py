@@ -9,7 +9,6 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Annotated, Any
 
 from azcommon.datetime import tznow
-from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,12 +25,19 @@ from azents.core.enums import (
     AgentSessionKind,
     EventKind,
 )
+from azents.core.inference_profile import (
+    InferenceProfileFailureCode,
+    InferenceProfileSource,
+    RequestedInferenceProfile,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import (
     SessionType,
     ToolkitContext,
     ToolkitExecutionMode,
     ToolkitProvider,
 )
+from azents.engine.context.window import compute_auto_compaction_threshold_tokens
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
     CreateGitWorktreeAction,
@@ -45,7 +51,7 @@ from azents.engine.events.engine_events import (
     RunStopped,
     SubagentTreeChanged,
 )
-from azents.engine.events.types import ActiveToolCall, Event
+from azents.engine.events.types import AgentRunState, Event
 from azents.engine.hooks.dispatcher import (
     RuntimeHookDispatcher,
     RuntimeHookProviderRef,
@@ -71,8 +77,11 @@ from azents.engine.run.failure import (
 )
 from azents.engine.run.input import InvokeInput
 from azents.engine.run.resolve import (
+    ModelTargetNotFound,
+    ReasoningEffortUnsupported,
     resolve_agent_tools,
-    resolve_invoke_input,
+    resolve_invoke_input_with_profile,
+    resolve_invoke_input_with_resolved_profile,
 )
 from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
 from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
@@ -139,7 +148,6 @@ from azents.worker.run.finalizer import (
 )
 from azents.worker.run.helpers import (
     apply_active_tool_call_event,
-    format_resolve_error,
     observed_terminal_run_event,
     user_stop_cancelled,
 )
@@ -169,8 +177,26 @@ class RunInputPollResult:
     """Input poll result shared by wake-up entry and model boundaries."""
 
     user_messages: list[RunUserMessage]
+    requested_inference_profile: RequestedInferenceProfile | None
+    promoted_event_ids: list[str]
     has_actionable_work: bool
     context_invalidated: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class RequestedProfileSelection:
+    """Requested profile and its durable source for a new run."""
+
+    profile: RequestedInferenceProfile
+    source: InferenceProfileSource
+
+
+@dataclasses.dataclass(frozen=True)
+class ProfileResolutionFailure:
+    """Safe durable profile-resolution failure projection."""
+
+    code: InferenceProfileFailureCode
+    message: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -178,6 +204,16 @@ class OperationActionProcessResult:
     """Result of processing promoted operation actions."""
 
     context_invalidated: bool
+
+
+def _requested_profile_from_run(run: AgentRunState) -> RequestedInferenceProfile:
+    """Return the durable requested profile of a recoverable run."""
+    if run.requested_model_target_label is None:
+        raise ValueError("Recoverable AgentRun has no requested model target")
+    return RequestedInferenceProfile(
+        model_target_label=run.requested_model_target_label,
+        reasoning_effort=run.requested_reasoning_effort,
+    )
 
 
 def _runtime_hook_provider_refs(
@@ -301,35 +337,7 @@ class RunExecutor:
         :return: Session-managed toolkits used by execution.
         """
         command_handler: CommandHandler | None = None
-        if command is None:
-            initial_input = await self.poll_run_inputs(
-                agent_id=message.agent_id,
-                session_id=message.session_id,
-                model=None,
-                poll_fn=None,
-                process_actions=True,
-            )
-            if initial_input.context_invalidated:
-                await self.session_lifecycle.send_session_wake_up(message)
-                return RunExecutionResult(
-                    toolkits=[],
-                    terminal_event_observed=False,
-                    no_actionable_work=True,
-                )
-            if not initial_input.has_actionable_work:
-                logger.info(
-                    "Session wake-up ignored because no runtime input is pending",
-                    extra={
-                        "session_id": message.session_id,
-                        "agent_id": message.agent_id,
-                    },
-                )
-                return RunExecutionResult(
-                    toolkits=[],
-                    terminal_event_observed=False,
-                    no_actionable_work=True,
-                )
-        else:
+        if command is not None:
             command_handler = self.command_registry.get(command.name)
             if command_handler is None:
                 logger.warning("Unknown command", extra={"command": command.name})
@@ -345,7 +353,85 @@ class RunExecutor:
         loop = asyncio.get_running_loop()
         preparation_started_at = loop.time()
         boundary_started_at = preparation_started_at
-        run_id = uuid7().hex
+        recoverable_run = await self.session_lifecycle.claim_recoverable_agent_run(
+            message.session_id
+        )
+        created_run = recoverable_run is None
+        if recoverable_run is not None:
+            agent_run = recoverable_run
+            if agent_run.inference_profile_source is None:
+                raise ValueError("Recoverable AgentRun has no inference profile source")
+            selected_profile = RequestedProfileSelection(
+                profile=_requested_profile_from_run(agent_run),
+                source=agent_run.inference_profile_source,
+            )
+        else:
+            explicit_profile: RequestedInferenceProfile | None = None
+            if command is None:
+                pending_input = (
+                    await self.input_buffer_service.peek_pending_inference_profile(
+                        message.session_id
+                    )
+                )
+                if not pending_input.exists:
+                    logger.info(
+                        "Session wake-up ignored because no runtime input is pending",
+                        extra={
+                            "session_id": message.session_id,
+                            "agent_id": message.agent_id,
+                        },
+                    )
+                    return RunExecutionResult(
+                        toolkits=[],
+                        terminal_event_observed=False,
+                        no_actionable_work=True,
+                    )
+                explicit_profile = pending_input.requested_inference_profile
+            selected_profile = await self._select_requested_profile(
+                agent_id=message.agent_id,
+                session_id=message.session_id,
+                explicit_profile=explicit_profile,
+            )
+            agent_run = await self.session_lifecycle.create_or_claim_pending_agent_run(
+                message.session_id,
+                requested_profile=selected_profile.profile,
+                source=selected_profile.source,
+                input_event_ids=[],
+            )
+
+        run_id = agent_run.id
+        if command is None:
+            initial_input = await self.poll_run_inputs(
+                agent_id=message.agent_id,
+                session_id=message.session_id,
+                model=None,
+                required_inference_profile=selected_profile.profile,
+                active_run_id=run_id,
+                poll_fn=None,
+                process_actions=True,
+            )
+            if created_run and (
+                initial_input.context_invalidated
+                or not initial_input.has_actionable_work
+            ):
+                await self.session_lifecycle.cancel_pending_agent_run(
+                    message.session_id,
+                    run_id=run_id,
+                )
+            if initial_input.context_invalidated:
+                await self.session_lifecycle.send_session_wake_up(message)
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=False,
+                    no_actionable_work=True,
+                    run_id=None if created_run else run_id,
+                )
+            if created_run and not initial_input.has_actionable_work:
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=False,
+                    no_actionable_work=True,
+                )
         logger.info(
             "Run execution started",
             extra={
@@ -353,6 +439,8 @@ class RunExecutor:
                 "agent_id": message.agent_id,
                 "run_id": run_id,
                 "user_id": message.user_id,
+                "model_target_label": selected_profile.profile.model_target_label,
+                "inference_profile_source": selected_profile.source.value,
                 "interface_type": message.interface.type
                 if message.interface is not None
                 else None,
@@ -366,41 +454,132 @@ class RunExecutor:
             user_id=message.user_id,
         )
 
-        resolved = await resolve_invoke_input(
-            invoke_input,
-            agent_repository=self.agent_repository,
-            integration_repository=self.integration_repository,
-            session_manager=self.session_manager,
-            exchange_file_service=self.exchange_file_service,
-            model_file_service=self.model_file_service,
-        )
-
-        if resolved.failure:
-            error_message = format_resolve_error(resolved.error)
-            logger.warning(
-                "Failed to resolve invoke input",
-                extra={
-                    "session_id": message.session_id,
-                    "error": error_message,
-                },
+        if agent_run.status == AgentRunStatus.RUNNING:
+            if (
+                agent_run.resolved_model_selection is None
+                or agent_run.effective_context_window_tokens is None
+                or agent_run.effective_auto_compaction_threshold_tokens is None
+            ):
+                raise ValueError(
+                    "Activated AgentRun has incomplete resolved provenance"
+                )
+            recovered = await resolve_invoke_input_with_resolved_profile(
+                invoke_input,
+                resolved_model_selection=agent_run.resolved_model_selection,
+                resolved_reasoning_effort=agent_run.resolved_reasoning_effort,
+                agent_repository=self.agent_repository,
+                integration_repository=self.integration_repository,
+                session_manager=self.session_manager,
+                exchange_file_service=self.exchange_file_service,
+                model_file_service=self.model_file_service,
             )
-            await dispatch_event(
-                message.session_id,
-                make_system_error_event(
+            if recovered.failure:
+                failure = _profile_resolution_failure(recovered.error)
+                await (
+                    self.session_lifecycle.fail_agent_run_profile_resolution_if_running(
+                        message.session_id,
+                        run_id=run_id,
+                        failure_code=failure.code,
+                        failure_message=failure.message,
+                    )
+                )
+                await self._publish_inference_run_event_projections(
                     session_id=message.session_id,
-                    content=error_message,
+                    run_id=run_id,
+                )
+                await dispatch_event(
+                    message.session_id,
+                    make_system_error_event(
+                        session_id=message.session_id,
+                        content=failure.message,
+                    ),
+                )
+                await dispatch_event(message.session_id, RunComplete())
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=True,
+                    no_actionable_work=False,
+                    run_id=run_id,
+                    terminal_run_status=AgentRunStatus.FAILED,
+                )
+            effective_context_window_tokens = agent_run.effective_context_window_tokens
+            run_request = dataclasses.replace(
+                recovered.value,
+                max_input_tokens=effective_context_window_tokens,
+                context_window_tokens=effective_context_window_tokens,
+                compaction_max_input_tokens=effective_context_window_tokens,
+                auto_compaction_threshold_tokens=(
+                    agent_run.effective_auto_compaction_threshold_tokens
                 ),
             )
-            await dispatch_event(message.session_id, RunComplete())
-            return RunExecutionResult(
-                toolkits=[],
-                terminal_event_observed=True,
-                no_actionable_work=False,
-                run_id=run_id,
-                terminal_run_status=AgentRunStatus.FAILED,
+        elif agent_run.status == AgentRunStatus.PENDING:
+            resolved = await resolve_invoke_input_with_profile(
+                invoke_input,
+                requested_profile=selected_profile.profile,
+                agent_repository=self.agent_repository,
+                integration_repository=self.integration_repository,
+                session_manager=self.session_manager,
+                exchange_file_service=self.exchange_file_service,
+                model_file_service=self.model_file_service,
             )
+            if resolved.failure:
+                failure = _profile_resolution_failure(resolved.error)
+                failure_code = failure.code
+                error_message = failure.message
+                await self.session_lifecycle.fail_pending_agent_run_profile(
+                    message.session_id,
+                    run_id=run_id,
+                    failure_code=failure_code,
+                    failure_message=error_message,
+                )
+                await self._publish_inference_run_event_projections(
+                    session_id=message.session_id,
+                    run_id=run_id,
+                )
+                logger.warning(
+                    "Failed to resolve requested inference profile",
+                    extra={
+                        "session_id": message.session_id,
+                        "run_id": run_id,
+                        "failure_code": failure_code.value,
+                    },
+                )
+                await dispatch_event(
+                    message.session_id,
+                    make_system_error_event(
+                        session_id=message.session_id,
+                        content=error_message,
+                    ),
+                )
+                await dispatch_event(message.session_id, RunComplete())
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=True,
+                    no_actionable_work=False,
+                    run_id=run_id,
+                    terminal_run_status=AgentRunStatus.FAILED,
+                )
 
-        run_request = resolved.value
+            resolved_profile = resolved.value
+            run_request = resolved_profile.run_request
+            await self.session_lifecycle.activate_pending_agent_run(
+                message.session_id,
+                run_id=run_id,
+                resolved_model_selection=resolved_profile.model_selection,
+                resolved_reasoning_effort=resolved_profile.reasoning_effort,
+                effective_context_window_tokens=run_request.effective_max_input_tokens,
+                effective_auto_compaction_threshold_tokens=(
+                    compute_auto_compaction_threshold_tokens(
+                        run_request.effective_max_input_tokens
+                    )
+                ),
+            )
+            await self._publish_inference_run_event_projections(
+                session_id=message.session_id,
+                run_id=run_id,
+            )
+        else:
+            raise ValueError("Recoverable AgentRun is already terminal")
         now = loop.time()
         logger.info(
             "Run invoke input resolved",
@@ -659,12 +838,19 @@ class RunExecutor:
         )
         boundary_started_at = now
 
-        active_tool_calls: list[ActiveToolCall] = []
-        active_phase: AgentRunPhase | None = (
-            AgentRunPhase.COMPACTING if command is not None else None
+        recovering_running_run = agent_run.status == AgentRunStatus.RUNNING
+        active_tool_calls = (
+            list(agent_run.active_tool_calls) if recovering_running_run else []
         )
-        current_retry_state: FailedRunRetryState | None = None
-        live_retry_state: FailedRunRetryState | None = None
+        active_phase: AgentRunPhase | None = (
+            agent_run.phase
+            if recovering_running_run
+            else AgentRunPhase.COMPACTING
+            if command is not None
+            else None
+        )
+        current_retry_state = agent_run.retry_state if recovering_running_run else None
+        live_retry_state = current_retry_state
 
         async def publish_live_run() -> None:
             """Publish the current live run snapshot to WebSocket clients."""
@@ -679,16 +865,16 @@ class RunExecutor:
             )
 
         async def clear_live_retry_state() -> None:
-            """Clear retry projection once the next run attempt starts."""
+            """Clear live retry UI while retaining durable takeover progress.
+
+            The durable state keeps the failed-attempt count until the next failure or
+            terminal transition. Its expired ``next_retry_at`` lets takeover replay the
+            in-flight attempt without repeating backoff or resetting the retry budget.
+            """
             nonlocal live_retry_state
             if live_retry_state is None:
                 return
             live_retry_state = None
-            await self.session_lifecycle.update_agent_run_retry_state(
-                message.session_id,
-                run_id=run_id,
-                retry_state=None,
-            )
             await publish_live_run()
 
         async def refresh_session_activity() -> None:
@@ -771,12 +957,56 @@ class RunExecutor:
 
         try:
             attempt_number = 1
-            while True:
+            if current_retry_state is not None:
+                attempt_number = current_retry_state.failed_attempt_count + 1
+                finalization_reason = _failed_run_finalization_reason(
+                    current_retry_state
+                )
+                if finalization_reason is not None:
+                    run_end_reason = "error"
+                    terminal_run_status = AgentRunStatus.FAILED
+                    await self.failed_run_finalizer.finalize(
+                        FailedRunFinalizationInput(
+                            session_id=message.session_id,
+                            run_id=run_id,
+                            user_message=current_retry_state.last_user_message,
+                            retry_state=current_retry_state,
+                            reason=finalization_reason,
+                        ),
+                        dispatch_event=dispatch_event,
+                    )
+                    run_completed = True
+                else:
+                    retry_stopped = await self._wait_for_failed_run_retry(
+                        session_id=message.session_id,
+                        retry_state=current_retry_state,
+                        check_stop=check_stop,
+                        shutdown_event=shutdown_event,
+                    )
+                    if retry_stopped:
+                        run_end_reason = "error"
+                        terminal_run_status = AgentRunStatus.FAILED
+                        await self.failed_run_finalizer.finalize(
+                            FailedRunFinalizationInput(
+                                session_id=message.session_id,
+                                run_id=run_id,
+                                user_message=current_retry_state.last_user_message,
+                                retry_state=current_retry_state,
+                                reason="retry_stopped_by_user",
+                            ),
+                            dispatch_event=dispatch_event,
+                        )
+                        run_completed = True
+                    else:
+                        await clear_live_retry_state()
+            while not run_completed:
                 try:
                     if command_handler is None:
                         boundary_poll = self.make_boundary_poll(
                             message=message,
                             model=run_request.model,
+                            requested_inference_profile=selected_profile.profile,
+                            run_id=run_id,
                             poll_fn=poll_fn,
                             mark_context_invalidated=mark_turn_boundary_context_invalidated,
                         )
@@ -960,6 +1190,10 @@ class RunExecutor:
                     run_id=run_id,
                     status=terminal_run_status or AgentRunStatus.CANCELLED,
                 )
+                await self._publish_inference_run_event_projections(
+                    session_id=message.session_id,
+                    run_id=run_id,
+                )
             await hook_dispatcher.dispatch_observation(
                 hook_providers,
                 "on_run_end",
@@ -1140,11 +1374,57 @@ class RunExecutor:
                 )
             await asyncio.sleep(_RUN_HEARTBEAT_INTERVAL_SECONDS)
 
+    async def _select_requested_profile(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        explicit_profile: RequestedInferenceProfile | None,
+    ) -> RequestedProfileSelection:
+        """Apply explicit, session-last, then Agent-default profile precedence."""
+        if explicit_profile is not None:
+            return RequestedProfileSelection(
+                profile=explicit_profile,
+                source=InferenceProfileSource.EXPLICIT_INPUT,
+            )
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if (
+                agent_session is not None
+                and agent_session.last_model_target_label is not None
+            ):
+                return RequestedProfileSelection(
+                    profile=RequestedInferenceProfile(
+                        model_target_label=agent_session.last_model_target_label,
+                        reasoning_effort=agent_session.last_reasoning_effort,
+                    ),
+                    source=InferenceProfileSource.SESSION_LAST_USED,
+                )
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+        return RequestedProfileSelection(
+            profile=RequestedInferenceProfile(
+                model_target_label=(agent.main_model_label if agent else "default"),
+                reasoning_effort=(
+                    ModelReasoningEffort(agent.model_parameters.reasoning_effort)
+                    if agent is not None
+                    and agent.model_parameters is not None
+                    and agent.model_parameters.reasoning_effort is not None
+                    else None
+                ),
+            ),
+            source=InferenceProfileSource.AGENT_DEFAULT,
+        )
+
     def make_boundary_poll(
         self,
         *,
         message: SessionWakeUp,
         model: str | None,
+        requested_inference_profile: RequestedInferenceProfile,
+        run_id: str,
         poll_fn: PollMessages | None,
         mark_context_invalidated: Callable[[], None],
     ) -> PollMessages:
@@ -1155,6 +1435,8 @@ class RunExecutor:
                 agent_id=message.agent_id,
                 session_id=message.session_id,
                 model=model,
+                required_inference_profile=requested_inference_profile,
+                active_run_id=run_id,
                 poll_fn=poll_fn,
                 process_actions=True,
             )
@@ -1177,20 +1459,29 @@ class RunExecutor:
         agent_id: str,
         session_id: str,
         model: str | None,
+        required_inference_profile: RequestedInferenceProfile | None,
+        active_run_id: str | None,
         poll_fn: PollMessages | None,
         process_actions: bool,
     ) -> RunInputPollResult:
         """Consume pending run inputs and report whether a wake-up has work."""
         user_messages: list[RunUserMessage] = []
+        promoted_event_ids: list[str] = []
+        selected_profile = required_inference_profile
         context_invalidated = False
         while True:
             promoted = await self._promote_input_buffers(
                 session_id=session_id,
                 model=model,
+                required_inference_profile=selected_profile,
+                active_run_id=active_run_id,
                 include_action_messages=process_actions,
             )
             if not promoted.deleted_buffer_ids:
                 break
+            if promoted.requested_inference_profile is not None:
+                selected_profile = promoted.requested_inference_profile
+            promoted_event_ids.extend(promoted.promoted_event_ids)
             user_messages.extend(promoted.user_messages)
             action_result = (
                 await self._process_operation_actions(
@@ -1219,6 +1510,8 @@ class RunExecutor:
         ) or await self._has_actionable_model_input(session_id)
         return RunInputPollResult(
             user_messages=user_messages,
+            requested_inference_profile=selected_profile,
+            promoted_event_ids=list(dict.fromkeys(promoted_event_ids)),
             has_actionable_work=has_actionable_work,
             context_invalidated=context_invalidated,
         )
@@ -1349,11 +1642,40 @@ class RunExecutor:
                     context_invalidated=False,
                 )
 
+    async def _publish_inference_run_event_projections(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+    ) -> None:
+        """Refresh associated message provenance for WebSocket clients."""
+        try:
+            projections = (
+                await self.session_lifecycle.list_inference_run_event_projections(
+                    run_id=run_id
+                )
+            )
+            for projection in projections:
+                await self.broadcast.publish(
+                    session_id,
+                    chat_history_event_appended_dump(
+                        projection.event,
+                        inference_run_summary=projection.inference_run_summary,
+                    ),
+                )
+        except Exception:
+            logger.exception(
+                "Failed to broadcast inference run event projections",
+                extra={"session_id": session_id, "run_id": run_id},
+            )
+
     async def _promote_input_buffers(
         self,
         *,
         session_id: str,
         model: str | None,
+        required_inference_profile: RequestedInferenceProfile | None,
+        active_run_id: str | None,
         include_action_messages: bool,
     ) -> PromotedInputBuffers:
         """Promote input buffers and publish the matching live-state changes."""
@@ -1365,6 +1687,8 @@ class RunExecutor:
         promoted = await self.input_buffer_service.flush_session_input_buffers(
             session_id=session_id,
             model=model,
+            required_inference_profile=required_inference_profile,
+            active_run_id=active_run_id,
             include_action_messages=include_action_messages,
         )
         logger.info(
@@ -1398,6 +1722,11 @@ class RunExecutor:
             logger.exception(
                 "Failed to broadcast promoted input buffer events",
                 extra={"session_id": session_id},
+            )
+        if active_run_id is not None:
+            await self._publish_inference_run_event_projections(
+                session_id=session_id,
+                run_id=active_run_id,
             )
         return promoted
 
@@ -1433,6 +1762,24 @@ def has_actionable_tail(events: Sequence[Event]) -> bool:
         else events
     )
     return any(event.kind not in _NON_ACTIONABLE_TAIL_EVENT_KINDS for event in tail)
+
+
+def _profile_resolution_failure(error: object) -> ProfileResolutionFailure:
+    """Map internal routing errors to safe durable failure details."""
+    if isinstance(error, ModelTargetNotFound):
+        return ProfileResolutionFailure(
+            code=InferenceProfileFailureCode.MODEL_TARGET_NOT_FOUND,
+            message="The selected model is no longer available.",
+        )
+    if isinstance(error, ReasoningEffortUnsupported):
+        return ProfileResolutionFailure(
+            code=InferenceProfileFailureCode.REASONING_EFFORT_UNSUPPORTED,
+            message="The selected reasoning effort is not supported by this model.",
+        )
+    return ProfileResolutionFailure(
+        code=InferenceProfileFailureCode.MODEL_TARGET_RESOLUTION_FAILED,
+        message="The selected model could not be prepared for this run.",
+    )
 
 
 def _chat_live_retry_state(

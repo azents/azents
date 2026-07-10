@@ -5,6 +5,7 @@ import datetime
 from typing import Literal
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
+from azents.core.inference_profile import InferenceRunSummary
 from azents.engine.events.types import Event
 from azents.engine.run.failure import FailedRunAttemptSource, FailedRunRetryability
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
@@ -21,6 +22,7 @@ class PaginatedEvents:
     """Paginated event result."""
 
     items: list[Event]
+    inference_run_summaries: dict[str, InferenceRunSummary]
     has_more: bool
     has_newer: bool = False
 
@@ -70,6 +72,7 @@ class ChatLiveStateSnapshot:
 
     partial_history_events: list[Event]
     input_buffer_events: list[Event]
+    inference_run_summaries: dict[str, InferenceRunSummary]
     run: ChatLiveRunState | None = None
     session_run_state: AgentSessionRunState = AgentSessionRunState.IDLE
     todo: TodoStateSnapshot | None = None

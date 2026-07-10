@@ -337,6 +337,10 @@ def create_chat_session_with_agent(
             "agent_id": agent.id,
             "client_request_id": f"e2e-utils-init-{uniq}",
             "message": "init",
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
         timeout=10,
     )

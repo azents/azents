@@ -533,8 +533,14 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
         )
+        newest_active = await repo.get_active_by_session_id(
+            rdb_session,
+            session_id=event_session.id,
+        )
         assert still_active is not None
         assert still_active.id == active.id
+        assert newest_active is not None
+        assert newest_active.id == pending.id
         assert await repo.list_input_event_ids(rdb_session, run_id=pending.id) == [
             event.id,
             second_event.id,
@@ -564,6 +570,10 @@ class TestEventExecutionRepositories:
             rdb_session,
             event_id=event.id,
         )
+        summaries = await repo.list_latest_inference_run_summaries_by_event_ids(
+            rdb_session,
+            event_ids=[event.id, second_event.id, event.id],
+        )
 
         assert activated.status == AgentRunStatus.RUNNING
         assert activated.started_at == resolved_at
@@ -575,6 +585,8 @@ class TestEventExecutionRepositories:
         assert summary.run_id == pending.id
         assert summary.resolved_profile is not None
         assert summary.resolved_profile.model_identifier == "resolved-model"
+        assert summaries[event.id].run_id == pending.id
+        assert summaries[second_event.id].run_id == pending.id
         assert "integration" not in summary.model_dump(mode="json")
 
     async def test_input_event_association_rejects_another_session(
@@ -777,6 +789,74 @@ class TestEventExecutionRepositories:
             )
             is None
         )
+
+    async def test_failed_run_lookup_by_terminal_result_event(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Resolve a manual retry source from its failed terminal event."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-manual-retry-source",
+        )
+        session_repo = _agent_session_repository()
+        event_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        other_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                requested_model_target_label="Quality",
+                requested_reasoning_effort=ModelReasoningEffort.HIGH,
+                inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+                resolved_model_selection=_model_selection(),
+                resolved_reasoning_effort=ModelReasoningEffort.HIGH,
+                resolved_at=datetime.datetime.now(datetime.UTC),
+                effective_context_window_tokens=128_000,
+                effective_auto_compaction_threshold_tokens=115_200,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
+        )
+        terminal_event_id = "fedcba9876543210fedcba9876543210"
+        await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.FAILED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+            terminal_result_event_id=terminal_event_id,
+        )
+
+        found = await repo.get_failed_by_terminal_result_event_id(
+            rdb_session,
+            session_id=event_session.id,
+            terminal_result_event_id=terminal_event_id,
+        )
+        wrong_session = await repo.get_failed_by_terminal_result_event_id(
+            rdb_session,
+            session_id=other_session.id,
+            terminal_result_event_id=terminal_event_id,
+        )
+
+        assert found is not None
+        assert found.id == run.id
+        assert wrong_session is None
 
     async def test_agent_run_retry_state_updates_and_clears_on_terminal(
         self,

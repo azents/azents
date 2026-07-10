@@ -1,7 +1,10 @@
 """InputBufferService tests."""
 
+import dataclasses
 import datetime
+from unittest.mock import AsyncMock
 
+import pytest
 import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
@@ -15,7 +18,12 @@ from azents.core.enums import (
     InputBufferKind,
     LLMProvider,
 )
-from azents.engine.events.action_messages import SkillAction
+from azents.core.inference_profile import (
+    InferenceProfileSource,
+    RequestedInferenceProfile,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
+from azents.engine.events.action_messages import ActionMessagePayload, SkillAction
 from azents.engine.events.types import (
     AgentMessagePayload,
     FileOutputPart,
@@ -32,12 +40,12 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.input_buffer import InputBufferRepository
-from azents.repos.input_buffer.data import InputBufferCreate
+from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
 from azents.repos.model_file.data import ModelFile
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -133,6 +141,8 @@ async def _create_buffer(
     session_id: str,
     user_id: str,
     content: str,
+    model_target_label: str | None = None,
+    reasoning_effort: ModelReasoningEffort | None = None,
     attachments: list[str] | None = None,
     file_parts: list[FileOutputPart] | None = None,
 ) -> str:
@@ -143,8 +153,8 @@ async def _create_buffer(
             InputBufferCreate(
                 session_id=session_id,
                 kind=InputBufferKind.USER_MESSAGE,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
+                requested_model_target_label=model_target_label,
+                requested_reasoning_effort=reasoning_effort,
                 actor_user_id=user_id,
                 content=content,
                 idempotency_key=None,
@@ -172,8 +182,8 @@ async def _create_action_buffer(
             InputBufferCreate(
                 session_id=session_id,
                 kind=InputBufferKind.ACTION_MESSAGE,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
+                requested_model_target_label="Fast",
+                requested_reasoning_effort=ModelReasoningEffort.HIGH,
                 actor_user_id=user_id,
                 content=content,
                 idempotency_key=None,
@@ -366,6 +376,7 @@ def _input_buffer_service(
         model_file_service=model_file_service or _ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
+        agent_run_repository=AgentRunRepository(),
     )
 
 
@@ -418,6 +429,113 @@ class TestInputBufferService:
         assert after is not None
         assert after.run_state == AgentSessionRunState.IDLE
 
+    async def test_enqueue_deduplicates_only_the_same_inference_profile(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """An idempotency key cannot silently reuse another requested profile."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-profile-idempotency",
+        )
+        service = _input_buffer_service(rdb_session_manager)
+        enqueue = InputBufferEnqueue(
+            session_id=session_id,
+            kind=InputBufferKind.USER_MESSAGE,
+            requested_model_target_label="Quality",
+            requested_reasoning_effort=ModelReasoningEffort.HIGH,
+            actor_user_id=user_id,
+            content="profile-aware input",
+            idempotency_key="client-request-profile",
+            metadata={"source": "test"},
+            action=None,
+            attachments=[],
+            file_parts=[],
+        )
+
+        async with rdb_session_manager() as session:
+            created = await service.enqueue(session, enqueue)
+            deduplicated = await service.enqueue(session, enqueue)
+
+            assert created.created is True
+            assert deduplicated.created is False
+            assert deduplicated.input_buffer.id == created.input_buffer.id
+
+            with pytest.raises(
+                ValueError,
+                match="idempotency key already used for another inference profile",
+            ):
+                await service.enqueue(
+                    session,
+                    dataclasses.replace(
+                        enqueue,
+                        requested_model_target_label="Fast",
+                    ),
+                )
+
+            with pytest.raises(
+                ValueError,
+                match="idempotency key already used for another inference profile",
+            ):
+                await service.enqueue(
+                    session,
+                    dataclasses.replace(
+                        enqueue,
+                        requested_reasoning_effort=ModelReasoningEffort.LOW,
+                    ),
+                )
+
+    async def test_enqueue_rejects_profile_mismatch_from_idempotency_race(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """The atomic create result is checked even when the pre-read misses."""
+        repository = AsyncMock(spec=InputBufferRepository)
+        repository.get_by_idempotency_key.return_value = None
+        repository.create_idempotent.return_value = InputBuffer(
+            id="buffer-winner",
+            session_id="session-001",
+            kind=InputBufferKind.USER_MESSAGE,
+            requested_model_target_label="Fast",
+            requested_reasoning_effort=ModelReasoningEffort.LOW,
+            actor_user_id="user-001",
+            content="winner",
+            idempotency_key="client-request-race",
+            metadata={"source": "test"},
+            action=None,
+            attachments=[],
+            file_parts=[],
+            created_at=datetime.datetime.now(datetime.UTC),
+        )
+        service = InputBufferService(
+            session_manager=rdb_session_manager,
+            input_buffer_repository=repository,
+            exchange_file_service=_ExchangeFileService(),
+            model_file_service=_ModelFileService(),
+            agent_session_repository=AgentSessionRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
+        )
+        enqueue = InputBufferEnqueue(
+            session_id="session-001",
+            kind=InputBufferKind.USER_MESSAGE,
+            requested_model_target_label="Quality",
+            requested_reasoning_effort=ModelReasoningEffort.HIGH,
+            actor_user_id="user-001",
+            content="loser",
+            idempotency_key="client-request-race",
+            metadata={"source": "test"},
+            action=None,
+            attachments=[],
+            file_parts=[],
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="idempotency key already used for another inference profile",
+        ):
+            await service.enqueue(AsyncMock(spec=AsyncSession), enqueue)
+
     async def test_flush_promotes_buffer_and_deletes_row(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -432,23 +550,45 @@ class TestInputBufferService:
             session_id=session_id,
             user_id=user_id,
             content="buffered message",
+            model_target_label="Quality",
+            reasoning_effort=None,
         )
         service = _input_buffer_service(rdb_session_manager)
 
         result = await service.flush_session_input_buffers(
             session_id=session_id,
             model="gpt-5.4",
+            required_inference_profile=None,
+            active_run_id=None,
         )
 
         assert result.claimed_count == 1
         assert result.inserted_count == 1
         assert result.deduped_count == 0
+        assert result.requested_inference_profile == RequestedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
+        assert result.promoted_event_ids == [result.events[0].id]
         assert len(result.user_messages) == 1
         assert len(result.events) == 1
         assert result.events[0].external_id == buffer_id
+        event_payload = result.events[0].payload
+        assert isinstance(event_payload, UserMessagePayload)
+        assert event_payload.requested_inference_profile == RequestedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
         promoted = result.user_messages[0]
         assert promoted.external_id == buffer_id
         assert promoted.payload.content == "buffered message"
+        assert (
+            promoted.payload.requested_inference_profile
+            == RequestedInferenceProfile(
+                model_target_label="Quality",
+                reasoning_effort=None,
+            )
+        )
         async with rdb_session_manager() as session:
             remaining = await session.scalar(
                 sa.select(sa.func.count())
@@ -456,6 +596,158 @@ class TestInputBufferService:
                 .where(RDBInputBuffer.id == buffer_id)
             )
         assert remaining == 0
+
+    async def test_flush_associates_events_with_run_before_buffer_delete(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Promotion, run association, and buffer deletion share one transaction."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-run-association",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="associate atomically",
+            model_target_label="Quality",
+            reasoning_effort=ModelReasoningEffort.HIGH,
+        )
+        run_repository = AgentRunRepository()
+        async with rdb_session_manager() as session:
+            run = await run_repository.create_pending(
+                session,
+                session_id=session_id,
+                requested_model_target_label="Quality",
+                requested_reasoning_effort=ModelReasoningEffort.HIGH,
+                inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+                parent_agent_run_id=None,
+                resolved_model_selection=None,
+                resolved_reasoning_effort=None,
+                resolved_at=None,
+                effective_context_window_tokens=None,
+                effective_auto_compaction_threshold_tokens=None,
+            )
+
+        result = await _input_buffer_service(
+            rdb_session_manager
+        ).flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=RequestedInferenceProfile(
+                model_target_label="Quality",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            active_run_id=run.id,
+        )
+
+        async with rdb_session_manager() as session:
+            associated_event_ids = await run_repository.list_input_event_ids(
+                session,
+                run_id=run.id,
+            )
+            remaining = await session.get(RDBInputBuffer, buffer_id)
+        assert associated_event_ids == result.promoted_event_ids
+        assert remaining is None
+
+    async def test_flush_stops_at_requested_profile_change(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Flush only the first exact requested-profile FIFO segment."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-profile-segment",
+        )
+        first_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="first",
+            model_target_label="Fast",
+            reasoning_effort=ModelReasoningEffort.HIGH,
+        )
+        second_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="second",
+            model_target_label="Fast",
+            reasoning_effort=ModelReasoningEffort.HIGH,
+        )
+        third_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="third",
+            model_target_label="Fast",
+            reasoning_effort=ModelReasoningEffort.LOW,
+        )
+
+        result = await _input_buffer_service(
+            rdb_session_manager
+        ).flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            active_run_id=None,
+        )
+
+        assert result.deleted_buffer_ids == [first_id, second_id]
+        assert result.requested_inference_profile == RequestedInferenceProfile(
+            model_target_label="Fast",
+            reasoning_effort=ModelReasoningEffort.HIGH,
+        )
+        assert result.promoted_event_ids == [event.id for event in result.events]
+        async with rdb_session_manager() as session:
+            remaining_ids = list(
+                (
+                    await session.execute(
+                        sa.select(RDBInputBuffer.id).where(
+                            RDBInputBuffer.session_id == session_id
+                        )
+                    )
+                ).scalars()
+            )
+        assert remaining_ids == [third_id]
+
+    async def test_required_profile_mismatch_keeps_first_buffer_queued(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Active-run polling leaves a different-profile prefix queued."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-profile-mismatch",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="wait for next run",
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
+
+        result = await _input_buffer_service(
+            rdb_session_manager
+        ).flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=RequestedInferenceProfile(
+                model_target_label="Fast",
+                reasoning_effort=None,
+            ),
+            active_run_id=None,
+        )
+
+        assert result.claimed_count == 0
+        assert result.requested_inference_profile is None
+        assert result.promoted_event_ids == []
+        async with rdb_session_manager() as session:
+            remaining = await session.get(RDBInputBuffer, buffer_id)
+        assert remaining is not None
 
     async def test_flush_promotes_agent_message_payload(
         self,
@@ -477,10 +769,16 @@ class TestInputBufferService:
         result = await service.flush_session_input_buffers(
             session_id=session_id,
             model="gpt-5.4",
+            required_inference_profile=RequestedInferenceProfile(
+                model_target_label="Fast",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            active_run_id=None,
         )
 
         assert result.claimed_count == 1
         assert result.inserted_count == 1
+        assert result.requested_inference_profile is None
         assert [message.external_id for message in result.user_messages] == [buffer_id]
         event = result.events[0]
         assert event.kind == EventKind.AGENT_MESSAGE
@@ -521,6 +819,11 @@ class TestInputBufferService:
         result = await service.flush_session_input_buffers(
             session_id=session_id,
             model="gpt-5.4",
+            required_inference_profile=RequestedInferenceProfile(
+                model_target_label="Fast",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            active_run_id=None,
         )
 
         assert result.inserted_count == 3
@@ -529,6 +832,16 @@ class TestInputBufferService:
             EventKind.SKILL_LOADED,
             EventKind.USER_MESSAGE,
         ]
+        action_event = result.events[0]
+        assert isinstance(action_event.payload, ActionMessagePayload)
+        assert action_event.payload.requested_inference_profile is not None
+        assert (
+            action_event.payload.requested_inference_profile.model_target_label
+            == "Fast"
+        )
+        assert action_event.payload.requested_inference_profile.reasoning_effort == (
+            ModelReasoningEffort.HIGH
+        )
         skill_event = result.events[1]
         assert skill_event.external_id == f"{buffer_id}:skill_loaded"
         assert isinstance(skill_event.payload, SkillLoadedPayload)
@@ -582,6 +895,8 @@ class TestInputBufferService:
         result = await service.flush_session_input_buffers(
             session_id=session_id,
             model="gpt-5.4",
+            required_inference_profile=None,
+            active_run_id=None,
         )
 
         promoted = result.user_messages[0]
@@ -649,6 +964,8 @@ class TestInputBufferService:
         result = await service.flush_session_input_buffers(
             session_id=session_id,
             model="gpt-5.4",
+            required_inference_profile=None,
+            active_run_id=None,
         )
 
         promoted = result.user_messages[0]
@@ -683,6 +1000,8 @@ class TestInputBufferService:
         result = await service.flush_session_input_buffers(
             session_id=session_id,
             model="gpt-5.4",
+            required_inference_profile=None,
+            active_run_id=None,
         )
 
         assert result.claimed_count == 0

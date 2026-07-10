@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from azents.core.inference_profile import InferenceRunSummary
 from azents.engine.events.types import Attachment as EventAttachment
 from azents.engine.events.types import Event
 from azents.repos.action_execution.data import ActionExecutionProjection
@@ -80,21 +81,34 @@ def chat_attachment_from_event(
     )
 
 
-def chat_event_transport_dump(event: Event) -> dict[str, object]:
+def chat_event_transport_dump(
+    event: Event,
+    *,
+    inference_run_summary: InferenceRunSummary | None = None,
+) -> dict[str, object]:
     """Convert Event to chat REST/WS transport wire dict."""
     dumped = event.model_dump(mode="json")
     payload = dumped.get("payload")
     if isinstance(payload, dict):
         _project_payload_attachments(payload)
+    if inference_run_summary is not None:
+        dumped["inference_run_summary"] = inference_run_summary.model_dump(mode="json")
     return dumped
 
 
-def chat_history_event_appended_dump(event: Event) -> dict[str, object]:
+def chat_history_event_appended_dump(
+    event: Event,
+    *,
+    inference_run_summary: InferenceRunSummary | None = None,
+) -> dict[str, object]:
     """Convert persisted history event append action to chat WS wire dict."""
     return {
         "type": "history_event_appended",
         "session_id": event.session_id,
-        "event": chat_event_transport_dump(event),
+        "event": chat_event_transport_dump(
+            event,
+            inference_run_summary=inference_run_summary,
+        ),
     }
 
 

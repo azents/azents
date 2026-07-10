@@ -12,7 +12,7 @@ from azents.broker.types import SessionBroker
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.types import ActiveToolCall, AgentRunState
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.worker.session.lifecycle import SessionLifecycleService
 
@@ -82,13 +82,13 @@ class _AgentRunRepository:
         self.running_run = running_run
         self.terminal_session_ids: list[str] = []
 
-    async def get_running_by_session_id(
+    async def get_active_by_session_id(
         self,
         session: AsyncSession,
         *,
         session_id: str,
     ) -> AgentRunState | None:
-        """Return test-specified running run."""
+        """Return test-specified active run."""
         del session, session_id
         return self.running_run
 
@@ -146,6 +146,7 @@ def _service(
             agent_session_repository,
         ),
         agent_run_repository=cast(AgentRunRepository, agent_run_repository),
+        event_transcript_repository=EventTranscriptRepository(),
     )
 
 

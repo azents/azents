@@ -20,7 +20,7 @@ from azents.broker.redis import RedisBroker
 from azents.core.config import PostgreSQLConfig
 from azents.core.redis import create_redis_client
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
@@ -119,6 +119,7 @@ async def runtime_control_server_lifespan(
         model_file_service=cast(ModelFileService, object()),
         agent_session_repository=session_repository,
         event_transcript_repository=cast(EventTranscriptRepository, object()),
+        agent_run_repository=AgentRunRepository(),
     )
     worker_input_queue = DatabaseWorkerInputQueue(
         broker=broker,

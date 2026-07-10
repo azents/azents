@@ -146,6 +146,10 @@ def _write_message(
             "agent_id": agent_id,
             "client_request_id": client_request_id,
             "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
     )
 
@@ -166,6 +170,10 @@ def _write_first_session_message(
         payload={
             "client_request_id": client_request_id,
             "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
             "existing_project_paths": [],
             "setup_actions": [],
         },

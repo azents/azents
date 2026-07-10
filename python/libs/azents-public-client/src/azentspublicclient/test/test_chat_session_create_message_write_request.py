@@ -37,6 +37,7 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
             return ChatSessionCreateMessageWriteRequest(
                 client_request_id = '0',
                 message = '',
+                inference_profile = { },
                 existing_project_paths = [
                     ''
                     ],
@@ -54,6 +55,7 @@ class TestChatSessionCreateMessageWriteRequest(unittest.TestCase):
             return ChatSessionCreateMessageWriteRequest(
                 client_request_id = '0',
                 message = '',
+                inference_profile = { },
                 existing_project_paths = [
                     ''
                     ],

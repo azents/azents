@@ -8,6 +8,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **str** | Session ID | 
 **agent_id** | **str** | Agent ID | 
+**last_model_target_label** | **str** |  | 
+**last_reasoning_effort** | [**ModelReasoningEffort**](ModelReasoningEffort.md) |  | 
 **title** | **str** |  | 
 **title_source** | [**AgentSessionTitleSource**](AgentSessionTitleSource.md) |  | 
 **status** | [**AgentSessionStatus**](AgentSessionStatus.md) | Session status | 

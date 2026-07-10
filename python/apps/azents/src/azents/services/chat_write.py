@@ -13,11 +13,16 @@ from azents.core.enums import (
     EventKind,
     InputBufferKind,
 )
+from azents.core.inference_profile import (
+    InferenceProfileSource,
+    RequestedInferenceProfile,
+)
 from azents.engine.events.types import FileOutputPart, SystemErrorPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request import ChatWriteRequestRepository
@@ -80,6 +85,7 @@ class ChatWriteService:
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     chat_write_request_repository: Annotated[
         ChatWriteRequestRepository, Depends(ChatWriteRequestRepository)
     ]
@@ -98,6 +104,7 @@ class ChatWriteService:
         client_request_id: str,
         message_id: str,
         text: str,
+        inference_profile: RequestedInferenceProfile,
         metadata: dict[str, str],
         attachments: list[str],
         file_parts: list[FileOutputPart],
@@ -153,8 +160,8 @@ class ChatWriteService:
                 InputBufferEnqueue(
                     session_id=session_id,
                     kind=InputBufferKind.EDITED_USER_MESSAGE,
-                    requested_model_target_label=None,
-                    requested_reasoning_effort=None,
+                    requested_model_target_label=inference_profile.model_target_label,
+                    requested_reasoning_effort=inference_profile.reasoning_effort,
                     actor_user_id=user_id,
                     content=text,
                     idempotency_key=client_request_id,
@@ -304,6 +311,25 @@ class ChatWriteService:
                 raise ValueError(
                     "Failed-run error is no longer the latest visible event"
                 )
+            original_run = (
+                await self.agent_run_repository.get_failed_by_terminal_result_event_id(
+                    session,
+                    session_id=session_id,
+                    terminal_result_event_id=failed_event_id,
+                )
+            )
+            if original_run is None:
+                raise ValueError("Failed AgentRun not found")
+            if original_run.requested_model_target_label is None:
+                raise ValueError("Failed AgentRun has no requested model target")
+            original_input_event_ids = (
+                await self.agent_run_repository.list_input_event_ids(
+                    session,
+                    run_id=original_run.id,
+                )
+            )
+            if not original_input_event_ids:
+                raise ValueError("Failed AgentRun has no input events")
 
             record, created = await self._create_idempotent_record(
                 session,
@@ -325,6 +351,28 @@ class ChatWriteService:
                 await self.input_buffer_service.delete_by_session_id(
                     session,
                     session_id,
+                )
+                retry_run = await self.agent_run_repository.create_pending(
+                    session,
+                    session_id=session_id,
+                    requested_model_target_label=(
+                        original_run.requested_model_target_label
+                    ),
+                    requested_reasoning_effort=(
+                        original_run.requested_reasoning_effort
+                    ),
+                    inference_profile_source=InferenceProfileSource.RETRY_ORIGINAL,
+                    parent_agent_run_id=None,
+                    resolved_model_selection=None,
+                    resolved_reasoning_effort=None,
+                    resolved_at=None,
+                    effective_context_window_tokens=None,
+                    effective_auto_compaction_threshold_tokens=None,
+                )
+                await self.agent_run_repository.associate_input_events(
+                    session,
+                    run_id=retry_run.id,
+                    event_ids=original_input_event_ids,
                 )
                 await self.agent_session_repository.mark_running(session, session_id)
 

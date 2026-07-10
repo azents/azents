@@ -328,6 +328,10 @@ def _run_message(
             "agent_id": agent_id,
             "client_request_id": f"agents-md-appendix-{unique()}",
             "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
         timeout=10,
     )

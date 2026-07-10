@@ -27,6 +27,10 @@ def test_chat_message_write_request_ignores_client_owned_file_parts() -> None:
             "agent_id": "agent-1",
             "client_request_id": "request-1",
             "message": "hello",
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
             "attachments": ["exchange://workspace/agent/file"],
             "file_parts": [
                 {
@@ -50,6 +54,10 @@ def test_chat_edit_message_write_request_ignores_client_owned_file_parts() -> No
             "client_request_id": "request-1",
             "message_id": "message-1",
             "message": "hello",
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
             "attachments": ["exchange://workspace/agent/file"],
             "file_parts": [
                 {
