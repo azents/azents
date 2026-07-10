@@ -1,6 +1,7 @@
 """Runtime Runner process entrypoint."""
 
 import asyncio
+import dataclasses
 import logging
 import os
 import uuid
@@ -38,7 +39,25 @@ _CAPABILITIES = (
     "file.bulk_move",
 )
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
+_DEFAULT_MAX_CONCURRENT_OPERATIONS_PER_SESSION = 10
+_DEFAULT_MAX_CONCURRENT_SYSTEM_OPERATIONS = 10
+_DEFAULT_MAX_CONCURRENT_OPERATIONS = 50
+_DEFAULT_MAX_PENDING_OPERATIONS_PER_OWNER = 100
+_DEFAULT_MAX_PENDING_OPERATIONS = 1_000
+_DEFAULT_MAX_CONCURRENT_CONTROL_OPERATIONS = 4
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class RunnerLimitConfig:
+    """Validated Runtime Runner operation limits."""
+
+    max_concurrent_operations_per_session: int
+    max_concurrent_system_operations: int
+    max_concurrent_operations: int
+    max_pending_operations_per_owner: int
+    max_pending_operations: int
+    max_concurrent_control_operations: int
 
 
 def main() -> None:
@@ -60,6 +79,7 @@ async def run_runtime_runner() -> None:
     base_connection_id = (
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
+    limit_config = _runner_limit_config()
     workspace = Workspace(workspace_path)
     registration = RunnerRegistration(
         runtime_id=runtime_id,
@@ -93,6 +113,20 @@ async def run_runtime_runner() -> None:
             registration=registration,
             connection_id=connection_id,
             consumer_id=runner_id,
+            max_concurrent_operations_per_session=(
+                limit_config.max_concurrent_operations_per_session
+            ),
+            max_concurrent_system_operations=(
+                limit_config.max_concurrent_system_operations
+            ),
+            max_concurrent_operations=limit_config.max_concurrent_operations,
+            max_pending_operations_per_owner=(
+                limit_config.max_pending_operations_per_owner
+            ),
+            max_pending_operations=limit_config.max_pending_operations,
+            max_concurrent_control_operations=(
+                limit_config.max_concurrent_control_operations
+            ),
         )
         try:
             _LOGGER.info(
@@ -120,6 +154,77 @@ async def run_runtime_runner() -> None:
         finally:
             await operations.close()
             await client.close()
+
+
+def _runner_limit_config() -> RunnerLimitConfig:
+    config = RunnerLimitConfig(
+        max_concurrent_operations_per_session=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
+            _DEFAULT_MAX_CONCURRENT_OPERATIONS_PER_SESSION,
+        ),
+        max_concurrent_system_operations=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
+            _DEFAULT_MAX_CONCURRENT_SYSTEM_OPERATIONS,
+        ),
+        max_concurrent_operations=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS",
+            _DEFAULT_MAX_CONCURRENT_OPERATIONS,
+        ),
+        max_pending_operations_per_owner=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER",
+            _DEFAULT_MAX_PENDING_OPERATIONS_PER_OWNER,
+        ),
+        max_pending_operations=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS",
+            _DEFAULT_MAX_PENDING_OPERATIONS,
+        ),
+        max_concurrent_control_operations=_positive_int_env(
+            "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS",
+            _DEFAULT_MAX_CONCURRENT_CONTROL_OPERATIONS,
+        ),
+    )
+    if config.max_concurrent_operations_per_session > config.max_concurrent_operations:
+        raise SystemExit(
+            "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION must not "
+            "exceed AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS"
+        )
+    if config.max_concurrent_system_operations > config.max_concurrent_operations:
+        raise SystemExit(
+            "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS must not exceed "
+            "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS"
+        )
+    if config.max_pending_operations_per_owner < max(
+        config.max_concurrent_operations_per_session,
+        config.max_concurrent_system_operations,
+    ):
+        raise SystemExit(
+            "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER must not be "
+            "smaller than an owner concurrency limit"
+        )
+    if config.max_pending_operations < config.max_concurrent_operations:
+        raise SystemExit(
+            "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS must not be smaller than "
+            "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS"
+        )
+    if config.max_pending_operations_per_owner > config.max_pending_operations:
+        raise SystemExit(
+            "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER must not exceed "
+            "AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS"
+        )
+    return config
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise SystemExit(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise SystemExit(f"{name} must be a positive integer")
+    return value
 
 
 def _control_connection_id(base_connection_id: str) -> str:
