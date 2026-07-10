@@ -40,7 +40,7 @@ class TestDebugErrorResponse(unittest.TestCase):
                 message = '',
                 sentry_event_id = '',
                 sentry = azentsadminclient.models.sentry_diagnostics.SentryDiagnostics(
-                    initialized = True,
+                    initialized = True, 
                     dsn_configured = True, )
             )
         else:
@@ -50,7 +50,7 @@ class TestDebugErrorResponse(unittest.TestCase):
                 message = '',
                 sentry_event_id = '',
                 sentry = azentsadminclient.models.sentry_diagnostics.SentryDiagnostics(
-                    initialized = True,
+                    initialized = True, 
                     dsn_configured = True, ),
         )
         """

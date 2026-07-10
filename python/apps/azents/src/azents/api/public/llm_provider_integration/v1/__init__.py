@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
+from azents.core.credentials import PROVIDER_SECRET_TYPES
 from azents.core.enums import LLMProvider
 from azents.repos.llm_catalog.data import CatalogNotFound
 from azents.repos.llm_provider_integration.data import NotFound
@@ -33,6 +34,8 @@ from azents.testing.deterministic_model_listing import (
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    LLMProviderCapabilityListResponse,
+    LLMProviderCapabilityResponse,
     LLMProviderIntegrationCreateRequest,
     LLMProviderIntegrationListResponse,
     LLMProviderIntegrationResponse,
@@ -51,7 +54,42 @@ _PROVIDER_DISPLAY_NAMES: dict[LLMProvider, str] = {
     LLMProvider.GOOGLE_GEMINI: "Google Gemini",
     LLMProvider.AWS_BEDROCK: "AWS Bedrock",
     LLMProvider.GOOGLE_VERTEX_AI: "Google Vertex AI",
+    LLMProvider.CHATGPT_OAUTH: "ChatGPT OAuth",
+    LLMProvider.XAI_OAUTH: "xAI Grok OAuth",
 }
+
+_BASE_AVAILABLE_PROVIDERS: tuple[LLMProvider, ...] = (
+    LLMProvider.OPENAI,
+    LLMProvider.ANTHROPIC,
+    LLMProvider.GOOGLE_GEMINI,
+    LLMProvider.AWS_BEDROCK,
+    LLMProvider.GOOGLE_VERTEX_AI,
+    LLMProvider.CHATGPT_OAUTH,
+    LLMProvider.XAI_OAUTH,
+)
+
+
+@router.get("/workspaces/{handle}/llm-provider-integrations/providers")
+async def list_integration_providers(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+) -> LLMProviderCapabilityListResponse:
+    """List provider options available to create in this workspace."""
+    if not member.has_permission(Permissions.LLM_INTEGRATIONS_READ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No LLM integration read permission.",
+        )
+    return LLMProviderCapabilityListResponse(
+        items=[
+            LLMProviderCapabilityResponse(
+                provider=provider,
+                display_name=_PROVIDER_DISPLAY_NAMES[provider],
+                credential_type=PROVIDER_SECRET_TYPES[provider],
+                experimental=provider == LLMProvider.XAI_OAUTH,
+            )
+            for provider in _BASE_AVAILABLE_PROVIDERS
+        ]
+    )
 
 
 @router.post(
@@ -75,7 +113,6 @@ async def create_integration(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No LLM integration management permission.",
         )
-
     name = request_body.name or _PROVIDER_DISPLAY_NAMES.get(
         request_body.provider, request_body.provider.value
     )

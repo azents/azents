@@ -5,6 +5,7 @@
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -28,6 +29,7 @@ from azents.runtime.control_protocol.data import (
     RuntimeRunnerRegistration,
     RuntimeRunnerRegistrationAccepted,
 )
+from azents.runtime.control_protocol.grpc.auth import RuntimeControlGrpcAuth
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
@@ -44,6 +46,19 @@ from azents.runtime.coordination.store import RuntimeCoordinationStore
 _DEFAULT_OPERATION_BLOCK_MS = 500
 _BODY_CHUNK_READ_LIMIT = 100
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class _RunnerOutboundItem:
+    """Runner outbound message with optional request ack metadata."""
+
+    message: runtime_runner_control_pb2.RunnerControlMessage
+    ack_envelope: RuntimeRequestEnvelope | None = None
+
+
+type _RunnerOutbound = (
+    runtime_runner_control_pb2.RunnerControlMessage | _RunnerOutboundItem
+)
 
 
 class RuntimeRunnerStateSink(Protocol):
@@ -70,6 +85,7 @@ class RuntimeRunnerControlGrpcServicer(
         state_sink: RuntimeRunnerStateSink,
         owner_replica_id: str,
         consumer_id: str,
+        control_auth_token: str | None,
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
         """Initialize the Runner Control gRPC servicer."""
@@ -78,6 +94,7 @@ class RuntimeRunnerControlGrpcServicer(
         self._state_sink = state_sink
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
+        self._auth = RuntimeControlGrpcAuth(control_auth_token)
         self._operation_block_ms = operation_block_ms
 
     async def ConnectRunner(
@@ -89,6 +106,7 @@ class RuntimeRunnerControlGrpcServicer(
         ],
     ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
         """Register a Runner, then bridge heartbeat/state/operation messages."""
+        await self._auth.authorize(context, subject="Runner")
         first_message = await _first_register_message(request_iterator, context)
         registration = _registration(
             first_message,
@@ -108,9 +126,7 @@ class RuntimeRunnerControlGrpcServicer(
                 "owner_replica_id": self._owner_replica_id,
             },
         )
-        outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage] = (
-            asyncio.Queue()
-        )
+        outbound: asyncio.Queue[_RunnerOutbound] = asyncio.Queue()
         inbound_task = asyncio.create_task(
             self._consume_runner_messages(
                 request_iterator,
@@ -126,21 +142,22 @@ class RuntimeRunnerControlGrpcServicer(
                 generation=accepted.generation,
             )
         )
-        yield runtime_runner_control_pb2.RunnerControlMessage(
-            request_id=first_message.request_id,
-            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
-                runtime_id=accepted.runtime_id,
-                runner_id=accepted.runner_id,
-                connection_id=accepted.connection_id,
-                generation=accepted.generation,
-                heartbeat_interval_seconds=accepted.heartbeat_interval_seconds,
-            ),
-        )
         try:
+            yield runtime_runner_control_pb2.RunnerControlMessage(
+                request_id=first_message.request_id,
+                register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                    runtime_id=accepted.runtime_id,
+                    runner_id=accepted.runner_id,
+                    connection_id=accepted.connection_id,
+                    generation=accepted.generation,
+                    heartbeat_interval_seconds=accepted.heartbeat_interval_seconds,
+                ),
+            )
             async for message in _outbound_messages(
                 outbound,
                 inbound_task,
                 operation_task,
+                control_protocol=self._control_protocol,
             ):
                 yield message
         finally:
@@ -153,11 +170,26 @@ class RuntimeRunnerControlGrpcServicer(
                     "runner_generation": accepted.generation,
                 },
             )
-            await self._record_runner_stream_closed(accepted, registration)
             for task in (inbound_task, operation_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            revoked = await self._control_protocol.revoke_runner(
+                runtime_id=accepted.runtime_id,
+                generation=accepted.generation,
+            )
+            if revoked:
+                await self._record_runner_stream_closed(accepted, registration)
+            else:
+                _LOGGER.info(
+                    "Runtime Runner stream close ignored for stale generation",
+                    extra={
+                        "runtime_id": accepted.runtime_id,
+                        "runner_id": accepted.runner_id,
+                        "connection_id": accepted.connection_id,
+                        "runner_generation": accepted.generation,
+                    },
+                )
 
     async def _record_runner_stream_closed(
         self,
@@ -196,13 +228,27 @@ class RuntimeRunnerControlGrpcServicer(
     async def _consume_runner_messages(
         self,
         request_iterator: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
-        outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage],
+        outbound: asyncio.Queue[_RunnerOutbound],
         *,
         runtime_id: str,
         generation: int,
     ) -> None:
         async for message in request_iterator:
             payload = message.WhichOneof("payload")
+            if message.generation != generation:
+                _LOGGER.warning(
+                    "Runtime Runner message rejected",
+                    extra={
+                        "runtime_id": runtime_id,
+                        "runner_generation": generation,
+                        "message_generation": message.generation,
+                        "request_id": message.request_id,
+                    },
+                )
+                await outbound.put(
+                    _error(message.request_id, "STALE_RUNNER_GENERATION")
+                )
+                return
             if payload == "heartbeat":
                 ok = await self._control_protocol.heartbeat_runner(
                     runtime_id=runtime_id,
@@ -232,6 +278,18 @@ class RuntimeRunnerControlGrpcServicer(
                 )
                 continue
             if payload == "state_report":
+                if message.state_report.runner_generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_RUNNER_GENERATION")
+                    )
+                    return
+                if not await self._runner_generation_current(
+                    runtime_id=runtime_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
                 report = runner_state_report_from_message(message.state_report)
                 await self._state_sink.record_runner_state(report)
                 _LOGGER.info(
@@ -246,11 +304,41 @@ class RuntimeRunnerControlGrpcServicer(
                 )
                 continue
             if payload == "operation_event":
+                if message.operation_event.generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_RUNNER_GENERATION")
+                    )
+                    return
+                if not await self._runner_generation_current(
+                    runtime_id=runtime_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
                 await self._append_runner_event(message)
+
+    async def _runner_generation_current(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+        request_id: str,
+        outbound: asyncio.Queue[_RunnerOutbound],
+    ) -> bool:
+        ok = await self._control_protocol.heartbeat_runner(
+            runtime_id=runtime_id,
+            generation=generation,
+            heartbeat_at=datetime.now(UTC),
+        )
+        if ok:
+            return True
+        await outbound.put(_error(request_id, "STALE_RUNNER_GENERATION"))
+        return False
 
     async def _relay_runner_operations(
         self,
-        outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage],
+        outbound: asyncio.Queue[_RunnerOutbound],
         *,
         runtime_id: str,
         generation: int,
@@ -265,6 +353,13 @@ class RuntimeRunnerControlGrpcServicer(
             if envelope is None:
                 await asyncio.sleep(max(self._operation_block_ms, 1) / 1000)
                 continue
+            if _deadline_expired(envelope, datetime.now(UTC)):
+                await self._expire_runner_operation(
+                    envelope,
+                    runtime_id=runtime_id,
+                )
+                await self._control_protocol.ack_claimed_request(envelope)
+                continue
             _LOGGER.info(
                 "Runtime Runner operation routed",
                 extra={
@@ -275,11 +370,49 @@ class RuntimeRunnerControlGrpcServicer(
                 },
             )
             outbound.put_nowait(
-                runtime_runner_control_pb2.RunnerControlMessage(
-                    request_id=envelope.request_id,
-                    operation_request=await self._runner_operation(envelope),
+                _RunnerOutboundItem(
+                    message=runtime_runner_control_pb2.RunnerControlMessage(
+                        request_id=envelope.request_id,
+                        operation_request=await self._runner_operation(envelope),
+                    ),
+                    ack_envelope=envelope,
                 )
             )
+
+    async def _expire_runner_operation(
+        self,
+        envelope: RuntimeRequestEnvelope,
+        *,
+        runtime_id: str,
+    ) -> None:
+        _LOGGER.warning(
+            "Runtime Runner operation expired before relay",
+            extra={
+                "runtime_id": runtime_id,
+                "runner_generation": envelope.generation,
+                "request_id": envelope.request_id,
+                "operation_type": envelope.operation_type,
+            },
+        )
+        await self._control_protocol.append_reply_event(
+            RuntimeReplyEvent(
+                request_id=envelope.request_id,
+                runtime_id=envelope.runtime_id,
+                generation=envelope.generation,
+                event_type=RuntimeReplyEventType.FINAL_ERROR,
+                payload={
+                    "success": False,
+                    "error_code": "RUNNER_OPERATION_EXPIRED",
+                    "error_message": "Runner operation expired before relay",
+                },
+                created_at=datetime.now(UTC),
+                final=True,
+            ),
+            reply_stream_id=envelope.reply_stream_id,
+            operation_id=f"operation:{envelope.request_id}",
+            expected_target=RuntimeCoordinationTarget.RUNNER,
+            expected_subject_id=runtime_id,
+        )
 
     async def _runner_operation(
         self,
@@ -369,6 +502,7 @@ def add_runtime_runner_control_servicer(
     state_sink: RuntimeRunnerStateSink,
     owner_replica_id: str,
     consumer_id: str,
+    control_auth_token: str | None,
     operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Runner Control servicer to a gRPC server."""
@@ -379,6 +513,7 @@ def add_runtime_runner_control_servicer(
             state_sink=state_sink,
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
+            control_auth_token=control_auth_token,
             operation_block_ms=operation_block_ms,
         ),
         server,
@@ -410,9 +545,11 @@ async def _first_register_message(
 
 
 async def _outbound_messages(
-    outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage],
+    outbound: asyncio.Queue[_RunnerOutbound],
     inbound_task: asyncio.Task[None],
     operation_task: asyncio.Task[None],
+    *,
+    control_protocol: RuntimeControlProtocolService,
 ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
     get_task = asyncio.create_task(outbound.get())
     try:
@@ -422,7 +559,14 @@ async def _outbound_messages(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if get_task in done:
-                yield get_task.result()
+                item = get_task.result()
+                if isinstance(item, _RunnerOutboundItem):
+                    try:
+                        yield item.message
+                    finally:
+                        await _ack_outbound_item(control_protocol, item)
+                else:
+                    yield item
                 get_task = asyncio.create_task(outbound.get())
                 continue
             for task in (inbound_task, operation_task):
@@ -433,6 +577,15 @@ async def _outbound_messages(
         get_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await get_task
+
+
+async def _ack_outbound_item(
+    control_protocol: RuntimeControlProtocolService,
+    item: _RunnerOutboundItem,
+) -> None:
+    if item.ack_envelope is None:
+        return
+    await control_protocol.ack_claimed_request(item.ack_envelope)
 
 
 def _registration(
@@ -647,6 +800,10 @@ def _str_list_payload(payload: dict[str, JsonValue], key: str) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
+
+
+def _deadline_expired(envelope: RuntimeRequestEnvelope, now: datetime) -> bool:
+    return envelope.deadline_at is not None and envelope.deadline_at <= now
 
 
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:

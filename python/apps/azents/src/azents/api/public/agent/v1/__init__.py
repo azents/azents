@@ -21,6 +21,7 @@ from azents.services.agent.data import (
     BuiltinToolValidationFailed,
     DuplicateAdmin,
     InvalidModelParameters,
+    InvalidSelectableModelOptions,
     LastAdminCannotBeRemoved,
     ModelRequired,
     ModelSelectionNotFound,
@@ -81,6 +82,9 @@ async def create_agent(
         name=request_body.name,
         model_selection=request_body.model_selection,
         lightweight_model_selection=request_body.lightweight_model_selection,
+        selectable_model_options=request_body.selectable_model_options,
+        main_model_label=request_body.main_model_label,
+        lightweight_model_label=request_body.lightweight_model_label,
         description=request_body.description,
         model_parameters=request_body.model_parameters,
         system_prompt=request_body.system_prompt,
@@ -90,6 +94,7 @@ async def create_agent(
         shell_enabled=request_body.shell_enabled,
         memory_enabled=request_body.memory_enabled,
         max_turns=request_body.max_turns,
+        subagent_settings=request_body.subagent_settings,
     )
     result = await service.create(
         create_input, creator_workspace_user_id=member.workspace_user_id
@@ -116,6 +121,14 @@ async def create_agent(
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Selected model was not found.",
+                    )
+                case InvalidSelectableModelOptions(errors=errors):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "message": "Invalid selectable model options.",
+                            "errors": errors,
+                        },
                     )
                 case InvalidModelParameters(errors=errors):
                     raise HTTPException(
@@ -209,6 +222,12 @@ def _build_agent_update_input(
         result["lightweight_model_selection"] = request_body[
             "lightweight_model_selection"
         ]
+    if "selectable_model_options" in request_body:
+        result["selectable_model_options"] = request_body["selectable_model_options"]
+    if "main_model_label" in request_body:
+        result["main_model_label"] = request_body["main_model_label"]
+    if "lightweight_model_label" in request_body:
+        result["lightweight_model_label"] = request_body["lightweight_model_label"]
     if "model_parameters" in request_body:
         result["model_parameters"] = request_body["model_parameters"]
     if "system_prompt" in request_body:
@@ -228,6 +247,8 @@ def _build_agent_update_input(
         result["memory_enabled"] = request_body["memory_enabled"]
     if "max_turns" in request_body:
         result["max_turns"] = request_body["max_turns"]
+    if "subagent_settings" in request_body:
+        result["subagent_settings"] = request_body["subagent_settings"]
 
     return result
 
@@ -286,6 +307,14 @@ async def update_agent(
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Selected model was not found.",
+                    )
+                case InvalidSelectableModelOptions(errors=errors):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "message": "Invalid selectable model options.",
+                            "errors": errors,
+                        },
                     )
                 case InvalidModelParameters(errors=errors):
                     raise HTTPException(

@@ -337,7 +337,8 @@
         "google_gemini": "Google Gemini",
         "aws_bedrock": "AWS Bedrock",
         "google_vertex_ai": "Google Vertex AI",
-        "chatgpt_oauth": "ChatGPT サブスクリプション"
+        "chatgpt_oauth": "ChatGPT サブスクリプション",
+        "xai_oauth": "xAI Grok OAuth"
       },
       "chatgptOAuth": {
         "title": "ChatGPT サブスクリプション",
@@ -354,7 +355,7 @@
       },
       "modelSelection": {
         "title": "ワークスペースのデフォルトモデル",
-        "description": "明示的なモデル選択なしで保存されたエージェントは、このモデル snapshot をコピーします。",
+        "description": "Configure the ordered model list that new agents copy by default.",
         "currentMain": "現在のメイン:",
         "currentLightweight": "現在の軽量:",
         "mainProviderLabel": "デフォルトメイン Provider",
@@ -372,7 +373,10 @@
         "selectWorkspaceLightweightModel": "ワークスペース軽量モデルを選択",
         "noDefaultModelSelected": "既定モデル未選択",
         "useMainModel": "メインモデルを使用",
-        "changeModel": "モデルを変更"
+        "changeModel": "モデルを変更",
+        "optionsTitle": "Workspace selectable models",
+        "optionsDescription": "Agents copy this ordered list and selected labels when they are created without custom models.",
+        "invalidOptions": "Fix model labels and model selections before saving."
       },
       "modelConfig": {
         "headline": "モデル設定",
@@ -428,6 +432,20 @@
         "skipProviderOrNormalizationFiltered": "Provider または正規化で除外",
         "skipUnsupportedBedrockModel": "未対応の Bedrock モデル",
         "skipUnsupportedVertexModel": "未対応の Vertex モデル"
+      },
+      "xaiOAuth": {
+        "title": "xAI Grok OAuth",
+        "oauthBadge": "実験的 OAuth",
+        "description": "xAI のデバイスコード OAuth で、自分の SuperGrok または X Premium アカウントを接続します。",
+        "callbackUnavailable": "利用可否は xAI によって制御され、サブスクリプション階層や allowlist 状態によって 403 が返る場合があります。",
+        "connected": "接続済み",
+        "deviceInstruction": "<link>xAI 認証ページ</link>を開き、以下のコードを入力してください。",
+        "openVerificationPage": "xAI 認証ページを開く",
+        "copyCode": "コードをコピー",
+        "copied": "コピーしました",
+        "connectWithDeviceCode": "デバイスコードで接続",
+        "cancel": "キャンセル",
+        "statusError": "デバイス認証は {status} です。"
       }
     },
     "agents": {
@@ -550,7 +568,12 @@
           "enabled": "Enabled",
           "disabled": "Disabled",
           "shellEnabled": "Shell on",
-          "shellDisabled": "Shell off"
+          "shellDisabled": "Shell off",
+          "subagents": "最大 {count} · 深さ {depth}"
+        },
+        "subagents": {
+          "label": "Subagents",
+          "description": "Delegated agents の同時実行数とネスト制限"
         }
       },
       "settingsLayout": {
@@ -608,13 +631,15 @@
           "backToParent": "親エージェントに戻る: {name}",
           "backToParentTooltip": "親エージェントに戻る: {name} ({path})",
           "navigationMenu": "サブエージェントの移動オプション",
-          "readOnlyNotice": "親エージェントで指示してください。",
+          "readOnlyNotice": "サブエージェントセッションは読み取り専用です。新しい指示は親エージェントから送信してください。",
+          "inputDisabledPlaceholder": "親エージェントで指示してください。",
           "unread": "未読",
           "runIndex": "Run {index}",
           "status": {
             "idle": "待機中",
             "running": "実行中",
             "completed": "完了",
+            "failed": "失敗",
             "errored": "エラー",
             "interrupted": "中断",
             "notFound": "見つかりません"
@@ -704,7 +729,39 @@
         "emptyDescription": "メモリを作成するか、検索条件を調整してください。",
         "deleteConfirm": "メモリ「{name}」を削除しますか？この操作は元に戻せません。"
       },
-      "shellEnabledDescription": "このエージェントにシェルコマンドの実行を許可する"
+      "shellEnabledDescription": "このエージェントにシェルコマンドの実行を許可する",
+      "subagentsSectionLabel": "サブエージェント",
+      "subagentMaxSubagentsLabel": "最大サブエージェント数",
+      "subagentMaxSubagentsDescription": "1 つの root session 配下で同時に active にできる subagent 数です。root agent は含みません。",
+      "subagentMaxDepthLabel": "最大深さ",
+      "subagentMaxDepthDescription": "root agent 配下の subagent tree の最大深さです。1 は root → child のみを許可します。",
+      "selectableModelOptions": {
+        "title": "Selectable models",
+        "description": "Define an ordered model list. Main and lightweight selections reference labels from this list; the first model is the fallback.",
+        "addOption": "Add model",
+        "emptyList": "Add at least one model.",
+        "maxOptions": "Up to 10 models can be added.",
+        "emptyLabel": "Model label is required.",
+        "duplicateLabel": "Model labels must be unique.",
+        "missingModel": "Choose a model for every row.",
+        "selectModelTitle": "Select model for {label}",
+        "newOption": "new model",
+        "mainLabel": "Main model",
+        "mainDescription": "Used for normal agent turns.",
+        "lightweightLabel": "Lightweight model",
+        "lightweightDescription": "Used for lightweight work and compaction fallback.",
+        "optionLabel": "Model label",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "remove": "Remove",
+        "noModelSelected": "No model selected",
+        "chooseModel": "Choose a provider integration and model.",
+        "changeModel": "Change model",
+        "modelLabelColumn": "Model label",
+        "selectedModelColumn": "Selected model",
+        "actionsColumn": "Actions",
+        "dragHandleLabel": "Reorder model"
+      }
     },
     "toolkits": {
       "headline": "ツールキット",
@@ -983,6 +1040,7 @@
     "startConversation": "メッセージを送信して会話を始めましょう",
     "inputPlaceholder": "メッセージを入力…",
     "inputPlaceholderDesktop": "メッセージを入力… (Shift+Enterで改行)",
+    "inputDisabledPlaceholder": "このセッションでは直接入力できません。",
     "connected": "接続済み",
     "connecting": "接続中",
     "reconnecting": "再接続中",
@@ -1402,6 +1460,9 @@
     "skillLoaded": {
       "title": "Skill loaded: {name}",
       "unknownSkill": "Skill"
+    },
+    "agentMessage": {
+      "title": "{name} エージェントからのメッセージ"
     },
     "addWorkspace": "Add workspace",
     "addExistingProject": "Add existing Project",

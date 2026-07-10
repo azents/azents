@@ -151,6 +151,12 @@ class RDBAgentRuntime(RDBModel):
         nullable=False,
         server_default=RuntimeProviderObservedState.UNKNOWN.value,
     )
+    provider_generation: Mapped[int] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=False,
+        server_default="0",
+    )
     provider_observed_generation: Mapped[int] = mapped_column(
         sa.Integer,
         init=False,

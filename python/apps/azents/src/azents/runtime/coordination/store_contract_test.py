@@ -1,7 +1,9 @@
 """Runtime coordination store contract tests."""
 
-from collections.abc import AsyncGenerator
+import json
+from collections.abc import AsyncGenerator, Callable
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
 import pytest
 import pytest_asyncio
@@ -45,6 +47,61 @@ async def store(
         yield RedisRuntimeCoordinationStore(client)
     finally:
         await client.aclose()
+
+
+class FakeRedisConnectionStore:
+    """Minimal Redis command subset for connection generation fencing tests."""
+
+    def __init__(self) -> None:
+        self.data: dict[str, str] = {}
+        self.after_get: Callable[[str], None] | None = None
+
+    async def incr(self, key: str) -> int:
+        value = int(self.data.get(key, "0")) + 1
+        self.data[key] = str(value)
+        return value
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        del key, seconds
+        return True
+
+    async def set(self, key: str, value: str, *, ex: int | None = None) -> bool:
+        del ex
+        self.data[key] = value
+        return True
+
+    async def get(self, key: str) -> str | None:
+        value = self.data.get(key)
+        if self.after_get is not None:
+            self.after_get(key)
+        return value
+
+    async def delete(self, key: str) -> int:
+        existed = key in self.data
+        self.data.pop(key, None)
+        return int(existed)
+
+    async def eval(
+        self,
+        script: str,
+        numkeys: int,
+        key: str,
+        *args: object,
+    ) -> int:
+        del numkeys
+        raw = self.data.get(key)
+        if raw is None:
+            return 0
+        payload = json.loads(raw)
+        if int(payload["generation"]) != int(cast(int, args[0])):
+            return 0
+        if "DEL" in script:
+            self.data.pop(key, None)
+            return 1
+        if "SET" in script:
+            self.data[key] = str(args[1])
+            return 1
+        return 0
 
 
 @pytest_asyncio.fixture
@@ -97,6 +154,60 @@ async def test_request_stream_can_be_claimed_and_acked(
             consumer_group="runtime-1:generation-1",
             consumer_id="replica-a",
             block_ms=0,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_unacked_request_can_be_reclaimed(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Pending request entries can be reclaimed by a replacement consumer."""
+    envelope = _request_envelope("req-1")
+
+    cursor = await store.append_request("runner:runtime-1", envelope)
+    first = await store.claim_next_request(
+        "runner:runtime-1",
+        consumer_group="runtime-1:generation-1",
+        consumer_id="replica-a",
+        block_ms=0,
+        reclaim_idle_seconds=60,
+    )
+    blocked = await store.claim_next_request(
+        "runner:runtime-1",
+        consumer_group="runtime-1:generation-1",
+        consumer_id="replica-b",
+        block_ms=0,
+        reclaim_idle_seconds=60,
+    )
+    reclaimed = await store.claim_next_request(
+        "runner:runtime-1",
+        consumer_group="runtime-1:generation-1",
+        consumer_id="replica-b",
+        block_ms=0,
+        reclaim_idle_seconds=0,
+    )
+
+    assert first is not None
+    assert first.cursor == cursor
+    assert blocked is None
+    assert reclaimed is not None
+    assert reclaimed.cursor == cursor
+    assert reclaimed.envelope == envelope
+
+    await store.ack_request(
+        "runner:runtime-1",
+        consumer_group="runtime-1:generation-1",
+        cursor=cursor,
+    )
+    assert (
+        await store.claim_next_request(
+            "runner:runtime-1",
+            consumer_group="runtime-1:generation-1",
+            consumer_id="replica-c",
+            block_ms=0,
+            reclaim_idle_seconds=0,
         )
         is None
     )
@@ -295,6 +406,133 @@ async def test_connection_registry_issues_generation_fences(
 
 
 @pytest.mark.asyncio
+async def test_redis_connection_revoke_is_generation_fenced() -> None:
+    """Redis stale revokes must not delete a newer connection generation."""
+    fake_redis = FakeRedisConnectionStore()
+    store = RedisRuntimeCoordinationStore(cast(Redis, fake_redis))
+    connected_at = _now()
+    first = await store.register_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="runner-a",
+        owner_replica_id="control-a",
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        ttl_seconds=60,
+        metadata={"workspace_path": "/workspace/agent"},
+    )
+    second = await store.register_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="runner-b",
+        owner_replica_id="control-a",
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        ttl_seconds=60,
+        metadata={"workspace_path": "/workspace/agent"},
+    )
+
+    stale_revoked = await store.revoke_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        generation=first.generation,
+    )
+    current = await store.get_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+    )
+
+    assert stale_revoked is False
+    assert current is not None
+    assert current.generation == second.generation
+    assert current.connection_id == "runner-b"
+
+
+@pytest.mark.asyncio
+async def test_redis_connection_heartbeat_is_generation_fenced() -> None:
+    """Redis stale heartbeats must not overwrite a newer connection generation."""
+    fake_redis = FakeRedisConnectionStore()
+    store = RedisRuntimeCoordinationStore(cast(Redis, fake_redis))
+    connected_at = _now()
+    first = await store.register_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="runner-a",
+        owner_replica_id="control-a",
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        ttl_seconds=60,
+        metadata={"workspace_path": "/workspace/agent"},
+    )
+    second = await store.register_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="runner-b",
+        owner_replica_id="control-a",
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        ttl_seconds=60,
+        metadata={"workspace_path": "/workspace/agent"},
+    )
+
+    stale_heartbeat = await store.heartbeat_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        generation=first.generation,
+        heartbeat_at=connected_at + timedelta(seconds=1),
+        ttl_seconds=60,
+    )
+    current = await store.get_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+    )
+
+    assert stale_heartbeat is False
+    assert current is not None
+    assert current.generation == second.generation
+    assert current.connection_id == "runner-b"
+
+
+@pytest.mark.asyncio
+async def test_redis_get_connection_does_not_delete_reconnected_generation() -> None:
+    """Expired-record cleanup must not delete a concurrent reconnect."""
+    fake_redis = FakeRedisConnectionStore()
+    store = RedisRuntimeCoordinationStore(cast(Redis, fake_redis))
+    key = "azents:agent-runtime:coordination:connection:runner:runtime-1"
+    now = _now()
+    fake_redis.data[key] = _fake_connection_json(
+        generation=1,
+        connection_id="runner-a",
+        expires_at=now - timedelta(seconds=1),
+    )
+
+    def reconnect_after_stale_get(requested_key: str) -> None:
+        if requested_key != key:
+            return
+        fake_redis.data[key] = _fake_connection_json(
+            generation=2,
+            connection_id="runner-b",
+            expires_at=now + timedelta(seconds=60),
+        )
+
+    fake_redis.after_get = reconnect_after_stale_get
+    stale = await store.get_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+    )
+    fake_redis.after_get = None
+    current = await store.get_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+    )
+
+    assert stale is None
+    assert current is not None
+    assert current.generation == 2
+    assert current.connection_id == "runner-b"
+
+
+@pytest.mark.asyncio
 async def test_background_completion_claim_is_exclusive_until_published(
     store: RuntimeCoordinationStore,
 ) -> None:
@@ -425,6 +663,28 @@ async def test_redis_connection_generation_has_ttl(
             "azents:agent-runtime:coordination:connection-generation:runner:runtime-1"
         )
         > 0
+    )
+
+
+def _fake_connection_json(
+    *,
+    generation: int,
+    connection_id: str,
+    expires_at: datetime,
+) -> str:
+    now = _now()
+    return json.dumps(
+        {
+            "kind": RuntimeConnectionKind.RUNNER.value,
+            "subject_id": "runtime-1",
+            "connection_id": connection_id,
+            "owner_replica_id": "control-a",
+            "generation": generation,
+            "connected_at": now.isoformat(),
+            "heartbeat_at": now.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "metadata": {"workspace_path": "/workspace/agent"},
+        }
     )
 
 

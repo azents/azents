@@ -8,6 +8,9 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **default_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | [optional] 
 **default_lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | [optional] 
+**default_selectable_model_options** | [**List[SelectableModelOption]**](SelectableModelOption.md) |  | [optional] 
+**default_main_model_label** | **str** |  | [optional] 
+**default_lightweight_model_label** | **str** |  | [optional] 
 **effective_default_lightweight_model_selection** | [**AgentModelSelection**](AgentModelSelection.md) |  | [optional] 
 
 ## Example

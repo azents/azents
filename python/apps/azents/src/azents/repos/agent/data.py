@@ -7,7 +7,12 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 from typing_extensions import Self, TypedDict
 
-from azents.core.agent import AgentModelSelection, ModelParameters
+from azents.core.agent import (
+    AgentModelSelection,
+    ModelParameters,
+    SelectableModelOption,
+    SubagentSettings,
+)
 from azents.core.enums import AgentType
 from azents.services.uploads.schema import StoredImage
 
@@ -25,6 +30,13 @@ class Agent(BaseModel):
     lightweight_model_selection: AgentModelSelection = Field(
         description="Lightweight model selection snapshot"
     )
+    selectable_model_options: list[SelectableModelOption] = Field(
+        description="Ordered selectable model options"
+    )
+    main_model_label: str = Field(description="Selected main model option label")
+    lightweight_model_label: str = Field(
+        description="Selected lightweight model option label"
+    )
     model_parameters: ModelParameters | None = Field(
         default=None, description="Model parameters"
     )
@@ -37,6 +49,10 @@ class Agent(BaseModel):
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
+    subagent_settings: SubagentSettings = Field(
+        default_factory=SubagentSettings,
+        description="Subagent execution settings",
+    )
     avatar: StoredImage | None = Field(
         default=None,
         description="Profile image storage schema including S3 key. None when unset",
@@ -61,6 +77,13 @@ class AgentCreate(BaseModel):
     lightweight_model_selection: AgentModelSelection = Field(
         description="Lightweight model selection snapshot"
     )
+    selectable_model_options: list[SelectableModelOption] = Field(
+        description="Ordered selectable model options"
+    )
+    main_model_label: str = Field(description="Selected main model option label")
+    lightweight_model_label: str = Field(
+        description="Selected lightweight model option label"
+    )
     description: str | None = Field(default=None, description="Agent description")
     model_parameters: ModelParameters | None = Field(
         default=None, description="Model parameters"
@@ -74,6 +97,9 @@ class AgentCreate(BaseModel):
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
+    subagent_settings: SubagentSettings = Field(
+        default_factory=SubagentSettings, description="Subagent execution settings"
+    )
 
 
 class AgentUpdate(TypedDict, total=False):
@@ -88,6 +114,14 @@ class AgentUpdate(TypedDict, total=False):
         AgentModelSelection,
         Field(description="Lightweight model selection snapshot"),
     ]
+    selectable_model_options: Annotated[
+        list[SelectableModelOption],
+        Field(description="Ordered selectable model options"),
+    ]
+    main_model_label: Annotated[str, Field(description="Selected main model label")]
+    lightweight_model_label: Annotated[
+        str, Field(description="Selected lightweight model label")
+    ]
     model_parameters: Annotated[
         ModelParameters | None, Field(description="Model parameters")
     ]
@@ -100,6 +134,9 @@ class AgentUpdate(TypedDict, total=False):
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
     max_turns: Annotated[int | None, Field(description="Maximum agent turn count")]
+    subagent_settings: Annotated[
+        SubagentSettings, Field(description="Subagent execution settings")
+    ]
 
 
 class AgentList(BaseModel):

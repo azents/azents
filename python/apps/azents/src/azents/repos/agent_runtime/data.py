@@ -42,6 +42,9 @@ class AgentRuntime(BaseModel):
         default=RuntimeProviderObservedState.UNKNOWN,
         description="Provider observed state",
     )
+    provider_generation: int = Field(
+        default=0, description="Provider stream generation"
+    )
     provider_observed_generation: int = Field(
         default=0, description="Provider observed state generation"
     )

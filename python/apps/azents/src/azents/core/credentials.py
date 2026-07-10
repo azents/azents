@@ -47,8 +47,18 @@ class ChatGPTOAuthSecrets(BaseModel):
     expires_at: datetime.datetime = Field(description="Access token expiration time")
 
 
+class XaiOAuthSecrets(BaseModel):
+    """xAI OAuth token secrets."""
+
+    type: Literal["xai_oauth"] = "xai_oauth"
+    access_token: str = Field(description="xAI access token")
+    refresh_token: str = Field(description="xAI refresh token")
+    id_token: str | None = Field(default=None, description="xAI ID token")
+    expires_at: datetime.datetime = Field(description="Access token expiration time")
+
+
 ProviderSecrets = Annotated[
-    ApiKeySecrets | AwsSecrets | GcpSecrets | ChatGPTOAuthSecrets,
+    ApiKeySecrets | AwsSecrets | GcpSecrets | ChatGPTOAuthSecrets | XaiOAuthSecrets,
     Field(discriminator="type"),
 ]
 
@@ -115,8 +125,39 @@ class ChatGPTOAuthConfig(BaseModel):
     )
 
 
+class XaiOAuthConfig(BaseModel):
+    """xAI OAuth display and status settings."""
+
+    type: Literal["xai_oauth"] = "xai_oauth"
+    account_id: str | None = Field(default=None, description="xAI account ID")
+    email: str | None = Field(default=None, description="xAI account email")
+    connection_method: Literal["device"] = Field(description="Connection method")
+    status: Literal[
+        "connected",
+        "refresh_required",
+        "temporarily_unavailable",
+        "entitlement_denied",
+        "disabled",
+    ] = Field(description="Connection status")
+    entitlement_status: Literal["denied"] | None = Field(
+        default=None, description="xAI OAuth API entitlement state"
+    )
+    connected_at: datetime.datetime | None = Field(
+        default=None, description="Connected time"
+    )
+    last_refreshed_at: datetime.datetime | None = Field(
+        default=None, description="Last refresh time"
+    )
+    last_failed_at: datetime.datetime | None = Field(
+        default=None, description="Last failure time"
+    )
+    last_failure_reason: str | None = Field(
+        default=None, description="Last failure reason"
+    )
+
+
 ProviderConfig = Annotated[
-    AwsConfig | GcpConfig | ChatGPTOAuthConfig,
+    AwsConfig | GcpConfig | ChatGPTOAuthConfig | XaiOAuthConfig,
     Field(discriminator="type"),
 ]
 
@@ -128,6 +169,7 @@ ProviderConfig = Annotated[
 PROVIDER_SECRET_TYPES: dict[LLMProvider, str] = {
     LLMProvider.OPENAI: "api_key",
     LLMProvider.CHATGPT_OAUTH: "chatgpt_oauth",
+    LLMProvider.XAI_OAUTH: "xai_oauth",
     LLMProvider.ANTHROPIC: "api_key",
     LLMProvider.GOOGLE_GEMINI: "api_key",
     LLMProvider.AWS_BEDROCK: "aws_credentials",
@@ -138,5 +180,6 @@ PROVIDER_SECRET_TYPES: dict[LLMProvider, str] = {
 PROVIDERS_WITH_CONFIG: set[LLMProvider] = {
     LLMProvider.AWS_BEDROCK,
     LLMProvider.CHATGPT_OAUTH,
+    LLMProvider.XAI_OAUTH,
     LLMProvider.GOOGLE_VERTEX_AI,
 }

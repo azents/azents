@@ -39,6 +39,11 @@ class TestAgentUpdateRequest(unittest.TestCase):
                 description = '',
                 model_selection = { },
                 lightweight_model_selection = { },
+                selectable_model_options = [
+                    { }
+                    ],
+                main_model_label = '',
+                lightweight_model_label = '',
                 model_parameters = { },
                 system_prompt = '',
                 enabled = True,
@@ -46,7 +51,8 @@ class TestAgentUpdateRequest(unittest.TestCase):
                 runtime_provider_id = '',
                 shell_enabled = True,
                 memory_enabled = True,
-                max_turns = 56
+                max_turns = 56,
+                subagent_settings = { }
             )
         else:
             return AgentUpdateRequest(

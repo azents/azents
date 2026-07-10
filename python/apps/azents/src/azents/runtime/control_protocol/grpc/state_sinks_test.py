@@ -111,6 +111,7 @@ async def test_runner_state_sink_rejects_workspace_mismatch(
             session,
             runtime_id,
             RuntimeProviderObservedState.RUNNING,
+            1,
             3,
             workspace_path="/workspace/provider",
         )
@@ -137,6 +138,7 @@ async def test_runner_state_sink_preserves_provider_workspace_path(
             session,
             runtime_id,
             RuntimeProviderObservedState.RUNNING,
+            1,
             3,
             workspace_path="/workspace/provider",
         )
@@ -163,6 +165,7 @@ async def test_runner_state_sink_rejects_unsupported_runner_state(
             session,
             runtime_id,
             RuntimeProviderObservedState.RUNNING,
+            1,
             3,
             workspace_path="/workspace/provider",
         )
@@ -190,6 +193,7 @@ async def test_runner_state_sink_records_runner_stream_closed_as_disconnected(
             session,
             runtime_id,
             RuntimeProviderObservedState.RUNNING,
+            1,
             3,
             workspace_path="/workspace/provider",
         )
@@ -211,10 +215,10 @@ async def test_runner_state_sink_records_runner_stream_closed_as_disconnected(
     assert runtime.failure_code is None
 
 
-async def test_runner_state_sink_accepts_latest_report_even_with_lower_generation(
+async def test_runner_state_sink_ignores_stale_report_with_lower_generation(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Durable state follows the latest Runner report, not stored generation values."""
+    """Stale Runner reports do not overwrite newer durable generations."""
     repo = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
         runtime_id = await _create_runtime(session, "runner-sink-lower-generation")
@@ -222,6 +226,7 @@ async def test_runner_state_sink_accepts_latest_report_even_with_lower_generatio
             session,
             runtime_id,
             RuntimeProviderObservedState.RUNNING,
+            1,
             3,
             workspace_path="/workspace/provider",
         )
@@ -246,8 +251,8 @@ async def test_runner_state_sink_accepts_latest_report_even_with_lower_generatio
     async with rdb_session_manager() as session:
         runtime = await repo.get_by_id(session, runtime_id)
     assert runtime is not None
-    assert runtime.runner_state == RuntimeRunnerState.DISCONNECTED
-    assert runtime.runner_generation == 1
+    assert runtime.runner_state == RuntimeRunnerState.READY
+    assert runtime.runner_generation == 2
 
 
 async def _create_runtime(session: AsyncSession, slug: str) -> str:

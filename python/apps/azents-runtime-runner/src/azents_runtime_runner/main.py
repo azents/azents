@@ -47,15 +47,16 @@ def main() -> None:
         level=os.environ.get("AZ_LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    asyncio.run(_main())
+    asyncio.run(run_runtime_runner())
 
 
-async def _main() -> None:
+async def run_runtime_runner() -> None:
     endpoint = _required_env("AZ_RUNTIME_CONTROL_ENDPOINT")
     runtime_id = _required_env("AZ_RUNTIME_ID")
     workspace_path = _required_env("AZ_AGENT_WORKSPACE_PATH")
     runner_id = os.environ.get("AZ_RUNTIME_RUNNER_ID") or f"runner-{uuid.uuid4()}"
     credential_id = _required_env("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID")
+    control_auth_token = os.environ.get("AZ_RUNTIME_CONTROL_AUTH_TOKEN")
     base_connection_id = (
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
@@ -80,7 +81,10 @@ async def _main() -> None:
         },
     )
     while True:
-        client = GrpcRunnerControlClient.from_endpoint(endpoint)
+        client = GrpcRunnerControlClient.from_endpoint(
+            endpoint,
+            control_auth_token=control_auth_token,
+        )
         connection_id = _control_connection_id(base_connection_id)
         operations = RunnerOperations(client=client, workspace=workspace)
         run_loop = RunnerRunLoop(

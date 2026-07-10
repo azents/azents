@@ -43,6 +43,8 @@ from azents.engine.tools import builtin as builtin_module
 from azents.engine.tools.builtin import (
     BuiltinToolkit,
     BuiltinToolkitProvider,
+    MemoryReadToolkit,
+    MemoryWriteToolkit,
     RuntimeToolkit,
 )
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
@@ -995,7 +997,9 @@ class TestBuiltinToolkitMemoryPrompt:
         await toolkit.update_context(ctx)
         assert (await toolkit.get_static_prompt(_make_context())) == ""
         assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
-        assert "Memory Rules" in (await toolkit.get_dynamic_prompt(ctx))
+        dynamic_prompt = await toolkit.get_dynamic_prompt(ctx)
+        assert "Memory Rules" in dynamic_prompt
+        assert "case-insensitive AND matching" in dynamic_prompt
 
     @pytest.mark.asyncio
     async def test_memory_disabled_excludes_memory(self) -> None:
@@ -1006,6 +1010,36 @@ class TestBuiltinToolkitMemoryPrompt:
         await toolkit.update_context(ctx)
         assert "Memories" not in (await toolkit.get_static_prompt(_make_context()))
         assert (await toolkit.get_dynamic_prompt(ctx)) == ""
+
+    @pytest.mark.asyncio
+    async def test_memory_write_prompt_reuses_read_shared_rules(self) -> None:
+        """Read prompt owns shared memory rules because write is never bound alone."""
+        config = ShellToolkitConfig(memory_enabled=True)
+        session_manager = _make_mock_session_manager()
+        memory_repo = _make_mock_memory_repo()
+        read_toolkit = MemoryReadToolkit(
+            config=config,
+            agent_id="agent-1",
+            session_manager=session_manager,
+            memory_repo=memory_repo,
+        )
+        write_toolkit = MemoryWriteToolkit(
+            config=config,
+            agent_id="agent-1",
+            session_manager=session_manager,
+            memory_repo=memory_repo,
+        )
+        ctx = _make_context()
+
+        read_prompt = await read_toolkit.get_dynamic_prompt(ctx)
+        write_prompt = await write_toolkit.get_dynamic_prompt(ctx)
+
+        assert "Types of memory" in read_prompt
+        assert "Scope selection" in read_prompt
+        assert "Types of memory" not in write_prompt
+        assert "Scope selection" not in write_prompt
+        assert "What NOT to save" in write_prompt
+        assert "Duplicate prevention" in write_prompt
 
     @pytest.mark.asyncio
     async def test_memory_index_included(self) -> None:
@@ -1275,16 +1309,39 @@ class TestProcessToolHandler:
         assert runner_operations.process_write_calls[-1]["yield_time_ms"] == 5000
 
     @pytest.mark.asyncio
-    async def test_write_stdin_rejects_out_of_range_mode_specific_yields(self) -> None:
-        """write_stdin validates mode-specific yield ranges in its input model."""
+    async def test_write_stdin_accepts_zero_yield_for_all_modes(self) -> None:
+        """write_stdin forwards zero yields for immediate process snapshots."""
+        toolkit = _make_toolkit()
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        state = await toolkit.update_context(_make_context())
+        tool = _find_tool(state.tools, "write_stdin")
+
+        await tool.handler(json.dumps({"process_id": "proc-1", "yield_time_ms": 0}))
+        await tool.handler(
+            json.dumps(
+                {
+                    "process_id": "proc-1",
+                    "chars": "input\n",
+                    "yield_time_ms": 0,
+                }
+            )
+        )
+
+        assert runner_operations.process_write_calls[-2]["yield_time_ms"] == 0
+        assert runner_operations.process_write_calls[-2]["stdin"] == ""
+        assert runner_operations.process_write_calls[-1]["yield_time_ms"] == 0
+        assert runner_operations.process_write_calls[-1]["stdin"] == "input\n"
+
+    @pytest.mark.asyncio
+    async def test_write_stdin_rejects_non_empty_yield_above_maximum(self) -> None:
+        """Non-empty write_stdin calls keep their shorter maximum yield."""
         toolkit = _make_toolkit()
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "write_stdin")
 
-        with pytest.raises(FunctionToolError, match="empty poll yield_time_ms"):
-            await tool.handler(
-                json.dumps({"process_id": "proc-1", "yield_time_ms": 250})
-            )
         with pytest.raises(FunctionToolError, match="non-empty write yield_time_ms"):
             await tool.handler(
                 json.dumps(
@@ -1317,7 +1374,12 @@ class TestProcessToolHandler:
         assert exec_yield["maximum"] == 30000
         assert "accepted range is 250-30000 ms" in exec_yield["description"]
         assert write_yield["default"] == 250
+        assert write_yield["minimum"] == 0
         assert write_yield["maximum"] == 300000
+        assert (
+            "Zero returns currently buffered output immediately"
+            in write_yield["description"]
+        )
         assert "Non-empty writes default to 250 ms" in write_yield["description"]
         assert "empty polls default to 5000 ms" in write_yield["description"]
 

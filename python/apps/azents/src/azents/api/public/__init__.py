@@ -21,6 +21,7 @@ from . import (
     workspace,
     workspace_model_settings,
     workspace_user,
+    xai_oauth,
 )
 
 modules = [
@@ -39,6 +40,7 @@ modules = [
     user,
     workspace,
     workspace_user,
+    xai_oauth,
 ]
 
 

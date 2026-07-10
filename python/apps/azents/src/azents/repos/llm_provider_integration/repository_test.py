@@ -14,6 +14,8 @@ from azents.core.credentials import (
     ChatGPTOAuthSecrets,
     GcpConfig,
     GcpSecrets,
+    XaiOAuthConfig,
+    XaiOAuthSecrets,
 )
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
@@ -231,6 +233,52 @@ class TestLLMProviderIntegrationRepository:
             email="user@example.com",
             plan_type="plus",
             connection_method="callback",
+            status="connected",
+            connected_at=connected_at,
+        )
+
+    async def test_get_by_id_with_secrets_xai_oauth(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Fetch xAI OAuth secrets and config decrypted."""
+        ws_id = await _create_workspace(rdb_session)
+        repo = _make_repo()
+        expires_at = datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC)
+        connected_at = datetime.datetime(2026, 7, 10, tzinfo=datetime.UTC)
+        created = await repo.create(
+            rdb_session,
+            LLMProviderIntegrationCreate(
+                workspace_id=ws_id,
+                provider=LLMProvider.XAI_OAUTH,
+                name="xAI Grok OAuth",
+                secrets=XaiOAuthSecrets(
+                    access_token="access-token",
+                    refresh_token="refresh-token",
+                    expires_at=expires_at,
+                ),
+                config=XaiOAuthConfig(
+                    account_id="account-123",
+                    email="user@example.com",
+                    connection_method="device",
+                    status="connected",
+                    connected_at=connected_at,
+                ),
+            ),
+        )
+
+        integration = await repo.get_by_id_with_secrets(rdb_session, created.id)
+
+        assert integration is not None
+        assert integration.provider == LLMProvider.XAI_OAUTH
+        assert integration.secrets == XaiOAuthSecrets(
+            access_token="access-token",
+            refresh_token="refresh-token",
+            expires_at=expires_at,
+        )
+        assert integration.config == XaiOAuthConfig(
+            account_id="account-123",
+            email="user@example.com",
+            connection_method="device",
             status="connected",
             connected_at=connected_at,
         )

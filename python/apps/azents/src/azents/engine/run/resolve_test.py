@@ -28,7 +28,10 @@ from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.repos.agent.data import Agent
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.runtime.types import RuntimeDomainConfig
-from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_selectable_model_options,
+)
 
 from .resolve import resolve_agent_tools, resolve_invoke_input
 
@@ -45,6 +48,9 @@ def _make_agent() -> Agent:
         description=None,
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_options(selection),
+        main_model_label="default",
+        lightweight_model_label="default",
         model_parameters=None,
         system_prompt="You are helpful.",
         enabled=True,
@@ -215,6 +221,7 @@ class TestResolveAgentTools:
     async def test_auto_binds_claude_rules_when_runtime_tools_enabled(self) -> None:
         """Claude rules Toolkit is auto-bound after runtime shell Toolkit."""
         session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
         agent_toolkit_repository.list_by_agent.return_value = []
 
@@ -267,6 +274,7 @@ class TestResolveAgentTools:
     ) -> None:
         """Claude rules Toolkit is not auto-bound without runtime tools."""
         session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
         agent_toolkit_repository.list_by_agent.return_value = []
 
@@ -298,6 +306,7 @@ class TestResolveAgentTools:
     async def test_auto_binds_subagent_toolkit_in_root_mode(self) -> None:
         """Root sessions receive the coherent subagent collaboration bundle."""
         session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
         agent_toolkit_repository.list_by_agent.return_value = []
 
@@ -335,6 +344,7 @@ class TestResolveAgentTools:
     async def test_subagent_mode_filters_root_only_auto_bound_toolkits(self) -> None:
         """Subagent mode keeps read/runtime capabilities and excludes root-only ones."""
         session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
         agent_toolkit_repository.list_by_agent.return_value = []
 

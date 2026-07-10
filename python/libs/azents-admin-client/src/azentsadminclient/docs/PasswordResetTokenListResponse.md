@@ -6,8 +6,8 @@ Password reset token list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[PasswordResetTokenResponse]**](PasswordResetTokenResponse.md) | Password reset token list |
-**total** | **int** | Total record count |
+**items** | [**List[PasswordResetTokenResponse]**](PasswordResetTokenResponse.md) | Password reset token list | 
+**total** | **int** | Total record count | 
 
 ## Example
 
@@ -27,3 +27,5 @@ password_reset_token_list_response_dict = password_reset_token_list_response_ins
 password_reset_token_list_response_from_dict = PasswordResetTokenListResponse.from_dict(password_reset_token_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

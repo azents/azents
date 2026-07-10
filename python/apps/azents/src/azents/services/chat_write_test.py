@@ -1,13 +1,19 @@
 """REST chat write service tests."""
 
 import datetime
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import cast
 
 import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionKind,
     AgentSessionRunState,
+    AgentSessionStartReason,
+    AgentSessionStatus,
     EventKind,
     InputBufferKind,
     LLMProvider,
@@ -31,7 +37,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import (
     ChatWriteRequest,
@@ -48,6 +54,47 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import make_test_model_selection_dict
+
+
+@asynccontextmanager
+async def _session_manager_double() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a placeholder DB session for service-double tests."""
+    yield cast(AsyncSession, object())
+
+
+class _SubagentLockRepository(AgentSessionRepository):
+    """AgentSessionRepository double returning a locked subagent session."""
+
+    def __init__(self, calls: list[str]) -> None:
+        """Store call log."""
+        self.calls = calls
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Return a subagent AgentSession for idle-control lock attempts."""
+        del session
+        self.calls.append("lock_by_id")
+        now = datetime.datetime.now(datetime.UTC)
+        return AgentSession(
+            id=agent_session_id,
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            handle="subagent-session",
+            session_kind=AgentSessionKind.SUBAGENT,
+            status=AgentSessionStatus.ACTIVE,
+            start_reason=AgentSessionStartReason.INITIAL,
+            title=None,
+            title_source=None,
+            title_generated_at=None,
+            title_generation_event_id=None,
+            last_user_input_at=now,
+            started_at=now,
+            created_at=now,
+            updated_at=now,
+        )
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -192,6 +239,34 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
 
 class TestChatWriteService:
     """REST chat write service behavior."""
+
+    async def test_pending_command_rejects_subagent_session_before_write(
+        self,
+    ) -> None:
+        """Direct REST control writes cannot target child subagent sessions."""
+        calls: list[str] = []
+        service = ChatWriteService(
+            agent_session_repository=_SubagentLockRepository(calls),
+            chat_write_request_repository=cast(ChatWriteRequestRepository, object()),
+            message_repository=cast(MessageRepository, object()),
+            input_buffer_service=cast(InputBufferService, object()),
+            session_manager=_session_manager_double,
+        )
+
+        try:
+            await service.create_idempotent_pending_command(
+                agent_id="agent-1",
+                session_id="subagent-session",
+                user_id="user-1",
+                client_request_id="subagent-command",
+                command_name="compact",
+                payload={"command": "compact"},
+            )
+        except ValueError as exc:
+            assert str(exc) == "Subagent sessions are read-only"
+        else:
+            raise AssertionError("Expected ValueError")
+        assert calls == ["lock_by_id"]
 
     async def test_idempotency_record_for_another_session_is_rejected(
         self,

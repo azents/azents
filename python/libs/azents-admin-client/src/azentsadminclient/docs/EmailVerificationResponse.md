@@ -6,13 +6,13 @@ EmailVerification response schema, including code.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Verification ID (UUID7 hex) |
-**email** | **str** | Email address |
-**code** | **str** | Six-digit verification code |
-**csrf_token** | **str** | CSRF token |
-**expires_at** | **datetime** | Expiration time |
-**verified_at** | **datetime** |  | [optional]
-**created_at** | **datetime** | Created time |
+**id** | **str** | Verification ID (UUID7 hex) | 
+**email** | **str** | Email address | 
+**code** | **str** | Six-digit verification code | 
+**csrf_token** | **str** | CSRF token | 
+**expires_at** | **datetime** | Expiration time | 
+**verified_at** | **datetime** |  | [optional] 
+**created_at** | **datetime** | Created time | 
 
 ## Example
 
@@ -32,3 +32,5 @@ email_verification_response_dict = email_verification_response_instance.to_dict(
 email_verification_response_from_dict = EmailVerificationResponse.from_dict(email_verification_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

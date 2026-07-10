@@ -9,7 +9,8 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   buildProviderIntegrationOptions,
-  parseModelSelectionValue,
+  fallbackSelectableModelLabel,
+  selectableModelOptionInputsFromFormValues,
 } from "@/features/agents/model-selection";
 import { trpc } from "@/trpc/client";
 import type {
@@ -21,6 +22,7 @@ import type {
   ModelCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
+  SelectableModelOptionFormValue,
 } from "@/features/agents/model-selection";
 import type { LlmProviderIntegrationResponse } from "@azents/public-client";
 
@@ -58,6 +60,7 @@ export interface LlmSettingsContainerOutput {
   mutationState: MutationState;
   canManage: boolean;
   providerOptions: ProviderIntegrationOption[];
+  availableProviderValues: string[];
   modelOptions: ModelSelectionOption[];
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
@@ -83,8 +86,9 @@ export interface LlmSettingsContainerOutput {
   ) => void;
   onSyncCatalog: (integrationId: string) => void;
   onUpdateWorkspaceModelSettings: (data: {
-    defaultModelValue: string | null;
-    defaultLightweightModelValue: string | null;
+    defaultSelectableModelOptions: SelectableModelOptionFormValue[];
+    defaultMainModelLabel: string | null;
+    defaultLightweightModelLabel: string | null;
   }) => void;
 }
 
@@ -107,6 +111,8 @@ export function useLlmSettingsContainer(
   const canManage = meQuery.data?.role === "owner";
 
   const listQuery = trpc.llmProviderIntegration.list.useQuery({ handle });
+  const providerCapabilitiesQuery =
+    trpc.llmProviderIntegration.listProviders.useQuery({ handle });
   const workspaceModelSettingsQuery = trpc.workspaceModelSettings.get.useQuery({
     handle,
   });
@@ -115,10 +121,18 @@ export function useLlmSettingsContainer(
     [listQuery.data],
   );
   const listState: IntegrationListState = useMemo(() => {
-    if (listQuery.isLoading || workspaceModelSettingsQuery.isLoading) {
+    if (
+      listQuery.isLoading ||
+      providerCapabilitiesQuery.isLoading ||
+      workspaceModelSettingsQuery.isLoading
+    ) {
       return { type: "LOADING" };
     }
-    if (listQuery.isError || workspaceModelSettingsQuery.isError) {
+    if (
+      listQuery.isError ||
+      providerCapabilitiesQuery.isError ||
+      workspaceModelSettingsQuery.isError
+    ) {
       return { type: "ERROR" };
     }
     return {
@@ -129,6 +143,8 @@ export function useLlmSettingsContainer(
   }, [
     listQuery.isLoading,
     listQuery.isError,
+    providerCapabilitiesQuery.isLoading,
+    providerCapabilitiesQuery.isError,
     integrations,
     workspaceModelSettingsQuery.isLoading,
     workspaceModelSettingsQuery.isError,
@@ -140,6 +156,12 @@ export function useLlmSettingsContainer(
   const providerOptions = useMemo(
     () => buildProviderIntegrationOptions(integrations),
     [integrations],
+  );
+
+  const availableProviderValues = useMemo(
+    () =>
+      providerCapabilitiesQuery.data?.items.map((item) => item.provider) ?? [],
+    [providerCapabilitiesQuery.data],
   );
 
   const modelOptions = useMemo<ModelSelectionOption[]>(() => [], []);
@@ -279,17 +301,24 @@ export function useLlmSettingsContainer(
 
   const onUpdateWorkspaceModelSettings = useCallback(
     (data: {
-      defaultModelValue: string | null;
-      defaultLightweightModelValue: string | null;
+      defaultSelectableModelOptions: SelectableModelOptionFormValue[];
+      defaultMainModelLabel: string | null;
+      defaultLightweightModelLabel: string | null;
     }): void => {
       setMutationState({ type: "SUBMITTING" });
       updateWorkspaceModelSettingsMutation.mutate({
         handle,
-        default_model_selection: parseModelSelectionValue(
-          data.defaultModelValue,
+        default_selectable_model_options:
+          selectableModelOptionInputsFromFormValues(
+            data.defaultSelectableModelOptions,
+          ),
+        default_main_model_label: fallbackSelectableModelLabel(
+          data.defaultMainModelLabel,
+          data.defaultSelectableModelOptions,
         ),
-        default_lightweight_model_selection: parseModelSelectionValue(
-          data.defaultLightweightModelValue,
+        default_lightweight_model_label: fallbackSelectableModelLabel(
+          data.defaultLightweightModelLabel,
+          data.defaultSelectableModelOptions,
         ),
       });
     },
@@ -303,6 +332,7 @@ export function useLlmSettingsContainer(
     mutationState,
     canManage,
     providerOptions,
+    availableProviderValues,
     modelOptions,
     catalogStates,
     modelsLoading,

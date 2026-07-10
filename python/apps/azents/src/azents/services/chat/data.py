@@ -205,6 +205,11 @@ class SessionNotFound:
 
 
 @dataclasses.dataclass(frozen=True)
+class SubagentSessionReadOnly:
+    """Child subagent session does not accept direct human writes."""
+
+
+@dataclasses.dataclass(frozen=True)
 class InvalidGoalStatusTransition:
     """Disallowed Goal status transition."""
 
@@ -228,13 +233,24 @@ class InvalidSessionTitle:
 
 EnsureSessionError = AgentNotFound | NotWorkspaceMember | SessionAccessDenied
 SessionAccessError = SessionNotFound | SessionAccessDenied
-DeleteSessionError = SessionAccessDenied
-DeleteInputBufferError = SessionNotFound | SessionAccessDenied
-UpdateGoalError = SessionNotFound | SessionAccessDenied | InvalidGoalStatusTransition
+DeleteSessionError = SessionAccessDenied | SubagentSessionReadOnly
+DeleteInputBufferError = SessionNotFound | SessionAccessDenied | SubagentSessionReadOnly
+UpdateGoalError = (
+    SessionNotFound
+    | SessionAccessDenied
+    | SubagentSessionReadOnly
+    | InvalidGoalStatusTransition
+)
 ArchiveSessionError = (
     SessionNotFound
     | SessionAccessDenied
+    | SubagentSessionReadOnly
     | PrimarySessionArchiveBlocked
     | RunningSessionArchiveBlocked
 )
-UpdateSessionTitleError = SessionNotFound | SessionAccessDenied | InvalidSessionTitle
+UpdateSessionTitleError = (
+    SessionNotFound
+    | SessionAccessDenied
+    | SubagentSessionReadOnly
+    | InvalidSessionTitle
+)

@@ -37,15 +37,15 @@ class TestSignupTokenListResponse(unittest.TestCase):
             return SignupTokenListResponse(
                 items = [
                     azentsadminclient.models.signup_token_response.SignupTokenResponse(
-                        id = '',
-                        email = '',
-                        created_by_user_id = '',
-                        delivery_method = 'manual',
-                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                        max_uses = 56,
-                        used_count = 56,
-                        revoked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        email = '', 
+                        created_by_user_id = '', 
+                        delivery_method = 'manual', 
+                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        max_uses = 56, 
+                        used_count = 56, 
+                        revoked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56
@@ -54,15 +54,15 @@ class TestSignupTokenListResponse(unittest.TestCase):
             return SignupTokenListResponse(
                 items = [
                     azentsadminclient.models.signup_token_response.SignupTokenResponse(
-                        id = '',
-                        email = '',
-                        created_by_user_id = '',
-                        delivery_method = 'manual',
-                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                        max_uses = 56,
-                        used_count = 56,
-                        revoked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        email = '', 
+                        created_by_user_id = '', 
+                        delivery_method = 'manual', 
+                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        max_uses = 56, 
+                        used_count = 56, 
+                        revoked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56,

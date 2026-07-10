@@ -6,11 +6,11 @@ Debug error response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**fired** | **bool** |  |
-**level** | **str** |  |
-**message** | **str** |  |
-**sentry_event_id** | **str** |  |
-**sentry** | [**SentryDiagnostics**](SentryDiagnostics.md) |  |
+**fired** | **bool** |  | 
+**level** | **str** |  | 
+**message** | **str** |  | 
+**sentry_event_id** | **str** |  | 
+**sentry** | [**SentryDiagnostics**](SentryDiagnostics.md) |  | 
 
 ## Example
 
@@ -30,3 +30,5 @@ debug_error_response_dict = debug_error_response_instance.to_dict()
 debug_error_response_from_dict = DebugErrorResponse.from_dict(debug_error_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

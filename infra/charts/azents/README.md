@@ -40,8 +40,9 @@ Chart consumers create Kubernetes Secrets with the keys below and reference thei
 | --- | --- | --- |
 | `secrets.existingSecrets.auth` | `jwt-secret-key`, `credential-encryption-key`, `sentry-dsn`, `oauth-secret-key` | `apiserver`, `adminserver`, `worker`, `scheduler` |
 | `secrets.existingSecrets.adminAuth` | `AUTH_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, or any admin web env keys required by the selected auth mode | `adminWeb` `envFrom` |
+| `server.runtimeControl.auth.existingSecret` | `runtime-control-token`, or the key selected by `server.runtimeControl.auth.tokenKey` | `server.runtimeControl`, `runtimeProviderKubernetes` when Runtime Control auth is enabled |
 
-`adminAuth` injects the whole Secret into the `adminWeb` container environment. Installations that do not use GitHub OAuth only need to provide the keys required by their admin web settings.
+`adminAuth` injects the whole Secret into the `adminWeb` container environment. Installations that do not use GitHub OAuth only need to provide the keys required by their admin web settings. Runtime Control auth is disabled by default; installations that enable it must provide an existing Secret reference through `server.runtimeControl.auth.existingSecret`.
 
 ## External Service Policy
 
@@ -95,7 +96,7 @@ Secret delivery is outside this chart. External Secrets Operator, Infisical, SOP
 ## Optional Component Prerequisites
 
 - `server.mcpEgressProxy.enabled=true`: renders the Squid proxy Deployment/Service/NetworkPolicy in the server namespace and injects `AZ_MCP_PROXY_URL` into the server ConfigMap.
-- `runtimeProviderKubernetes.enabled=true`: requires `runtimeProviderKubernetes.image.*`, `runtimeProviderKubernetes.runnerImage.*`, and `server.runtimeControl.enabled=true`.
+- `runtimeProviderKubernetes.enabled=true`: requires `runtimeProviderKubernetes.image.*`, `runtimeProviderKubernetes.runnerImage.*`, and `server.runtimeControl.enabled=true`. If `server.runtimeControl.auth.enabled=true`, it also requires `server.runtimeControl.auth.existingSecret`.
 
 ## Kustomize Label Differences
 

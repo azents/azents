@@ -43,12 +43,65 @@ class AgentModelSelection(BaseModel):
     )
 
 
+MAX_SELECTABLE_MODEL_OPTIONS = 10
+MAX_SELECTABLE_MODEL_LABEL_LENGTH = 80
+DEFAULT_MAIN_MODEL_OPTION_LABEL = "default"
+DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL = "lightweight"
+
+
+class SelectableModelOptionInput(BaseModel):
+    """Selectable model option input keyed by label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(
+        min_length=1,
+        max_length=MAX_SELECTABLE_MODEL_LABEL_LENGTH,
+        description="Selectable model label",
+    )
+    model_selection: AgentModelSelectionInput = Field(
+        description="Selectable model selection input"
+    )
+
+
+class SelectableModelOption(BaseModel):
+    """Stored selectable model option keyed by label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(description="Selectable model label")
+    model_selection: AgentModelSelection = Field(
+        description="Selectable model selection snapshot"
+    )
+
+
 class BuiltinToolConfig(BaseModel):
     """Built-in tool setting to enable on an Agent."""
 
     name: str = Field(description="Built-in tool name, for example web_search")
     config: dict[str, object] = Field(
         default_factory=dict, description="Per-tool options"
+    )
+
+
+DEFAULT_SUBAGENT_MAX_SUBAGENTS = 3
+DEFAULT_SUBAGENT_MAX_DEPTH = 1
+
+
+class SubagentSettings(BaseModel):
+    """Subagent execution settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_subagents: int = Field(
+        default=DEFAULT_SUBAGENT_MAX_SUBAGENTS,
+        ge=0,
+        description="Maximum active subagents per root session",
+    )
+    max_depth: int = Field(
+        default=DEFAULT_SUBAGENT_MAX_DEPTH,
+        ge=0,
+        description="Maximum subagent tree depth below the root agent",
     )
 
 

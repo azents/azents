@@ -5,6 +5,7 @@
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -29,6 +30,7 @@ from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeProviderRegistration,
 )
+from azents.runtime.control_protocol.grpc.auth import RuntimeControlGrpcAuth
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
@@ -42,6 +44,19 @@ from azents.runtime.coordination.data import (
 
 _DEFAULT_COMMAND_BLOCK_MS = 500
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class _ProviderOutboundItem:
+    """Provider outbound message with optional request ack metadata."""
+
+    message: runtime_provider_control_pb2.ControlMessage
+    ack_envelope: RuntimeRequestEnvelope | None = None
+
+
+type _ProviderOutbound = (
+    runtime_provider_control_pb2.ControlMessage | _ProviderOutboundItem
+)
 
 
 class RuntimeProviderReportSink(Protocol):
@@ -67,6 +82,7 @@ class RuntimeProviderControlGrpcServicer(
         report_sink: RuntimeProviderReportSink,
         owner_replica_id: str,
         consumer_id: str,
+        control_auth_token: str | None,
         command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
     ) -> None:
         """Initialize the Provider Control gRPC servicer."""
@@ -74,6 +90,7 @@ class RuntimeProviderControlGrpcServicer(
         self._report_sink = report_sink
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
+        self._auth = RuntimeControlGrpcAuth(control_auth_token)
         self._command_block_ms = command_block_ms
 
     async def ConnectProvider(
@@ -85,6 +102,7 @@ class RuntimeProviderControlGrpcServicer(
         ],
     ) -> AsyncIterator[runtime_provider_control_pb2.ControlMessage]:
         """Register a Provider, then bridge heartbeat/report/command messages."""
+        await self._auth.authorize(context, subject="Provider")
         first_message = await _first_register_message(request_iterator, context)
         now = datetime.now(UTC)
         accepted = await self._control_protocol.register_provider(
@@ -103,9 +121,7 @@ class RuntimeProviderControlGrpcServicer(
                 "owner_replica_id": self._owner_replica_id,
             },
         )
-        outbound: asyncio.Queue[runtime_provider_control_pb2.ControlMessage] = (
-            asyncio.Queue()
-        )
+        outbound: asyncio.Queue[_ProviderOutbound] = asyncio.Queue()
         inbound_task = asyncio.create_task(
             self._consume_provider_messages(
                 request_iterator,
@@ -135,6 +151,7 @@ class RuntimeProviderControlGrpcServicer(
                 outbound,
                 inbound_task,
                 command_task,
+                control_protocol=self._control_protocol,
             ):
                 yield message
         finally:
@@ -155,13 +172,18 @@ class RuntimeProviderControlGrpcServicer(
     async def _consume_provider_messages(
         self,
         request_iterator: AsyncIterator[runtime_provider_control_pb2.ProviderMessage],
-        outbound: asyncio.Queue[runtime_provider_control_pb2.ControlMessage],
+        outbound: asyncio.Queue[_ProviderOutbound],
         *,
         provider_id: str,
         generation: int,
     ) -> None:
         async for message in request_iterator:
             payload = message.WhichOneof("payload")
+            if message.generation != generation:
+                await outbound.put(
+                    _error(message.request_id, "STALE_PROVIDER_GENERATION")
+                )
+                return
             if payload == "heartbeat":
                 ok = await self._control_protocol.heartbeat_provider(
                     provider_id=provider_id,
@@ -183,11 +205,44 @@ class RuntimeProviderControlGrpcServicer(
                 )
                 continue
             if payload == "report":
+                if message.report.provider_generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_PROVIDER_GENERATION")
+                    )
+                    return
+                if not await self._provider_generation_current(
+                    provider_id=provider_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
                 await self._report_sink.record_provider_report(
                     _shared_report(message.report)
                 )
                 continue
             if payload == "command_completion":
+                if message.command_completion.generation != generation:
+                    await outbound.put(
+                        _error(message.request_id, "STALE_PROVIDER_GENERATION")
+                    )
+                    return
+                if (
+                    message.command_completion.report.runtime_id
+                    and message.command_completion.report.provider_generation
+                    != generation
+                ):
+                    await outbound.put(
+                        _error(message.request_id, "STALE_PROVIDER_GENERATION")
+                    )
+                    return
+                if not await self._provider_generation_current(
+                    provider_id=provider_id,
+                    generation=generation,
+                    request_id=message.request_id,
+                    outbound=outbound,
+                ):
+                    return
                 await self._complete_provider_command(
                     message.command_completion,
                     provider_id=provider_id,
@@ -197,9 +252,27 @@ class RuntimeProviderControlGrpcServicer(
                         _shared_report(message.command_completion.report)
                     )
 
+    async def _provider_generation_current(
+        self,
+        *,
+        provider_id: str,
+        generation: int,
+        request_id: str,
+        outbound: asyncio.Queue[_ProviderOutbound],
+    ) -> bool:
+        ok = await self._control_protocol.heartbeat_provider(
+            provider_id=provider_id,
+            generation=generation,
+            heartbeat_at=datetime.now(UTC),
+        )
+        if ok:
+            return True
+        await outbound.put(_error(request_id, "STALE_PROVIDER_GENERATION"))
+        return False
+
     async def _relay_provider_commands(
         self,
-        outbound: asyncio.Queue[runtime_provider_control_pb2.ControlMessage],
+        outbound: asyncio.Queue[_ProviderOutbound],
         *,
         provider_id: str,
         generation: int,
@@ -219,6 +292,7 @@ class RuntimeProviderControlGrpcServicer(
                     envelope,
                     provider_id=provider_id,
                 )
+                await self._control_protocol.ack_claimed_request(envelope)
                 continue
             try:
                 command = _provider_command(envelope)
@@ -234,6 +308,7 @@ class RuntimeProviderControlGrpcServicer(
                     },
                 )
                 await outbound.put(_error(envelope.request_id, exc.code, str(exc)))
+                await self._control_protocol.ack_claimed_request(envelope)
                 continue
             _LOGGER.info(
                 "Runtime Provider command relayed",
@@ -246,9 +321,12 @@ class RuntimeProviderControlGrpcServicer(
                 },
             )
             await outbound.put(
-                runtime_provider_control_pb2.ControlMessage(
-                    request_id=envelope.request_id,
-                    provider_command=command,
+                _ProviderOutboundItem(
+                    message=runtime_provider_control_pb2.ControlMessage(
+                        request_id=envelope.request_id,
+                        provider_command=command,
+                    ),
+                    ack_envelope=envelope,
                 )
             )
 
@@ -349,6 +427,7 @@ def add_runtime_provider_control_servicer(
     report_sink: RuntimeProviderReportSink,
     owner_replica_id: str,
     consumer_id: str,
+    control_auth_token: str | None,
     command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Provider Control servicer to a gRPC server."""
@@ -358,6 +437,7 @@ def add_runtime_provider_control_servicer(
             report_sink=report_sink,
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
+            control_auth_token=control_auth_token,
             command_block_ms=command_block_ms,
         ),
         server,
@@ -389,9 +469,11 @@ async def _first_register_message(
 
 
 async def _outbound_messages(
-    outbound: asyncio.Queue[runtime_provider_control_pb2.ControlMessage],
+    outbound: asyncio.Queue[_ProviderOutbound],
     inbound_task: asyncio.Task[None],
     command_task: asyncio.Task[None],
+    *,
+    control_protocol: RuntimeControlProtocolService,
 ) -> AsyncIterator[runtime_provider_control_pb2.ControlMessage]:
     get_task = asyncio.create_task(outbound.get())
     try:
@@ -401,7 +483,14 @@ async def _outbound_messages(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if get_task in done:
-                yield get_task.result()
+                item = get_task.result()
+                if isinstance(item, _ProviderOutboundItem):
+                    try:
+                        yield item.message
+                    finally:
+                        await _ack_outbound_item(control_protocol, item)
+                else:
+                    yield item
                 get_task = asyncio.create_task(outbound.get())
                 continue
             for task in (inbound_task, command_task):
@@ -430,6 +519,15 @@ async def _outbound_messages(
         get_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await get_task
+
+
+async def _ack_outbound_item(
+    control_protocol: RuntimeControlProtocolService,
+    item: _ProviderOutboundItem,
+) -> None:
+    if item.ack_envelope is None:
+        return
+    await control_protocol.ack_claimed_request(item.ack_envelope)
 
 
 def _registration(

@@ -35,8 +35,11 @@ from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.input_buffer import InputBufferService
 from azents.testing.model_selection import make_test_model_selection_dict
 
-from . import ChatSessionService
-from .data import SessionAccessDenied
+from . import (
+    ChatSessionService,
+    _finalize_subagent_tree_nodes,  # pyright: ignore[reportPrivateUsage]
+)
+from .data import SessionAccessDenied, SubagentTreeNode
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -102,6 +105,32 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     return agent.id
 
 
+def _tree_node(
+    name: str,
+    status: str,
+    *,
+    children: list[SubagentTreeNode] | None = None,
+) -> SubagentTreeNode:
+    """Create a minimal SubagentTreeNode fixture."""
+    return SubagentTreeNode(
+        session_agent_id=f"{name}-agent",
+        agent_session_id=f"{name}-session",
+        parent_session_agent_id=None,
+        name=name,
+        path=f"/root/{name}",
+        agent_type="default",
+        status=status,
+        last_task_message=None,
+        unread_result=False,
+        latest_run_id=None,
+        latest_run_index=None,
+        latest_run_status=None,
+        terminal_result_event_id=None,
+        terminal_result_message=None,
+        children=children or [],
+    )
+
+
 def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     return ChatSessionService(
@@ -123,6 +152,42 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
 
 class TestSubagentTreeProjection:
     """Subagent Tree projection tests."""
+
+    def test_finalize_tree_propagates_interrupted_to_all_descendants(self) -> None:
+        """Interrupted parent status overrides every descendant status."""
+        nodes = [
+            _tree_node(
+                "root",
+                "interrupted",
+                children=[
+                    _tree_node(
+                        "completed-child",
+                        "completed",
+                        children=[
+                            _tree_node("failed-grandchild", "errored"),
+                            _tree_node("running-grandchild", "running"),
+                        ],
+                    ),
+                    _tree_node("idle-child", "idle"),
+                ],
+            )
+        ]
+
+        finalized = _finalize_subagent_tree_nodes(nodes)
+
+        root_node = finalized[0]
+        assert root_node.status == "interrupted"
+        assert {node.name: node.status for node in root_node.children} == {
+            "completed-child": "interrupted",
+            "idle-child": "interrupted",
+        }
+        completed_node = next(
+            node for node in root_node.children if node.name == "completed-child"
+        )
+        assert {node.name: node.status for node in completed_node.children} == {
+            "failed-grandchild": "interrupted",
+            "running-grandchild": "interrupted",
+        }
 
     async def test_projects_nested_tree_from_child_session_access(
         self,
@@ -244,6 +309,151 @@ class TestSubagentTreeProjection:
         assert nested_node.session_agent_id == nested.id
         assert nested_node.status == "running"
         assert nested_node.unread_result is False
+
+    async def test_interrupted_parent_projects_all_descendants_interrupted(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Propagate interrupted status from a parent to every descendant."""
+        repo = AgentSessionRepository()
+        run_repo = AgentRunRepository()
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "subagent-tree-interrupted-propagation",
+            )
+            user_id = await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                email="subagent-tree-interrupted@example.com",
+            )
+            agent_id = await _create_agent(
+                session,
+                workspace_id,
+                "subagent-tree-interrupted",
+            )
+            root_session = await repo.create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                    primary_kind=None,
+                    start_reason=AgentSessionStartReason.INITIAL,
+                ),
+            )
+            root_agent = await repo.get_session_agent_by_session_id(
+                session,
+                root_session.id,
+            )
+            assert root_agent is not None
+            completed_child = await repo.create_child_session_agent(
+                session,
+                parent_session_agent_id=root_agent.id,
+                name="completed-child",
+                agent_type="default",
+                title="Completed child",
+                last_task_message="done",
+            )
+            await repo.create_child_session_agent(
+                session,
+                parent_session_agent_id=root_agent.id,
+                name="idle-child",
+                agent_type="default",
+                title="Idle child",
+                last_task_message=None,
+            )
+            running_grandchild = await repo.create_child_session_agent(
+                session,
+                parent_session_agent_id=completed_child.id,
+                name="running-grandchild",
+                agent_type="default",
+                title="Running grandchild",
+                last_task_message="still working",
+            )
+            failed_grandchild = await repo.create_child_session_agent(
+                session,
+                parent_session_agent_id=completed_child.id,
+                name="failed-grandchild",
+                agent_type="default",
+                title="Failed grandchild",
+                last_task_message="failed",
+            )
+
+            root_run = await run_repo.create(
+                session,
+                AgentRunCreate(
+                    session_id=root_agent.agent_session_id,
+                    run_index=1,
+                ),
+            )
+            await run_repo.mark_terminal(
+                session,
+                root_run.id,
+                AgentRunStatus.INTERRUPTED,
+                ended_at=datetime.datetime.now(datetime.UTC),
+                terminal_result_event_id="root-interrupted",
+                terminal_result_message="Root interrupted",
+            )
+            completed_child_run = await run_repo.create(
+                session,
+                AgentRunCreate(
+                    session_id=completed_child.agent_session_id,
+                    run_index=1,
+                ),
+            )
+            await run_repo.mark_terminal(
+                session,
+                completed_child_run.id,
+                AgentRunStatus.COMPLETED,
+                ended_at=datetime.datetime.now(datetime.UTC),
+                terminal_result_event_id="child-completed",
+                terminal_result_message="Child completed",
+            )
+            await repo.mark_running(session, running_grandchild.agent_session_id)
+            await run_repo.create(
+                session,
+                AgentRunCreate(
+                    session_id=running_grandchild.agent_session_id,
+                    run_index=1,
+                ),
+            )
+            failed_grandchild_run = await run_repo.create(
+                session,
+                AgentRunCreate(
+                    session_id=failed_grandchild.agent_session_id,
+                    run_index=1,
+                ),
+            )
+            await run_repo.mark_terminal(
+                session,
+                failed_grandchild_run.id,
+                AgentRunStatus.FAILED,
+                ended_at=datetime.datetime.now(datetime.UTC),
+                terminal_result_event_id="grandchild-failed",
+                terminal_result_message="Grandchild failed",
+            )
+
+        result = await _service(rdb_session_manager).get_subagent_tree(
+            agent_id=agent_id,
+            session_id=root_session.id,
+            user_id=user_id,
+        )
+
+        assert isinstance(result, Success)
+        root_node = result.value.nodes[0]
+        assert root_node.status == "interrupted"
+        assert {node.name: node.status for node in root_node.children} == {
+            "completed-child": "interrupted",
+            "idle-child": "interrupted",
+        }
+        completed_node = next(
+            node for node in root_node.children if node.name == "completed-child"
+        )
+        assert {node.name: node.status for node in completed_node.children} == {
+            "failed-grandchild": "interrupted",
+            "running-grandchild": "interrupted",
+        }
 
     async def test_denies_tree_projection_without_workspace_membership(
         self,

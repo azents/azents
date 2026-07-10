@@ -337,7 +337,8 @@
         "google_gemini": "Google Gemini",
         "aws_bedrock": "AWS Bedrock",
         "google_vertex_ai": "Google Vertex AI",
-        "chatgpt_oauth": "ChatGPT subscription"
+        "chatgpt_oauth": "ChatGPT subscription",
+        "xai_oauth": "xAI Grok OAuth"
       },
       "chatgptOAuth": {
         "title": "ChatGPT subscription",
@@ -354,7 +355,7 @@
       },
       "modelSelection": {
         "title": "Workspace default models",
-        "description": "Agents copy these model snapshots when they are saved without an explicit model selection.",
+        "description": "Configure the ordered model list that new agents copy by default.",
         "currentMain": "Current main:",
         "currentLightweight": "Current lightweight:",
         "mainProviderLabel": "Default main provider",
@@ -372,7 +373,10 @@
         "selectWorkspaceLightweightModel": "Select workspace lightweight model",
         "noDefaultModelSelected": "No default model selected",
         "useMainModel": "Use main model",
-        "changeModel": "Change model"
+        "changeModel": "Change model",
+        "optionsTitle": "Workspace selectable models",
+        "optionsDescription": "Agents copy this ordered list and selected labels when they are created without custom models.",
+        "invalidOptions": "Fix model labels and model selections before saving."
       },
       "modelConfig": {
         "headline": "Model configs",
@@ -428,6 +432,20 @@
         "skipProviderOrNormalizationFiltered": "Filtered by provider or normalization",
         "skipUnsupportedBedrockModel": "Unsupported Bedrock model",
         "skipUnsupportedVertexModel": "Unsupported Vertex model"
+      },
+      "xaiOAuth": {
+        "title": "xAI Grok OAuth",
+        "oauthBadge": "Experimental OAuth",
+        "description": "Connect your own SuperGrok or X Premium account with xAI device-code OAuth.",
+        "callbackUnavailable": "Availability is controlled by xAI and may return 403 depending on your subscription tier or allowlist status.",
+        "connected": "Connected",
+        "deviceInstruction": "Open <link>xAI verification</link> and enter the code below.",
+        "openVerificationPage": "Open xAI verification page",
+        "copyCode": "Copy code",
+        "copied": "Copied",
+        "connectWithDeviceCode": "Connect with device code",
+        "cancel": "Cancel",
+        "statusError": "Device authorization {status}."
       }
     },
     "agents": {
@@ -550,7 +568,12 @@
           "enabled": "Enabled",
           "disabled": "Disabled",
           "shellEnabled": "Shell on",
-          "shellDisabled": "Shell off"
+          "shellDisabled": "Shell off",
+          "subagents": "{count} max · depth {depth}"
+        },
+        "subagents": {
+          "label": "Subagents",
+          "description": "Concurrency and nesting limits for delegated agents"
         }
       },
       "settingsLayout": {
@@ -608,13 +631,15 @@
           "backToParent": "Back to parent: {name}",
           "backToParentTooltip": "Back to parent: {name} ({path})",
           "navigationMenu": "Subagent navigation options",
-          "readOnlyNotice": "Use the parent agent.",
+          "readOnlyNotice": "Subagent sessions are read-only. Send new instructions from the parent agent.",
+          "inputDisabledPlaceholder": "Use the parent agent.",
           "unread": "Unread",
           "runIndex": "Run {index}",
           "status": {
             "idle": "Idle",
             "running": "Running",
             "completed": "Completed",
+            "failed": "Failed",
             "errored": "Errored",
             "interrupted": "Interrupted",
             "notFound": "Missing"
@@ -704,7 +729,39 @@
         "emptyDescription": "Create a memory or adjust the search filter.",
         "deleteConfirm": "Delete memory \"{name}\"? This cannot be undone."
       },
-      "shellEnabledDescription": "Allow this agent to execute shell commands"
+      "shellEnabledDescription": "Allow this agent to execute shell commands",
+      "subagentsSectionLabel": "Subagents",
+      "subagentMaxSubagentsLabel": "Max subagents",
+      "subagentMaxSubagentsDescription": "Maximum number of active subagents under one root session. The root agent is not counted.",
+      "subagentMaxDepthLabel": "Max depth",
+      "subagentMaxDepthDescription": "Maximum subagent tree depth below the root agent. 1 allows root → child only.",
+      "selectableModelOptions": {
+        "title": "Selectable models",
+        "description": "Define an ordered model list. Main and lightweight selections reference labels from this list; the first model is the fallback.",
+        "addOption": "Add model",
+        "emptyList": "Add at least one model.",
+        "maxOptions": "Up to 10 models can be added.",
+        "emptyLabel": "Model label is required.",
+        "duplicateLabel": "Model labels must be unique.",
+        "missingModel": "Choose a model for every row.",
+        "selectModelTitle": "Select model for {label}",
+        "newOption": "new model",
+        "mainLabel": "Main model",
+        "mainDescription": "Used for normal agent turns.",
+        "lightweightLabel": "Lightweight model",
+        "lightweightDescription": "Used for lightweight work and compaction fallback.",
+        "optionLabel": "Model label",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "remove": "Remove",
+        "noModelSelected": "No model selected",
+        "chooseModel": "Choose a provider integration and model.",
+        "changeModel": "Change model",
+        "modelLabelColumn": "Model label",
+        "selectedModelColumn": "Selected model",
+        "actionsColumn": "Actions",
+        "dragHandleLabel": "Reorder model"
+      }
     },
     "toolkits": {
       "headline": "Toolkits",
@@ -983,6 +1040,7 @@
     "startConversation": "Send a message to start the conversation",
     "inputPlaceholder": "Type a message…",
     "inputPlaceholderDesktop": "Type a message… (Shift+Enter for newline)",
+    "inputDisabledPlaceholder": "Direct input is disabled for this session.",
     "connected": "Connected",
     "connecting": "Connecting",
     "reconnecting": "Reconnecting",
@@ -1402,6 +1460,9 @@
     "skillLoaded": {
       "title": "Skill loaded: {name}",
       "unknownSkill": "Skill"
+    },
+    "agentMessage": {
+      "title": "Message from agent {name}"
     },
     "addWorkspace": "Add workspace",
     "addExistingProject": "Add existing Project",

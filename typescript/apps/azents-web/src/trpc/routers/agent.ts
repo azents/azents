@@ -39,9 +39,22 @@ const modelSelectionInputSchema = z
   })
   .nullable();
 
+const selectableModelOptionInputSchema = z.object({
+  label: z.string().min(1),
+  model_selection: z.object({
+    llm_provider_integration_id: z.string().min(1),
+    model_identifier: z.string().min(1),
+  }),
+});
+
 const builtinToolConfigSchema = z.object({
   name: z.string().min(1),
   config: z.record(z.string(), z.unknown()).optional().default({}),
+});
+
+const subagentSettingsSchema = z.object({
+  max_subagents: z.number().int().min(0),
+  max_depth: z.number().int().min(0),
 });
 
 const modelParametersSchema = z
@@ -111,6 +124,11 @@ export const agentRouter = router({
         description: z.string().optional(),
         model_selection: modelSelectionInputSchema.optional(),
         lightweight_model_selection: modelSelectionInputSchema.optional(),
+        selectable_model_options: z
+          .array(selectableModelOptionInputSchema)
+          .optional(),
+        main_model_label: z.string().nullable().optional(),
+        lightweight_model_label: z.string().nullable().optional(),
         model_parameters: modelParametersSchema.optional(),
         system_prompt: z.string().optional(),
         enabled: z.boolean().optional(),
@@ -118,6 +136,7 @@ export const agentRouter = router({
         shell_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
+        subagent_settings: subagentSettingsSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -130,6 +149,9 @@ export const agentRouter = router({
             model_selection: input.model_selection ?? null,
             lightweight_model_selection:
               input.lightweight_model_selection ?? null,
+            selectable_model_options: input.selectable_model_options,
+            main_model_label: input.main_model_label,
+            lightweight_model_label: input.lightweight_model_label,
             description: input.description ?? null,
             model_parameters: input.model_parameters ?? null,
             system_prompt: input.system_prompt ?? null,
@@ -138,6 +160,7 @@ export const agentRouter = router({
             shell_enabled: input.shell_enabled,
             memory_enabled: input.memory_enabled,
             max_turns: input.max_turns,
+            subagent_settings: input.subagent_settings,
           },
           throwOnError: true,
         });
@@ -162,6 +185,11 @@ export const agentRouter = router({
         description: z.string().nullable().optional(),
         model_selection: modelSelectionInputSchema.optional(),
         lightweight_model_selection: modelSelectionInputSchema.optional(),
+        selectable_model_options: z
+          .array(selectableModelOptionInputSchema)
+          .optional(),
+        main_model_label: z.string().nullable().optional(),
+        lightweight_model_label: z.string().nullable().optional(),
         model_parameters: modelParametersSchema.optional(),
         system_prompt: z.string().nullable().optional(),
         enabled: z.boolean().optional(),
@@ -169,6 +197,7 @@ export const agentRouter = router({
         shell_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         max_turns: z.number().int().positive().nullable().optional(),
+        subagent_settings: subagentSettingsSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -188,6 +217,15 @@ export const agentRouter = router({
                     input.lightweight_model_selection,
                 }
               : {}),
+            ...("selectable_model_options" in input
+              ? { selectable_model_options: input.selectable_model_options }
+              : {}),
+            ...("main_model_label" in input
+              ? { main_model_label: input.main_model_label }
+              : {}),
+            ...("lightweight_model_label" in input
+              ? { lightweight_model_label: input.lightweight_model_label }
+              : {}),
             model_parameters: input.model_parameters,
             system_prompt: input.system_prompt,
             enabled: input.enabled,
@@ -195,6 +233,7 @@ export const agentRouter = router({
             shell_enabled: input.shell_enabled,
             memory_enabled: input.memory_enabled,
             max_turns: input.max_turns,
+            subagent_settings: input.subagent_settings,
           },
           throwOnError: true,
         });

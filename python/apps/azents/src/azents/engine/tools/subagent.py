@@ -4,13 +4,21 @@ import asyncio
 import dataclasses
 import json
 import time
+from textwrap import dedent
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
-from azents.core.enums import AgentRunStatus, AgentSessionRunState, InputBufferKind
+from azents.core.agent import SubagentSettings
+from azents.core.enums import (
+    AgentRunStatus,
+    AgentSessionRunState,
+    EventKind,
+    InputBufferKind,
+    SessionAgentKind,
+)
 from azents.core.tools import (
     PublishEventFn,
     ResolveContext,
@@ -28,11 +36,12 @@ from azents.engine.events.fork_context import (
     parse_fork_turns,
     select_fork_events,
 )
-from azents.engine.events.types import Event
+from azents.engine.events.types import AgentRunState, Event, SystemReminderPayload
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -54,9 +63,10 @@ class SpawnAgentInput(BaseModel):
         description="Agent type. Only the default type is supported.",
     )
     fork_turns: str = Field(
-        default="none",
+        default="all",
         description=(
-            "Context fork selection: 'none', 'all', or a positive integer string."
+            "Context fork selection: 'none', 'all', or a positive integer string. "
+            "Defaults to 'all'."
         ),
     )
 
@@ -64,14 +74,14 @@ class SpawnAgentInput(BaseModel):
 class SendMessageInput(BaseModel):
     """send_message tool input."""
 
-    agent_name: str = Field(description="Target agent path or child name")
+    agent_name: str = Field(description="Target agent path or name")
     message: str = Field(description="Message to queue for the target agent")
 
 
 class FollowupTaskInput(BaseModel):
     """followup_task tool input."""
 
-    agent_name: str = Field(description="Target agent path or child name")
+    agent_name: str = Field(description="Target agent path or name")
     task: str = Field(description="Follow-up task to assign and wake")
 
 
@@ -98,8 +108,10 @@ class WaitAgentInput(BaseModel):
 class InterruptAgentInput(BaseModel):
     """interrupt_agent tool input."""
 
-    agent_name: str = Field(description="Target agent path or child name")
+    agent_name: str = Field(description="Target agent path or name")
 
+
+_JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 
 _TERMINAL_STATUSES = {
     AgentRunStatus.COMPLETED,
@@ -109,6 +121,13 @@ _TERMINAL_STATUSES = {
     AgentRunStatus.CANCELLED,
 }
 _WAIT_AGENT_POLL_INTERVAL_SECONDS = 0.1
+_FORKED_HISTORY_BOUNDARY_REMINDER = "\n".join(
+    [
+        "The messages above are inherited conversation history from the parent agent.",
+        "Treat them as background context for the subagent task.",
+        "The subagent's direct assignment begins after this reminder.",
+    ]
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,6 +148,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         event_transcript_repository: EventTranscriptRepository,
         input_buffer_service: InputBufferService,
         broker: SessionBroker,
+        subagent_settings: SubagentSettings,
     ) -> None:
         self.session_manager = session_manager
         self.agent_session_repository = agent_session_repository
@@ -136,6 +156,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.event_transcript_repository = event_transcript_repository
         self.input_buffer_service = input_buffer_service
         self.broker = broker
+        self.subagent_settings = subagent_settings
         self.session_id: str | None = None
         self.user_id: str | None = None
         self.publish_event: PublishEventFn | None = None
@@ -164,17 +185,43 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Return subagent collaboration guidance."""
         del context
-        return (
-            "Use subagent tools to delegate independent work to child agents. "
-            "Child agents have separate transcripts and can be nested. "
-            "Use send_message for queue-only notes, followup_task for work "
-            "that should wake the child, wait_agent to observe completed "
-            "child results, and list_agents to inspect the tree."
+        max_concurrency = self.subagent_settings.max_subagents + 1
+        max_depth = self.subagent_settings.max_depth
+        return dedent(
+            f"""\
+            You are an agent in a team of agents collaborating to fulfill the
+            user's goals.
+
+            At the start of your turn, you are the active agent.
+            There are {max_concurrency} available concurrency slots, meaning
+            that up to {max_concurrency} agents can be active at once,
+            including you. The maximum subagent depth below the root agent is
+            {max_depth}.
+            You can spawn sub-agents to handle subtasks, and those sub-agents
+            can spawn their own sub-agents when depth allows.
+            All agents in the team are similarly capable and have access to
+            almost the same set of tools, except for Azents root/user-facing
+            capabilities that are not available in subagent mode.
+
+            You can use `spawn_agent` to create a new agent, `followup_task`
+            to give an existing agent a new task and wake it, and
+            `send_message` to pass a message to a running agent without
+            waking it.
+            Child agents can also spawn their own sub-agents.
+            You can decide how much context you want to propagate to your
+            sub-agents with the `fork_turns` parameter, which defaults to
+            `all`.
+            Use `wait_agent` to observe unread terminal child results when
+            you need completion output from child agents.
+
+            When you provide a final response, that content is delivered back
+            to your parent agent as a terminal child result.
+            """
         )
 
     def _spawn_agent_tool(self) -> FunctionTool:
         async def spawn_agent(input: SpawnAgentInput) -> str:
-            """Create a child subagent and assign its initial task."""
+            """Create a child subagent and return its identity."""
             if input.agent_type != "default":
                 raise FunctionToolError("Only the default agent_type is supported")
             try:
@@ -186,6 +233,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
             async with self.session_manager() as session:
                 current = await self._current_session_agent(session)
+                await self._enforce_spawn_limits(session, current)
                 try:
                     child = (
                         await self.agent_session_repository.create_child_session_agent(
@@ -220,6 +268,11 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                             model_order=event.model_order,
                         ),
                     )
+                if forked:
+                    await self._append_forked_history_boundary_reminder(
+                        session,
+                        child.agent_session_id,
+                    )
                 await self._enqueue_agent_message(
                     session,
                     source=current,
@@ -243,7 +296,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     def _send_message_tool(self) -> FunctionTool:
         async def send_message(input: SendMessageInput) -> str:
-            """Queue a message for a target child agent without waking it."""
+            """Queue a message for a target agent without waking it."""
             if not input.message.strip():
                 raise FunctionToolError("message is required")
             async with self.session_manager() as session:
@@ -279,7 +332,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     def _followup_task_tool(self) -> FunctionTool:
         async def followup_task(input: FollowupTaskInput) -> str:
-            """Assign a follow-up task to a target child agent and wake it."""
+            """Assign a follow-up task to an existing agent and wake it."""
             if not input.task.strip():
                 raise FunctionToolError("task is required")
             async with self.session_manager() as session:
@@ -287,6 +340,10 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 if resolution.target is None:
                     return _json(
                         {"status": "not_found", "agent_name": input.agent_name}
+                    )
+                if resolution.target.kind == SessionAgentKind.ROOT:
+                    raise FunctionToolError(
+                        "Follow-up tasks can't target the root agent"
                     )
                 target_session = await self._session_or_error(
                     session,
@@ -405,11 +462,18 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     def _interrupt_agent_tool(self) -> FunctionTool:
         async def interrupt_agent(input: InterruptAgentInput) -> str:
-            """Interrupt the target child agent's current run without deleting it."""
+            """Interrupt the target agent's current run without deleting it."""
             async with self.session_manager() as session:
                 resolution = await self._resolve_target(session, input.agent_name)
                 if resolution.target is None:
                     return _json({"previous_status": "not_found"})
+                if resolution.target.kind == SessionAgentKind.ROOT:
+                    raise FunctionToolError("root is not a spawned agent")
+                if resolution.target.id == resolution.current.id:
+                    raise FunctionToolError(
+                        "an agent cannot interrupt itself; return your result and let "
+                        "the parent interrupt you if needed"
+                    )
                 target_session = await self._session_or_error(
                     session,
                     resolution.target.agent_session_id,
@@ -489,8 +553,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             )
         except ValueError:
             target = None
-        if target is not None and target.id == current.id:
-            target = None
         return _TargetResolution(current=current, target=target)
 
     async def _wait_targets(
@@ -521,6 +583,74 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             )
         )
         return descendants
+
+    async def _enforce_spawn_limits(
+        self,
+        session: AsyncSession,
+        current: SessionAgent,
+    ) -> None:
+        """Raise a tool error when spawning would exceed configured limits."""
+        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
+            session,
+            current.root_session_agent_id,
+        )
+        if locked_root is None:
+            raise FunctionToolError("Root SessionAgent was not found")
+        next_depth = _session_agent_depth(current) + 1
+        max_depth = self.subagent_settings.max_depth
+        if next_depth > max_depth:
+            raise FunctionToolError(
+                "Cannot spawn subagent: max_depth "
+                f"{max_depth} would be exceeded by child depth {next_depth}."
+            )
+
+        max_subagents = self.subagent_settings.max_subagents
+        tree = await self.agent_session_repository.list_session_agent_tree(
+            session,
+            root_session_agent_id=current.root_session_agent_id,
+        )
+        subagents = [
+            agent for agent in tree if agent.id != current.root_session_agent_id
+        ]
+        sessions = await self.agent_session_repository.list_by_ids(
+            session,
+            agent_session_ids=[agent.agent_session_id for agent in subagents],
+        )
+        latest_runs = await self.agent_run_repository.list_latest_by_session_ids(
+            session,
+            session_ids=[agent.agent_session_id for agent in subagents],
+        )
+        active_count = sum(
+            1
+            for agent in subagents
+            if _session_agent_active(
+                sessions.get(agent.agent_session_id),
+                latest_runs.get(agent.agent_session_id),
+            )
+        )
+        if active_count >= max_subagents:
+            raise FunctionToolError(
+                "Cannot spawn subagent: max_subagents "
+                f"{max_subagents} is already reached for this root session."
+            )
+
+    async def _append_forked_history_boundary_reminder(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> None:
+        """Append the model-visible boundary after copied parent history."""
+        payload = SystemReminderPayload(text=_FORKED_HISTORY_BOUNDARY_REMINDER)
+        await self.event_transcript_repository.append(
+            session,
+            EventCreate(
+                session_id=session_id,
+                kind=EventKind.SYSTEM_REMINDER,
+                payload=_JSON_OBJECT_ADAPTER.validate_python(
+                    payload.model_dump(mode="json")
+                ),
+            ),
+        )
 
     async def _enqueue_agent_message(
         self,
@@ -676,6 +806,10 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
     ) -> SubagentToolkit:
         """Resolve per-session subagent collaboration tools."""
         del config
+        agent = await AgentRepository().get_by_id(context.session, context.agent_id)
+        subagent_settings = (
+            agent.subagent_settings if agent is not None else SubagentSettings()
+        )
         toolkit = SubagentToolkit(
             session_manager=self.session_manager,
             agent_session_repository=AgentSessionRepository(),
@@ -683,9 +817,29 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
             event_transcript_repository=EventTranscriptRepository(),
             input_buffer_service=self.input_buffer_service,
             broker=self.broker,
+            subagent_settings=subagent_settings,
         )
         toolkit.set_session_id(context.session_id)
         return toolkit
+
+
+def _session_agent_depth(agent: SessionAgent) -> int:
+    """Return depth below /root for a SessionAgent path."""
+    if agent.path == "/root":
+        return 0
+    return len([segment for segment in agent.path.split("/") if segment]) - 1
+
+
+def _session_agent_active(
+    session: AgentSession | None,
+    latest_run: AgentRunState | None,
+) -> bool:
+    """Return whether a SessionAgent should count against active capacity."""
+    if session is None:
+        return False
+    return session.run_state == AgentSessionRunState.RUNNING or (
+        latest_run is not None and latest_run.status == AgentRunStatus.RUNNING
+    )
 
 
 def _json(value: dict[str, object]) -> str:

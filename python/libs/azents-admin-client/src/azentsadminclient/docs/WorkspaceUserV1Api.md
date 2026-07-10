@@ -40,7 +40,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    workspace_user_create_request = azentsadminclient.WorkspaceUserCreateRequest() # WorkspaceUserCreateRequest |
+    workspace_user_create_request = azentsadminclient.WorkspaceUserCreateRequest() # WorkspaceUserCreateRequest | 
 
     try:
         # Create Workspace User
@@ -58,7 +58,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_create_request** | [**WorkspaceUserCreateRequest**](WorkspaceUserCreateRequest.md)|  |
+ **workspace_user_create_request** | [**WorkspaceUserCreateRequest**](WorkspaceUserCreateRequest.md)|  | 
 
 ### Return type
 
@@ -110,7 +110,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    workspace_user_id = 'workspace_user_id_example' # str |
+    workspace_user_id = 'workspace_user_id_example' # str | 
 
     try:
         # Delete Workspace User
@@ -126,7 +126,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_id** | **str**|  |
+ **workspace_user_id** | **str**|  | 
 
 ### Return type
 
@@ -177,7 +177,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    workspace_user_id = 'workspace_user_id_example' # str |
+    workspace_user_id = 'workspace_user_id_example' # str | 
 
     try:
         # Get Workspace User
@@ -195,7 +195,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_id** | **str**|  |
+ **workspace_user_id** | **str**|  | 
 
 ### Return type
 
@@ -246,7 +246,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # List Workspace Users
@@ -264,7 +264,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -318,8 +318,8 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    handle = 'handle_example' # str |
-    transfer_ownership_request = azentsadminclient.TransferOwnershipRequest() # TransferOwnershipRequest |
+    handle = 'handle_example' # str | 
+    transfer_ownership_request = azentsadminclient.TransferOwnershipRequest() # TransferOwnershipRequest | 
 
     try:
         # Transfer Workspace Ownership
@@ -337,8 +337,8 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **transfer_ownership_request** | [**TransferOwnershipRequest**](TransferOwnershipRequest.md)|  |
+ **handle** | **str**|  | 
+ **transfer_ownership_request** | [**TransferOwnershipRequest**](TransferOwnershipRequest.md)|  | 
 
 ### Return type
 
@@ -390,8 +390,8 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    workspace_user_id = 'workspace_user_id_example' # str |
-    workspace_user_update_request = azentsadminclient.WorkspaceUserUpdateRequest() # WorkspaceUserUpdateRequest |
+    workspace_user_id = 'workspace_user_id_example' # str | 
+    workspace_user_update_request = azentsadminclient.WorkspaceUserUpdateRequest() # WorkspaceUserUpdateRequest | 
 
     try:
         # Update Workspace User
@@ -409,8 +409,8 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_id** | **str**|  |
- **workspace_user_update_request** | [**WorkspaceUserUpdateRequest**](WorkspaceUserUpdateRequest.md)|  |
+ **workspace_user_id** | **str**|  | 
+ **workspace_user_update_request** | [**WorkspaceUserUpdateRequest**](WorkspaceUserUpdateRequest.md)|  | 
 
 ### Return type
 
@@ -433,3 +433,4 @@ No authorization required
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

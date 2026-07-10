@@ -23,6 +23,7 @@ import { AwsCredentialsForm } from "./AwsCredentialsForm";
 import { ChatGPTOAuthConnectionCard } from "./ChatGPTOAuthConnectionCard";
 import { GcpServiceAccountForm } from "./GcpServiceAccountForm";
 import { SetupGuide } from "./SetupGuide";
+import { XaiOAuthConnectionCard } from "./XaiOAuthConnectionCard";
 import type { LlmSettingsContainerOutput } from "../containers/useLlmSettingsContainer";
 import type { CredentialType } from "./SetupGuide";
 import type { LlmProviderIntegrationResponse } from "@azents/public-client";
@@ -34,6 +35,7 @@ const PROVIDER_VALUES = [
   "aws_bedrock",
   "google_vertex_ai",
   "chatgpt_oauth",
+  "xai_oauth",
 ] as const;
 
 type ProviderValue = (typeof PROVIDER_VALUES)[number];
@@ -65,6 +67,8 @@ function labelForProvider(provider: string, labels: ProviderLabels): string {
       return labels.google_vertex_ai;
     case "chatgpt_oauth":
       return labels.chatgpt_oauth;
+    case "xai_oauth":
+      return labels.xai_oauth;
     default:
       return provider;
   }
@@ -84,6 +88,7 @@ export interface ProviderFormProps {
 
 export function IntegrationFormModal({
   handle,
+  availableProviderValues,
   formModal,
   mutationState,
   onClose,
@@ -91,6 +96,7 @@ export function IntegrationFormModal({
   onUpdate,
 }: {
   handle: string;
+  availableProviderValues: string[];
   formModal: LlmSettingsContainerOutput["formModal"];
   mutationState: LlmSettingsContainerOutput["mutationState"];
   onClose: () => void;
@@ -114,6 +120,7 @@ export function IntegrationFormModal({
       <IntegrationFormContent
         key={contentKey}
         handle={handle}
+        availableProviderValues={availableProviderValues}
         formModal={formModal}
         mutationState={mutationState}
         onClose={onClose}
@@ -127,6 +134,7 @@ export function IntegrationFormModal({
 /** Modal internal content — remounted by key prop */
 function IntegrationFormContent({
   handle,
+  availableProviderValues,
   formModal,
   mutationState,
   onClose,
@@ -134,6 +142,7 @@ function IntegrationFormContent({
   onUpdate,
 }: {
   handle: string;
+  availableProviderValues: string[];
   formModal: LlmSettingsContainerOutput["formModal"];
   mutationState: LlmSettingsContainerOutput["mutationState"];
   onClose: () => void;
@@ -148,8 +157,12 @@ function IntegrationFormContent({
     aws_bedrock: t("providers.aws_bedrock"),
     google_vertex_ai: t("providers.google_vertex_ai"),
     chatgpt_oauth: t("providers.chatgpt_oauth"),
+    xai_oauth: t("providers.xai_oauth"),
   };
-  const providerOptions = PROVIDER_VALUES.map((value) => ({
+  const availableProviders = new Set(availableProviderValues);
+  const providerOptions = PROVIDER_VALUES.filter((value) =>
+    availableProviders.has(value),
+  ).map((value) => ({
     value,
     label: providerLabels[value],
   }));
@@ -169,6 +182,8 @@ function IntegrationFormContent({
     ? labelForProvider(provider, providerLabels)
     : "";
   const isChatGPTOAuth = provider === "chatgpt_oauth";
+  const isXaiOAuth = provider === "xai_oauth";
+  const isOAuthProvider = isChatGPTOAuth || isXaiOAuth;
 
   const formProps: ProviderFormProps = {
     name,
@@ -196,7 +211,7 @@ function IntegrationFormContent({
           required
         />
       )}
-      {!(isCreate && isChatGPTOAuth) && (
+      {!(isCreate && isOAuthProvider) && (
         <TextInput
           label={t("nameLabel")}
           placeholder={
@@ -217,15 +232,22 @@ function IntegrationFormContent({
           onConnected={onClose}
         />
       )}
-      {isChatGPTOAuth && !isCreate && (
-        <ChatGPTOAuthAliasForm
+      {isXaiOAuth && isCreate && (
+        <XaiOAuthConnectionCard
+          handle={handle}
+          canManage
+          onConnected={onClose}
+        />
+      )}
+      {isOAuthProvider && !isCreate && (
+        <OAuthAliasForm
           name={name}
           isSubmitting={isSubmitting}
           onUpdate={onUpdate}
           onClose={onClose}
         />
       )}
-      {credType === "api_key" && !isChatGPTOAuth && (
+      {credType === "api_key" && !isOAuthProvider && (
         <ApiKeyForm {...formProps} />
       )}
       {credType === "aws_credentials" && <AwsCredentialsForm {...formProps} />}
@@ -234,12 +256,12 @@ function IntegrationFormContent({
       )}
 
       {/* Setup guide */}
-      {provider && !isChatGPTOAuth && <SetupGuide credType={credType} />}
+      {provider && !isOAuthProvider && <SetupGuide credType={credType} />}
     </Stack>
   );
 }
 
-function ChatGPTOAuthAliasForm({
+function OAuthAliasForm({
   name,
   isSubmitting,
   onUpdate,

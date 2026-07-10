@@ -97,10 +97,14 @@
 }
 
 .codeBlockCopyButton {
-  position: absolute;
+  position: sticky;
   top: calc(var(--mantine-spacing-xs) / 2);
   right: calc(var(--mantine-spacing-xs) / 2);
   z-index: 1;
+  float: right;
+  height: 0;
+  background-color: var(--azents-chat-code-background);
+  border-radius: var(--mantine-radius-xs);
 }
 
 .markdown pre code,
@@ -143,7 +147,8 @@
 .markdown blockquote {
   margin: 0.4em 0;
   padding: 0.2em 0 0.2em 0.8em;
-  border-left: calc(var(--mantine-spacing-xs) / 3) solid color-mix(in srgb, currentColor 30%, transparent);
+  border-left: calc(var(--mantine-spacing-xs) / 3) solid
+    color-mix(in srgb, currentColor 30%, transparent);
 }
 
 .markdown blockquote > *:first-child {
@@ -206,7 +211,8 @@
 .mermaidDiagram {
   position: relative;
   margin: 0.5em 0;
-  padding: var(--mantine-spacing-sm) var(--mantine-spacing-lg) var(--mantine-spacing-sm) var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-lg)
+    var(--mantine-spacing-sm) var(--mantine-spacing-sm);
   border-radius: var(--mantine-radius-sm);
   background-color: var(--mantine-color-default);
   overflow-x: auto;

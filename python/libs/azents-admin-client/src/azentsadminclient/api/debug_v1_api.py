@@ -267,9 +267,9 @@ class DebugV1Api:
         # process the path parameters
         # process the query parameters
         if message is not None:
-
+            
             _query_params.append(('message', message))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -545,13 +545,13 @@ class DebugV1Api:
         # process the path parameters
         # process the query parameters
         if level is not None:
-
+            
             _query_params.append(('level', level.value))
-
+            
         if message is not None:
-
+            
             _query_params.append(('message', message))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -584,3 +584,5 @@ class DebugV1Api:
             _host=_host,
             _request_auth=_request_auth
         )
+
+

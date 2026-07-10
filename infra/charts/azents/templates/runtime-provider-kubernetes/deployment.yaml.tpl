@@ -45,6 +45,13 @@ spec:
           env:
             - name: AZ_RUNTIME_CONTROL_ENDPOINT
               value: {{ include "azents.runtimeControlEndpoint" . | quote }}
+            {{- if .Values.server.runtimeControl.auth.enabled }}
+            - name: AZ_RUNTIME_CONTROL_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "server.runtimeControl.auth.existingSecret is required when Runtime Control auth is enabled" .Values.server.runtimeControl.auth.existingSecret | quote }}
+                  key: {{ required "server.runtimeControl.auth.tokenKey is required when Runtime Control auth is enabled" .Values.server.runtimeControl.auth.tokenKey | quote }}
+            {{- end }}
             - name: AZ_RUNTIME_PROVIDER_AUTH_CREDENTIAL_ID
               value: {{ .Values.runtimeProviderKubernetes.providerId | quote }}
             - name: AZ_RUNTIME_ENV

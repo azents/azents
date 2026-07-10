@@ -116,31 +116,20 @@ logger = logging.getLogger(__name__)
 _MEMORY_READ_RULES_PROMPT = dedent("""\
     ### Memory Rules
 
-    You have access to persistent memories. Memories persist across conversations.
-
     Use `list_memories` or `search_memories` to discover relevant memories. Use `get_memory` to retrieve full content when a memory looks relevant.
 
-    Memories can be scoped to the Agent or to the current User. When Agent and User memories conflict on the same topic, follow the User memory because it represents this user's specific preference.
+    #### Memory lookup
 
-    Memories are snapshots from when they were written. Before acting on a memory, verify it against current state. If stale, avoid relying on it.""")  # noqa: E501
-
-_MEMORY_WRITE_RULES_PROMPT = dedent("""\
-    ### Memory Write Rules
-
-    Use `save_memory` to store durable information and `delete_memory` to remove stale or unwanted memories.
-
-    If the user explicitly asks you to remember something, save it immediately as whichever type fits best. If they ask you to forget something, use `delete_memory` to remove the relevant entry.
+    `search_memories` splits the query on whitespace and performs case-insensitive AND matching across memory name, description, and content. Include the distinctive terms that every search result should contain.
 
     #### Types of memory
 
     **user** — User's role, expertise, preferences.
     - Scope: Always `user`.
-    - Example: user says "I'm a product manager" → save_memory(scope="user", type="user", name="profile", ...)
 
     **feedback** — Behavioral corrections AND confirmations.
     - Scope: Personal preference → `user`. Team rule → `agent`.
     - Body: Lead with the rule, then **Why:** and **When to apply:** lines.
-    - Example: user says "always include sources" → save_memory(scope="agent", type="feedback", name="include-sources", ...)
 
     **project** — Ongoing work, decisions, deadlines.
     - Scope: Team context → `agent`. Personal work → `user`.
@@ -149,20 +138,31 @@ _MEMORY_WRITE_RULES_PROMPT = dedent("""\
     **reference** — Pointers to external systems.
     - Scope: Almost always `agent`.
 
+    #### Scope selection
+
+    - `agent` scope: team-wide knowledge shared with ALL users of this agent.
+    - `user` scope: personal preferences and context only for this specific user.
+
+    When Agent and User memories conflict on the same topic, follow the User memory because it represents this user's specific preference.
+
+    Memories are snapshots from when they were written. Before acting on a memory, verify it against current state. If stale, avoid relying on it.""")  # noqa: E501
+
+_MEMORY_WRITE_RULES_PROMPT = dedent("""\
+    ### Memory Write Rules
+
+    Use `save_memory` to store durable information and `delete_memory` to remove stale or unwanted memories.
+
+    If the user explicitly asks you to remember something, save it immediately using the memory type and scope guidance from Memory Rules. If they ask you to forget something, use `delete_memory` to remove the relevant entry.
+
     #### What NOT to save
 
     - Code patterns, architecture, file paths — read from code directly
     - Git history — use git log/blame
     - Ephemeral task details only useful in this conversation
 
-    #### Scope selection
-
-    - `agent` scope: shared with ALL users of this agent. Only save universally applicable knowledge.
-    - `user` scope: only this specific user. Save personal preferences and context.
-
     #### Duplicate prevention
 
-    Do not save duplicate memories. Use `list_memories` or `search_memories` to check if a similar memory already exists. Use the same `name` to update an existing memory (upsert).""")  # noqa: E501
+    Do not save duplicate memories. Use `list_memories` or `search_memories` with short keywords to check if a similar memory already exists. Use the same `name` to update an existing memory (upsert).""")  # noqa: E501
 
 _MAX_MEMORY_SUMMARIES = 100
 
@@ -267,7 +267,6 @@ _MIN_PROCESS_YIELD_TIME_MS = 250
 _DEFAULT_PROCESS_YIELD_TIME_MS = 10_000
 _MAX_PROCESS_YIELD_TIME_MS = 30_000
 _DEFAULT_PROCESS_WRITE_YIELD_TIME_MS = 250
-_MIN_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 5_000
 _DEFAULT_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 5_000
 _MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 300_000
 _DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 64 * 1024
@@ -318,8 +317,9 @@ class WriteStdinInput(BaseModel):
         le=_MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS,
         description=(
             "How long to wait for process output before yielding, in milliseconds. "
-            "Non-empty writes default to 250 ms and cap at 30000 ms; "
-            "empty polls default to 5000 ms and allow 5000-300000 ms."
+            "Zero returns currently buffered output immediately. Non-empty writes "
+            "default to 250 ms and cap at 30000 ms; empty polls default to 5000 ms "
+            "and cap at 300000 ms."
         ),
     )
     max_output_bytes: int = Field(
@@ -340,15 +340,7 @@ class WriteStdinInput(BaseModel):
 
     @model_validator(mode="after")
     def _validate_yield_time_range(self) -> "WriteStdinInput":
-        if self.chars == "":
-            if self.yield_time_ms < _MIN_PROCESS_EMPTY_POLL_YIELD_TIME_MS:
-                msg = "empty poll yield_time_ms must be at least 5000"
-                raise ValueError(msg)
-            return self
-        if self.yield_time_ms < _MIN_PROCESS_YIELD_TIME_MS:
-            msg = "non-empty write yield_time_ms must be at least 250"
-            raise ValueError(msg)
-        if self.yield_time_ms > _MAX_PROCESS_YIELD_TIME_MS:
+        if self.chars != "" and self.yield_time_ms > _MAX_PROCESS_YIELD_TIME_MS:
             msg = "non-empty write yield_time_ms must be at most 30000"
             raise ValueError(msg)
         return self
@@ -1536,9 +1528,10 @@ def make_write_stdin_tool(
         name="write_stdin",
         description=(
             "Write characters to a running exec_command process. Pass an empty "
-            "chars string to poll for unread output without sending input. Non-empty "
-            "writes default to 250 ms and cap at 30000 ms; empty polls default to "
-            "5000 ms and allow 5000-300000 ms."
+            "chars string to poll for unread output without sending input. A zero "
+            "yield returns currently buffered output immediately. Non-empty writes "
+            "default to 250 ms and cap at 30000 ms; empty polls default to 5000 ms "
+            "and cap at 300000 ms."
         ),
     )
     return dataclasses.replace(

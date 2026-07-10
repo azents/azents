@@ -54,7 +54,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest |
+    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest | 
 
     try:
         # Create Password Reset Token
@@ -72,7 +72,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **create_password_reset_token_request** | [**CreatePasswordResetTokenRequest**](CreatePasswordResetTokenRequest.md)|  |
+ **create_password_reset_token_request** | [**CreatePasswordResetTokenRequest**](CreatePasswordResetTokenRequest.md)|  | 
 
 ### Return type
 
@@ -134,7 +134,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    create_signup_token_request = azentsadminclient.CreateSignupTokenRequest() # CreateSignupTokenRequest |
+    create_signup_token_request = azentsadminclient.CreateSignupTokenRequest() # CreateSignupTokenRequest | 
 
     try:
         # Create Signup Token
@@ -152,7 +152,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **create_signup_token_request** | [**CreateSignupTokenRequest**](CreateSignupTokenRequest.md)|  |
+ **create_signup_token_request** | [**CreateSignupTokenRequest**](CreateSignupTokenRequest.md)|  | 
 
 ### Return type
 
@@ -203,7 +203,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    verification_id = 'verification_id_example' # str |
+    verification_id = 'verification_id_example' # str | 
 
     try:
         # Get Email Verification
@@ -221,7 +221,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **verification_id** | **str**|  |
+ **verification_id** | **str**|  | 
 
 ### Return type
 
@@ -272,8 +272,8 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    email = 'email_example' # str |
-    csrf_token = 'csrf_token_example' # str |
+    email = 'email_example' # str | 
+    csrf_token = 'csrf_token_example' # str | 
 
     try:
         # Get Email Verification By Email
@@ -291,8 +291,8 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **email** | **str**|  |
- **csrf_token** | **str**|  |
+ **email** | **str**|  | 
+ **csrf_token** | **str**|  | 
 
 ### Return type
 
@@ -414,7 +414,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    email = 'email_example' # str |
+    email = 'email_example' # str | 
     offset = 0 # int |  (optional) (default to 0)
     limit = 20 # int |  (optional) (default to 20)
 
@@ -434,7 +434,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **email** | **str**|  |
+ **email** | **str**|  | 
  **offset** | **int**|  | [optional] [default to 0]
  **limit** | **int**|  | [optional] [default to 20]
 
@@ -628,7 +628,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    token_id = 'token_id_example' # str |
+    token_id = 'token_id_example' # str | 
 
     try:
         # Revoke Password Reset Token
@@ -644,7 +644,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **token_id** | **str**|  |
+ **token_id** | **str**|  | 
 
 ### Return type
 
@@ -694,7 +694,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    token_id = 'token_id_example' # str |
+    token_id = 'token_id_example' # str | 
 
     try:
         # Revoke Signup Token
@@ -710,7 +710,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **token_id** | **str**|  |
+ **token_id** | **str**|  | 
 
 ### Return type
 
@@ -733,3 +733,4 @@ No authorization required
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

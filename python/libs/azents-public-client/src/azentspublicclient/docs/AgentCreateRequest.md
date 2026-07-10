@@ -9,6 +9,9 @@ Name | Type | Description | Notes
 **name** | **str** | Agent name | 
 **model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
 **lightweight_model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) |  | [optional] 
+**selectable_model_options** | [**List[SelectableModelOptionInput]**](SelectableModelOptionInput.md) |  | [optional] 
+**main_model_label** | **str** |  | [optional] 
+**lightweight_model_label** | **str** |  | [optional] 
 **description** | **str** |  | [optional] 
 **model_parameters** | [**ModelParameters**](ModelParameters.md) |  | [optional] 
 **system_prompt** | **str** |  | [optional] 
@@ -18,6 +21,7 @@ Name | Type | Description | Notes
 **shell_enabled** | **bool** | Shell enabled state | [optional] [default to True]
 **memory_enabled** | **bool** | Memory enabled state | [optional] [default to True]
 **max_turns** | **int** |  | [optional] 
+**subagent_settings** | [**SubagentSettings**](SubagentSettings.md) | Subagent execution settings | [optional] 
 
 ## Example
 

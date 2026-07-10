@@ -17,6 +17,7 @@ from azents.core.enums import (
     ActionExecutionEventKind,
     ActionExecutionStatus,
     AgentProjectCatalogStatus,
+    AgentSessionKind,
     EventKind,
     RuntimeRunnerState,
     SessionGitWorktreeBranchCreatedBy,
@@ -179,6 +180,11 @@ class GitWorktreeCleanupAccessDenied:
 
 
 @dataclasses.dataclass(frozen=True)
+class GitWorktreeCleanupSubagentReadOnly:
+    """Child subagent sessions do not accept direct cleanup requests."""
+
+
+@dataclasses.dataclass(frozen=True)
 class GitWorktreeCleanupNotFound:
     """No session Git worktree allocation exists."""
 
@@ -186,6 +192,7 @@ class GitWorktreeCleanupNotFound:
 GitWorktreeCleanupRequestError = (
     GitWorktreeCleanupSessionNotFound
     | GitWorktreeCleanupAccessDenied
+    | GitWorktreeCleanupSubagentReadOnly
     | GitWorktreeCleanupNotFound
 )
 
@@ -217,6 +224,11 @@ class GitWorktreeActionExecutionAccessDenied:
 
 
 @dataclasses.dataclass(frozen=True)
+class GitWorktreeActionExecutionSubagentReadOnly:
+    """Child subagent sessions do not accept direct action mutations."""
+
+
+@dataclasses.dataclass(frozen=True)
 class GitWorktreeActionExecutionNotFound:
     """Action execution was not found in the session."""
 
@@ -231,6 +243,7 @@ class GitWorktreeActionExecutionUnavailable:
 GitWorktreeActionExecutionRequestError = (
     GitWorktreeActionExecutionSessionNotFound
     | GitWorktreeActionExecutionAccessDenied
+    | GitWorktreeActionExecutionSubagentReadOnly
     | GitWorktreeActionExecutionNotFound
     | GitWorktreeActionExecutionUnavailable
 )
@@ -1221,6 +1234,7 @@ class SessionGitWorktreeService:
     ) -> (
         GitWorktreeActionExecutionSessionNotFound
         | GitWorktreeActionExecutionAccessDenied
+        | GitWorktreeActionExecutionSubagentReadOnly
         | None
     ):
         """Return an access error for action execution mutation, if any."""
@@ -1230,6 +1244,8 @@ class SessionGitWorktreeService:
         )
         if agent_session is None or agent_session.agent_id != agent_id:
             return GitWorktreeActionExecutionSessionNotFound()
+        if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+            return GitWorktreeActionExecutionSubagentReadOnly()
         workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
             session,
             workspace_id=agent_session.workspace_id,
@@ -1255,6 +1271,8 @@ class SessionGitWorktreeService:
             )
             if agent_session is None or agent_session.agent_id != agent_id:
                 return Failure(GitWorktreeCleanupSessionNotFound())
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(GitWorktreeCleanupSubagentReadOnly())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
                     session,

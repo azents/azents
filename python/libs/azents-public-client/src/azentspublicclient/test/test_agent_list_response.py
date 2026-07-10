@@ -46,6 +46,11 @@ class TestAgentListResponse(unittest.TestCase):
                         lightweight_model_selection = {
                             'key' : null
                             }, 
+                        selectable_model_options = [
+                            { }
+                            ], 
+                        main_model_label = '', 
+                        lightweight_model_label = '', 
                         effective_context_window_tokens = 56, 
                         effective_auto_compaction_threshold_tokens = 56, 
                         model_parameters = { }, 
@@ -56,6 +61,7 @@ class TestAgentListResponse(unittest.TestCase):
                         shell_enabled = True, 
                         memory_enabled = True, 
                         max_turns = 56, 
+                        subagent_settings = { }, 
                         avatar = azentspublicclient.models.uploaded_image.UploadedImage(
                             filename = '', 
                             default = azentspublicclient.models.image_file.ImageFile(
@@ -87,6 +93,11 @@ class TestAgentListResponse(unittest.TestCase):
                         lightweight_model_selection = {
                             'key' : null
                             }, 
+                        selectable_model_options = [
+                            { }
+                            ], 
+                        main_model_label = '', 
+                        lightweight_model_label = '', 
                         effective_context_window_tokens = 56, 
                         effective_auto_compaction_threshold_tokens = 56, 
                         model_parameters = { }, 
@@ -97,6 +108,7 @@ class TestAgentListResponse(unittest.TestCase):
                         shell_enabled = True, 
                         memory_enabled = True, 
                         max_turns = 56, 
+                        subagent_settings = { }, 
                         avatar = azentspublicclient.models.uploaded_image.UploadedImage(
                             filename = '', 
                             default = azentspublicclient.models.image_file.ImageFile(

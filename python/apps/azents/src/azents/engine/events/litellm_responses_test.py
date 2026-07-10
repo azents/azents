@@ -38,6 +38,7 @@ from azents.engine.events.system_reminders import (
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
     format_interrupted_reminder,
+    format_plain_system_reminder,
     format_system_reminder,
 )
 from azents.engine.events.types import (
@@ -188,8 +189,8 @@ class TestLiteLLMResponsesLowerer:
             {"role": "user", "content": "Review this PR"},
         ]
 
-    def test_lowers_agent_message_with_source_label(self) -> None:
-        """agent_message events become sourced user-role tasks."""
+    def test_lowers_agent_message_with_task_envelope(self) -> None:
+        """agent_message events become explicit parent-to-child task envelopes."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
         transcript = [
             _event(
@@ -210,7 +211,41 @@ class TestLiteLLMResponsesLowerer:
         assert request.input[-1] == {
             "role": "user",
             "content": (
-                "Message from agent /root (followup task):\ncontinue the investigation"
+                "Message Type: NEW_TASK\n"
+                "Task name: /root/child\n"
+                "Sender: /root\n"
+                "Payload:\n"
+                "continue the investigation"
+            ),
+        }
+
+    def test_lowers_send_message_as_message_envelope(self) -> None:
+        """send_message mailbox events render as non-task messages."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        transcript = [
+            _event(
+                EventKind.AGENT_MESSAGE,
+                AgentMessagePayload(
+                    message_kind="send_message",
+                    source_session_agent_id="source-agent",
+                    source_path="/root",
+                    target_session_agent_id="target-agent",
+                    target_path="/root/child",
+                    content="status note",
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input[-1] == {
+            "role": "user",
+            "content": (
+                "Message Type: MESSAGE\n"
+                "Task name: /root/child\n"
+                "Sender: /root\n"
+                "Payload:\n"
+                "status note"
             ),
         }
 
@@ -600,8 +635,8 @@ class TestLiteLLMResponsesLowerer:
                 item.attrib["name"]: item.text for item in data.findall("item")
             } == expected_data
 
-    def test_lowers_system_reminder_with_shared_xml_envelope(self) -> None:
-        """Lower system_reminder event to same XML envelope."""
+    def test_lowers_plain_system_reminder_with_hyphenated_envelope(self) -> None:
+        """Lower a plain system reminder to the model-facing envelope."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
         transcript = [
             _event(
@@ -615,11 +650,7 @@ class TestLiteLLMResponsesLowerer:
         assert request.input == [
             {
                 "role": "user",
-                "content": format_system_reminder(
-                    reminder_type="system_reminder",
-                    instruction="Use <safe> mode & continue.",
-                    data=(),
-                ),
+                "content": format_plain_system_reminder("Use <safe> mode & continue."),
             }
         ]
 
@@ -1247,6 +1278,58 @@ class TestLiteLLMResponsesLowerer:
         request = lowerer.lower([], model="gpt-5.1")
 
         assert request.kwargs["instructions"] == "You are a helpful assistant."
+
+    @pytest.mark.parametrize(
+        ("provider", "provider_id"),
+        [
+            ("xai_oauth", LLMProvider.XAI_OAUTH),
+            ("xai", None),
+        ],
+    )
+    def test_lowers_instructions_to_input_message_when_required(
+        self,
+        provider: str,
+        provider_id: LLMProvider | None,
+    ) -> None:
+        """Use a system input message when top-level instructions are unsupported."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider=provider,
+            model="grok-4.20-0309-reasoning",
+            provider_id=provider_id,
+        )
+        transcript = [
+            _event(
+                EventKind.USER_MESSAGE,
+                UserMessagePayload(content="hello"),
+            )
+        ]
+
+        request = lowerer.lower(
+            transcript,
+            model="xai/grok-4.20-0309-reasoning",
+            system_prompt="Follow project rules.",
+        )
+
+        assert "instructions" not in request.kwargs
+        assert request.input == [
+            {"role": "system", "content": "Follow project rules."},
+            {"role": "user", "content": "hello"},
+        ]
+
+    def test_uses_default_input_message_instructions_when_required(self) -> None:
+        """Preserve default instructions for input-message instruction transport."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="xai_oauth",
+            model="grok-4.20-0309-reasoning",
+            provider_id=LLMProvider.XAI_OAUTH,
+        )
+
+        request = lowerer.lower([], model="xai/grok-4.20-0309-reasoning")
+
+        assert "instructions" not in request.kwargs
+        assert request.input == [
+            {"role": "system", "content": "You are a helpful assistant."}
+        ]
 
     def test_does_not_expose_hosted_tool_without_agent_opt_in(self) -> None:
         """Do not send hosted tool without Agent opt-in even if capability exists."""

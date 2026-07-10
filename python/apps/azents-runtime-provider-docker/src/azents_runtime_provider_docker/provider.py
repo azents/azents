@@ -47,6 +47,7 @@ _LABEL_WORKSPACE_PATH = "azents/workspace-path"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
+_ENV_CONTROL_AUTH_TOKEN = "AZ_RUNTIME_CONTROL_AUTH_TOKEN"
 _ENV_RUNTIME_ID = "AZ_RUNTIME_ID"
 _ENV_AGENT_ID = "AZ_AGENT_ID"
 _ENV_WORKSPACE_ID = "AZ_WORKSPACE_ID"
@@ -301,7 +302,7 @@ class DockerRuntimeProvider:
 
     def _stable_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
         identity = command.identity
-        return {
+        env = {
             _ENV_CONTROL_ENDPOINT: command.auth.control_endpoint,
             _ENV_RUNTIME_ID: identity.runtime_id,
             _ENV_AGENT_ID: identity.agent_id,
@@ -309,6 +310,9 @@ class DockerRuntimeProvider:
             _ENV_PROVIDER_ID: self._config.provider_id,
             _ENV_WORKSPACE_PATH: self._workspace_mount_path,
         }
+        if command.auth.control_token is not None:
+            env[_ENV_CONTROL_AUTH_TOKEN] = command.auth.control_token
+        return env
 
     def _binds(self, runtime_id: str) -> tuple[DockerBindMount, ...]:
         return (

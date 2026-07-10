@@ -44,7 +44,7 @@ from azents.engine.events.system_reminders import (
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
     format_interrupted_reminder,
-    format_system_reminder,
+    format_plain_system_reminder,
 )
 from azents.engine.events.types import (
     AgentMessagePayload,
@@ -80,6 +80,8 @@ from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import BuiltinToolSpec
 
 _DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
+_PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS = {LLMProvider.XAI_OAUTH}
+_PROVIDER_NAMES_WITH_INPUT_MESSAGE_INSTRUCTIONS = {"xai", "xai_oauth"}
 _PROMPT_CACHE_KEY_PREFIX = "azs"
 _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
 _REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
@@ -100,13 +102,23 @@ def _format_goal_updated_event_reminder(payload: UserMessagePayload) -> str:
 
 def _format_agent_message(payload: AgentMessagePayload) -> str:
     """Render agent_message as an explicitly sourced model-visible task."""
-    kind_label = payload.message_kind.replace("_", " ")
+    message_type = _agent_message_type(payload.message_kind)
     return "\n".join(
         [
-            f"Message from agent {payload.source_path} ({kind_label}):",
+            f"Message Type: {message_type}",
+            f"Task name: {payload.target_path}",
+            f"Sender: {payload.source_path}",
+            "Payload:",
             payload.content,
         ]
     )
+
+
+def _agent_message_type(message_kind: str) -> str:
+    """Return the model-visible agent mailbox message type."""
+    if message_kind in {"spawn_agent", "followup_task"}:
+        return "NEW_TASK"
+    return "MESSAGE"
 
 
 def _format_skill_loaded_event(payload: SkillLoadedPayload) -> str:
@@ -163,6 +175,18 @@ class _StreamingLoggingObject(Protocol):
 
 class UnsupportedRequiredBuiltinToolError(ValueError):
     """Raised when adapter does not support required builtin tool."""
+
+
+def _uses_input_message_instructions(
+    *,
+    provider: str,
+    provider_id: LLMProvider | None,
+) -> bool:
+    """Return whether system instructions belong in the Responses input."""
+    return (
+        provider_id in _PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS
+        or provider in _PROVIDER_NAMES_WITH_INPUT_MESSAGE_INSTRUCTIONS
+    )
 
 
 class LiteLLMResponsesLowerer:
@@ -233,7 +257,15 @@ class LiteLLMResponsesLowerer:
         input_items: list[dict[str, object]] = []
         kwargs = self._lower_model_kwargs()
         default_instructions = kwargs.get("instructions") or _DEFAULT_INSTRUCTIONS
-        kwargs["instructions"] = system_prompt or str(default_instructions)
+        instructions = system_prompt or str(default_instructions)
+        if _uses_input_message_instructions(
+            provider=self.provider,
+            provider_id=self._provider_id,
+        ):
+            kwargs.pop("instructions", None)
+            input_items.append({"role": "system", "content": instructions})
+        else:
+            kwargs["instructions"] = instructions
 
         for event in transcript:
             native_item = self._compatible_native_item(event)
@@ -282,6 +314,12 @@ class LiteLLMResponsesLowerer:
             base_url = kwargs.get("base_url") or kwargs.get("api_base")
             if base_url is None and self._provider_id == LLMProvider.OPENAI:
                 base_url = os.environ.get("AZ_OPENAI_BASE_URL")
+            if base_url is not None:
+                kwargs.setdefault("base_url", base_url)
+                kwargs.setdefault("api_base", base_url)
+        if self._provider_id == LLMProvider.XAI_OAUTH:
+            kwargs.setdefault("custom_llm_provider", "xai")
+            base_url = kwargs.get("base_url") or kwargs.get("api_base")
             if base_url is not None:
                 kwargs.setdefault("base_url", base_url)
                 kwargs.setdefault("api_base", base_url)
@@ -406,11 +444,7 @@ class LiteLLMResponsesLowerer:
             case SystemReminderPayload(text=text):
                 return {
                     "role": "user",
-                    "content": format_system_reminder(
-                        reminder_type="system_reminder",
-                        instruction=text,
-                        data=(),
-                    ),
+                    "content": format_plain_system_reminder(text),
                 }
             case RunMarkerPayload():
                 return None
@@ -496,6 +530,7 @@ def _uses_anthropic_cache_control(
     if provider_id in {
         LLMProvider.OPENAI,
         LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.XAI_OAUTH,
         LLMProvider.GOOGLE_GEMINI,
     }:
         return False
@@ -596,7 +631,7 @@ def _lower_hosted_tools(
             raise UnsupportedRequiredBuiltinToolError(msg)
         config = dict(tool.config)
         match target:
-            case "openai":
+            case "openai" | "xai":
                 native_tools.append({"type": "web_search", **config})
             case "google":
                 native_tools.append({"google_search": config})
@@ -623,12 +658,16 @@ def _hosted_tool_target(
     """Choose hosted tool lowering target from provider/model developer pair."""
     if provider_id in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         return "openai"
+    if provider_id == LLMProvider.XAI_OAUTH:
+        return "xai"
     if model_developer == LLMModelDeveloper.GOOGLE:
         return "google"
     if model_developer == LLMModelDeveloper.ANTHROPIC:
         return "anthropic"
     if provider in {"openai", "chatgpt_oauth"}:
         return "openai"
+    if provider == "xai_oauth":
+        return "xai"
     if provider in {"google_gemini", "google_vertex_ai"}:
         return "google"
     if provider == "anthropic":

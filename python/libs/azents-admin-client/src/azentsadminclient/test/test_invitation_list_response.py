@@ -37,13 +37,13 @@ class TestInvitationListResponse(unittest.TestCase):
             return InvitationListResponse(
                 items = [
                     azentsadminclient.models.invitation_response.InvitationResponse(
-                        id = '',
-                        workspace_id = '',
-                        email = '',
-                        role = 'owner',
-                        invited_by = '',
-                        status = 'pending',
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        workspace_id = '', 
+                        email = '', 
+                        role = 'owner', 
+                        invited_by = '', 
+                        status = 'pending', 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
             )
@@ -51,13 +51,13 @@ class TestInvitationListResponse(unittest.TestCase):
             return InvitationListResponse(
                 items = [
                     azentsadminclient.models.invitation_response.InvitationResponse(
-                        id = '',
-                        workspace_id = '',
-                        email = '',
-                        role = 'owner',
-                        invited_by = '',
-                        status = 'pending',
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        workspace_id = '', 
+                        email = '', 
+                        role = 'owner', 
+                        invited_by = '', 
+                        status = 'pending', 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
         )

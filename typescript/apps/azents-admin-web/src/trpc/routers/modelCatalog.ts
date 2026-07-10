@@ -5,6 +5,7 @@ import type { Client } from "@azents/admin-client";
 const systemCatalogProviderSchema = z.enum([
   "openai",
   "chatgpt_oauth",
+  "xai_oauth",
   "anthropic",
   "google_gemini",
 ]);

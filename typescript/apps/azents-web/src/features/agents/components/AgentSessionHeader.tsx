@@ -23,10 +23,10 @@ import {
 import {
   IconChartBar,
   IconFolderOpen,
-  IconGitBranch,
   IconMenu2,
   IconMessageCircle,
   IconPencil,
+  IconRobot,
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
@@ -368,10 +368,7 @@ export function AgentSessionHeader({
             <Tabs.Tab value="context" leftSection={<IconChartBar size={14} />}>
               {t("tabs.context")}
             </Tabs.Tab>
-            <Tabs.Tab
-              value="subagents"
-              leftSection={<IconGitBranch size={14} />}
-            >
+            <Tabs.Tab value="subagents" leftSection={<IconRobot size={14} />}>
               {t("subagents.title")}
             </Tabs.Tab>
           </Tabs.List>

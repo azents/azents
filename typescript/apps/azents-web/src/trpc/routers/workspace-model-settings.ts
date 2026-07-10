@@ -15,6 +15,14 @@ const agentModelSelectionInputSchema = z
   })
   .nullable();
 
+const selectableModelOptionInputSchema = z.object({
+  label: z.string().min(1),
+  model_selection: z.object({
+    llm_provider_integration_id: z.string().min(1),
+    model_identifier: z.string().min(1),
+  }),
+});
+
 export const workspaceModelSettingsRouter = router({
   get: publicProcedure
     .input(z.object({ handle: z.string().min(1) }))
@@ -43,6 +51,11 @@ export const workspaceModelSettingsRouter = router({
         default_model_selection: agentModelSelectionInputSchema.optional(),
         default_lightweight_model_selection:
           agentModelSelectionInputSchema.optional(),
+        default_selectable_model_options: z
+          .array(selectableModelOptionInputSchema)
+          .optional(),
+        default_main_model_label: z.string().nullable().optional(),
+        default_lightweight_model_label: z.string().nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -55,6 +68,11 @@ export const workspaceModelSettingsRouter = router({
               default_model_selection: input.default_model_selection,
               default_lightweight_model_selection:
                 input.default_lightweight_model_selection,
+              default_selectable_model_options:
+                input.default_selectable_model_options,
+              default_main_model_label: input.default_main_model_label,
+              default_lightweight_model_label:
+                input.default_lightweight_model_label,
             },
             throwOnError: true,
           });

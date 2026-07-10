@@ -31,7 +31,7 @@ from azents.engine.events.system_reminders import (
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
     format_interrupted_reminder,
-    format_system_reminder,
+    format_plain_system_reminder,
 )
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -922,11 +922,7 @@ def _model_visible_event_value(event: Event) -> object | None:
     if isinstance(payload, SystemReminderPayload):
         return {
             "role": "user",
-            "content": format_system_reminder(
-                reminder_type="system_reminder",
-                instruction=payload.text,
-                data=(),
-            ),
+            "content": format_plain_system_reminder(payload.text),
         }
     return None
 
@@ -1008,11 +1004,7 @@ def _model_visible_event_text(
     if isinstance(payload, SystemReminderPayload):
         return _format_continuity_block(
             "User",
-            format_system_reminder(
-                reminder_type="system_reminder",
-                instruction=payload.text,
-                data=(),
-            ),
+            format_plain_system_reminder(payload.text),
             include_label=include_label,
         )
     return None

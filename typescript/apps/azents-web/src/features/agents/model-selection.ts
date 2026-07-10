@@ -3,13 +3,27 @@ import type {
   AgentModelSelectionInput,
   LlmProviderIntegrationResponse,
   ModelCapabilities,
+  SelectableModelOption,
+  SelectableModelOptionInput,
 } from "@azents/public-client";
+
+export const MAX_SELECTABLE_MODEL_OPTIONS = 10;
 
 export interface SelectableModelCandidate {
   provider: string;
   model_identifier: string;
   model_display_name: string;
   normalized_capabilities: ModelCapabilities;
+}
+
+export interface SelectableModelOptionFormValue {
+  id: string;
+  label: string;
+  model_provider_integration_id: string | null;
+  model_selection_value: string | null;
+  model_display_name: string | null;
+  model_identifier: string | null;
+  normalized_capabilities: ModelCapabilities | null;
 }
 
 export interface ModelCatalogAttemptState {
@@ -135,4 +149,105 @@ export function findModelSelectionOption(
     return null;
   }
   return options.find((option) => option.value === value) ?? null;
+}
+
+export function selectableModelOptionFormValueFromStoredOption(
+  option: SelectableModelOption,
+  index: number,
+): SelectableModelOptionFormValue {
+  return {
+    id: `stored-${index}-${option.label}`,
+    label: option.label,
+    model_provider_integration_id:
+      option.model_selection.llm_provider_integration_id,
+    model_selection_value: modelSelectionValue(option.model_selection),
+    model_display_name: option.model_selection.model_display_name,
+    model_identifier: option.model_selection.model_identifier,
+    normalized_capabilities: option.model_selection.normalized_capabilities,
+  };
+}
+
+export function selectableModelOptionFormValuesFromStoredOptions(
+  options: SelectableModelOption[],
+): SelectableModelOptionFormValue[] {
+  return options.map((option, index) =>
+    selectableModelOptionFormValueFromStoredOption(option, index),
+  );
+}
+
+export function selectableModelOptionInputsFromFormValues(
+  options: SelectableModelOptionFormValue[],
+): SelectableModelOptionInput[] {
+  return options.flatMap((option) => {
+    const modelSelection = parseModelSelectionValue(
+      option.model_selection_value,
+    );
+    const label = option.label.trim();
+    if (modelSelection == null || label.length === 0) {
+      return [];
+    }
+    return [{ label, model_selection: modelSelection }];
+  });
+}
+
+export function fallbackSelectableModelLabel(
+  label: string | null,
+  options: SelectableModelOptionFormValue[],
+): string | null {
+  const firstLabel = options[0]?.label.trim() ?? null;
+  if (firstLabel == null || firstLabel.length === 0) {
+    return null;
+  }
+  if (label == null) {
+    return firstLabel;
+  }
+  const trimmed = label.trim();
+  if (options.some((option) => option.label.trim() === trimmed)) {
+    return trimmed;
+  }
+  return firstLabel;
+}
+
+export function findSelectableModelOptionByLabel(
+  options: SelectableModelOptionFormValue[],
+  label: string | null,
+): SelectableModelOptionFormValue | null {
+  const effectiveLabel = fallbackSelectableModelLabel(label, options);
+  if (effectiveLabel == null) {
+    return null;
+  }
+  return (
+    options.find((option) => option.label.trim() === effectiveLabel) ?? null
+  );
+}
+
+export function selectableModelLabelSelectData(
+  options: SelectableModelOptionFormValue[],
+): Array<{ value: string; label: string }> {
+  return options.flatMap((option) => {
+    const label = option.label.trim();
+    if (label.length === 0) {
+      return [];
+    }
+    return [{ value: label, label }];
+  });
+}
+
+export function nextSelectableModelOptionLabel(
+  options: SelectableModelOptionFormValue[],
+): string {
+  const usedLabels = new Set(options.map((option) => option.label.trim()));
+  const preferred = ["default", "lightweight"];
+  for (const label of preferred) {
+    if (!usedLabels.has(label)) {
+      return label;
+    }
+  }
+  for (let index = 1; index <= MAX_SELECTABLE_MODEL_OPTIONS; index += 1) {
+    const label = `option-${index}`;
+    if (!usedLabels.has(label)) {
+      return label;
+    }
+  }
+  return "option";
 }

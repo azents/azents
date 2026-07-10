@@ -74,6 +74,10 @@ def responses_endpoint_kwargs(
         if provider == LLMProvider.CHATGPT_OAUTH:
             store = False if store is None else store
             include = [_REASONING_ENCRYPTED_CONTENT_INCLUDE]
+    if provider == LLMProvider.XAI_OAUTH:
+        custom_llm_provider = custom_llm_provider or "xai"
+        base_url = base_url or api_base
+        api_base = api_base or base_url
 
     return ResponsesEndpointKwargs(
         api_key=api_key,

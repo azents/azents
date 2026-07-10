@@ -6,16 +6,16 @@ Signup token metadata response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Signup token ID |
-**email** | **str** | Email fixed to token |
-**created_by_user_id** | **str** |  |
-**delivery_method** | [**SignupTokenDeliveryMethod**](SignupTokenDeliveryMethod.md) | Token delivery method |
-**expires_at** | **datetime** | Expiration time |
-**max_uses** | **int** | Maximum use count |
-**used_count** | **int** | Use count |
-**revoked_at** | **datetime** |  |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | Signup token ID | 
+**email** | **str** | Email fixed to token | 
+**created_by_user_id** | **str** |  | 
+**delivery_method** | [**SignupTokenDeliveryMethod**](SignupTokenDeliveryMethod.md) | Token delivery method | 
+**expires_at** | **datetime** | Expiration time | 
+**max_uses** | **int** | Maximum use count | 
+**used_count** | **int** | Use count | 
+**revoked_at** | **datetime** |  | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 
@@ -35,3 +35,5 @@ signup_token_response_dict = signup_token_response_instance.to_dict()
 signup_token_response_from_dict = SignupTokenResponse.from_dict(signup_token_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

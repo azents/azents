@@ -21,13 +21,14 @@ def _full_memory_rules_prompt() -> str:
     return """### Memory Rules
 
 Use list_memories, get_memory, and search_memories.
+Do not pass the full user sentence.
+Types of memory
+Scope selection
 
 ### Memory Write Rules
 
-Types of memory
 What NOT to save
 Use save_memory and delete_memory.
-Scope selection
 """
 
 
@@ -191,6 +192,7 @@ class TestCollectMemoryPrompt:
             "save_memory",
             "delete_memory",
             "Scope selection",
+            "Do not pass the full user sentence",
         ],
         ids=[
             "memory-types",
@@ -198,6 +200,7 @@ class TestCollectMemoryPrompt:
             "save-tool",
             "delete-tool",
             "scope-selection",
+            "keyword-search-guidance",
         ],
     )
     async def test_rules_contain_key_instructions(self, expected: str) -> None:

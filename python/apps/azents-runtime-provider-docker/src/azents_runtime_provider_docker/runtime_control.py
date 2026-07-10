@@ -96,6 +96,7 @@ def _command(command: ControlRuntimeLifecycleCommand) -> RuntimeLifecycleCommand
         auth=RuntimeContainerAuth(
             control_endpoint=command.auth.control_endpoint,
             runner_auth_token=command.auth.runner_auth_token,
+            control_token=command.auth.control_token,
         ),
         reset_final_desired_state=_desired_state(command.reset_final_desired_state),
     )

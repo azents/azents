@@ -11,6 +11,9 @@ from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
     ModelParameters,
+    SelectableModelOption,
+    SelectableModelOptionInput,
+    SubagentSettings,
 )
 from azents.core.enums import AgentType
 from azents.repos.agent.data import Agent
@@ -26,6 +29,9 @@ class AgentOutput(BaseModel):
     description: str | None
     model_selection: AgentModelSelection | None
     lightweight_model_selection: AgentModelSelection | None
+    selectable_model_options: list[SelectableModelOption]
+    main_model_label: str
+    lightweight_model_label: str
     effective_context_window_tokens: int | None
     effective_auto_compaction_threshold_tokens: int | None
     model_parameters: ModelParameters | None
@@ -36,6 +42,7 @@ class AgentOutput(BaseModel):
     shell_enabled: bool
     memory_enabled: bool
     max_turns: int | None
+    subagent_settings: SubagentSettings
     avatar: UploadedImage | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -57,6 +64,9 @@ class AgentOutput(BaseModel):
             description=data.description,
             model_selection=data.model_selection,
             lightweight_model_selection=data.lightweight_model_selection,
+            selectable_model_options=data.selectable_model_options,
+            main_model_label=data.main_model_label,
+            lightweight_model_label=data.lightweight_model_label,
             effective_context_window_tokens=effective_context_window_tokens,
             effective_auto_compaction_threshold_tokens=(
                 effective_auto_compaction_threshold_tokens
@@ -69,6 +79,7 @@ class AgentOutput(BaseModel):
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
             max_turns=data.max_turns,
+            subagent_settings=data.subagent_settings,
             avatar=avatar,
             created_at=data.created_at,
             updated_at=data.updated_at,
@@ -97,6 +108,15 @@ class AgentCreateInput(BaseModel):
         default=None,
         description="Lightweight model selection input. Copy default/main when None",
     )
+    selectable_model_options: list[SelectableModelOptionInput] | None = Field(
+        default=None, description="Ordered selectable model option inputs"
+    )
+    main_model_label: str | None = Field(
+        default=None, description="Selected main model option label"
+    )
+    lightweight_model_label: str | None = Field(
+        default=None, description="Selected lightweight model option label"
+    )
     description: str | None = Field(default=None, description="Agent description")
     model_parameters: ModelParameters | None = Field(
         default=None, description="Model parameters"
@@ -110,6 +130,9 @@ class AgentCreateInput(BaseModel):
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
+    subagent_settings: SubagentSettings = Field(
+        default_factory=SubagentSettings, description="Subagent execution settings"
+    )
 
 
 class AgentUpdateInput(TypedDict, total=False):
@@ -131,6 +154,16 @@ class AgentUpdateInput(TypedDict, total=False):
             )
         ),
     ]
+    selectable_model_options: Annotated[
+        list[SelectableModelOptionInput] | None,
+        Field(description="Ordered selectable model option inputs"),
+    ]
+    main_model_label: Annotated[
+        str | None, Field(description="Selected main model option label")
+    ]
+    lightweight_model_label: Annotated[
+        str | None, Field(description="Selected lightweight model option label")
+    ]
     model_parameters: Annotated[
         ModelParameters | None, Field(description="Model parameters")
     ]
@@ -143,6 +176,9 @@ class AgentUpdateInput(TypedDict, total=False):
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
     max_turns: Annotated[int | None, Field(description="Maximum agent turn count")]
+    subagent_settings: Annotated[
+        SubagentSettings, Field(description="Subagent execution settings")
+    ]
 
 
 class AgentListOutput(BaseModel):
@@ -186,6 +222,13 @@ class ModelSelectionNotFound:
 
     llm_provider_integration_id: str
     model_identifier: str
+
+
+@dataclasses.dataclass(frozen=True)
+class InvalidSelectableModelOptions:
+    """Selectable model option payload is invalid."""
+
+    errors: list[str]
 
 
 @dataclasses.dataclass(frozen=True)

@@ -130,7 +130,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **level** | [**ErrorLevel**](.md)| Log level (warning, error, critical) | [optional]
+ **level** | [**ErrorLevel**](.md)| Log level (warning, error, critical) | [optional] 
  **message** | **str**| Log message | [optional] [default to &#39;Debug test log from admin API&#39;]
 
 ### Return type
@@ -154,3 +154,4 @@ No authorization required
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

@@ -6,11 +6,11 @@ First owner bootstrap request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Owner email |
-**password** | **str** | Owner initial password |
-**owner_name** | **str** | Owner display name |
-**workspace_name** | **str** | Workspace name |
-**workspace_handle** | **str** | Workspace handle |
+**email** | **str** | Owner email | 
+**password** | **str** | Owner initial password | 
+**owner_name** | **str** | Owner display name | 
+**workspace_name** | **str** | Workspace name | 
+**workspace_handle** | **str** | Workspace handle | 
 **locale** | **str** | Locale (BCP 47) | [optional] [default to 'ko-KR']
 
 ## Example
@@ -31,3 +31,5 @@ bootstrap_first_owner_request_dict = bootstrap_first_owner_request_instance.to_d
 bootstrap_first_owner_request_from_dict = BootstrapFirstOwnerRequest.from_dict(bootstrap_first_owner_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

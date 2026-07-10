@@ -23,6 +23,7 @@ import type { SystemCatalogProvider, SystemCatalogStatus } from "../types";
 const PROVIDER_LABELS: Record<SystemCatalogProvider, string> = {
   openai: "OpenAI",
   chatgpt_oauth: "ChatGPT OAuth",
+  xai_oauth: "xAI Grok OAuth",
   anthropic: "Anthropic",
   google_gemini: "Google Gemini",
 };
@@ -33,6 +34,8 @@ function formatProvider(provider: string): string {
       return PROVIDER_LABELS.openai;
     case "chatgpt_oauth":
       return PROVIDER_LABELS.chatgpt_oauth;
+    case "xai_oauth":
+      return PROVIDER_LABELS.xai_oauth;
     case "anthropic":
       return PROVIDER_LABELS.anthropic;
     case "google_gemini":

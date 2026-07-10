@@ -29,6 +29,61 @@
   }
 }
 
+.thinkingHeader {
+  width: fit-content;
+  max-width: min(80vw, rem(312px));
+  min-width: 0;
+  user-select: none;
+}
+
+.thinkingHeaderContent {
+  width: 100%;
+  min-width: 0;
+}
+
+.thinkingChevron {
+  flex-shrink: 0;
+  transition: transform 200ms ease;
+}
+
+.thinkingChevron[data-opened="true"] {
+  transform: rotate(90deg);
+}
+
+.thinkingIcon {
+  flex-shrink: 0;
+  color: var(--mantine-color-dimmed);
+}
+
+.thinkingLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: thinking-label-fade 140ms ease;
+}
+
+@keyframes thinking-label-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinkingChevron {
+    transition: none;
+  }
+
+  .thinkingLabel {
+    animation: none;
+  }
+}
+
 .actionRow {
   min-height: rem(28px);
 }

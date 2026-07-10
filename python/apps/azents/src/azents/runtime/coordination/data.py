@@ -77,6 +77,9 @@ class RuntimeRequestEnvelope:
     reply_stream_id: str
     deadline_at: datetime | None
     body_stream_id: str | None
+    cursor: str | None = None
+    stream_id: str | None = None
+    consumer_group: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
