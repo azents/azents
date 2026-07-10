@@ -192,6 +192,91 @@ class TestCreateIntegration:
         assert exc_info.value.status == 422  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
 
 
+class TestXaiApiKeyIntegrationLifecycle:
+    """Stable xAI API-key integration lifecycle."""
+
+    def test_xai_api_key_crud_is_separate_and_secret_safe(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+    ) -> None:
+        """Discover, create, update, and delete xAI without calling xAI."""
+        access_token, handle = _setup_workspace(public_api_client, admin_api_client)
+        api = LLMProviderIntegrationV1Api(public_api_client)
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        capabilities = api.llm_provider_integration_v1_list_integration_providers(
+            handle=handle,
+            _headers=headers,
+        )
+        xai = next(
+            item for item in capabilities.items if item.provider == LLMProvider.XAI
+        )
+        xai_oauth = next(
+            item
+            for item in capabilities.items
+            if item.provider == LLMProvider.XAI_OAUTH
+        )
+        assert xai.credential_type == "api_key"
+        assert xai.experimental is False
+        assert xai_oauth.credential_type == "xai_oauth"
+        assert xai_oauth.experimental is True
+
+        created = api.llm_provider_integration_v1_create_integration(
+            handle=handle,
+            llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+                provider=LLMProvider.XAI,
+                name="Test xAI API key",
+                secrets=Secrets(ApiKeySecrets(api_key="test-xai-key")),
+            ),
+            _headers=headers,
+        )
+        assert created.provider == LLMProvider.XAI
+        assert created.config is None
+        assert "secrets" not in created.to_dict()
+
+        listed = api.llm_provider_integration_v1_list_integrations(
+            handle=handle,
+            _headers=headers,
+        )
+        assert [item.id for item in listed.items] == [created.id]
+        assert "secrets" not in listed.items[0].to_dict()
+
+        fetched = api.llm_provider_integration_v1_get_integration(
+            integration_id=created.id,
+            handle=handle,
+            _headers=headers,
+        )
+        assert fetched.id == created.id
+        assert "secrets" not in fetched.to_dict()
+
+        updated = api.llm_provider_integration_v1_update_integration(
+            integration_id=created.id,
+            handle=handle,
+            llm_provider_integration_update_request=LLMProviderIntegrationUpdateRequest(
+                name="Updated xAI API key",
+                enabled=False,
+            ),
+            _headers=headers,
+        )
+        assert updated.name == "Updated xAI API key"
+        assert updated.enabled is False
+        assert "secrets" not in updated.to_dict()
+
+        api.llm_provider_integration_v1_delete_integration(
+            integration_id=created.id,
+            handle=handle,
+            _headers=headers,
+        )
+        with pytest.raises(ApiException) as exc_info:
+            api.llm_provider_integration_v1_get_integration(
+                integration_id=created.id,
+                handle=handle,
+                _headers=headers,
+            )
+        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType]
+
+
 class TestListIntegrations:
     """LLM Provider Integration list fetch test."""
 
