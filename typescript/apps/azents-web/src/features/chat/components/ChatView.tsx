@@ -20,7 +20,6 @@ import {
   Center,
   Group,
   Loader,
-  Paper,
   rem,
   ScrollArea,
   Stack,
@@ -1294,46 +1293,54 @@ export function ChatView({
           {/* input area */}
           <Box px="md" py="sm">
             <Box maw={rem(920)} mx="auto">
-              {readOnlyNotice === null ? (
-                <ChatInput
-                  agentId={activeAgent?.id ?? null}
-                  sessionId={sessionId}
-                  isMobile={isMobile}
-                  isUploading={isUploading || isWritePending}
-                  pendingFiles={pendingFiles}
-                  goal={editingMessage === null ? goal : null}
-                  todo={editingMessage === null ? todo : null}
-                  onClearGoal={onClearGoal}
-                  onUpdateGoal={onUpdateGoal}
-                  onPauseGoal={onPauseGoal}
-                  onResumeGoal={onResumeGoal}
-                  uploadAll={uploadAll}
-                  onSendInput={handleSubmitInput}
-                  clearFiles={clearFiles}
-                  resetDoneFiles={resetDoneFiles}
-                  addFiles={addFiles}
-                  removeFile={removeFile}
-                  onAfterSend={handleAfterSend}
-                  onFocus={handleInputFocus}
-                  wasCommandBlocked={wasCommandBlocked}
-                  isStopAvailable={isStopAvailable}
-                  isStopPending={isStopPending}
-                  onStopRequest={onStopRequest}
-                  inputActions={inputActions}
-                  editingMessageId={editingMessage?.messageId ?? null}
-                  editingInitialValue={editingMessage?.content ?? null}
-                  onCancelEdit={handleCancelEdit}
-                  editSendDisabled={
-                    editingMessage !== null && isResponsePending
-                  }
-                />
-              ) : (
-                <Paper withBorder radius="md" px="sm" py="xs">
-                  <Text size="sm" c="dimmed" ta="center">
-                    {readOnlyNotice}
-                  </Text>
-                </Paper>
-              )}
+              <ChatInput
+                agentId={activeAgent?.id ?? null}
+                sessionId={sessionId}
+                isMobile={isMobile}
+                isUploading={isUploading || isWritePending}
+                pendingFiles={readOnlyNotice === null ? pendingFiles : []}
+                goal={
+                  readOnlyNotice === null && editingMessage === null
+                    ? goal
+                    : null
+                }
+                todo={
+                  readOnlyNotice === null && editingMessage === null
+                    ? todo
+                    : null
+                }
+                onClearGoal={onClearGoal}
+                onUpdateGoal={onUpdateGoal}
+                onPauseGoal={onPauseGoal}
+                onResumeGoal={onResumeGoal}
+                uploadAll={uploadAll}
+                onSendInput={handleSubmitInput}
+                clearFiles={clearFiles}
+                resetDoneFiles={resetDoneFiles}
+                addFiles={addFiles}
+                removeFile={removeFile}
+                onAfterSend={handleAfterSend}
+                onFocus={handleInputFocus}
+                wasCommandBlocked={readOnlyNotice === null && wasCommandBlocked}
+                isStopAvailable={isStopAvailable}
+                isStopPending={isStopPending}
+                onStopRequest={onStopRequest}
+                inputActions={readOnlyNotice === null ? inputActions : []}
+                editingMessageId={
+                  readOnlyNotice === null
+                    ? (editingMessage?.messageId ?? null)
+                    : null
+                }
+                editingInitialValue={
+                  readOnlyNotice === null
+                    ? (editingMessage?.content ?? null)
+                    : null
+                }
+                onCancelEdit={handleCancelEdit}
+                editSendDisabled={editingMessage !== null && isResponsePending}
+                inputDisabled={readOnlyNotice !== null}
+                disabledPlaceholder={readOnlyNotice}
+              />
             </Box>
           </Box>
         </Box>

@@ -21,14 +21,27 @@ from azents.runtime.coordination.data import (
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class InMemoryRequestPending:
+    """In-memory pending request claim metadata."""
+
+    consumer_id: str
+    claimed_at: datetime
+
+
 class InMemoryRuntimeCoordinationStore:
     """Process-local coordination store for standalone deployments and tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, request_reclaim_idle_seconds: float = 30.0) -> None:
         """Initialize the in-memory store."""
         self._lock = asyncio.Lock()
+        self._request_reclaim_idle_seconds = request_reclaim_idle_seconds
         self._request_streams: dict[str, list[RuntimeRequestRecord]] = {}
         self._request_group_offsets: dict[tuple[str, str], int] = {}
+        self._request_pending: dict[
+            tuple[str, str], dict[str, InMemoryRequestPending]
+        ] = {}
+        self._request_acked: set[tuple[str, str, str]] = set()
         self._reply_streams: dict[str, list[RuntimeReplyRecord]] = {}
         self._body_streams: dict[str, list[RuntimeBodyChunkRecord]] = {}
         self._operation_metadata: dict[str, RuntimeOperationMetadata] = {}
@@ -57,17 +70,47 @@ class InMemoryRuntimeCoordinationStore:
         consumer_group: str,
         consumer_id: str,
         block_ms: int,
+        reclaim_idle_seconds: float | None = None,
     ) -> RuntimeRequestRecord | None:
         """Claim the next request for an active owner consumer."""
-        del consumer_id, block_ms
+        del block_ms
         async with self._lock:
             stream = self._request_streams.get(stream_id, [])
+            pending_key = (stream_id, consumer_group)
+            pending = self._request_pending.setdefault(pending_key, {})
+            now = datetime.now(timezone.utc)
+            reclaim_after = (
+                self._request_reclaim_idle_seconds
+                if reclaim_idle_seconds is None
+                else reclaim_idle_seconds
+            )
+            for record in stream:
+                claim = pending.get(record.cursor)
+                if claim is None:
+                    continue
+                if now - claim.claimed_at < timedelta(seconds=reclaim_after):
+                    continue
+                pending[record.cursor] = InMemoryRequestPending(
+                    consumer_id=consumer_id,
+                    claimed_at=now,
+                )
+                return record
             offset_key = (stream_id, consumer_group)
             offset = self._request_group_offsets.get(offset_key, 0)
-            if offset >= len(stream):
-                return None
-            self._request_group_offsets[offset_key] = offset + 1
-            return stream[offset]
+            while offset < len(stream):
+                record = stream[offset]
+                offset += 1
+                ack_key = (stream_id, consumer_group, record.cursor)
+                if ack_key in self._request_acked:
+                    continue
+                pending[record.cursor] = InMemoryRequestPending(
+                    consumer_id=consumer_id,
+                    claimed_at=now,
+                )
+                self._request_group_offsets[offset_key] = offset
+                return record
+            self._request_group_offsets[offset_key] = offset
+            return None
 
     async def ack_request(
         self,
@@ -77,7 +120,12 @@ class InMemoryRuntimeCoordinationStore:
         cursor: str,
     ) -> None:
         """Acknowledge a claimed request."""
-        del stream_id, consumer_group, cursor
+        async with self._lock:
+            self._request_pending.setdefault((stream_id, consumer_group), {}).pop(
+                cursor,
+                None,
+            )
+            self._request_acked.add((stream_id, consumer_group, cursor))
 
     async def append_reply(
         self,

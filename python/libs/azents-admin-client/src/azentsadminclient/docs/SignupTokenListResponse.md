@@ -6,8 +6,8 @@ Signup token list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SignupTokenResponse]**](SignupTokenResponse.md) | Signup token list |
-**total** | **int** | Total record count |
+**items** | [**List[SignupTokenResponse]**](SignupTokenResponse.md) | Signup token list | 
+**total** | **int** | Total record count | 
 
 ## Example
 
@@ -27,3 +27,5 @@ signup_token_list_response_dict = signup_token_list_response_instance.to_dict()
 signup_token_list_response_from_dict = SignupTokenListResponse.from_dict(signup_token_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

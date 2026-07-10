@@ -43,6 +43,8 @@ from azents.engine.tools import builtin as builtin_module
 from azents.engine.tools.builtin import (
     BuiltinToolkit,
     BuiltinToolkitProvider,
+    MemoryReadToolkit,
+    MemoryWriteToolkit,
     RuntimeToolkit,
 )
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
@@ -995,7 +997,9 @@ class TestBuiltinToolkitMemoryPrompt:
         await toolkit.update_context(ctx)
         assert (await toolkit.get_static_prompt(_make_context())) == ""
         assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
-        assert "Memory Rules" in (await toolkit.get_dynamic_prompt(ctx))
+        dynamic_prompt = await toolkit.get_dynamic_prompt(ctx)
+        assert "Memory Rules" in dynamic_prompt
+        assert "case-insensitive AND matching" in dynamic_prompt
 
     @pytest.mark.asyncio
     async def test_memory_disabled_excludes_memory(self) -> None:
@@ -1006,6 +1010,36 @@ class TestBuiltinToolkitMemoryPrompt:
         await toolkit.update_context(ctx)
         assert "Memories" not in (await toolkit.get_static_prompt(_make_context()))
         assert (await toolkit.get_dynamic_prompt(ctx)) == ""
+
+    @pytest.mark.asyncio
+    async def test_memory_write_prompt_reuses_read_shared_rules(self) -> None:
+        """Read prompt owns shared memory rules because write is never bound alone."""
+        config = ShellToolkitConfig(memory_enabled=True)
+        session_manager = _make_mock_session_manager()
+        memory_repo = _make_mock_memory_repo()
+        read_toolkit = MemoryReadToolkit(
+            config=config,
+            agent_id="agent-1",
+            session_manager=session_manager,
+            memory_repo=memory_repo,
+        )
+        write_toolkit = MemoryWriteToolkit(
+            config=config,
+            agent_id="agent-1",
+            session_manager=session_manager,
+            memory_repo=memory_repo,
+        )
+        ctx = _make_context()
+
+        read_prompt = await read_toolkit.get_dynamic_prompt(ctx)
+        write_prompt = await write_toolkit.get_dynamic_prompt(ctx)
+
+        assert "Types of memory" in read_prompt
+        assert "Scope selection" in read_prompt
+        assert "Types of memory" not in write_prompt
+        assert "Scope selection" not in write_prompt
+        assert "What NOT to save" in write_prompt
+        assert "Duplicate prevention" in write_prompt
 
     @pytest.mark.asyncio
     async def test_memory_index_included(self) -> None:

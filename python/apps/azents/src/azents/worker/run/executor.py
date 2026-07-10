@@ -624,10 +624,9 @@ class RunExecutor:
             AgentRunPhase.COMPACTING if command is not None else None
         )
         current_retry_state: FailedRunRetryState | None = None
+        live_retry_state: FailedRunRetryState | None = None
 
-        async def publish_live_run(
-            retry_state: FailedRunRetryState | None = None,
-        ) -> None:
+        async def publish_live_run() -> None:
             """Publish the current live run snapshot to WebSocket clients."""
             await self.live_event_projector.publish_live_run_updated(
                 message.session_id,
@@ -635,9 +634,22 @@ class RunExecutor:
                     run_id=run_id,
                     phase=active_phase or AgentRunPhase.IDLE,
                     status=AgentRunStatus.RUNNING,
-                    retry=_chat_live_retry_state(retry_state),
+                    retry=_chat_live_retry_state(live_retry_state),
                 ),
             )
+
+        async def clear_live_retry_state() -> None:
+            """Clear retry projection once the next run attempt starts."""
+            nonlocal live_retry_state
+            if live_retry_state is None:
+                return
+            live_retry_state = None
+            await self.session_lifecycle.update_agent_run_retry_state(
+                message.session_id,
+                run_id=run_id,
+                retry_state=None,
+            )
+            await publish_live_run()
 
         async def refresh_session_activity() -> None:
             """Publish the current run phase and active tool calls to the broker."""
@@ -647,7 +659,7 @@ class RunExecutor:
                 phase=active_phase,
                 active_tool_calls=active_tool_calls,
             )
-            await publish_live_run(current_retry_state)
+            await publish_live_run()
 
         await refresh_session_activity()
         await dispatch_event(
@@ -764,7 +776,8 @@ class RunExecutor:
                         previous_retry_state=current_retry_state,
                     )
                     current_retry_state = retry_state
-                    await publish_live_run(retry_state)
+                    live_retry_state = retry_state
+                    await publish_live_run()
                     finalization_reason = _failed_run_finalization_reason(retry_state)
                     if finalization_reason is not None:
                         run_end_reason = "error"
@@ -802,6 +815,7 @@ class RunExecutor:
                         )
                         run_completed = True
                         break
+                    await clear_live_retry_state()
                     attempt_number += 1
                 except Exception as exc:
                     retry_state = await self._record_failed_run_attempt(
@@ -821,7 +835,8 @@ class RunExecutor:
                         previous_retry_state=current_retry_state,
                     )
                     current_retry_state = retry_state
-                    await publish_live_run(retry_state)
+                    live_retry_state = retry_state
+                    await publish_live_run()
                     logger.exception(
                         "Internal error during engine run attempt",
                         extra={
@@ -868,6 +883,7 @@ class RunExecutor:
                         )
                         run_completed = True
                         break
+                    await clear_live_retry_state()
                     attempt_number += 1
         except asyncio.CancelledError as exc:
             run_end_reason = "cancelled"

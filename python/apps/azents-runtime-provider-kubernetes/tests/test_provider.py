@@ -189,7 +189,8 @@ def _command(
         runner_image=runner_image,
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runner-token",
+            runner_auth_token="runtime-runner:runtime-1:1",
+            control_token="control-token",
         ),
         reset_final_desired_state=final_desired_state,
     )
@@ -210,7 +211,8 @@ def _control_command(
         runner_image="runner:latest",
         auth=ControlRuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runner-token",
+            runner_auth_token="runtime-runner:runtime-1:1",
+            control_token="control-token",
         ),
     )
 
@@ -236,8 +238,8 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
         claims=None,
     )
     assert env["AZ_AGENT_WORKSPACE_PATH"] == "/workspace/agent"
-    assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runner-token"
-    assert "AZ_RUNTIME_RUNNER_AUTH_TOKEN" not in env
+    assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runtime-runner:runtime-1:1"
+    assert env["AZ_RUNTIME_CONTROL_AUTH_TOKEN"] == "control-token"
     assert pod.metadata.annotations == {
         "azents/workspace-path": "/workspace/agent",
     }
@@ -307,6 +309,60 @@ async def test_start_preserves_generic_runner_resource_requirements() -> None:
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert pod.spec.containers[0].resources == resources
+
+
+@pytest.mark.asyncio
+async def test_start_reuses_pod_with_kubernetes_default_tolerations() -> None:
+    """Admission-added tolerations do not make an existing Runtime Pod stale."""
+    api = FakeKubernetesApi()
+    configured_toleration = Toleration(
+        key="runtime",
+        operator="Equal",
+        value="azents",
+        effect="NoSchedule",
+    )
+    provider = KubernetesRuntimeProvider(
+        api,
+        KubernetesRuntimeProviderConfig(
+            provider_id="system-kubernetes",
+            namespace="azents-runtime",
+            storage_class_name="gp3",
+            pvc_storage_request="20Gi",
+            runner_resources=None,
+            pod_tolerations=(configured_toleration,),
+        ),
+    )
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    default_tolerations = (
+        Toleration(
+            key="node.kubernetes.io/not-ready",
+            operator="Exists",
+            effect="NoExecute",
+        ),
+        Toleration(
+            key="node.kubernetes.io/unreachable",
+            operator="Exists",
+            effect="NoExecute",
+        ),
+    )
+    api.pods[pod_key] = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(
+            pod.spec,
+            tolerations=(configured_toleration, *default_tolerations),
+        ),
+    )
+
+    await provider.start(command)
+
+    assert api.deleted_pods == []
+    assert tuple(api.pods[pod_key].spec.tolerations) == (
+        configured_toleration,
+        *default_tolerations,
+    )
 
 
 @pytest.mark.asyncio
@@ -693,7 +749,8 @@ async def test_observe_known_runtimes_reports_pod_and_pvc() -> None:
         runner_image="runner:latest",
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runner-token",
+            runner_auth_token="runtime-runner:runtime-2:1",
+            control_token="control-token",
         ),
     )
     await provider.start(command_2)

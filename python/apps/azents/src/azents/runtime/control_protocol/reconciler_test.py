@@ -97,6 +97,7 @@ async def test_reconciler_dispatches_periodic_provider_observe(
         config=RuntimeLifecycleDispatchConfig(
             runner_image="runner:test",
             runner_control_endpoint="runtime-control:9090",
+            runner_control_auth_token="control-token",
             observe_interval=datetime.timedelta(minutes=1),
         ),
     )

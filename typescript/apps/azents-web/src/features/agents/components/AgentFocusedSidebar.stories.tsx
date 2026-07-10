@@ -17,6 +17,9 @@ const agent: AgentResponse = {
   avatar: null,
   model_selection: null,
   lightweight_model_selection: null,
+  selectable_model_options: [],
+  main_model_label: "default",
+  lightweight_model_label: "default",
   effective_context_window_tokens: 128000,
   effective_auto_compaction_threshold_tokens: 96000,
   model_parameters: null,
@@ -25,6 +28,7 @@ const agent: AgentResponse = {
   shell_enabled: true,
   memory_enabled: true,
   max_turns: null,
+  subagent_settings: { max_subagents: 3, max_depth: 1 },
   created_at: "2026-06-25T08:00:00Z",
   updated_at: "2026-06-25T08:00:00Z",
 };

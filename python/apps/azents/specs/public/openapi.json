@@ -5329,6 +5329,54 @@
         }
       }
     },
+    "/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/providers": {
+      "get": {
+        "tags": [
+          "LLM Provider Integration v1"
+        ],
+        "summary": "List Integration Providers",
+        "description": "List provider options available to create in this workspace.",
+        "operationId": "llm_provider_integration_v1_list_integration_providers",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMProviderCapabilityListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations": {
       "post": {
         "tags": [
@@ -7742,6 +7790,166 @@
           }
         }
       }
+    },
+    "/llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/start": {
+      "post": {
+        "tags": [
+          "xAI OAuth v1"
+        ],
+        "summary": "Start Device",
+        "description": "Start xAI OAuth device flow.",
+        "operationId": "xai_oauth_v1_start_device",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/XaiOAuthDeviceStartResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/{session_id}": {
+      "get": {
+        "tags": [
+          "xAI OAuth v1"
+        ],
+        "summary": "Poll Device",
+        "description": "Poll xAI OAuth device flow status once.",
+        "operationId": "xai_oauth_v1_poll_device",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/XaiOAuthDeviceStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "xAI OAuth v1"
+        ],
+        "summary": "Cancel Device",
+        "description": "Cancel xAI OAuth device flow.",
+        "operationId": "xai_oauth_v1_cancel_device",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/XaiOAuthDeviceStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8101,6 +8309,45 @@
             ],
             "description": "Lightweight model selection. Copies default/main when None"
           },
+          "selectable_model_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SelectableModelOptionInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selectable Model Options",
+            "description": "Ordered selectable model option inputs"
+          },
+          "main_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Model Label",
+            "description": "Selected main model option label"
+          },
+          "lightweight_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lightweight Model Label",
+            "description": "Selected lightweight model option label"
+          },
           "description": {
             "anyOf": [
               {
@@ -8183,6 +8430,10 @@
             ],
             "title": "Max Turns",
             "description": "Maximum agent turn count"
+          },
+          "subagent_settings": {
+            "$ref": "#/components/schemas/SubagentSettings",
+            "description": "Subagent execution settings"
           }
         },
         "type": "object",
@@ -8413,6 +8664,21 @@
               }
             ]
           },
+          "selectable_model_options": {
+            "items": {
+              "$ref": "#/components/schemas/SelectableModelOption"
+            },
+            "type": "array",
+            "title": "Selectable Model Options"
+          },
+          "main_model_label": {
+            "type": "string",
+            "title": "Main Model Label"
+          },
+          "lightweight_model_label": {
+            "type": "string",
+            "title": "Lightweight Model Label"
+          },
           "effective_context_window_tokens": {
             "anyOf": [
               {
@@ -8493,6 +8759,9 @@
             ],
             "title": "Max Turns"
           },
+          "subagent_settings": {
+            "$ref": "#/components/schemas/SubagentSettings"
+          },
           "avatar": {
             "anyOf": [
               {
@@ -8521,6 +8790,9 @@
           "description",
           "model_selection",
           "lightweight_model_selection",
+          "selectable_model_options",
+          "main_model_label",
+          "lightweight_model_label",
           "effective_context_window_tokens",
           "effective_auto_compaction_threshold_tokens",
           "model_parameters",
@@ -8531,6 +8803,7 @@
           "shell_enabled",
           "memory_enabled",
           "max_turns",
+          "subagent_settings",
           "created_at",
           "updated_at"
         ],
@@ -9241,6 +9514,45 @@
             ],
             "description": "Lightweight model selection. Copies default/main when None"
           },
+          "selectable_model_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SelectableModelOptionInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selectable Model Options",
+            "description": "Ordered selectable model option inputs"
+          },
+          "main_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Model Label",
+            "description": "Selected main model option label"
+          },
+          "lightweight_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lightweight Model Label",
+            "description": "Selected lightweight model option label"
+          },
           "model_parameters": {
             "anyOf": [
               {
@@ -9307,6 +9619,10 @@
             ],
             "title": "Max Turns",
             "description": "Maximum agent turn count"
+          },
+          "subagent_settings": {
+            "$ref": "#/components/schemas/SubagentSettings",
+            "description": "Subagent execution settings"
           }
         },
         "type": "object",
@@ -12602,6 +12918,7 @@
           "openai",
           "anthropic",
           "google",
+          "xai",
           "meta",
           "mistral"
         ],
@@ -12613,6 +12930,7 @@
         "enum": [
           "openai",
           "chatgpt_oauth",
+          "xai_oauth",
           "anthropic",
           "google_gemini",
           "aws_bedrock",
@@ -12620,6 +12938,51 @@
         ],
         "title": "LLMProvider",
         "description": "LLM hosting provider."
+      },
+      "LLMProviderCapabilityListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LLMProviderCapabilityResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "LLMProviderCapabilityListResponse",
+        "description": "Available LLM provider capability list response."
+      },
+      "LLMProviderCapabilityResponse": {
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/LLMProvider"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "credential_type": {
+            "type": "string",
+            "title": "Credential Type"
+          },
+          "experimental": {
+            "type": "boolean",
+            "title": "Experimental",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "display_name",
+          "credential_type"
+        ],
+        "title": "LLMProviderCapabilityResponse",
+        "description": "LLM provider capability exposed to the workspace UI."
       },
       "LLMProviderIntegrationCreateRequest": {
         "properties": {
@@ -12652,6 +13015,9 @@
               },
               {
                 "$ref": "#/components/schemas/ChatGPTOAuthSecrets"
+              },
+              {
+                "$ref": "#/components/schemas/XaiOAuthSecrets"
               }
             ],
             "title": "Secrets",
@@ -12662,7 +13028,8 @@
                 "api_key": "#/components/schemas/ApiKeySecrets",
                 "aws_credentials": "#/components/schemas/AwsSecrets",
                 "chatgpt_oauth": "#/components/schemas/ChatGPTOAuthSecrets",
-                "gcp_service_account": "#/components/schemas/GcpSecrets"
+                "gcp_service_account": "#/components/schemas/GcpSecrets",
+                "xai_oauth": "#/components/schemas/XaiOAuthSecrets"
               }
             }
           },
@@ -12678,6 +13045,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/ChatGPTOAuthConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/XaiOAuthConfig"
                   }
                 ],
                 "discriminator": {
@@ -12685,7 +13055,8 @@
                   "mapping": {
                     "aws_credentials": "#/components/schemas/AwsConfig",
                     "chatgpt_oauth": "#/components/schemas/ChatGPTOAuthConfig",
-                    "gcp_service_account": "#/components/schemas/GcpConfig"
+                    "gcp_service_account": "#/components/schemas/GcpConfig",
+                    "xai_oauth": "#/components/schemas/XaiOAuthConfig"
                   }
                 }
               },
@@ -12753,6 +13124,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/ChatGPTOAuthConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/XaiOAuthConfig"
                   }
                 ],
                 "discriminator": {
@@ -12760,7 +13134,8 @@
                   "mapping": {
                     "aws_credentials": "#/components/schemas/AwsConfig",
                     "chatgpt_oauth": "#/components/schemas/ChatGPTOAuthConfig",
-                    "gcp_service_account": "#/components/schemas/GcpConfig"
+                    "gcp_service_account": "#/components/schemas/GcpConfig",
+                    "xai_oauth": "#/components/schemas/XaiOAuthConfig"
                   }
                 }
               },
@@ -12818,6 +13193,9 @@
               },
               {
                 "$ref": "#/components/schemas/ChatGPTOAuthSecrets"
+              },
+              {
+                "$ref": "#/components/schemas/XaiOAuthSecrets"
               }
             ],
             "title": "Secrets",
@@ -12828,7 +13206,8 @@
                 "api_key": "#/components/schemas/ApiKeySecrets",
                 "aws_credentials": "#/components/schemas/AwsSecrets",
                 "chatgpt_oauth": "#/components/schemas/ChatGPTOAuthSecrets",
-                "gcp_service_account": "#/components/schemas/GcpSecrets"
+                "gcp_service_account": "#/components/schemas/GcpSecrets",
+                "xai_oauth": "#/components/schemas/XaiOAuthSecrets"
               }
             }
           },
@@ -12844,6 +13223,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/ChatGPTOAuthConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/XaiOAuthConfig"
                   }
                 ],
                 "discriminator": {
@@ -12851,7 +13233,8 @@
                   "mapping": {
                     "aws_credentials": "#/components/schemas/AwsConfig",
                     "chatgpt_oauth": "#/components/schemas/ChatGPTOAuthConfig",
-                    "gcp_service_account": "#/components/schemas/GcpConfig"
+                    "gcp_service_account": "#/components/schemas/GcpConfig",
+                    "xai_oauth": "#/components/schemas/XaiOAuthConfig"
                   }
                 }
               },
@@ -14853,6 +15236,50 @@
         "title": "RuntimeSummary",
         "description": "Server-computed Agent Runtime summary status."
       },
+      "SelectableModelOption": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Selectable model label"
+          },
+          "model_selection": {
+            "$ref": "#/components/schemas/AgentModelSelection",
+            "description": "Selectable model selection snapshot"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "model_selection"
+        ],
+        "title": "SelectableModelOption",
+        "description": "Stored selectable model option keyed by label."
+      },
+      "SelectableModelOptionInput": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "description": "Selectable model label"
+          },
+          "model_selection": {
+            "$ref": "#/components/schemas/AgentModelSelectionInput",
+            "description": "Selectable model selection input"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "model_selection"
+        ],
+        "title": "SelectableModelOptionInput",
+        "description": "Selectable model option input keyed by label."
+      },
       "SendCodeRequest": {
         "properties": {
           "email": {
@@ -15425,6 +15852,28 @@
         ],
         "title": "SkillAction",
         "description": "Skill invocation turn action."
+      },
+      "SubagentSettings": {
+        "properties": {
+          "max_subagents": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Max Subagents",
+            "description": "Maximum active subagents per root session",
+            "default": 3
+          },
+          "max_depth": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Max Depth",
+            "description": "Maximum subagent tree depth below the root agent",
+            "default": 1
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SubagentSettings",
+        "description": "Subagent execution settings."
       },
       "SubagentTreeNodeResponse": {
         "properties": {
@@ -16395,6 +16844,45 @@
             ],
             "description": "Default lightweight model selection snapshot"
           },
+          "default_selectable_model_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SelectableModelOption"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Selectable Model Options",
+            "description": "Ordered default selectable model options"
+          },
+          "default_main_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Main Model Label",
+            "description": "Default main model option label"
+          },
+          "default_lightweight_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Lightweight Model Label",
+            "description": "Default lightweight model option label"
+          },
           "effective_default_lightweight_model_selection": {
             "anyOf": [
               {
@@ -16434,6 +16922,45 @@
               }
             ],
             "description": "Default lightweight model selection input"
+          },
+          "default_selectable_model_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SelectableModelOptionInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Selectable Model Options",
+            "description": "Ordered default selectable model option inputs"
+          },
+          "default_main_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Main Model Label",
+            "description": "Default main model option label"
+          },
+          "default_lightweight_model_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Lightweight Model Label",
+            "description": "Default lightweight model option label"
           }
         },
         "type": "object",
@@ -16575,6 +17102,264 @@
         ],
         "title": "WsTicketResponse",
         "description": "Short-lived ticket response for WebSocket connection."
+      },
+      "XaiOAuthConfig": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "xai_oauth",
+            "title": "Type",
+            "default": "xai_oauth"
+          },
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id",
+            "description": "xAI account ID"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "xAI account email"
+          },
+          "connection_method": {
+            "type": "string",
+            "const": "device",
+            "title": "Connection Method",
+            "description": "Connection method"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "refresh_required",
+              "temporarily_unavailable",
+              "entitlement_denied",
+              "disabled"
+            ],
+            "title": "Status",
+            "description": "Connection status"
+          },
+          "entitlement_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "denied"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entitlement Status",
+            "description": "xAI OAuth API entitlement state"
+          },
+          "connected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connected At",
+            "description": "Connected time"
+          },
+          "last_refreshed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Refreshed At",
+            "description": "Last refresh time"
+          },
+          "last_failed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failed At",
+            "description": "Last failure time"
+          },
+          "last_failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure Reason",
+            "description": "Last failure reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connection_method",
+          "status"
+        ],
+        "title": "XaiOAuthConfig",
+        "description": "xAI OAuth display and status settings."
+      },
+      "XaiOAuthDeviceStartResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "OAuth session ID"
+          },
+          "user_code": {
+            "type": "string",
+            "title": "User Code",
+            "description": "Device user code"
+          },
+          "verification_uri": {
+            "type": "string",
+            "title": "Verification Uri",
+            "description": "Device verification URI"
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "title": "Interval Seconds",
+            "description": "Provider polling interval"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "Session expiry"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "user_code",
+          "verification_uri",
+          "interval_seconds",
+          "expires_at"
+        ],
+        "title": "XaiOAuthDeviceStartResponse",
+        "description": "Device OAuth start response."
+      },
+      "XaiOAuthDeviceStatusResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "OAuth session ID"
+          },
+          "status": {
+            "$ref": "#/components/schemas/XaiOAuthSessionStatus",
+            "description": "Session status"
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "title": "Interval Seconds",
+            "description": "Current provider polling interval"
+          },
+          "integration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LLMProviderIntegrationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stored provider integration when connected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "status",
+          "interval_seconds"
+        ],
+        "title": "XaiOAuthDeviceStatusResponse",
+        "description": "Device OAuth status response."
+      },
+      "XaiOAuthSecrets": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "xai_oauth",
+            "title": "Type",
+            "default": "xai_oauth"
+          },
+          "access_token": {
+            "type": "string",
+            "title": "Access Token",
+            "description": "xAI access token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token",
+            "description": "xAI refresh token"
+          },
+          "id_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id Token",
+            "description": "xAI ID token"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "Access token expiration time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_at"
+        ],
+        "title": "XaiOAuthSecrets",
+        "description": "xAI OAuth token secrets."
+      },
+      "XaiOAuthSessionStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "connected",
+          "cancelled",
+          "expired",
+          "failed"
+        ],
+        "title": "XaiOAuthSessionStatus",
+        "description": "xAI OAuth session status."
       }
     },
     "securitySchemes": {
@@ -16648,6 +17433,10 @@
     {
       "name": "WorkspaceUser v1",
       "description": "\nWorkspaceUser API (Public)\n\nWorkspace member lookup, role change, and delete endpoints.\n"
+    },
+    {
+      "name": "xAI OAuth v1",
+      "description": "\nxAI OAuth API (Public)\n\nStarts and completes xAI OAuth device-code connections.\nTokens and authorization codes are never returned in API responses.\n"
     }
   ]
 }

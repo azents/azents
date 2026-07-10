@@ -60,6 +60,7 @@ class RuntimeContainerAuth:
 
     control_endpoint: str
     runner_auth_token: str
+    control_token: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -270,6 +271,11 @@ class ProviderRunLoop:
             registered_at=self._clock(),
         )
         self._accepted = accepted
+        # Refresh the connection before the potentially slow backend resync.
+        # The Control registration TTL starts when register_provider completes,
+        # so delaying the first heartbeat until after observe_known_runtimes can
+        # let a slow Kubernetes API scan expire an otherwise healthy Provider.
+        await self.heartbeat(force=True)
         reports = await self._lifecycle.observe_known_runtimes()
         _LOGGER.info(
             "Runtime Provider registered",
@@ -281,9 +287,21 @@ class ProviderRunLoop:
             },
         )
         for report in reports:
-            await self._client.report_provider_state(report)
-        await self.heartbeat(force=True)
+            await self.report_provider_state(report)
         return accepted
+
+    async def report_provider_state(
+        self,
+        report: RuntimeProviderReport,
+    ) -> RuntimeProviderReport:
+        """Send backend state under the current Provider connection generation."""
+        accepted = self._require_accepted()
+        current_report = dataclasses.replace(
+            report,
+            provider_generation=accepted.generation,
+        )
+        await self._client.report_provider_state(current_report)
+        return current_report
 
     async def heartbeat(self, *, force: bool = False) -> bool:
         """Send a heartbeat when due and reject stale generations explicitly."""
@@ -355,9 +373,17 @@ class ProviderRunLoop:
             )
             return completion
         completion = await self._execute_command(envelope, accepted.generation)
+        if completion.report is not None:
+            completion = dataclasses.replace(
+                completion,
+                report=dataclasses.replace(
+                    completion.report,
+                    provider_generation=accepted.generation,
+                ),
+            )
         await self._client.complete_provider_command(completion)
         if completion.report is not None:
-            await self._client.report_provider_state(completion.report)
+            await self.report_provider_state(completion.report)
         _LOGGER.info(
             "Runtime Provider command finished provider_id=%s provider_generation=%s "
             "request_id=%s command=%s resource=runtime/%s desired_generation=%s "

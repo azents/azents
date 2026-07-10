@@ -20,7 +20,6 @@ import {
   IconAlertCircle,
   IconCircleCheck,
   IconClock,
-  IconGitBranch,
   IconMessageCircle,
   IconPlayerPause,
   IconRobot,
@@ -59,12 +58,55 @@ function countChildren(nodes: SubagentTreeNodeResponse[]): number {
   );
 }
 
+function statusSortRank(status: string): number {
+  switch (status) {
+    case "running":
+      return 0;
+    case "failed":
+    case "errored":
+    case "completed":
+      return 1;
+    case "interrupted":
+      return 2;
+    case "pending":
+    case "idle":
+    case "not_found":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function finalizeSubagentNodes(
+  nodes: SubagentTreeNodeResponse[],
+  ancestorInterrupted = false,
+): SubagentTreeNodeResponse[] {
+  return nodes
+    .map((node) => {
+      const status = ancestorInterrupted ? "interrupted" : node.status;
+      return {
+        ...node,
+        status,
+        children: finalizeSubagentNodes(
+          node.children ?? [],
+          ancestorInterrupted || status === "interrupted",
+        ),
+      };
+    })
+    .sort((left, right) => {
+      const byStatus =
+        statusSortRank(left.status) - statusSortRank(right.status);
+      return byStatus === 0 ? left.name.localeCompare(right.name) : byStatus;
+    });
+}
+
 function statusColor(status: string): string {
   switch (status) {
     case "running":
       return "blue";
     case "completed":
       return "green";
+    case "failed":
     case "errored":
       return "red";
     case "interrupted":
@@ -85,6 +127,8 @@ function statusLabel(
       return t("subagents.status.running");
     case "completed":
       return t("subagents.status.completed");
+    case "failed":
+      return t("subagents.status.failed");
     case "errored":
       return t("subagents.status.errored");
     case "interrupted":
@@ -104,6 +148,7 @@ function statusIcon(status: string): React.ReactElement {
       return <Loader size={rem(14)} />;
     case "completed":
       return <IconCircleCheck size={rem(14)} />;
+    case "failed":
     case "errored":
       return <IconAlertCircle size={rem(14)} />;
     case "interrupted":
@@ -275,8 +320,9 @@ export function SubagentTreePanel({
   }
 
   const { tree } = state;
-  const childCount = countChildren(tree.nodes);
-  const totalCount = countNodes(tree.nodes);
+  const nodes = finalizeSubagentNodes(tree.nodes);
+  const childCount = countChildren(nodes);
+  const totalCount = countNodes(nodes);
 
   return (
     <Stack h="100%" gap={0} style={{ overflow: "hidden" }}>
@@ -284,7 +330,7 @@ export function SubagentTreePanel({
         <Group gap="xs" justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             <ThemeIcon variant="light" radius="xl">
-              <IconGitBranch size={rem(16)} />
+              <IconRobot size={rem(16)} />
             </ThemeIcon>
             <Box style={{ minWidth: 0 }}>
               <Text fw={700} size="sm">
@@ -308,7 +354,7 @@ export function SubagentTreePanel({
       <Divider />
       <ScrollArea flex={1} mih={0}>
         <Stack gap="xs" p="xs">
-          {tree.nodes.map((node) => (
+          {nodes.map((node) => (
             <SubagentNodeRow
               key={node.session_agent_id}
               handle={handle}

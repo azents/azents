@@ -6,8 +6,8 @@ EmailVerification list response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[EmailVerificationResponse]**](EmailVerificationResponse.md) | Authentication record list |
-**total** | **int** | Total record count |
+**items** | [**List[EmailVerificationResponse]**](EmailVerificationResponse.md) | Authentication record list | 
+**total** | **int** | Total record count | 
 
 ## Example
 
@@ -27,3 +27,5 @@ email_verification_list_response_dict = email_verification_list_response_instanc
 email_verification_list_response_from_dict = EmailVerificationListResponse.from_dict(email_verification_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

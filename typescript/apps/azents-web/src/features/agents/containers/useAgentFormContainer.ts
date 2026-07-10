@@ -12,8 +12,9 @@ import { useCallback, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import {
   buildProviderIntegrationOptions,
+  fallbackSelectableModelLabel,
   modelSelectionValue,
-  parseModelSelectionValue,
+  selectableModelOptionInputsFromFormValues,
 } from "../model-selection";
 import type {
   ModelCatalogState,
@@ -26,6 +27,7 @@ import type {
   AgentAdminResponse,
   LlmProviderIntegrationResponse,
   ModelParameters,
+  WorkspaceModelSettingsResponse,
 } from "@azents/public-client";
 
 /** Parse builtin_tool_errors from error message. */
@@ -70,6 +72,7 @@ export interface AgentFormContainerOutput {
   integrations: LlmProviderIntegrationResponse[];
   providerOptions: ProviderIntegrationOption[];
   modelOptions: ModelSelectionOption[];
+  workspaceModelSettings: WorkspaceModelSettingsResponse | null;
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];
@@ -130,6 +133,9 @@ export function useAgentFormContainer(
     { enabled: isEditMode },
   );
   const integrationsQuery = trpc.llmProviderIntegration.list.useQuery({
+    handle,
+  });
+  const workspaceModelSettingsQuery = trpc.workspaceModelSettings.get.useQuery({
     handle,
   });
   const membersQuery = trpc.workspaceMember.list.useQuery({ handle });
@@ -256,11 +262,16 @@ export function useAgentFormContainer(
     (values: AgentFormValues): void => {
       setMutationState({ type: "SUBMITTING" });
       const modelParameters = buildModelParameters(values);
-      const modelSelection = parseModelSelectionValue(
-        values.model_selection_value,
+      const selectableModelOptions = selectableModelOptionInputsFromFormValues(
+        values.selectable_model_options,
       );
-      const lightweightModelSelection = parseModelSelectionValue(
-        values.lightweight_model_selection_value,
+      const mainModelLabel = fallbackSelectableModelLabel(
+        values.main_model_label,
+        values.selectable_model_options,
+      );
+      const lightweightModelLabel = fallbackSelectableModelLabel(
+        values.lightweight_model_label,
+        values.selectable_model_options,
       );
       if (isEditMode && agentId) {
         updateMutation.mutate({
@@ -268,8 +279,9 @@ export function useAgentFormContainer(
           agentId,
           name: values.name,
           description: values.description ?? null,
-          model_selection: modelSelection,
-          lightweight_model_selection: lightweightModelSelection,
+          selectable_model_options: selectableModelOptions,
+          main_model_label: mainModelLabel,
+          lightweight_model_label: lightweightModelLabel,
           model_parameters: modelParameters,
           system_prompt: values.system_prompt ?? null,
           type: values.type,
@@ -277,14 +289,19 @@ export function useAgentFormContainer(
           shell_enabled: values.shell_enabled,
           memory_enabled: values.memory_enabled,
           max_turns: values.max_turns ?? null,
+          subagent_settings: {
+            max_subagents: values.subagent_max_subagents,
+            max_depth: values.subagent_max_depth,
+          },
         });
       } else {
         createMutation.mutate({
           handle,
           name: values.name,
           description: values.description,
-          model_selection: modelSelection,
-          lightweight_model_selection: lightweightModelSelection,
+          selectable_model_options: selectableModelOptions,
+          main_model_label: mainModelLabel,
+          lightweight_model_label: lightweightModelLabel,
           model_parameters: modelParameters,
           system_prompt: values.system_prompt,
           type: values.type,
@@ -292,6 +309,10 @@ export function useAgentFormContainer(
           shell_enabled: values.shell_enabled,
           memory_enabled: values.memory_enabled,
           max_turns: values.max_turns ?? null,
+          subagent_settings: {
+            max_subagents: values.subagent_max_subagents,
+            max_depth: values.subagent_max_depth,
+          },
         });
       }
     },
@@ -337,6 +358,7 @@ export function useAgentFormContainer(
     integrations,
     providerOptions,
     modelOptions,
+    workspaceModelSettings: workspaceModelSettingsQuery.data ?? null,
     catalogStates,
     modelsLoading,
     members,

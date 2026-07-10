@@ -37,8 +37,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-08
-spec_version: 62
+last_verified_at: 2026-07-09
+spec_version: 66
 ---
 
 # Agent Execution Loop
@@ -111,10 +111,13 @@ terminal. `RunExecutor` converts the propagated failure into `FailedRunAttempt`,
 same `run_id`. This keeps the run `running` and prevents durable failed history until retry is
 finalized.
 
-When the next attempt succeeds, the normal terminal completed path closes the same `agent_runs` row
-and clears `retry_state`. Known non-retryable failures, such as deterministic fixture strict-mode
-`no_fixture_match`, are classified with `retryability = non_retryable`, receive `backoff_seconds = 0`,
-and are finalized on the first failed attempt instead of waiting for the retry budget. When retry is
+When retry wait expires and the next attempt starts, `RunExecutor` clears `agent_runs.retry_state`
+and publishes a `live_run_updated` snapshot with `run.retry = null` so stale retry UI disappears
+while normal model/tool progress continues. The in-memory executor still carries the previous
+attempt summaries for the next failure in the same run. Known non-retryable failures, such as
+deterministic fixture strict-mode `no_fixture_match`, are classified with `retryability =
+non_retryable`, receive `backoff_seconds = 0`, and are finalized on the first failed attempt instead
+of waiting for the retry budget. When retry is
 exhausted, when a non-retryable failure is observed, or when stop is requested while retry is waiting,
 `FailedRunErrorFinalizer` promotes the latest attempt to durable failed-run output by delegating
 durable append and terminal run updates to the engine failed-run event store. That event-store
@@ -197,6 +200,11 @@ The pre-lower order is significant. Event attachment/file availability filters r
 compaction. Scheduler-owned file cleanup does not run in run input preparation. The runtime does not omit old tool outputs in normal model input. If the lowered request
 is still too large, `NativeRequestSizeGuard` remains the final post-lower hard guard.
 
+`AgentWorker` resolves effective model snapshots before the engine starts. Agent selectable model labels
+are not a runtime concern: Agent and Workspace settings services resolve labels into saved
+`model_selection` and `lightweight_model_selection` snapshots before run start, and the execution loop
+receives only those effective snapshots in `RunRequest`.
+
 `LiteLLMResponsesLowerer` owns the full provider-native request surface for the Responses adapter:
 transport credential kwargs, generation kwargs, client function tool passthrough, and provider-hosted
 tool lowering. Agent `model_parameters.builtin_tools` stores semantic ids such as `web_search`; the
@@ -255,22 +263,45 @@ toolkit resolution uses subagent execution mode; otherwise it uses root executio
 excludes root/user-facing auto-bound capabilities such as Memory Write and Goal Toolkit
 while keeping the subagent collaboration toolkit available.
 
-Subagent collaboration tools communicate through target child input buffers:
+Subagent collaboration tools communicate through resolved agent input buffers:
 
-- `spawn_agent` creates a child `SessionAgent` plus hidden child `AgentSession`, optionally forks the
-  parent's current model-visible context, appends that selected context to the child transcript, writes
-  an initial `agent_message`, marks the child running, and sends a broker wake-up.
-- `send_message` writes an `agent_message` to the target child without waking it.
-- `followup_task` writes an `agent_message`, marks the child running, and sends a broker wake-up.
+- `spawn_agent` first enforces the Agent's active subagent and depth limits while holding a root
+  `SessionAgent` row lock for the tree. It fails with a tool error instead of queueing when the root
+  tree already has `subagent_settings.max_subagents` active subagents or the requested child would
+  exceed `subagent_settings.max_depth`. If allowed, it creates
+  a child `SessionAgent` plus hidden child `AgentSession`, forks the parent's current model-visible
+  context by default, appends that selected context to the child transcript, appends a
+  `system_reminder` event rendered as a `<system-reminder>` boundary when any parent history
+  was copied, writes an initial `agent_message`, marks the child running, and sends a broker
+  wake-up. The caller may still
+  explicitly select no context or a bounded number of recent turns through `fork_turns`. The
+  boundary reminder is inserted immediately after copied parent history for `fork_turns=all` or a
+  positive integer selection, and it marks preceding messages as inherited conversation history.
+- Agent references follow Codex v2 visibility and targeting semantics within the current root tree.
+  `list_agents` includes the root and the known agent tree, including ancestors of the caller.
+- `send_message` writes an `agent_message` to any resolved agent, including the root, without waking it.
+- `followup_task` writes an `agent_message`, marks the target running, and sends a broker wake-up,
+  but rejects the root as a target.
+- `interrupt_agent` rejects the root and the caller itself, then records stop intent only for the
+  resolved target's current run.
 
-`agent_message` lowering renders the mailbox payload as explicitly sourced delegated input for the
-target child session. Broker wake-ups remain payload-free; recovery is based on persisted input
-buffers and `agent_sessions.run_state`.
+`agent_message` lowering renders the mailbox payload as an explicit task envelope for the target
+child session. `spawn_agent` and `followup_task` render `Message Type: NEW_TASK`; `send_message`
+renders `Message Type: MESSAGE`. The envelope includes the target path as task name, sender path,
+and payload text so a subagent can distinguish its current assignment from inherited forked
+history. Broker wake-ups remain payload-free; recovery is based on persisted input buffers and
+`agent_sessions.run_state`.
+
+Human-authored direct writes are root-session only. REST message/edit/command/failed-run retry paths
+and operation retry/discard paths reject `session_kind = subagent` before creating input buffers,
+chat write requests, pending commands, operation mutations, live projections, or broker wake-ups.
+Subagent mailbox input must be written by another SessionAgent through collaboration tools as
+`agent_message` buffers.
 
 User-facing stop is subtree-aware: stopping a root session records stop intent for running linked
 descendants, and stopping a child detail session records stop intent for that child subtree.
 Model-visible `interrupt_agent` is intentionally narrower and records stop intent only for the named
-target child current run.
+target agent's current run after rejecting the root and the caller itself.
 
 ## 5. Tool Loop
 
@@ -469,6 +500,10 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-09** — v66. Documented forked-history `<system-reminder>` boundaries, explicit agent-message envelopes, and Codex v2 agent targeting and list visibility.
+- **2026-07-09** — v65. Clarified that selectable model labels are resolved before run start and runtime receives effective model snapshots only.
+- **2026-07-09** — v64. Documented `spawn_agent` active subagent and depth limit enforcement before child-session side effects.
+- **2026-07-09** — v63. Documented default subagent context forking and child-session human write rejection before side effects.
 - **2026-07-08** — v62. Documented subagent worker scheduling through normal session runs, `agent_message` mailbox promotion, subagent execution-mode tool resolution, terminal result projections, and subtree stop behavior.
 - **2026-07-08** — v61. Process TurnActions at every model-call turn boundary; failed actions are marked failed and FIFO processing continues, while context invalidation exits through a follow-up wake-up without a completed run marker.
 - **2026-07-08** — v60. Process TurnActions at every model-call turn boundary and close the current run when an operation action blocks or invalidates context.
@@ -530,6 +565,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-09** (spec_version 65) — Clarified that retry live state is cleared before the next retry attempt starts so stale retry errors do not remain visible during successful progress.
 - **2026-07-06** (spec_version 58) — Promoted existing-session Register Project worktree actions and action retry/discard mutation semantics.
 - **2026-07-05** (spec_version 57) — Added operation TurnAction execution projection updates during status/log changes.
 - **2026-07-04** (spec_version 54) — Clarified that the session runner drains pending initialization work before dispatch and may continue into run creation on the same wake-up once setup becomes ready.

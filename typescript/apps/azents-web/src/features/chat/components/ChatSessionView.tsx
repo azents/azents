@@ -25,8 +25,8 @@ import {
   IconArrowLeft,
   IconArrowUp,
   IconDotsVertical,
-  IconGitBranch,
   IconHome,
+  IconRobot,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -181,7 +181,7 @@ export function ChatSessionView({
               onClick={() => setSubagentDrawerOpened(true)}
               aria-label={tAgentDetail("subagents.open")}
             >
-              <IconGitBranch size={rem(18)} />
+              <IconRobot size={rem(18)} />
             </ActionIcon>
           </Group>
         }
@@ -315,7 +315,7 @@ export function ChatSessionView({
           readOnlyNotice={
             subagentNavigation === null
               ? null
-              : tAgentDetail("subagents.readOnlyNotice")
+              : tAgentDetail("subagents.inputDisabledPlaceholder")
           }
         />
       </Box>

@@ -33,7 +33,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-10
-spec_version: 49
+spec_version: 51
 ---
 
 # Toolkit
@@ -322,6 +322,19 @@ and subagent execution modes and exposes the coherent collaboration bundle as un
 - `list_agents`
 
 `spawn_agent` currently supports only `agent_type = default`; unsupported values fail as tool errors.
+Its `fork_turns` parameter defaults to `all`, so the child starts with the parent's current
+model-visible context unless the caller explicitly selects no context or a bounded number of turns.
+Before creating a child, `spawn_agent` enforces the Agent's `subagent_settings` while holding a
+row lock on the root `SessionAgent`, so parallel spawn calls in the same root tree serialize before
+capacity is checked. `max_subagents` limits active subagents across the root `SessionAgent` tree; a
+subagent counts as active when its linked `AgentSession.run_state` is `running` or its latest run
+status is `running`. `max_depth` limits child creation by depth below `/root`. Limit failures are
+returned as clear tool errors and do not queue the requested task.
+The static toolkit prompt includes the configured Codex-compatible concurrency slot count as
+`max_subagents + 1`, which counts the root/current agent, and the configured maximum depth.
+The child prompt describes that it has almost the same tool set as the parent because subagent
+execution mode intentionally removes root/user-facing capabilities while preserving collaboration and
+runtime work tools.
 The toolkit stores inter-agent delivery as target session `agent_message` input buffers. `send_message`
 queues without waking the target, while `spawn_agent` and `followup_task` mark the target session
 running and send normal broker wake-up signals. `wait_agent` reads unread terminal run projections and
@@ -334,7 +347,9 @@ target session and returns its previous projected status; it does not close, del
 descendants.
 
 The toolkit emits non-durable `subagent_tree_changed` events as invalidation signals. Durable tree
-state remains in `SessionAgent`, linked `AgentSession`, and latest `agent_runs` rows.
+state remains in `SessionAgent`, linked `AgentSession`, and latest `agent_runs` rows. Parent observation
+wording is terminal-result based: `wait_agent` exposes unread terminal child results, not immediate
+human delivery guarantees.
 
 ### Goal/Todo Prompt and Result Stability
 
@@ -524,7 +539,8 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
-- **2026-07-10** (spec_version 49) — Allowed `write_stdin` zero-yield calls in both write and poll modes so callers can drain currently buffered process output immediately.
+- **2026-07-10** (spec_version 51) — Allowed `write_stdin` zero-yield calls in both write and poll modes so callers can drain currently buffered process output immediately.
+- **2026-07-09** (spec_version 50) — Added Codex-compatible subagent concurrency slot prompt text and `spawn_agent` active capacity/depth limit enforcement from Agent settings.
 - **2026-07-09** (spec_version 48) — Corrected `wait_agent` timeout behavior to wait for running child results until the requested timeout expires before returning a timeout response.
 - **2026-07-08** (spec_version 47) — Added the auto-bound Subagent collaboration toolkit and updated execution-mode filtering from future subagent mode to current root/subagent resolution.
 - **2026-07-08** (spec_version 46) — Split auto-bound memory resolution into Memory Read and Memory Write capabilities, renamed the auto-bound runtime binding from shell to runtime, and documented root/subagent execution-mode filtering for Memory Write and Goal Toolkit.

@@ -22,6 +22,8 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
+from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput
+from azentspublicclient.models.subagent_settings import SubagentSettings
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -33,6 +35,9 @@ class AgentUpdateRequest(BaseModel):
     description: Optional[StrictStr] = None
     model_selection: Optional[AgentModelSelectionInput] = None
     lightweight_model_selection: Optional[AgentModelSelectionInput] = None
+    selectable_model_options: Optional[List[SelectableModelOptionInput]] = None
+    main_model_label: Optional[StrictStr] = None
+    lightweight_model_label: Optional[StrictStr] = None
     model_parameters: Optional[ModelParameters] = None
     system_prompt: Optional[StrictStr] = None
     enabled: Optional[StrictBool] = Field(default=None, description="Enabled state")
@@ -41,8 +46,9 @@ class AgentUpdateRequest(BaseModel):
     shell_enabled: Optional[StrictBool] = Field(default=None, description="Shell enabled state")
     memory_enabled: Optional[StrictBool] = Field(default=None, description="Memory enabled state")
     max_turns: Optional[StrictInt] = None
+    subagent_settings: Optional[SubagentSettings] = Field(default=None, description="Subagent execution settings")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "description", "model_selection", "lightweight_model_selection", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "max_turns"]
+    __properties: ClassVar[List[str]] = ["name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "max_turns", "subagent_settings"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -91,9 +97,19 @@ class AgentUpdateRequest(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of lightweight_model_selection
         if self.lightweight_model_selection:
             _dict['lightweight_model_selection'] = self.lightweight_model_selection.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of each item in selectable_model_options (list)
+        _items = []
+        if self.selectable_model_options:
+            for _item_selectable_model_options in self.selectable_model_options:
+                if _item_selectable_model_options:
+                    _items.append(_item_selectable_model_options.to_dict())
+            _dict['selectable_model_options'] = _items
         # override the default output from pydantic by calling `to_dict()` of model_parameters
         if self.model_parameters:
             _dict['model_parameters'] = self.model_parameters.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of subagent_settings
+        if self.subagent_settings:
+            _dict['subagent_settings'] = self.subagent_settings.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -113,6 +129,21 @@ class AgentUpdateRequest(BaseModel):
         # and model_fields_set contains the field
         if self.lightweight_model_selection is None and "lightweight_model_selection" in self.model_fields_set:
             _dict['lightweight_model_selection'] = None
+
+        # set to None if selectable_model_options (nullable) is None
+        # and model_fields_set contains the field
+        if self.selectable_model_options is None and "selectable_model_options" in self.model_fields_set:
+            _dict['selectable_model_options'] = None
+
+        # set to None if main_model_label (nullable) is None
+        # and model_fields_set contains the field
+        if self.main_model_label is None and "main_model_label" in self.model_fields_set:
+            _dict['main_model_label'] = None
+
+        # set to None if lightweight_model_label (nullable) is None
+        # and model_fields_set contains the field
+        if self.lightweight_model_label is None and "lightweight_model_label" in self.model_fields_set:
+            _dict['lightweight_model_label'] = None
 
         # set to None if model_parameters (nullable) is None
         # and model_fields_set contains the field
@@ -150,6 +181,9 @@ class AgentUpdateRequest(BaseModel):
             "description": obj.get("description"),
             "model_selection": AgentModelSelectionInput.from_dict(obj["model_selection"]) if obj.get("model_selection") is not None else None,
             "lightweight_model_selection": AgentModelSelectionInput.from_dict(obj["lightweight_model_selection"]) if obj.get("lightweight_model_selection") is not None else None,
+            "selectable_model_options": [SelectableModelOptionInput.from_dict(_item) for _item in obj["selectable_model_options"]] if obj.get("selectable_model_options") is not None else None,
+            "main_model_label": obj.get("main_model_label"),
+            "lightweight_model_label": obj.get("lightweight_model_label"),
             "model_parameters": ModelParameters.from_dict(obj["model_parameters"]) if obj.get("model_parameters") is not None else None,
             "system_prompt": obj.get("system_prompt"),
             "enabled": obj.get("enabled"),
@@ -157,7 +191,8 @@ class AgentUpdateRequest(BaseModel):
             "runtime_provider_id": obj.get("runtime_provider_id"),
             "shell_enabled": obj.get("shell_enabled"),
             "memory_enabled": obj.get("memory_enabled"),
-            "max_turns": obj.get("max_turns")
+            "max_turns": obj.get("max_turns"),
+            "subagent_settings": SubagentSettings.from_dict(obj["subagent_settings"]) if obj.get("subagent_settings") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

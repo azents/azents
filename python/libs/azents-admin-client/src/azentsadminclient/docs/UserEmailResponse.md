@@ -6,12 +6,12 @@ UserEmail response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | UserEmail ID (UUID7 hex) |
-**user_id** | **str** | Owning User ID |
-**email** | **str** | Email address |
-**verified_at** | **datetime** |  | [optional]
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | UserEmail ID (UUID7 hex) | 
+**user_id** | **str** | Owning User ID | 
+**email** | **str** | Email address | 
+**verified_at** | **datetime** |  | [optional] 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 
@@ -31,3 +31,5 @@ user_email_response_dict = user_email_response_instance.to_dict()
 user_email_response_from_dict = UserEmailResponse.from_dict(user_email_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

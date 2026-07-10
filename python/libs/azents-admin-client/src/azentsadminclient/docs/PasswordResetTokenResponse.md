@@ -6,14 +6,14 @@ Password reset token metadata response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Password reset token ID |
-**user_id** | **str** | Reset target User ID |
-**created_by_user_id** | **str** |  |
-**expires_at** | **datetime** | Expiration time |
-**used_at** | **datetime** |  |
-**revoked_at** | **datetime** |  |
-**created_at** | **datetime** | Created time |
-**updated_at** | **datetime** | Updated time |
+**id** | **str** | Password reset token ID | 
+**user_id** | **str** | Reset target User ID | 
+**created_by_user_id** | **str** |  | 
+**expires_at** | **datetime** | Expiration time | 
+**used_at** | **datetime** |  | 
+**revoked_at** | **datetime** |  | 
+**created_at** | **datetime** | Created time | 
+**updated_at** | **datetime** | Updated time | 
 
 ## Example
 
@@ -33,3 +33,5 @@ password_reset_token_response_dict = password_reset_token_response_instance.to_d
 password_reset_token_response_from_dict = PasswordResetTokenResponse.from_dict(password_reset_token_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

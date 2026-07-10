@@ -6,7 +6,7 @@ Debug exception response. The actual response is 500.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**message** | **str** |  |
+**message** | **str** |  | 
 
 ## Example
 
@@ -26,3 +26,5 @@ debug_exception_response_dict = debug_exception_response_instance.to_dict()
 debug_exception_response_from_dict = DebugExceptionResponse.from_dict(debug_exception_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

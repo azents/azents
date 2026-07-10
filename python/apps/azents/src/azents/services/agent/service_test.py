@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import AgentModelSelectionInput
+from azents.core.agent import (
+    DEFAULT_MAIN_MODEL_OPTION_LABEL,
+    AgentModelSelectionInput,
+    SelectableModelOption,
+)
 from azents.core.enums import AgentType
 from azents.repos.agent.data import Agent
 from azents.testing.model_selection import make_test_model_selection
@@ -30,6 +34,14 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         description=None,
         model_selection=selection,
         lightweight_model_selection=selection,
+        selectable_model_options=[
+            SelectableModelOption(
+                label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+                model_selection=selection,
+            )
+        ],
+        main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+        lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
         model_parameters=None,
         system_prompt=None,
         enabled=True,
@@ -86,6 +98,9 @@ class TestAgentServiceModelSelection:
         settings = AsyncMock()
         settings.default_model_selection = None
         settings.default_lightweight_model_selection = None
+        settings.default_selectable_model_options = None
+        settings.default_main_model_label = None
+        settings.default_lightweight_model_label = None
         settings_repo = cast(Any, service.workspace_model_settings_repository)
         settings_repo.get_or_create.return_value = settings
 
@@ -104,6 +119,9 @@ class TestAgentServiceModelSelection:
         settings = AsyncMock()
         settings.default_model_selection = None
         settings.default_lightweight_model_selection = None
+        settings.default_selectable_model_options = None
+        settings.default_main_model_label = None
+        settings.default_lightweight_model_label = None
         settings_repo = cast(Any, service.workspace_model_settings_repository)
         catalog_read_service = cast(Any, service.model_catalog_read_service)
         agent_repo = cast(Any, service.repository)

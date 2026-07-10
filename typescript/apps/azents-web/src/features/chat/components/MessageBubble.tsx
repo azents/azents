@@ -18,6 +18,7 @@ import {
   Stack,
   Text,
   Tooltip,
+  UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import {
@@ -25,8 +26,9 @@ import {
   IconCheck,
   IconChevronRight,
   IconClock,
-  IconGitBranch,
+  IconMessageCircle,
   IconPencil,
+  IconRobot,
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -355,6 +357,52 @@ function MessageSurface({
   );
 }
 
+const HTML_COMMENT_PATTERN =
+  /<!--[\s\S]*?-->|<!—[\s\S]*?(?:—>|-->)|<!--|-->|<!—|—>/gu;
+
+function removeHtmlComments(content: string): string {
+  return content.replace(HTML_COMMENT_PATTERN, "");
+}
+
+function markdownLineToPlainText(line: string): string {
+  return line
+    .replace(/^(?:`{3,}|~{3,})[^`~]*$/u, "")
+    .replace(/^(?:\s*[-*_]){3,}\s*$/u, "")
+    .replace(/^\s*[-+*]\s+\[[ xX]\]\s+/u, "")
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s*|[-+*]\s+|\d+[.)]\s+)/u, "")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/gu, "$1")
+    .replace(/<\/?[A-Za-z][^>]*>/gu, "")
+    .replace(/<([^>]+)>/gu, "$1")
+    .replace(/(\*\*|__|~~)(.*?)\1/gu, "$2")
+    .replace(/(^|\s)([*_])([^*_]+)\2(?=\s|[.,!?]|$)/gu, "$1$3")
+    .replace(/`([^`]*)`/gu, "$1")
+    .replace(/\\([\\`*_{}\[\]()#+\-.!>])/gu, "$1")
+    .replace(/&nbsp;/gu, " ")
+    .replace(/&amp;/gu, "&")
+    .replace(/&lt;/gu, "<")
+    .replace(/&gt;/gu, ">")
+    .replace(/&quot;/gu, '"')
+    .replace(/&#39;|&apos;/gu, "'")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function getThinkingPreview(reasoningSummary: string): string | null {
+  const firstNonEmptyLine = removeHtmlComments(reasoningSummary)
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+  if (!firstNonEmptyLine) {
+    return null;
+  }
+
+  const preview = markdownLineToPlainText(firstNonEmptyLine);
+  return preview.length > 0 ? preview : null;
+}
+
 function ThinkingBlock({
   hasContent,
   reasoningSummary,
@@ -364,41 +412,77 @@ function ThinkingBlock({
 }): React.ReactElement {
   const t = useTranslations("chat");
   const [thinkingOpened, { toggle: toggleThinking }] = useDisclosure(false);
+  const sanitizedReasoningSummary = useMemo(
+    () => removeHtmlComments(reasoningSummary).trim(),
+    [reasoningSummary],
+  );
+  const preview = useMemo(
+    () => getThinkingPreview(sanitizedReasoningSummary),
+    [sanitizedReasoningSummary],
+  );
+  const canExpand = sanitizedReasoningSummary.length > 0;
+  const label =
+    thinkingOpened || preview === null ? t("thinkingLabel") : preview;
+  const headerContent = (
+    <>
+      {canExpand && (
+        <IconChevronRight
+          aria-hidden="true"
+          size={rem(12)}
+          className={classes.thinkingChevron}
+          data-opened={thinkingOpened}
+          color="var(--mantine-color-dimmed)"
+        />
+      )}
+      <IconMessageCircle
+        aria-hidden="true"
+        size={rem(14)}
+        stroke={1.8}
+        className={classes.thinkingIcon}
+      />
+      <Text
+        key={thinkingOpened ? "opened" : "closed"}
+        component="span"
+        size="xs"
+        c="dimmed"
+        fw={500}
+        className={classes.thinkingLabel}
+      >
+        {label}
+      </Text>
+    </>
+  );
 
   return (
     <Box mb={hasContent ? "xs" : 0}>
-      <Group
-        gap={rem(4)}
-        wrap="nowrap"
-        style={{ cursor: "pointer", userSelect: "none", width: "100%" }}
-        onClick={toggleThinking}
-      >
-        <IconChevronRight
-          size={rem(12)}
-          style={{
-            flexShrink: 0,
-            transform: thinkingOpened ? "rotate(90deg)" : "none",
-            transition: "transform 200ms",
-          }}
-          color="var(--mantine-color-dimmed)"
-        />
-        <Text
-          size="xs"
-          c="dimmed"
-          fw={500}
-          lineClamp={1}
-          style={{ flex: 1, minWidth: 0 }}
+      {canExpand ? (
+        <UnstyledButton
+          className={classes.thinkingHeader}
+          onClick={toggleThinking}
+          aria-expanded={thinkingOpened}
         >
-          {t("thinkingLabel")}
-        </Text>
-      </Group>
-      <Collapse expanded={thinkingOpened}>
-        <ScrollArea.Autosize mah={rem(300)} mt={rem(4)}>
-          <Box c="dimmed">
-            <MarkdownContent>{reasoningSummary}</MarkdownContent>
-          </Box>
-        </ScrollArea.Autosize>
-      </Collapse>
+          <Group
+            gap={rem(4)}
+            wrap="nowrap"
+            className={classes.thinkingHeaderContent}
+          >
+            {headerContent}
+          </Group>
+        </UnstyledButton>
+      ) : (
+        <Group gap={rem(4)} wrap="nowrap" className={classes.thinkingHeader}>
+          {headerContent}
+        </Group>
+      )}
+      {canExpand && (
+        <Collapse expanded={thinkingOpened}>
+          <ScrollArea.Autosize mah={rem(300)} mt={rem(4)}>
+            <Box c="dimmed">
+              <MarkdownContent>{sanitizedReasoningSummary}</MarkdownContent>
+            </Box>
+          </ScrollArea.Autosize>
+        </Collapse>
+      )}
     </Box>
   );
 }
@@ -408,11 +492,9 @@ function TextMessageContent({
   hasContent,
   hasReasoning,
 }: TextMessageProps): React.ReactElement {
-  const t = useTranslations("chat");
-
   return (
     <>
-      {hasReasoning && (
+      {(hasReasoning || (message.status === "partial" && !message.content)) && (
         <ThinkingBlock
           hasContent={hasContent}
           reasoningSummary={message.reasoningSummary ?? ""}
@@ -428,13 +510,6 @@ function TextMessageContent({
             </Text>
           )}
         </>
-      )}
-
-      {/* streamingand content if absent loading display (reasoning existstextwhen above of Thinking block shown instead) */}
-      {message.status === "partial" && !message.content && !hasReasoning && (
-        <Text size="sm" c="dimmed">
-          {t("thinking")}
-        </Text>
       )}
     </>
   );
@@ -588,67 +663,73 @@ function isAgentMailboxMessage(message: ChatMessage): boolean {
   return message.metadata?.source === "agent_mailbox";
 }
 
+function agentNameFromPath(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  return segments.at(-1) ?? path;
+}
+
 function AgentMailboxMessage({
   message,
-  hasContent,
-  hasReasoning,
-}: TextMessageProps): React.ReactElement {
-  const sourcePath = message.metadata?.source_path || "/";
+}: {
+  message: ChatMessage;
+}): React.ReactElement {
+  const t = useTranslations("chat");
+  const [opened, { toggle }] = useDisclosure(false);
+  const sourcePath = message.metadata?.source_path || "/root";
+  const sourceName = agentNameFromPath(sourcePath);
 
   return (
-    <Group
-      align="flex-start"
-      gap="sm"
-      justify="flex-end"
-      wrap="nowrap"
-      mb="md"
-      w="100%"
-      style={{ minWidth: 0 }}
-    >
-      <Box maw="75%" style={{ minWidth: 0 }}>
-        <MessageSurface>
+    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
+      <Stack gap={rem(6)} maw={rem(720)}>
+        <Group
+          gap={rem(6)}
+          c="dimmed"
+          wrap="nowrap"
+          role="button"
+          tabIndex={0}
+          aria-expanded={opened}
+          aria-label={t("agentMessage.title", { name: sourcePath })}
+          style={{ cursor: "pointer", userSelect: "none" }}
+          onClick={toggle}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              toggle();
+            }
+          }}
+        >
+          <IconChevronRight
+            aria-hidden="true"
+            size={14}
+            stroke={1.8}
+            style={{
+              flexShrink: 0,
+              transform: opened ? "rotate(90deg)" : "none",
+              transition: "transform 160ms",
+            }}
+          />
+          <IconRobot aria-hidden="true" size={14} stroke={1.8} />
+          <Tooltip label={sourcePath} openDelay={500}>
+            <Text size="xs" fw={600} lineClamp={1} style={{ minWidth: 0 }}>
+              {t("agentMessage.title", { name: sourceName })}
+            </Text>
+          </Tooltip>
+        </Group>
+        <Collapse expanded={opened}>
           <Paper
             withBorder
-            px="sm"
-            py="2xs"
-            radius="lg"
-            bg="var(--mantine-color-gray-light)"
-            style={{
-              width: "fit-content",
-              maxWidth: "100%",
-              minWidth: 0,
-              overflowWrap: "anywhere",
-              borderTopRightRadius: rem(4),
-              marginLeft: "auto",
-            }}
+            radius="md"
+            p="sm"
+            bg="var(--mantine-color-body)"
+            style={{ minWidth: 0, overflow: "hidden" }}
           >
-            <Stack gap={rem(6)}>
-              <Group gap={rem(6)} c="dimmed" wrap="nowrap">
-                <IconGitBranch aria-hidden="true" size={14} stroke={1.8} />
-                <Text size="xs" fw={600} lineClamp={1} style={{ minWidth: 0 }}>
-                  {sourcePath}
-                </Text>
-              </Group>
-              <Box style={{ overflowWrap: "anywhere" }}>
-                <TextMessageContent
-                  message={message}
-                  hasContent={hasContent}
-                  hasReasoning={hasReasoning}
-                />
-              </Box>
-            </Stack>
+            <Box style={{ overflowWrap: "anywhere" }}>
+              <MarkdownContent>{message.content ?? ""}</MarkdownContent>
+            </Box>
           </Paper>
-
-          {message.content && message.status !== "partial" && (
-            <MessageActionRow
-              content={message.content}
-              createdAt={message.createdAt}
-              align="user"
-            />
-          )}
-        </MessageSurface>
-      </Box>
-    </Group>
+        </Collapse>
+      </Stack>
+    </Box>
   );
 }
 
@@ -1021,11 +1102,7 @@ export const MessageBubble = memo(function MessageBubble({
   if (message.role === "user" && isAgentMailboxMessage(message)) {
     return (
       <Box opacity={dimmed ? 0.45 : 1}>
-        <AgentMailboxMessage
-          message={message}
-          hasContent={hasContent}
-          hasReasoning={hasReasoning}
-        />
+        <AgentMailboxMessage message={message} />
       </Box>
     );
   }

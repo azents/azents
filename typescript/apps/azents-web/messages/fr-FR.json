@@ -337,7 +337,8 @@
         "google_gemini": "Google Gemini",
         "aws_bedrock": "AWS Bedrock",
         "google_vertex_ai": "Google Vertex AI",
-        "chatgpt_oauth": "Abonnement ChatGPT"
+        "chatgpt_oauth": "Abonnement ChatGPT",
+        "xai_oauth": "OAuth xAI Grok"
       },
       "chatgptOAuth": {
         "title": "Abonnement ChatGPT",
@@ -354,7 +355,7 @@
       },
       "modelSelection": {
         "title": "Modèles par défaut de l'espace de travail",
-        "description": "Les agents copient ces snapshots de modèle lorsqu'ils sont enregistrés sans sélection explicite.",
+        "description": "Configure the ordered model list that new agents copy by default.",
         "currentMain": "Principal actuel :",
         "currentLightweight": "Léger actuel :",
         "mainProviderLabel": "Provider principal par défaut",
@@ -372,7 +373,10 @@
         "selectWorkspaceLightweightModel": "Sélectionner le modèle léger du workspace",
         "noDefaultModelSelected": "Aucun modèle par défaut sélectionné",
         "useMainModel": "Utiliser le modèle principal",
-        "changeModel": "Changer de modèle"
+        "changeModel": "Changer de modèle",
+        "optionsTitle": "Workspace selectable models",
+        "optionsDescription": "Agents copy this ordered list and selected labels when they are created without custom models.",
+        "invalidOptions": "Fix model labels and model selections before saving."
       },
       "modelConfig": {
         "headline": "Configurations de modèle",
@@ -428,6 +432,20 @@
         "skipProviderOrNormalizationFiltered": "Filtré par provider ou normalisation",
         "skipUnsupportedBedrockModel": "Modèle Bedrock non pris en charge",
         "skipUnsupportedVertexModel": "Modèle Vertex non pris en charge"
+      },
+      "xaiOAuth": {
+        "title": "OAuth xAI Grok",
+        "oauthBadge": "OAuth expérimental",
+        "description": "Connectez votre compte SuperGrok ou X Premium avec OAuth par code appareil de xAI.",
+        "callbackUnavailable": "La disponibilité est contrôlée par xAI et peut renvoyer 403 selon votre niveau d’abonnement ou votre statut d’allowlist.",
+        "connected": "Connecté",
+        "deviceInstruction": "Ouvrez <link>la vérification xAI</link> et saisissez le code ci-dessous.",
+        "openVerificationPage": "Ouvrir la page de vérification xAI",
+        "copyCode": "Copier le code",
+        "copied": "Copié",
+        "connectWithDeviceCode": "Connecter avec un code appareil",
+        "cancel": "Annuler",
+        "statusError": "Autorisation appareil {status}."
       }
     },
     "agents": {
@@ -550,7 +568,12 @@
           "enabled": "Enabled",
           "disabled": "Disabled",
           "shellEnabled": "Shell on",
-          "shellDisabled": "Shell off"
+          "shellDisabled": "Shell off",
+          "subagents": "{count} max · profondeur {depth}"
+        },
+        "subagents": {
+          "label": "Sous-agents",
+          "description": "Limites de concurrence et d’imbrication des agents délégués"
         }
       },
       "settingsLayout": {
@@ -609,12 +632,14 @@
           "backToParentTooltip": "Retour au parent : {name} ({path})",
           "navigationMenu": "Options de navigation du sous-agent",
           "readOnlyNotice": "Les sessions de sous-agent sont en lecture seule. Envoyez les nouvelles instructions depuis l’agent parent.",
+          "inputDisabledPlaceholder": "Cette session de sous-agent ne permet pas la saisie directe. Envoyez les instructions depuis l’agent parent.",
           "unread": "Non lu",
           "runIndex": "Run {index}",
           "status": {
             "idle": "Inactif",
             "running": "En cours",
             "completed": "Terminé",
+            "failed": "Échec",
             "errored": "Erreur",
             "interrupted": "Interrompu",
             "notFound": "Introuvable"
@@ -704,7 +729,39 @@
         "emptyDescription": "Créez une mémoire ou ajustez le filtre de recherche.",
         "deleteConfirm": "Supprimer la mémoire « {name} » ? Cette action est irréversible."
       },
-      "shellEnabledDescription": "Autoriser cet agent à exécuter des commandes shell"
+      "shellEnabledDescription": "Autoriser cet agent à exécuter des commandes shell",
+      "subagentsSectionLabel": "Sous-agents",
+      "subagentMaxSubagentsLabel": "Nombre maximal de sous-agents",
+      "subagentMaxSubagentsDescription": "Nombre maximal de sous-agents actifs sous une session racine. L’agent racine n’est pas compté.",
+      "subagentMaxDepthLabel": "Profondeur maximale",
+      "subagentMaxDepthDescription": "Profondeur maximale de l’arbre de sous-agents sous l’agent racine. 1 autorise seulement root → child.",
+      "selectableModelOptions": {
+        "title": "Selectable models",
+        "description": "Define an ordered model list. Main and lightweight selections reference labels from this list; the first model is the fallback.",
+        "addOption": "Add model",
+        "emptyList": "Add at least one model.",
+        "maxOptions": "Up to 10 models can be added.",
+        "emptyLabel": "Model label is required.",
+        "duplicateLabel": "Model labels must be unique.",
+        "missingModel": "Choose a model for every row.",
+        "selectModelTitle": "Select model for {label}",
+        "newOption": "new model",
+        "mainLabel": "Main model",
+        "mainDescription": "Used for normal agent turns.",
+        "lightweightLabel": "Lightweight model",
+        "lightweightDescription": "Used for lightweight work and compaction fallback.",
+        "optionLabel": "Model label",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "remove": "Remove",
+        "noModelSelected": "No model selected",
+        "chooseModel": "Choose a provider integration and model.",
+        "changeModel": "Change model",
+        "modelLabelColumn": "Model label",
+        "selectedModelColumn": "Selected model",
+        "actionsColumn": "Actions",
+        "dragHandleLabel": "Reorder model"
+      }
     },
     "toolkits": {
       "headline": "Toolkits",
@@ -983,6 +1040,7 @@
     "startConversation": "Envoyez un message pour démarrer la conversation",
     "inputPlaceholder": "Saisissez un message…",
     "inputPlaceholderDesktop": "Saisissez un message… (Maj+Entrée pour un saut de ligne)",
+    "inputDisabledPlaceholder": "La saisie directe est désactivée pour cette session.",
     "connected": "Connecté",
     "connecting": "Connexion",
     "reconnecting": "Reconnexion",
@@ -1402,6 +1460,9 @@
     "skillLoaded": {
       "title": "Skill chargé : {name}",
       "unknownSkill": "Skill"
+    },
+    "agentMessage": {
+      "title": "Message de l’agent {name}"
     },
     "addWorkspace": "Add workspace",
     "addExistingProject": "Add existing Project",

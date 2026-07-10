@@ -337,7 +337,8 @@
         "google_gemini": "Google Gemini",
         "aws_bedrock": "AWS Bedrock",
         "google_vertex_ai": "Google Vertex AI",
-        "chatgpt_oauth": "ChatGPT 구독"
+        "chatgpt_oauth": "ChatGPT 구독",
+        "xai_oauth": "xAI Grok OAuth"
       },
       "chatgptOAuth": {
         "title": "ChatGPT 구독",
@@ -354,7 +355,7 @@
       },
       "modelSelection": {
         "title": "워크스페이스 기본 모델",
-        "description": "명시적인 모델 선택 없이 저장된 에이전트는 이 모델 snapshot을 복사합니다.",
+        "description": "새 에이전트가 기본으로 복사할 순서 있는 모델 목록을 설정합니다.",
         "currentMain": "현재 메인:",
         "currentLightweight": "현재 경량:",
         "mainProviderLabel": "기본 메인 Provider",
@@ -372,7 +373,10 @@
         "selectWorkspaceLightweightModel": "워크스페이스 경량 모델 선택",
         "noDefaultModelSelected": "선택된 기본 모델 없음",
         "useMainModel": "메인 모델 사용",
-        "changeModel": "모델 변경"
+        "changeModel": "모델 변경",
+        "optionsTitle": "워크스페이스 선택 모델",
+        "optionsDescription": "에이전트가 커스텀 모델 없이 생성될 때 이 순서 있는 목록과 선택 라벨을 복사합니다.",
+        "invalidOptions": "저장하기 전에 모델 라벨과 모델 선택을 수정하세요."
       },
       "modelConfig": {
         "headline": "모델 설정",
@@ -428,6 +432,20 @@
         "skipProviderOrNormalizationFiltered": "Provider 또는 정규화 기준으로 제외됨",
         "skipUnsupportedBedrockModel": "지원하지 않는 Bedrock 모델",
         "skipUnsupportedVertexModel": "지원하지 않는 Vertex 모델"
+      },
+      "xaiOAuth": {
+        "title": "xAI Grok OAuth",
+        "oauthBadge": "실험적 OAuth",
+        "description": "xAI 디바이스 코드 OAuth로 본인의 SuperGrok 또는 X Premium 계정을 연결합니다.",
+        "callbackUnavailable": "사용 가능 여부는 xAI가 제어하며, 구독 등급 또는 allowlist 상태에 따라 403이 반환될 수 있습니다.",
+        "connected": "연결됨",
+        "deviceInstruction": "<link>xAI 인증 페이지</link>를 열고 아래 코드를 입력하세요.",
+        "openVerificationPage": "xAI 인증 페이지 열기",
+        "copyCode": "코드 복사",
+        "copied": "복사됨",
+        "connectWithDeviceCode": "디바이스 코드로 연결",
+        "cancel": "취소",
+        "statusError": "디바이스 인증 상태: {status}."
       }
     },
     "agents": {
@@ -550,7 +568,12 @@
           "enabled": "사용 중",
           "disabled": "사용 안 함",
           "shellEnabled": "Shell 켜짐",
-          "shellDisabled": "Shell 꺼짐"
+          "shellDisabled": "Shell 꺼짐",
+          "subagents": "최대 {count}개 · 깊이 {depth}"
+        },
+        "subagents": {
+          "label": "서브에이전트",
+          "description": "위임된 에이전트의 동시 실행 및 중첩 제한"
         }
       },
       "settingsLayout": {
@@ -609,12 +632,14 @@
           "backToParentTooltip": "상위 에이전트로 돌아가기: {name} ({path})",
           "navigationMenu": "서브에이전트 이동 옵션",
           "readOnlyNotice": "서브에이전트 세션은 읽기 전용입니다. 새 지시는 상위 에이전트에서 보내세요.",
+          "inputDisabledPlaceholder": "서브에이전트 세션이라 직접 입력할 수 없습니다. 새 지시는 상위 에이전트에서 보내세요.",
           "unread": "읽지 않음",
           "runIndex": "Run {index}",
           "status": {
             "idle": "대기",
             "running": "실행 중",
             "completed": "완료",
+            "failed": "실패",
             "errored": "오류",
             "interrupted": "중단됨",
             "notFound": "없음"
@@ -704,7 +729,39 @@
         "emptyDescription": "메모리를 만들거나 검색 조건을 조정하세요.",
         "deleteConfirm": "메모리 \"{name}\"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다."
       },
-      "shellEnabledDescription": "이 에이전트가 Shell 명령어를 실행할 수 있도록 허용"
+      "shellEnabledDescription": "이 에이전트가 Shell 명령어를 실행할 수 있도록 허용",
+      "subagentsSectionLabel": "서브에이전트",
+      "subagentMaxSubagentsLabel": "최대 서브에이전트 수",
+      "subagentMaxSubagentsDescription": "하나의 루트 세션 아래에서 동시에 활성화될 수 있는 서브에이전트 수입니다. 루트 에이전트는 포함하지 않습니다.",
+      "subagentMaxDepthLabel": "최대 깊이",
+      "subagentMaxDepthDescription": "루트 에이전트 아래 서브에이전트 트리의 최대 깊이입니다. 1은 root → child만 허용합니다.",
+      "selectableModelOptions": {
+        "title": "선택 가능한 모델",
+        "description": "순서가 있는 모델 목록을 정의합니다. 기본/경량 선택은 이 목록의 라벨을 참조하며, 첫 번째 모델이 폴백입니다.",
+        "addOption": "모델 추가",
+        "emptyList": "모델을 하나 이상 추가하세요.",
+        "maxOptions": "모델은 최대 10개까지 추가할 수 있습니다.",
+        "emptyLabel": "모델 라벨이 필요합니다.",
+        "duplicateLabel": "모델 라벨은 중복될 수 없습니다.",
+        "missingModel": "각 행에 모델을 선택하세요.",
+        "selectModelTitle": "{label} 모델 선택",
+        "newOption": "새 모델",
+        "mainLabel": "기본 모델",
+        "mainDescription": "일반 에이전트 턴에 사용합니다.",
+        "lightweightLabel": "경량 모델",
+        "lightweightDescription": "경량 작업과 컴팩션 폴백에 사용합니다.",
+        "optionLabel": "모델 라벨",
+        "moveUp": "위로",
+        "moveDown": "아래로",
+        "remove": "삭제",
+        "noModelSelected": "선택된 모델 없음",
+        "chooseModel": "Provider integration과 모델을 선택하세요.",
+        "changeModel": "모델 변경",
+        "modelLabelColumn": "모델 라벨",
+        "selectedModelColumn": "선택된 모델",
+        "actionsColumn": "작업",
+        "dragHandleLabel": "모델 순서 변경"
+      }
     },
     "toolkits": {
       "headline": "툴킷",
@@ -983,6 +1040,7 @@
     "startConversation": "메시지를 보내 대화를 시작하세요",
     "inputPlaceholder": "메시지를 입력하세요...",
     "inputPlaceholderDesktop": "메시지를 입력하세요... (Shift+Enter로 줄바꿈)",
+    "inputDisabledPlaceholder": "이 세션에는 직접 입력할 수 없습니다.",
     "connected": "연결됨",
     "connecting": "연결 중",
     "reconnecting": "재연결 중",
@@ -1402,6 +1460,9 @@
     "skillLoaded": {
       "title": "Skill 로드됨: {name}",
       "unknownSkill": "Skill"
+    },
+    "agentMessage": {
+      "title": "{name} 에이전트의 메시지"
     },
     "addWorkspace": "Workspace 추가",
     "addExistingProject": "기존 Project 추가",

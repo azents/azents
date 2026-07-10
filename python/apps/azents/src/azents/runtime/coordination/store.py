@@ -37,6 +37,7 @@ class RuntimeCoordinationStore(Protocol):
         consumer_group: str,
         consumer_id: str,
         block_ms: int,
+        reclaim_idle_seconds: float | None = None,
     ) -> RuntimeRequestRecord | None:
         """Claim the next request for an active owner consumer."""
         ...

@@ -34,6 +34,7 @@ __all__ = [
     "WorkspaceUserV1Api",
     "WorkspaceModelSettingsV1Api",
     "WorkspaceV1Api",
+    "XAIOAuthV1Api",
     "ApiResponse",
     "ApiClient",
     "Configuration",
@@ -181,6 +182,8 @@ __all__ = [
     "JoinRequestStatus",
     "LLMModelDeveloper",
     "LLMProvider",
+    "LLMProviderCapabilityListResponse",
+    "LLMProviderCapabilityResponse",
     "LLMProviderIntegrationCreateRequest",
     "LLMProviderIntegrationCreateRequestConfig",
     "LLMProviderIntegrationListResponse",
@@ -249,6 +252,8 @@ __all__ = [
     "RuntimeSummary",
     "Secrets",
     "Secrets1",
+    "SelectableModelOption",
+    "SelectableModelOptionInput",
     "SendCodeRequest",
     "SendCodeResponse",
     "SendElevationCodeResponse",
@@ -265,6 +270,7 @@ __all__ = [
     "SetPasswordRequest",
     "SignupStatusResponse",
     "SkillAction",
+    "SubagentSettings",
     "SubagentTreeNodeResponse",
     "SubagentTreeResponse",
     "TestConnectionRequest",
@@ -298,6 +304,11 @@ __all__ = [
     "WorkspaceUserResponse",
     "WorkspaceUserRole",
     "WsTicketResponse",
+    "XaiOAuthConfig",
+    "XaiOAuthDeviceStartResponse",
+    "XaiOAuthDeviceStatusResponse",
+    "XaiOAuthSecrets",
+    "XaiOAuthSessionStatus",
 ]
 
 # import apis into sdk package
@@ -317,6 +328,7 @@ from azentspublicclient.api.user_v1_api import UserV1Api as UserV1Api
 from azentspublicclient.api.workspace_user_v1_api import WorkspaceUserV1Api as WorkspaceUserV1Api
 from azentspublicclient.api.workspace_model_settings_v1_api import WorkspaceModelSettingsV1Api as WorkspaceModelSettingsV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api as WorkspaceV1Api
+from azentspublicclient.api.xaio_auth_v1_api import XAIOAuthV1Api as XAIOAuthV1Api
 
 # import ApiClient
 from azentspublicclient.api_response import ApiResponse as ApiResponse
@@ -468,6 +480,8 @@ from azentspublicclient.models.join_request_response import JoinRequestResponse 
 from azentspublicclient.models.join_request_status import JoinRequestStatus as JoinRequestStatus
 from azentspublicclient.models.llm_model_developer import LLMModelDeveloper as LLMModelDeveloper
 from azentspublicclient.models.llm_provider import LLMProvider as LLMProvider
+from azentspublicclient.models.llm_provider_capability_list_response import LLMProviderCapabilityListResponse as LLMProviderCapabilityListResponse
+from azentspublicclient.models.llm_provider_capability_response import LLMProviderCapabilityResponse as LLMProviderCapabilityResponse
 from azentspublicclient.models.llm_provider_integration_create_request import LLMProviderIntegrationCreateRequest as LLMProviderIntegrationCreateRequest
 from azentspublicclient.models.llm_provider_integration_create_request_config import LLMProviderIntegrationCreateRequestConfig as LLMProviderIntegrationCreateRequestConfig
 from azentspublicclient.models.llm_provider_integration_list_response import LLMProviderIntegrationListResponse as LLMProviderIntegrationListResponse
@@ -536,6 +550,8 @@ from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState as
 from azentspublicclient.models.runtime_summary import RuntimeSummary as RuntimeSummary
 from azentspublicclient.models.secrets import Secrets as Secrets
 from azentspublicclient.models.secrets1 import Secrets1 as Secrets1
+from azentspublicclient.models.selectable_model_option import SelectableModelOption as SelectableModelOption
+from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput as SelectableModelOptionInput
 from azentspublicclient.models.send_code_request import SendCodeRequest as SendCodeRequest
 from azentspublicclient.models.send_code_response import SendCodeResponse as SendCodeResponse
 from azentspublicclient.models.send_elevation_code_response import SendElevationCodeResponse as SendElevationCodeResponse
@@ -552,6 +568,7 @@ from azentspublicclient.models.session_workspace_project_response import Session
 from azentspublicclient.models.set_password_request import SetPasswordRequest as SetPasswordRequest
 from azentspublicclient.models.signup_status_response import SignupStatusResponse as SignupStatusResponse
 from azentspublicclient.models.skill_action import SkillAction as SkillAction
+from azentspublicclient.models.subagent_settings import SubagentSettings as SubagentSettings
 from azentspublicclient.models.subagent_tree_node_response import SubagentTreeNodeResponse as SubagentTreeNodeResponse
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse as SubagentTreeResponse
 from azentspublicclient.models.test_connection_request import TestConnectionRequest as TestConnectionRequest
@@ -585,4 +602,9 @@ from azentspublicclient.models.workspace_user_list_response import WorkspaceUser
 from azentspublicclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
 from azentspublicclient.models.ws_ticket_response import WsTicketResponse as WsTicketResponse
+from azentspublicclient.models.xai_o_auth_config import XaiOAuthConfig as XaiOAuthConfig
+from azentspublicclient.models.xai_o_auth_device_start_response import XaiOAuthDeviceStartResponse as XaiOAuthDeviceStartResponse
+from azentspublicclient.models.xai_o_auth_device_status_response import XaiOAuthDeviceStatusResponse as XaiOAuthDeviceStatusResponse
+from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets as XaiOAuthSecrets
+from azentspublicclient.models.xai_o_auth_session_status import XaiOAuthSessionStatus as XaiOAuthSessionStatus
 

@@ -38,6 +38,7 @@ class LLMProvider(enum.StrEnum):
 
     OPENAI = "openai"
     CHATGPT_OAUTH = "chatgpt_oauth"
+    XAI_OAUTH = "xai_oauth"
     ANTHROPIC = "anthropic"
     GOOGLE_GEMINI = "google_gemini"
     AWS_BEDROCK = "aws_bedrock"
@@ -50,6 +51,7 @@ class LLMModelDeveloper(enum.StrEnum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
+    XAI = "xai"
     META = "meta"
     MISTRAL = "mistral"
 

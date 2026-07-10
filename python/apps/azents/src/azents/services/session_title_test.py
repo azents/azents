@@ -9,7 +9,11 @@ import pytest
 from openai import OpenAIError
 
 import azents.services.session_title as session_title_module
-from azents.core.agent import AgentModelSelection
+from azents.core.agent import (
+    DEFAULT_MAIN_MODEL_OPTION_LABEL,
+    AgentModelSelection,
+    SelectableModelOption,
+)
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
     AgentSessionKind,
@@ -259,6 +263,14 @@ class _AgentRepository:
             name="Test agent",
             model_selection=selection,
             lightweight_model_selection=selection,
+            selectable_model_options=[
+                SelectableModelOption(
+                    label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+                    model_selection=selection,
+                )
+            ],
+            main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+            lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
             enabled=True,
             type=AgentType.PUBLIC,
             created_at=now,

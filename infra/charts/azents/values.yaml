@@ -66,6 +66,10 @@ server:
     reconcileIntervalSeconds: 15
     lifecycleRetryDelaySeconds: 15
     startTimeoutSeconds: 300
+    auth:
+      enabled: false
+      existingSecret: ""
+      tokenKey: runtime-control-token
     runnerImage:
       repository: ""
       tag: ""

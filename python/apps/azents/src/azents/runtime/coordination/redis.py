@@ -3,7 +3,7 @@
 import base64
 import dataclasses
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
@@ -33,6 +33,30 @@ _BUSYGROUP_PREFIX = "BUSYGROUP"
 _PAYLOAD_FIELD = "payload"
 _DEFAULT_STREAM_TTL_SECONDS = 60 * 60
 _DEFAULT_CONNECTION_GENERATION_TTL_SECONDS = 7 * 24 * 60 * 60
+_GENERATION_FENCED_SET_CONNECTION_SCRIPT = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, payload = pcall(cjson.decode, raw)
+if not ok or tonumber(payload['generation']) ~= tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', tonumber(ARGV[3]))
+return 1
+"""
+_GENERATION_FENCED_DELETE_CONNECTION_SCRIPT = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, payload = pcall(cjson.decode, raw)
+if not ok or tonumber(payload['generation']) ~= tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+return 1
+"""
 
 
 class RedisRuntimeCoordinationStore:
@@ -75,12 +99,27 @@ class RedisRuntimeCoordinationStore:
         consumer_group: str,
         consumer_id: str,
         block_ms: int,
+        reclaim_idle_seconds: float | None = None,
     ) -> RuntimeRequestRecord | None:
         """Claim the next request for an active owner consumer."""
         stream_key = self._stream_key("request", stream_id)
         await self._refresh_stream_ttl(stream_key)
         await self._ensure_group(stream_key, consumer_group)
         await self._refresh_stream_ttl(stream_key)
+        if reclaim_idle_seconds is not None:
+            xautoclaim = cast(Any, self._redis).xautoclaim
+            reclaimed = await xautoclaim(
+                stream_key,
+                consumer_group,
+                consumer_id,
+                int(reclaim_idle_seconds * 1000),
+                start_id="0-0",
+                count=1,
+            )
+            record = _request_record_from_xautoclaim(reclaimed)
+            if record is not None:
+                await self._refresh_stream_ttl(stream_key)
+                return record
         block = block_ms if block_ms > 0 else None
         result = await self._redis.xreadgroup(
             consumer_group,
@@ -334,7 +373,6 @@ class RedisRuntimeCoordinationStore:
             return None
         record = _connection_from_json(_decode_text(raw))
         if record.expires_at <= datetime.now(timezone.utc):
-            await self._redis.delete(key)
             return None
         return record
 
@@ -356,12 +394,14 @@ class RedisRuntimeCoordinationStore:
             heartbeat_at=heartbeat_at,
             expires_at=heartbeat_at + timedelta(seconds=ttl_seconds),
         )
-        await self._redis.set(
-            self._connection_key(kind, subject_id),
-            _connection_to_json(updated),
-            ex=ttl_seconds,
+        updated = await self._set_connection_if_generation(
+            kind=kind,
+            subject_id=subject_id,
+            generation=generation,
+            record=updated,
+            ttl_seconds=ttl_seconds,
         )
-        return True
+        return updated
 
     async def revoke_connection(
         self,
@@ -371,11 +411,11 @@ class RedisRuntimeCoordinationStore:
         generation: int,
     ) -> bool:
         """Revoke a connection if generation fencing matches."""
-        record = await self.get_connection(kind=kind, subject_id=subject_id)
-        if record is None or record.generation != generation:
-            return False
-        await self._redis.delete(self._connection_key(kind, subject_id))
-        return True
+        return await self._delete_connection_if_generation(
+            kind=kind,
+            subject_id=subject_id,
+            generation=generation,
+        )
 
     async def claim_background_completion(
         self,
@@ -449,6 +489,42 @@ class RedisRuntimeCoordinationStore:
         """Delete a background completion claim."""
         await self._redis.delete(self._completion_claim_key(operation_id))
 
+    async def _set_connection_if_generation(
+        self,
+        *,
+        kind: RuntimeConnectionKind,
+        subject_id: str,
+        generation: int,
+        record: RuntimeConnectionRecord,
+        ttl_seconds: int,
+    ) -> bool:
+        eval_script = cast(Any, self._redis).eval
+        result = await eval_script(
+            _GENERATION_FENCED_SET_CONNECTION_SCRIPT,
+            1,
+            self._connection_key(kind, subject_id),
+            generation,
+            _connection_to_json(record),
+            ttl_seconds,
+        )
+        return bool(result)
+
+    async def _delete_connection_if_generation(
+        self,
+        *,
+        kind: RuntimeConnectionKind,
+        subject_id: str,
+        generation: int,
+    ) -> bool:
+        eval_script = cast(Any, self._redis).eval
+        result = await eval_script(
+            _GENERATION_FENCED_DELETE_CONNECTION_SCRIPT,
+            1,
+            self._connection_key(kind, subject_id),
+            generation,
+        )
+        return bool(result)
+
     async def _ensure_group(self, stream_key: str, group_name: str) -> None:
         try:
             await self._redis.xgroup_create(
@@ -506,6 +582,31 @@ class RedisRuntimeCoordinationStore:
 
     def _completion_claim_key(self, operation_id: str) -> str:
         return f"{self._key_prefix}:completion-claim:{operation_id}"
+
+
+def _request_record_from_xautoclaim(result: object) -> RuntimeRequestRecord | None:
+    if not isinstance(result, Sequence) or isinstance(result, (bytes, str)):
+        return None
+    if len(result) < 2:
+        return None
+    entries = result[1]
+    if not isinstance(entries, Sequence) or isinstance(entries, (bytes, str)):
+        return None
+    if not entries:
+        return None
+    entry = entries[0]
+    if not isinstance(entry, Sequence) or isinstance(entry, (bytes, str)):
+        return None
+    if len(entry) != 2:
+        return None
+    cursor, fields = entry
+    if not isinstance(fields, Mapping):
+        return None
+    payload = _payload_field(fields)
+    return RuntimeRequestRecord(
+        cursor=_decode_text(cursor),
+        envelope=_envelope_from_json(payload),
+    )
 
 
 def _payload_field(fields: Mapping[object, object]) -> str:

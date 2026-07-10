@@ -6,9 +6,9 @@ Password reset token creation response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**token** | [**PasswordResetTokenResponse**](PasswordResetTokenResponse.md) | Password reset token metadata |
-**plaintext_token** | **str** | Plaintext password reset token |
-**reset_url** | **str** | Password reset URL |
+**token** | [**PasswordResetTokenResponse**](PasswordResetTokenResponse.md) | Password reset token metadata | 
+**plaintext_token** | **str** | Plaintext password reset token | 
+**reset_url** | **str** | Password reset URL | 
 
 ## Example
 
@@ -28,3 +28,5 @@ create_password_reset_token_response_dict = create_password_reset_token_response
 create_password_reset_token_response_from_dict = CreatePasswordResetTokenResponse.from_dict(create_password_reset_token_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -41,7 +41,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceV1Api(api_client)
-    bootstrap_first_owner_request = azentsadminclient.BootstrapFirstOwnerRequest() # BootstrapFirstOwnerRequest |
+    bootstrap_first_owner_request = azentsadminclient.BootstrapFirstOwnerRequest() # BootstrapFirstOwnerRequest | 
 
     try:
         # Bootstrap First Owner
@@ -59,7 +59,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **bootstrap_first_owner_request** | [**BootstrapFirstOwnerRequest**](BootstrapFirstOwnerRequest.md)|  |
+ **bootstrap_first_owner_request** | [**BootstrapFirstOwnerRequest**](BootstrapFirstOwnerRequest.md)|  | 
 
 ### Return type
 
@@ -111,7 +111,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceV1Api(api_client)
-    workspace_create_request = azentsadminclient.WorkspaceCreateRequest() # WorkspaceCreateRequest |
+    workspace_create_request = azentsadminclient.WorkspaceCreateRequest() # WorkspaceCreateRequest | 
 
     try:
         # Create Workspace
@@ -129,7 +129,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_create_request** | [**WorkspaceCreateRequest**](WorkspaceCreateRequest.md)|  |
+ **workspace_create_request** | [**WorkspaceCreateRequest**](WorkspaceCreateRequest.md)|  | 
 
 ### Return type
 
@@ -179,7 +179,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # Delete Workspace
@@ -195,7 +195,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -310,7 +310,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # Get Workspace
@@ -328,7 +328,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -444,8 +444,8 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceV1Api(api_client)
-    handle = 'handle_example' # str |
-    workspace_update_request = azentsadminclient.WorkspaceUpdateRequest() # WorkspaceUpdateRequest |
+    handle = 'handle_example' # str | 
+    workspace_update_request = azentsadminclient.WorkspaceUpdateRequest() # WorkspaceUpdateRequest | 
 
     try:
         # Update Workspace
@@ -463,8 +463,8 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **workspace_update_request** | [**WorkspaceUpdateRequest**](WorkspaceUpdateRequest.md)|  |
+ **handle** | **str**|  | 
+ **workspace_update_request** | [**WorkspaceUpdateRequest**](WorkspaceUpdateRequest.md)|  | 
 
 ### Return type
 
@@ -487,3 +487,4 @@ No authorization required
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

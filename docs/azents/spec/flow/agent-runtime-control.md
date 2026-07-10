@@ -22,8 +22,8 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-07-06
-spec_version: 7
+last_verified_at: 2026-07-10
+spec_version: 13
 ---
 
 # Agent Runtime Control
@@ -90,8 +90,25 @@ The store owns:
 - operation metadata, heartbeat/progress/final events
 - background operation completion claims
 - generation fencing data used to reject stale provider/runner messages
+- request claim cursors and stream metadata used to acknowledge delivered Provider/Runner requests
+
+Generation fencing is enforced before volatile stream messages mutate durable state. Control rejects or closes Provider/Runner streams whose inbound message generation differs from the accepted registration generation. Durable Provider reports are accepted only when both the Provider stream generation and observed desired generation are monotonic relative to the `agent_runtimes` row. Durable Runner state reports are accepted only when the Runner generation is not older than the row generation. Stale reports must not overwrite workspace path, observed state, runner availability, or current failure fields.
+
+Provider report framing always uses the generation accepted for the current Control stream. A Provider reconnect or leader failover may observe backend resources whose labels contain an older Provider generation; those labels are historical command metadata and must be replaced with the current connection generation before initial resync reports, watch reports, or command completion reports are sent to Control.
+
+Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed request with the stream cursor and consumer-group metadata needed to acknowledge the request only after it has been sent on the matching gRPC stream. Unacknowledged requests may be reclaimed after an idle interval so a Control replica crash or stream interruption does not strand in-flight Provider/Runner work.
+
+Connection heartbeat and revoke operations are generation-fenced. In Redis-backed coordination, heartbeat refresh and revoke are atomic compare-and-set/delete operations against the current connection generation. Reading an expired connection must not delete the key because a newer reconnect may have replaced it concurrently. When a Runner stream closes, Control records `stream_closed` durable state only if revoking that same generation succeeds; stale close handling must not overwrite a newer Runner generation.
 
 The store is not a source of product truth. Losing store data may interrupt in-flight commands but must not make a Control replica infer that a Runtime does not exist or that workspace data can be discarded.
+
+## Control Stream Authentication
+
+Runtime Control gRPC streams support a shared-token authentication gate for Provider and Runner connections. When `AZ_RUNTIME_CONTROL_AUTH_ENABLED` is true, Control requires a non-empty `AZ_RUNTIME_CONTROL_AUTH_TOKEN` at startup and rejects Provider or Runner streams that do not provide the matching token before stream registration is processed. Clients may present the token with `authorization: Bearer ...` metadata or `x-azents-runtime-control-token` metadata.
+
+The Helm chart wires Runtime Control auth from an existing Kubernetes Secret only. It must not place token literals in default values or rendered manifests. Runtime Control auth is disabled by default in chart values so consumers can opt into the Runtime Control component without committing a placeholder Secret reference. When Runtime Control auth is enabled for the chart, `server.runtimeControl.auth.existingSecret` and `server.runtimeControl.auth.tokenKey` identify the Secret key used by the Control server and Kubernetes Provider deployment. Providers propagate the same token to Runtime Runner containers through `AZ_RUNTIME_CONTROL_AUTH_TOKEN` so Runner streams authenticate back to Control.
+
+Auth token values are secret material. Logs, test evidence, and user-visible diagnostics may mention auth being enabled, disabled, missing, or invalid, but must not include raw token values.
 
 ## Provider Contract
 
@@ -104,6 +121,8 @@ Provider is lifecycle-only. It implements:
 - observe
 
 Provider reports backend observed state and metadata. The Agent Workspace absolute path is provider metadata and is stored on `agent_runtimes.workspace_path`. Runner registration can validate that it mounted the same path, but Runner is not the authority for choosing the Agent Workspace path.
+
+Kubernetes Runtime Pod reuse compares Provider-managed configuration while allowing additive fields injected by Kubernetes admission and defaulting. In particular, configured tolerations must remain present, but built-in `NoExecute` tolerations added by Kubernetes do not make an otherwise reusable Pod stale or trigger replacement during repeated start reconciliation.
 
 If Provider is disconnected or reports no workspace path for a Runtime that needs workspace access, Control records an explicit failure/unavailable state. It must not invent a fallback path. `PROVIDER_WORKSPACE_PATH_MISSING` is the explicit error for a missing provider path.
 
@@ -135,7 +154,7 @@ Runner owns runtime exec process handles, stdin writers, stdout/stderr drains, u
 
 Process output is continuously drained into bounded Runner-owned buffers. Tool calls drain unread buffers into one model-visible client tool result and preserve structured process metadata. Running exec processes do not use background operation completion publication and do not inject `background_completion` messages when they exit; callers observe completion through process events or later `write_stdin` polling.
 
-Runner operations are deadline-bounded end to end. Every `RuntimeRunnerOperation` carries a non-null `deadline_at`, including foreground and background operations. Foreground callers pass the same deadline to the reply-stream fold/resume path; waiting for a final reply without a deadline is invalid. If the reply stream does not produce a final event before the deadline, Control appends a local final error event with `operation_timeout`, marks the operation final, and the caller receives a failed operation result instead of waiting indefinitely. Provider lifecycle commands and Coordination Store metadata may still model optional deadlines because they cover different request classes and storage TTL semantics.
+Runner operations are deadline-bounded end to end. Every `RuntimeRunnerOperation` carries a non-null `deadline_at`, including foreground and background operations. Foreground callers pass the same deadline to the reply-stream fold/resume path; waiting for a final reply without a deadline is invalid. If the reply stream does not produce a final event before the deadline, Control appends a local final error event with `operation_timeout`, marks the operation final, and the caller receives a failed operation result instead of waiting indefinitely. Coordination Store operation metadata must live at least until the operation deadline plus a buffer so timeout/final folding can complete; it must not expire earlier merely because the default operation TTL is shorter than the requested deadline. Provider lifecycle commands and Coordination Store metadata may still model optional deadlines because they cover different request classes and storage TTL semantics.
 
 ## Lifecycle Semantics
 
@@ -151,7 +170,7 @@ Reset carries its own desired generation and a final desired state. Provider is 
 
 ## Background Operation Completion
 
-Long-running Runner operations can be marked background. Control stores background operation metadata in the Coordination Store, folds matching request events from the generation-scoped operation reply stream when a final event appears, claims publication idempotently, and enqueues a structured Worker input message.
+Long-running Runner operations can be marked background. Control stores background operation metadata in the Coordination Store, folds matching request events from the generation-scoped operation reply stream when a final event appears, claims publication idempotently, and enqueues a structured Worker input message. Background operation metadata includes the request id, operation id, parent AgentSession context, workspace id, agent id, tool name, and idempotency key needed to publish completion after the original request stream has been claimed, acknowledged, or retried.
 
 The Worker input queue message contains the parent AgentSession id, workspace id, agent id, runtime id, operation id, request id, tool name, status, completion text, and an idempotency key. Worker stores it as a `background_completion` input buffer for the parent AgentSession and sends a session wake-up. Completion publication must be idempotent across Control replica restarts.
 
@@ -181,5 +200,11 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-10** (spec_version 13) — Allowed Kubernetes admission-defaulted tolerations during Runtime Pod reuse so repeated start reconciliation does not delete a healthy Pod.
+- **2026-07-10** (spec_version 12) — Required Provider-side report generation rebasing after reconnect or leader failover so historical backend labels cannot close the current Control stream.
+- **2026-07-09** (spec_version 11) — Added generation-fenced connection heartbeat/revoke semantics and stale Runner stream-close handling.
+- **2026-07-09** (spec_version 10) — Added Provider/Runner request claim/ack/reclaim semantics, operation metadata deadline buffering, and background completion context propagation.
+- **2026-07-09** (spec_version 9) — Added monotonic Provider/Runner generation fencing for stream messages and durable Runtime state updates.
+- **2026-07-09** (spec_version 8) — Added Runtime Control shared-token authentication for Provider and Runner gRPC streams and documented the Helm Secret-based wiring contract.
 - **2026-07-04** (spec_version 6) — Added typed Runner Git operations for ref preview, worktree creation, worktree removal, and branch deletion.
 - **2026-06-28** (spec_version 5) — Promoted Runtime Runner process operations and runner-owned process lifecycle/buffer semantics for `exec_command` and `write_stdin`.

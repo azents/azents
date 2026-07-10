@@ -6,8 +6,8 @@ UserEmail list response schema.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[UserEmailResponse]**](UserEmailResponse.md) | UserEmail list |
-**total** | **int** | Total record count |
+**items** | [**List[UserEmailResponse]**](UserEmailResponse.md) | UserEmail list | 
+**total** | **int** | Total record count | 
 
 ## Example
 
@@ -27,3 +27,5 @@ user_email_list_response_dict = user_email_list_response_instance.to_dict()
 user_email_list_response_from_dict = UserEmailListResponse.from_dict(user_email_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

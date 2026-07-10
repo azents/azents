@@ -154,7 +154,8 @@ def _command(
         runner_image="runner:latest",
         auth=RuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runner-token",
+            runner_auth_token="runtime-runner:runtime-1:1",
+            control_token="control-token",
         ),
         reset_final_desired_state=final_desired_state,
     )
@@ -175,7 +176,8 @@ def _control_command(
         runner_image="runner:latest",
         auth=ControlRuntimeContainerAuth(
             control_endpoint="runtime-control:8020",
-            runner_auth_token="runner-token",
+            runner_auth_token="runtime-runner:runtime-1:1",
+            control_token="control-token",
         ),
     )
 
@@ -194,6 +196,11 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     assert container.spec.working_dir == "/workspace/agent"
     assert any(
         bind.container_path == "/workspace/agent" for bind in container.spec.binds
+    )
+    assert container.spec.env["AZ_RUNTIME_CONTROL_AUTH_TOKEN"] == "control-token"
+    assert (
+        container.spec.env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"]
+        == "runtime-runner:runtime-1:1"
     )
     workspace_path = tmp_path / "agent-runtimes" / "runtime-1" / "workspace"
     assert workspace_path.exists()

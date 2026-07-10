@@ -20,6 +20,7 @@ import {
   IconRobot,
   IconSettings,
   IconShield,
+  IconSitemap,
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
@@ -172,6 +173,16 @@ export function AgentSettingsHub({
           value: agent.memory_enabled
             ? t("values.enabled")
             : t("values.disabled"),
+        },
+        {
+          href: `${basePath}/subagents`,
+          icon: <IconSitemap size={rem(18)} />,
+          label: t("subagents.label"),
+          description: t("subagents.description"),
+          value: t("values.subagents", {
+            count: agent.subagent_settings.max_subagents ?? 3,
+            depth: agent.subagent_settings.max_depth ?? 1,
+          }),
         },
       ],
     },

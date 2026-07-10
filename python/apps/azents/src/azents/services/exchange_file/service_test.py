@@ -25,7 +25,10 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
 from azents.repos.workspace_user.data import WorkspaceUser
-from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_selectable_model_options,
+)
 
 from . import (
     ExchangeFileService,
@@ -277,13 +280,17 @@ def _make_agent_session() -> AgentSession:
 
 def _make_agent() -> Agent:
     """Create Agent for tests."""
+    selection = make_test_model_selection()
     return Agent(
         id="agent-1",
         workspace_id="workspace-1",
         name="Test Agent",
         description=None,
-        model_selection=make_test_model_selection(),
-        lightweight_model_selection=make_test_model_selection(),
+        model_selection=selection,
+        lightweight_model_selection=selection,
+        selectable_model_options=make_test_selectable_model_options(selection),
+        main_model_label="default",
+        lightweight_model_label="default",
         model_parameters=None,
         system_prompt=None,
         enabled=True,

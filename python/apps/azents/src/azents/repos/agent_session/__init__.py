@@ -168,6 +168,22 @@ class AgentSessionRepository:
             return None
         return self._build_session_agent(rdb)
 
+    async def lock_session_agent_by_id(
+        self,
+        session: AsyncSession,
+        session_agent_id: str,
+    ) -> SessionAgent | None:
+        """Fetch SessionAgent by ID with a row lock."""
+        result = await session.execute(
+            sa.select(RDBSessionAgent)
+            .where(RDBSessionAgent.id == session_agent_id)
+            .with_for_update()
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build_session_agent(rdb)
+
     async def list_session_agent_tree(
         self,
         session: AsyncSession,

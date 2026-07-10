@@ -112,6 +112,10 @@ interface ChatInputProps {
   onCancelEdit?: () => void;
   /** whether edit send is blocked by external run, etc. */
   editSendDisabled?: boolean;
+  /** whether direct composer input is disabled while preserving controls like Stop */
+  inputDisabled?: boolean;
+  /** placeholder shown when direct composer input is disabled */
+  disabledPlaceholder?: string | null;
 }
 
 function actionType(action: InputActionDefinition["action"]): string | null {
@@ -376,6 +380,8 @@ export const ChatInput = memo(function ChatInput({
   editingInitialValue = null,
   onCancelEdit,
   editSendDisabled = false,
+  inputDisabled = false,
+  disabledPlaceholder = null,
 }: ChatInputProps): React.ReactElement {
   const t = useTranslations("chat");
   const draftStorageKey = useMemo(
@@ -405,9 +411,11 @@ export const ChatInput = memo(function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previousEditingMessageIdRef = useRef<string | null>(null);
-  const inputActionQuery = selectedAction
+  const inputActionQuery = inputDisabled
     ? null
-    : getInputActionQuery(inputValue);
+    : selectedAction
+      ? null
+      : getInputActionQuery(inputValue);
   const visibleInputActions = useMemo(() => {
     if (inputActionQuery === null) {
       return [];
@@ -521,7 +529,7 @@ export const ChatInput = memo(function ChatInput({
       const trimmed = inputValue.trim();
       const normalizedAction =
         selectedAction === null ? null : normalizeAction(selectedAction.action);
-      if (isUploading || editSendDisabled) {
+      if (inputDisabled || isUploading || editSendDisabled) {
         return;
       }
 
@@ -592,6 +600,7 @@ export const ChatInput = memo(function ChatInput({
     selectedAction,
     isUploading,
     editSendDisabled,
+    inputDisabled,
     pendingFiles,
     agentId,
     uploadAll,
@@ -767,6 +776,7 @@ export const ChatInput = memo(function ChatInput({
             variant="subtle"
             onClick={() => fileInputRef.current?.click()}
             disabled={
+              inputDisabled ||
               isUploading ||
               Boolean(editingMessageId) ||
               selectedAction?.attachments.policy === "unsupported"
@@ -795,55 +805,60 @@ export const ChatInput = memo(function ChatInput({
                     onResumeGoal={onResumeGoal}
                   />
                 )}
-                {selectedAction !== null && !editingMessageId && (
-                  <Group
-                    gap={rem(4)}
-                    wrap="nowrap"
-                    px={rem(7)}
-                    py={rem(2)}
-                    style={{
-                      position: "absolute",
-                      top: rem(7),
-                      left: rem(12),
-                      zIndex: 1,
-                      borderRadius: rem(999),
-                      background: "var(--mantine-color-blue-light)",
-                      maxWidth: "calc(100% - 24px)",
-                      pointerEvents: "auto",
-                    }}
-                  >
-                    <Text size="xs" fw={700} c="blue" truncate>
-                      /{selectedAction.keyword}
-                    </Text>
-                    <ActionIcon
-                      variant="transparent"
-                      size={rem(14)}
-                      c="dimmed"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setSelectedAction(null);
-                        persistDraft(inputValue, null);
-                        textareaRef.current?.focus();
+                {selectedAction !== null &&
+                  !editingMessageId &&
+                  !inputDisabled && (
+                    <Group
+                      gap={rem(4)}
+                      wrap="nowrap"
+                      px={rem(7)}
+                      py={rem(2)}
+                      style={{
+                        position: "absolute",
+                        top: rem(7),
+                        left: rem(12),
+                        zIndex: 1,
+                        borderRadius: rem(999),
+                        background: "var(--mantine-color-blue-light)",
+                        maxWidth: "calc(100% - 24px)",
+                        pointerEvents: "auto",
                       }}
-                      aria-label={t("cancelEdit")}
                     >
-                      <IconX size={10} />
-                    </ActionIcon>
-                  </Group>
-                )}
+                      <Text size="xs" fw={700} c="blue" truncate>
+                        /{selectedAction.keyword}
+                      </Text>
+                      <ActionIcon
+                        variant="transparent"
+                        size={rem(14)}
+                        c="dimmed"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setSelectedAction(null);
+                          persistDraft(inputValue, null);
+                          textareaRef.current?.focus();
+                        }}
+                        aria-label={t("cancelEdit")}
+                      >
+                        <IconX size={10} />
+                      </ActionIcon>
+                    </Group>
+                  )}
                 <Textarea
                   ref={textareaRef}
                   placeholder={
-                    selectedAction?.message.placeholder ??
-                    (isMobile
-                      ? t("inputPlaceholder")
-                      : t("inputPlaceholderDesktop"))
+                    inputDisabled
+                      ? (disabledPlaceholder ?? t("inputDisabledPlaceholder"))
+                      : (selectedAction?.message.placeholder ??
+                        (isMobile
+                          ? t("inputPlaceholder")
+                          : t("inputPlaceholderDesktop")))
                   }
-                  value={inputValue}
+                  value={inputDisabled ? "" : inputValue}
                   onChange={(e) => updateInputValue(e.currentTarget.value)}
                   onKeyDown={handleKeyDown}
                   onFocus={onFocus}
+                  disabled={inputDisabled}
                   autosize
                   minRows={1}
                   maxRows={5}
@@ -852,14 +867,17 @@ export const ChatInput = memo(function ChatInput({
                     input: {
                       fontSize: rem(16),
                       paddingTop:
-                        selectedAction !== null && !editingMessageId
+                        selectedAction !== null &&
+                        !editingMessageId &&
+                        !inputDisabled
                           ? rem(34)
                           : void 0,
                     },
                   }}
                 />
                 {selectedAction?.availability_hint?.message &&
-                  !editingMessageId && (
+                  !editingMessageId &&
+                  !inputDisabled && (
                     <Text size="xs" c="orange" mt={rem(4)}>
                       {selectedAction.availability_hint.message}
                     </Text>
@@ -867,7 +885,8 @@ export const ChatInput = memo(function ChatInput({
               </Box>
             </Stack>
           </Box>
-          {isStopAvailable && !inputValue.trim() && selectedAction === null ? (
+          {isStopAvailable &&
+          (inputDisabled || (!inputValue.trim() && selectedAction === null)) ? (
             <ActionIcon
               size="input-sm"
               variant="filled"
@@ -886,6 +905,7 @@ export const ChatInput = memo(function ChatInput({
               onClick={handleSend}
               onMouseDown={(e) => e.preventDefault()}
               disabled={
+                inputDisabled ||
                 editSendDisabled ||
                 (!inputValue.trim() &&
                   selectedAction?.message.policy === "required")

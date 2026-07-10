@@ -10,6 +10,8 @@ LLM model developer.
 
 * `GOOGLE` (value: `'google'`)
 
+* `XAI` (value: `'xai'`)
+
 * `META` (value: `'meta'`)
 
 * `MISTRAL` (value: `'mistral'`)

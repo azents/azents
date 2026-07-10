@@ -176,6 +176,7 @@ Class | Method | HTTP request | Description
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_delete_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_delete_integration) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Delete Integration
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_get_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_get_integration) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Get Integration
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integration_catalog_entries**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integration_catalog_entries) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-entries | List Integration Catalog Entries
+*LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integration_providers**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integration_providers) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/providers | List Integration Providers
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integrations**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integrations) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | List Integrations
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_sync_integration_catalog**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_sync_integration_catalog) | **POST** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-sync | Sync Integration Catalog
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_update_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_update_integration) | **PATCH** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Update Integration
@@ -221,6 +222,9 @@ Class | Method | HTTP request | Description
 *WorkspaceV1Api* | [**workspace_v1_get_bootstrap_status**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_get_bootstrap_status) | **GET** /workspace/v1/bootstrap/status | Get Bootstrap Status
 *WorkspaceV1Api* | [**workspace_v1_get_workspace_by_handle**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_get_workspace_by_handle) | **GET** /workspace/v1/workspaces/{handle} | Get Workspace By Handle
 *WorkspaceV1Api* | [**workspace_v1_list_workspaces**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_list_workspaces) | **GET** /workspace/v1/workspaces | List Workspaces
+*XAIOAuthV1Api* | [**xai_oauth_v1_cancel_device**](azentspublicclient/docs/XAIOAuthV1Api.md#xai_oauth_v1_cancel_device) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/{session_id} | Cancel Device
+*XAIOAuthV1Api* | [**xai_oauth_v1_poll_device**](azentspublicclient/docs/XAIOAuthV1Api.md#xai_oauth_v1_poll_device) | **GET** /llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/{session_id} | Poll Device
+*XAIOAuthV1Api* | [**xai_oauth_v1_start_device**](azentspublicclient/docs/XAIOAuthV1Api.md#xai_oauth_v1_start_device) | **POST** /llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/start | Start Device
 
 
 ## Documentation For Models
@@ -363,6 +367,8 @@ Class | Method | HTTP request | Description
  - [JoinRequestStatus](azentspublicclient/docs/JoinRequestStatus.md)
  - [LLMModelDeveloper](azentspublicclient/docs/LLMModelDeveloper.md)
  - [LLMProvider](azentspublicclient/docs/LLMProvider.md)
+ - [LLMProviderCapabilityListResponse](azentspublicclient/docs/LLMProviderCapabilityListResponse.md)
+ - [LLMProviderCapabilityResponse](azentspublicclient/docs/LLMProviderCapabilityResponse.md)
  - [LLMProviderIntegrationCreateRequest](azentspublicclient/docs/LLMProviderIntegrationCreateRequest.md)
  - [LLMProviderIntegrationCreateRequestConfig](azentspublicclient/docs/LLMProviderIntegrationCreateRequestConfig.md)
  - [LLMProviderIntegrationListResponse](azentspublicclient/docs/LLMProviderIntegrationListResponse.md)
@@ -431,6 +437,8 @@ Class | Method | HTTP request | Description
  - [RuntimeSummary](azentspublicclient/docs/RuntimeSummary.md)
  - [Secrets](azentspublicclient/docs/Secrets.md)
  - [Secrets1](azentspublicclient/docs/Secrets1.md)
+ - [SelectableModelOption](azentspublicclient/docs/SelectableModelOption.md)
+ - [SelectableModelOptionInput](azentspublicclient/docs/SelectableModelOptionInput.md)
  - [SendCodeRequest](azentspublicclient/docs/SendCodeRequest.md)
  - [SendCodeResponse](azentspublicclient/docs/SendCodeResponse.md)
  - [SendElevationCodeResponse](azentspublicclient/docs/SendElevationCodeResponse.md)
@@ -447,6 +455,7 @@ Class | Method | HTTP request | Description
  - [SetPasswordRequest](azentspublicclient/docs/SetPasswordRequest.md)
  - [SignupStatusResponse](azentspublicclient/docs/SignupStatusResponse.md)
  - [SkillAction](azentspublicclient/docs/SkillAction.md)
+ - [SubagentSettings](azentspublicclient/docs/SubagentSettings.md)
  - [SubagentTreeNodeResponse](azentspublicclient/docs/SubagentTreeNodeResponse.md)
  - [SubagentTreeResponse](azentspublicclient/docs/SubagentTreeResponse.md)
  - [TestConnectionRequest](azentspublicclient/docs/TestConnectionRequest.md)
@@ -480,6 +489,11 @@ Class | Method | HTTP request | Description
  - [WorkspaceUserResponse](azentspublicclient/docs/WorkspaceUserResponse.md)
  - [WorkspaceUserRole](azentspublicclient/docs/WorkspaceUserRole.md)
  - [WsTicketResponse](azentspublicclient/docs/WsTicketResponse.md)
+ - [XaiOAuthConfig](azentspublicclient/docs/XaiOAuthConfig.md)
+ - [XaiOAuthDeviceStartResponse](azentspublicclient/docs/XaiOAuthDeviceStartResponse.md)
+ - [XaiOAuthDeviceStatusResponse](azentspublicclient/docs/XaiOAuthDeviceStatusResponse.md)
+ - [XaiOAuthSecrets](azentspublicclient/docs/XaiOAuthSecrets.md)
+ - [XaiOAuthSessionStatus](azentspublicclient/docs/XaiOAuthSessionStatus.md)
 
 
 <a id="documentation-for-authorization"></a>

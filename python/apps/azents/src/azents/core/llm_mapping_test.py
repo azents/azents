@@ -12,6 +12,7 @@ from azents.core.credentials import (
     GcpSecrets,
     ProviderConfig,
     ProviderSecrets,
+    XaiOAuthSecrets,
 )
 from azents.core.enums import LLMProvider
 from azents.core.llm_mapping import (
@@ -19,6 +20,7 @@ from azents.core.llm_mapping import (
     to_litellm_model,
     to_runtime_model,
 )
+from azents.core.xai_oauth import XAI_OAUTH_BACKEND_BASE_URL
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
@@ -98,6 +100,12 @@ class TestToLitellmModel:
 
         assert result == "gpt-5.1-codex"
 
+    def test_xai_oauth(self) -> None:
+        """xAI OAuth provider uses LiteLLM xAI routing prefix."""
+        result = to_litellm_model(LLMProvider.XAI_OAUTH, "grok-4.5")
+
+        assert result == "xai/grok-4.5"
+
 
 class TestToRuntimeModel:
     """to_runtime_model function tests."""
@@ -122,6 +130,12 @@ class TestToRuntimeModel:
         )
 
         assert result == "bedrock/anthropic.claude-v2"
+
+    def test_xai_oauth_uses_litellm_routing_id(self) -> None:
+        """xAI OAuth uses LiteLLM xAI routing."""
+        result = to_runtime_model(LLMProvider.XAI_OAUTH, "grok-4.5")
+
+        assert result == "xai/grok-4.5"
 
 
 class TestBuildCredentialKwargs:
@@ -198,4 +212,25 @@ class TestBuildCredentialKwargs:
             "api_key": "access-token",
             "base_url": CHATGPT_OAUTH_BACKEND_BASE_URL,
             "api_base": CHATGPT_OAUTH_BACKEND_BASE_URL,
+        }
+
+    def test_xai_oauth_secrets(self) -> None:
+        """Convert xAI OAuth secrets to Responses client kwargs."""
+        integration = _make_integration(
+            provider=LLMProvider.XAI_OAUTH,
+            secrets=XaiOAuthSecrets(
+                access_token="access-token",
+                refresh_token="refresh-token",
+                expires_at=datetime.datetime.now(datetime.UTC)
+                + datetime.timedelta(hours=1),
+            ),
+        )
+
+        result = build_credential_kwargs(integration)
+
+        assert result == {
+            "api_key": "access-token",
+            "base_url": XAI_OAUTH_BACKEND_BASE_URL,
+            "api_base": XAI_OAUTH_BACKEND_BASE_URL,
+            "custom_llm_provider": "xai",
         }
