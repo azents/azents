@@ -8,7 +8,7 @@
  */
 
 import { Box, Group, rem, Stack, Text, UnstyledButton } from "@mantine/core";
-import { IconChartDonut, IconChevronRight } from "@tabler/icons-react";
+import { IconChartArcs3, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { memo, useState } from "react";
 import inlineControlClasses from "./ChatInlineControl.module.css";
@@ -66,7 +66,7 @@ export const TurnDivider = memo(function TurnDivider({
               transition: "transform 120ms ease",
             }}
           />
-          <IconChartDonut aria-hidden="true" size={rem(14)} stroke={1.8} />
+          <IconChartArcs3 aria-hidden="true" size={rem(14)} stroke={1.8} />
           <Text size="xs" c="dimmed" className={inlineControlClasses.label}>
             {t("turnUsage.tokens", { count: formatNumber(totalTokens) })}
           </Text>
