@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
+  - python/apps/azents/src/azents/core/xai.py
   - python/apps/azents/src/azents/core/xai_oauth.py
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/credentials.py
@@ -21,14 +22,14 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-07-10
-spec_version: 2
+spec_version: 3
 ---
 
 # xAI OAuth Flow
 
 ## Overview
 
-xAI OAuth flow is an experimental provider connection flow that lets a workspace run agents with a user-authorized xAI account credential. Provider enum is `xai_oauth`, separate from the future xAI API key provider because subscription OAuth uses different billing, entitlement, setup, and refresh behavior.
+xAI OAuth flow is an experimental provider connection flow that lets a workspace run agents with a user-authorized xAI account credential. Provider enum is `xai_oauth`, separate from the stable xAI API-key provider `xai` because subscription OAuth uses different billing, entitlement, setup, and refresh behavior.
 
 The provider is experimental but available without operator OAuth configuration. Azents uses the public native-application client identity registered for the Grok CLI flow, matching the built-in public-client model used by ChatGPT OAuth. The provider capability list always includes `xai_oauth`, and the LLM Settings create modal marks it experimental.
 
@@ -174,6 +175,7 @@ Rules:
 
 - Refresh applies only to integrations whose provider is `xai_oauth`.
 - Runtime calls pass `api_key=<access token>`, `base_url=https://api.x.ai/v1`, `api_base=https://api.x.ai/v1`, and `custom_llm_provider=xai`.
+- OAuth and API-key identities share xAI transport lowering: the first `system` input item carries system instructions, top-level `instructions` is omitted, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are not applied.
 - Transient network/provider failures mark the integration `temporarily_unavailable` and can be retried by a later run.
 - Token refresh 400/401 marks the integration `refresh_required`.
 - Token refresh 403 marks the integration `entitlement_denied`; it is treated as an account tier/allowlist failure, not an expired-token failure.
@@ -190,7 +192,7 @@ Rules:
 
 ## Model Catalog
 
-`xai_oauth` uses the system model catalog projected from LiteLLM source metadata with LiteLLM provider family `xai`. Provider-facing model identifiers remove the `xai/` prefix for selection snapshots, and runtime model identifiers are reconstructed with the `xai/` prefix when invoking LiteLLM.
+`xai_oauth` uses its own system model catalog projected from LiteLLM source metadata with LiteLLM provider family `xai`. The stable `xai` provider has a separate stored system catalog projected from the same source family. Provider-facing model identifiers remove the `xai/` prefix for selection snapshots, and runtime model identifiers are reconstructed with the `xai/` prefix when invoking LiteLLM.
 
 ## Frontend UX Rules
 
@@ -210,5 +212,6 @@ Rules:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-10 | 3 | Clarified separation from the stable API-key provider and documented shared xAI transport/catalog behavior | `docs/azents/design/xai-api-key-provider.md` |
 | 2026-07-10 | 2 | Adopted the public Grok CLI client identity and made the experimental provider available without operator OAuth configuration | OpenCode xAI OAuth and ChatGPT OAuth parity review |
 | 2026-07-10 | 1 | Wrote current xAI OAuth device, runtime refresh, catalog, and UI behavior | `docs/azents/design/xai-oauth-provider.md` |

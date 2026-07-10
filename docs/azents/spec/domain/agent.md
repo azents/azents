@@ -44,8 +44,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-09
-spec_version: 41
+last_verified_at: 2026-07-10
+spec_version: 42
 ---
 
 # Agent Domain Spec
@@ -137,6 +137,8 @@ Rules:
 ### 1.3 Provider integration and model listing
 
 `LLMProviderIntegration` is workspace-scoped credential/config. `/models` endpoint returns normalized model candidates selectable with that integration.
+
+The stable `xai` provider uses generic encrypted API-key secrets with no plaintext provider config. It remains a separate integration identity from experimental `xai_oauth`. Generic integration CRUD persists fake or real keys without calling xAI for validation, omits secrets from every public response, and preserves the encrypted key when an alias or enabled-state update omits `secrets`.
 
 Agent/Workspace settings API resolves each client-sent `{ llm_provider_integration_id, model_identifier }` through the stored model catalog projection and normalizes it into an `AgentModelSelection` snapshot. This applies both to direct transition fields and to every selectable model option entry.
 
@@ -257,7 +259,7 @@ Deterministic fixture in local/test environment is development/QA support path a
 3. Read Agent effective `model_selection` and `lightweight_model_selection` snapshots. These snapshots were resolved from selectable model labels before run start.
 4. Load integration including secrets by `llm_provider_integration_id` of each snapshot.
 5. Return `IntegrationNotFound` if integration absent, `IntegrationDisabled` if disabled.
-6. ChatGPT OAuth integration refreshes near-expiry token with `ensure_runtime_tokens()`.
+6. Refresh-capable OAuth integrations refresh near-expiry tokens with their provider-specific `ensure_runtime_tokens()` path. API-key integrations, including `xai`, do not enter an OAuth refresh path.
 7. Convert `provider` + `model_identifier` into LiteLLM runtime model string.
 8. Compute max input token from `normalized_capabilities.context_window.max_input_tokens`.
 9. Validate Agent `model_parameters` by capability and pass to runtime request fields.
@@ -308,6 +310,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-10 | 42 | Added the stable xAI API-key integration contract and clarified provider-specific OAuth refresh |
 | 2026-07-09 | 41 | Added selectable model option lists, label-based Agent/Workspace model selection, and effective snapshot semantics |
 | 2026-07-09 | 40 | Added Agent `subagent_settings` persistence/API contract for subagent concurrency and depth limits |
 | 2026-07-08 | 39 | Clarified that current subagents are session-scoped `SessionAgent` participants, not persistent Agent roles |

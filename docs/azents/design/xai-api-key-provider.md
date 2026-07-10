@@ -2,6 +2,7 @@
 title: "xAI API Key Provider"
 created: 2026-07-10
 updated: 2026-07-10
+implemented: 2026-07-10
 tags: [backend, frontend, engine, security, api, testenv]
 ---
 
