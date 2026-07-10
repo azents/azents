@@ -53,6 +53,8 @@ class _InputBufferService:
                     id=f"{index + 1:032d}",
                     session_id=input.session_id,
                     kind=input.kind,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
                     actor_user_id=input.actor_user_id,
                     content=input.content,
                     idempotency_key=input.idempotency_key,

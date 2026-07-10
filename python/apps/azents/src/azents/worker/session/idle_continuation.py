@@ -102,6 +102,8 @@ class IdleContinuationService:
         return InputBufferEnqueue(
             session_id=message.session_id,
             kind=InputBufferKind.GOAL_CONTINUATION,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
             actor_user_id=None,
             content=continuation.content,
             idempotency_key=None,

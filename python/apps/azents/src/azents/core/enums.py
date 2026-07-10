@@ -250,6 +250,7 @@ class AgentRunPhase(enum.StrEnum):
 class AgentRunStatus(enum.StrEnum):
     """Agent run status."""
 
+    PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     STOPPED = "stopped"

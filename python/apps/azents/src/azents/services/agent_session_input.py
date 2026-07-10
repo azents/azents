@@ -202,6 +202,8 @@ class AgentSessionInputService:
                 InputBufferEnqueue(
                     session_id=agent_session.id,
                     kind=InputBufferKind.ACTION_MESSAGE,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
                     actor_user_id=user_id,
                     content=message.text,
                     idempotency_key=client_request_id,
@@ -344,6 +346,8 @@ class AgentSessionInputService:
                         InputBufferEnqueue(
                             session_id=agent_session.id,
                             kind=InputBufferKind.ACTION_MESSAGE,
+                            requested_model_target_label=None,
+                            requested_reasoning_effort=None,
                             actor_user_id=user_id,
                             content="",
                             idempotency_key=(
@@ -375,6 +379,8 @@ class AgentSessionInputService:
             InputBufferEnqueue(
                 session_id=agent_session.id,
                 kind=InputBufferKind.USER_MESSAGE,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
                 actor_user_id=user_id,
                 content=message.text,
                 idempotency_key=client_request_id,

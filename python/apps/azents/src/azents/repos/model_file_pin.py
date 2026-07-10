@@ -63,7 +63,17 @@ class ModelFilePinRepository:
             await session.execute(
                 sa.select(RDBModelFilePin.model_file_id, RDBModelFilePin.run_id)
                 .join(RDBAgentRun, RDBAgentRun.id == RDBModelFilePin.run_id)
-                .where(RDBAgentRun.status != AgentRunStatus.RUNNING)
+                .where(
+                    RDBAgentRun.status.in_(
+                        [
+                            AgentRunStatus.COMPLETED,
+                            AgentRunStatus.STOPPED,
+                            AgentRunStatus.FAILED,
+                            AgentRunStatus.INTERRUPTED,
+                            AgentRunStatus.CANCELLED,
+                        ]
+                    )
+                )
                 .limit(limit)
             )
         ).all()

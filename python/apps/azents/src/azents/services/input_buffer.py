@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, InputBufferKind
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
     ChatAction,
@@ -58,6 +59,8 @@ class InputBufferEnqueue:
 
     session_id: str
     kind: InputBufferKind
+    requested_model_target_label: str | None
+    requested_reasoning_effort: ModelReasoningEffort | None
     actor_user_id: str | None
     content: str
     idempotency_key: str | None
@@ -136,6 +139,8 @@ class InputBufferService:
             create = InputBufferCreate(
                 session_id=input.session_id,
                 kind=input.kind,
+                requested_model_target_label=input.requested_model_target_label,
+                requested_reasoning_effort=input.requested_reasoning_effort,
                 actor_user_id=input.actor_user_id,
                 content=input.content,
                 idempotency_key=input.idempotency_key,

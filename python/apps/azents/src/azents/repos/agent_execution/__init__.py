@@ -9,16 +9,27 @@ from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.inference_profile import (
+    InferenceProfileFailureCode,
+    InferenceProfileSource,
+    InferenceRunSummary,
+    RequestedInferenceProfile,
+    ResolvedInferenceProfileSummary,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentRunState,
     Event,
     EventPayload,
+    UserMessagePayload,
     validate_event_payload,
 )
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.models.agent_run import RDBAgentRun
+from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import JSONValue, RDBEvent
 
@@ -38,6 +49,23 @@ def _validate_payload(
 ) -> EventPayload:
     """Validate JSON payload using the canonical payload model mapping."""
     return validate_event_payload(kind, payload)
+
+
+def _serialize_payload(payload: EventPayload) -> dict[str, JSONValue]:
+    """Serialize an event while preserving explicit Default profile effort."""
+    serialized = _JSON_OBJECT_ADAPTER.validate_python(
+        payload.model_dump(mode="json", exclude_none=True)
+    )
+    if (
+        isinstance(payload, UserMessagePayload)
+        and payload.requested_inference_profile is not None
+    ):
+        serialized["requested_inference_profile"] = (
+            _JSON_OBJECT_ADAPTER.validate_python(
+                payload.requested_inference_profile.model_dump(mode="json")
+            )
+        )
+    return serialized
 
 
 class EventTranscriptRepository:
@@ -66,9 +94,7 @@ class EventTranscriptRepository:
         rdb = RDBEvent(
             session_id=create.session_id,
             kind=create.kind,
-            payload=_JSON_OBJECT_ADAPTER.validate_python(
-                payload.model_dump(mode="json", exclude_none=True)
-            ),
+            payload=_serialize_payload(payload),
             model_order=model_order,
             external_id=None,
             adapter=create.adapter,
@@ -93,9 +119,7 @@ class EventTranscriptRepository:
             raise ValueError("External ID is required for idempotent append")
 
         payload = _validate_payload(create.kind, create.payload)
-        payload_json = _JSON_OBJECT_ADAPTER.validate_python(
-            payload.model_dump(mode="json", exclude_none=True)
-        )
+        payload_json = _serialize_payload(payload)
         model_order = (
             create.model_order
             if create.model_order is not None
@@ -311,15 +335,8 @@ class EventTranscriptRepository:
         rdb = await session.get(RDBEvent, event_id)
         if rdb is None:
             raise ValueError("Event not found")
-        validated = _validate_payload(
-            rdb.kind,
-            _JSON_OBJECT_ADAPTER.validate_python(
-                payload.model_dump(mode="json", exclude_none=True)
-            ),
-        )
-        rdb.payload = _JSON_OBJECT_ADAPTER.validate_python(
-            validated.model_dump(mode="json", exclude_none=True)
-        )
+        validated = _validate_payload(rdb.kind, _serialize_payload(payload))
+        rdb.payload = _serialize_payload(validated)
         await session.flush()
         await session.refresh(rdb)
         return self._build(rdb)
@@ -414,14 +431,356 @@ class AgentRunRepository:
         rdb = RDBAgentRun(
             session_id=create.session_id,
             run_index=run_index,
+            requested_model_target_label=create.requested_model_target_label,
+            requested_reasoning_effort=create.requested_reasoning_effort,
+            inference_profile_source=create.inference_profile_source,
+            resolved_model_selection=(
+                create.resolved_model_selection.model_dump(mode="json")
+                if create.resolved_model_selection is not None
+                else None
+            ),
+            resolved_reasoning_effort=create.resolved_reasoning_effort,
+            resolved_at=create.resolved_at,
+            effective_context_window_tokens=create.effective_context_window_tokens,
+            effective_auto_compaction_threshold_tokens=(
+                create.effective_auto_compaction_threshold_tokens
+            ),
+            inference_profile_failure_code=create.inference_profile_failure_code,
+            inference_profile_failure_message=create.inference_profile_failure_message,
+            parent_agent_run_id=create.parent_agent_run_id,
             phase=create.phase,
             status=create.status,
         )
         if create.id is not None:
             rdb.id = create.id
+        if create.status == AgentRunStatus.RUNNING:
+            rdb.started_at = datetime.datetime.now(datetime.UTC)
         session.add(rdb)
         await session.flush()
         return self._build(rdb)
+
+    async def create_pending(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        requested_model_target_label: str | None,
+        requested_reasoning_effort: ModelReasoningEffort | None,
+        inference_profile_source: InferenceProfileSource,
+        parent_agent_run_id: str | None,
+        resolved_model_selection: AgentModelSelection | None,
+        resolved_reasoning_effort: ModelReasoningEffort | None,
+        resolved_at: datetime.datetime | None,
+        effective_context_window_tokens: int | None,
+        effective_auto_compaction_threshold_tokens: int | None,
+    ) -> AgentRunState:
+        """Create a pending run without cancelling an active run."""
+        locked_session_id = await session.scalar(
+            sa.select(RDBAgentSession.id)
+            .where(RDBAgentSession.id == session_id)
+            .with_for_update()
+        )
+        if locked_session_id is None:
+            raise ValueError("AgentSession not found")
+        run_index = await self.next_run_index(session, session_id=session_id)
+        rdb = RDBAgentRun(
+            session_id=session_id,
+            run_index=run_index,
+            requested_model_target_label=requested_model_target_label,
+            requested_reasoning_effort=requested_reasoning_effort,
+            inference_profile_source=inference_profile_source,
+            resolved_model_selection=(
+                resolved_model_selection.model_dump(mode="json")
+                if resolved_model_selection is not None
+                else None
+            ),
+            resolved_reasoning_effort=resolved_reasoning_effort,
+            resolved_at=resolved_at,
+            effective_context_window_tokens=effective_context_window_tokens,
+            effective_auto_compaction_threshold_tokens=(
+                effective_auto_compaction_threshold_tokens
+            ),
+            inference_profile_failure_code=None,
+            inference_profile_failure_message=None,
+            parent_agent_run_id=parent_agent_run_id,
+            phase=AgentRunPhase.IDLE,
+            status=AgentRunStatus.PENDING,
+        )
+        session.add(rdb)
+        await session.flush()
+        return self._build(rdb)
+
+    async def get_pending_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> AgentRunState | None:
+        """Fetch the session's pending run when present."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(
+                RDBAgentRun.session_id == session_id,
+                RDBAgentRun.status == AgentRunStatus.PENDING,
+            )
+            .order_by(RDBAgentRun.run_index.asc())
+            .limit(1)
+        )
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
+    async def claim_pending_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> AgentRunState | None:
+        """Lock and return the session's pending run for one worker."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(
+                RDBAgentRun.session_id == session_id,
+                RDBAgentRun.status == AgentRunStatus.PENDING,
+            )
+            .order_by(RDBAgentRun.run_index.asc())
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
+    async def activate_pending(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        resolved_model_selection: AgentModelSelection,
+        resolved_reasoning_effort: ModelReasoningEffort | None,
+        resolved_at: datetime.datetime,
+        effective_context_window_tokens: int,
+        effective_auto_compaction_threshold_tokens: int,
+    ) -> AgentRunState:
+        """Atomically activate one resolved pending run and its session profile."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(
+                RDBAgentRun.id == run_id,
+                RDBAgentRun.status == AgentRunStatus.PENDING,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            raise ValueError("Pending AgentRun not found")
+        if rdb.requested_model_target_label is None:
+            raise ValueError("Pending AgentRun has no requested model target")
+
+        rdb.resolved_model_selection = resolved_model_selection.model_dump(mode="json")
+        rdb.resolved_reasoning_effort = resolved_reasoning_effort
+        rdb.resolved_at = resolved_at
+        rdb.effective_context_window_tokens = effective_context_window_tokens
+        rdb.effective_auto_compaction_threshold_tokens = (
+            effective_auto_compaction_threshold_tokens
+        )
+        rdb.status = AgentRunStatus.RUNNING
+        rdb.started_at = resolved_at
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == rdb.session_id)
+            .values(
+                last_model_target_label=rdb.requested_model_target_label,
+                last_reasoning_effort=rdb.requested_reasoning_effort,
+            )
+        )
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
+    async def fail_pending_profile_resolution(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        failure_code: InferenceProfileFailureCode,
+        failure_message: str,
+        ended_at: datetime.datetime,
+    ) -> AgentRunState:
+        """Finalize a pending run with safe typed profile failure data."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(
+                RDBAgentRun.id == run_id,
+                RDBAgentRun.status == AgentRunStatus.PENDING,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            raise ValueError("Pending AgentRun not found")
+        rdb.status = AgentRunStatus.FAILED
+        rdb.inference_profile_failure_code = failure_code
+        rdb.inference_profile_failure_message = failure_message
+        rdb.ended_at = ended_at
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
+    async def associate_input_events(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        event_ids: Sequence[str],
+    ) -> None:
+        """Associate ordered input events with one run idempotently."""
+        if not event_ids:
+            return
+        run_session_id = await session.scalar(
+            sa.select(RDBAgentRun.session_id)
+            .where(RDBAgentRun.id == run_id)
+            .with_for_update()
+        )
+        if run_session_id is None:
+            raise ValueError("AgentRun not found")
+        existing_ids = set(
+            (
+                await session.execute(
+                    sa.select(RDBAgentRunInputEvent.event_id).where(
+                        RDBAgentRunInputEvent.agent_run_id == run_id
+                    )
+                )
+            ).scalars()
+        )
+        new_event_ids = [
+            event_id
+            for event_id in dict.fromkeys(event_ids)
+            if event_id not in existing_ids
+        ]
+        if not new_event_ids:
+            return
+        event_rows = (
+            await session.execute(
+                sa.select(RDBEvent.id, RDBEvent.session_id).where(
+                    RDBEvent.id.in_(new_event_ids)
+                )
+            )
+        ).all()
+        if len(event_rows) != len(new_event_ids) or any(
+            event_session_id != run_session_id for _, event_session_id in event_rows
+        ):
+            raise ValueError("Input events must belong to the AgentRun session")
+        max_input_order = await session.scalar(
+            sa.select(sa.func.max(RDBAgentRunInputEvent.input_order)).where(
+                RDBAgentRunInputEvent.agent_run_id == run_id
+            )
+        )
+        first_order = (max_input_order if max_input_order is not None else -1) + 1
+        await session.execute(
+            insert(RDBAgentRunInputEvent).values(
+                [
+                    {
+                        "agent_run_id": run_id,
+                        "event_id": event_id,
+                        "input_order": first_order + offset,
+                    }
+                    for offset, event_id in enumerate(new_event_ids)
+                ]
+            )
+        )
+        await session.flush()
+
+    async def list_input_event_ids(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+    ) -> list[str]:
+        """List a run's associated input events in stable order."""
+        result = await session.execute(
+            sa.select(RDBAgentRunInputEvent.event_id)
+            .where(RDBAgentRunInputEvent.agent_run_id == run_id)
+            .order_by(RDBAgentRunInputEvent.input_order.asc())
+        )
+        return list(result.scalars())
+
+    async def list_by_input_event_id(
+        self,
+        session: AsyncSession,
+        *,
+        event_id: str,
+    ) -> list[AgentRunState]:
+        """List runs associated with one input event in run order."""
+        result = await session.execute(
+            sa.select(RDBAgentRun)
+            .join(
+                RDBAgentRunInputEvent,
+                RDBAgentRunInputEvent.agent_run_id == RDBAgentRun.id,
+            )
+            .where(RDBAgentRunInputEvent.event_id == event_id)
+            .order_by(RDBAgentRun.run_index.asc(), RDBAgentRun.created_at.asc())
+        )
+        return [self._build(rdb) for rdb in result.scalars()]
+
+    async def get_latest_by_input_event_id(
+        self,
+        session: AsyncSession,
+        *,
+        event_id: str,
+    ) -> AgentRunState | None:
+        """Fetch the latest run associated with one input event."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun)
+            .join(
+                RDBAgentRunInputEvent,
+                RDBAgentRunInputEvent.agent_run_id == RDBAgentRun.id,
+            )
+            .where(RDBAgentRunInputEvent.event_id == event_id)
+            .order_by(RDBAgentRun.run_index.desc(), RDBAgentRun.created_at.desc())
+            .limit(1)
+        )
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
+    async def get_latest_inference_run_summary_by_event_id(
+        self,
+        session: AsyncSession,
+        *,
+        event_id: str,
+    ) -> InferenceRunSummary | None:
+        """Project the latest associated run through the safe public allowlist."""
+        run = await self.get_latest_by_input_event_id(session, event_id=event_id)
+        if run is None:
+            return None
+        requested_profile = (
+            RequestedInferenceProfile(
+                model_target_label=run.requested_model_target_label,
+                reasoning_effort=run.requested_reasoning_effort,
+            )
+            if run.requested_model_target_label is not None
+            else None
+        )
+        resolved_profile = (
+            ResolvedInferenceProfileSummary.from_model_selection(
+                run.resolved_model_selection
+            )
+            if run.resolved_model_selection is not None
+            else None
+        )
+        return InferenceRunSummary(
+            run_id=run.id,
+            run_index=run.run_index,
+            status=run.status,
+            requested_profile=requested_profile,
+            source=run.inference_profile_source,
+            resolved_profile=resolved_profile,
+            resolved_reasoning_effort=run.resolved_reasoning_effort,
+            effective_context_window_tokens=run.effective_context_window_tokens,
+            effective_auto_compaction_threshold_tokens=(
+                run.effective_auto_compaction_threshold_tokens
+            ),
+            failure_code=run.inference_profile_failure_code,
+        )
 
     async def mark_session_running_terminal(
         self,
@@ -535,6 +894,12 @@ class AgentRunRepository:
                 if patch.retry_state is not None
                 else None
             )
+        if "resolved_model_selection" in values:
+            values["resolved_model_selection"] = (
+                patch.resolved_model_selection.model_dump(mode="json")
+                if patch.resolved_model_selection is not None
+                else None
+            )
         if values:
             for key, value in values.items():
                 setattr(rdb, key, value)
@@ -637,6 +1002,23 @@ class AgentRunRepository:
             run_index=rdb.run_index,
             phase=rdb.phase,
             status=rdb.status,
+            requested_model_target_label=rdb.requested_model_target_label,
+            requested_reasoning_effort=rdb.requested_reasoning_effort,
+            inference_profile_source=rdb.inference_profile_source,
+            resolved_model_selection=(
+                AgentModelSelection.model_validate(rdb.resolved_model_selection)
+                if rdb.resolved_model_selection is not None
+                else None
+            ),
+            resolved_reasoning_effort=rdb.resolved_reasoning_effort,
+            resolved_at=rdb.resolved_at,
+            effective_context_window_tokens=rdb.effective_context_window_tokens,
+            effective_auto_compaction_threshold_tokens=(
+                rdb.effective_auto_compaction_threshold_tokens
+            ),
+            inference_profile_failure_code=rdb.inference_profile_failure_code,
+            inference_profile_failure_message=rdb.inference_profile_failure_message,
+            parent_agent_run_id=rdb.parent_agent_run_id,
             active_tool_calls=active_tool_calls,
             retry_state=FailedRunRetryState.model_validate(rdb.retry_state)
             if rdb.retry_state is not None
@@ -645,6 +1027,7 @@ class AgentRunRepository:
             terminal_result_event_id=rdb.terminal_result_event_id,
             terminal_result_message=rdb.terminal_result_message,
             stop_requested_at=rdb.stop_requested_at,
+            created_at=rdb.created_at,
             started_at=rdb.started_at,
             ended_at=rdb.ended_at,
             updated_at=rdb.updated_at,

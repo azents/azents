@@ -83,6 +83,8 @@ class _SubagentLockRepository(AgentSessionRepository):
             workspace_id="workspace-1",
             agent_id="agent-1",
             handle="subagent-session",
+            last_model_target_label=None,
+            last_reasoning_effort=None,
             session_kind=AgentSessionKind.SUBAGENT,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,

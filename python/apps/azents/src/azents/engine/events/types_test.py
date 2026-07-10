@@ -6,6 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from azents.core.enums import EventKind
+from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import (
     AssistantMessagePayload,
     ClientToolResultPayload,
@@ -94,6 +96,32 @@ def test_event_rejects_payload_kind_mismatch() -> None:
             ),
             created_at=now,
         )
+
+
+def test_user_message_decodes_historical_payload_without_profile() -> None:
+    payload = UserMessagePayload.model_validate({"content": "historical"})
+
+    assert payload.requested_inference_profile is None
+
+
+def test_user_message_preserves_requested_inference_profile() -> None:
+    payload = UserMessagePayload(
+        content="use quality",
+        requested_inference_profile=RequestedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=ModelReasoningEffort.HIGH,
+        ),
+    )
+
+    assert payload.model_dump(mode="json", exclude_none=True) == {
+        "content": "use quality",
+        "attachments": [],
+        "metadata": {},
+        "requested_inference_profile": {
+            "model_target_label": "Quality",
+            "reasoning_effort": "high",
+        },
+    }
 
 
 def test_user_message_accepts_text_and_file_parts() -> None:

@@ -298,7 +298,21 @@ class AgentEngineAdapter:
             if run_state is None:
                 run_state = await self.run_repo.create(
                     session,
-                    AgentRunCreate(id=context.run_id, session_id=request.session_id),
+                    AgentRunCreate(
+                        id=context.run_id,
+                        session_id=request.session_id,
+                        requested_model_target_label=None,
+                        requested_reasoning_effort=None,
+                        inference_profile_source=None,
+                        resolved_model_selection=None,
+                        resolved_reasoning_effort=None,
+                        resolved_at=None,
+                        effective_context_window_tokens=None,
+                        effective_auto_compaction_threshold_tokens=None,
+                        inference_profile_failure_code=None,
+                        inference_profile_failure_message=None,
+                        parent_agent_run_id=None,
+                    ),
                 )
             else:
                 await self.run_repo.update_retry_state(session, context.run_id, None)

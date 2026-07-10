@@ -729,6 +729,8 @@ class ChatSessionService:
                         InputBufferEnqueue(
                             session_id=agent_session.id,
                             kind=InputBufferKind.ACTION_MESSAGE,
+                            requested_model_target_label=None,
+                            requested_reasoning_effort=None,
                             actor_user_id=user_id,
                             content="",
                             idempotency_key=None,

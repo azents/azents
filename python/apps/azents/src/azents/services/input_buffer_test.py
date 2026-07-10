@@ -143,6 +143,8 @@ async def _create_buffer(
             InputBufferCreate(
                 session_id=session_id,
                 kind=InputBufferKind.USER_MESSAGE,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
                 actor_user_id=user_id,
                 content=content,
                 idempotency_key=None,
@@ -170,6 +172,8 @@ async def _create_action_buffer(
             InputBufferCreate(
                 session_id=session_id,
                 kind=InputBufferKind.ACTION_MESSAGE,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
                 actor_user_id=user_id,
                 content=content,
                 idempotency_key=None,
@@ -196,6 +200,8 @@ async def _create_agent_message_buffer(
             InputBufferCreate(
                 session_id=session_id,
                 kind=InputBufferKind.AGENT_MESSAGE,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
                 actor_user_id=user_id,
                 content=content,
                 idempotency_key=None,
@@ -390,6 +396,8 @@ class TestInputBufferService:
                 InputBufferEnqueue(
                     session_id=session_id,
                     kind=InputBufferKind.USER_MESSAGE,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
                     actor_user_id=user_id,
                     content="wake me",
                     idempotency_key="client-request-001",
