@@ -16,7 +16,7 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
-import { IconCheck, IconCopy } from "@tabler/icons-react";
+import { IconCheck, IconCopy, IconExternalLink } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
@@ -184,6 +184,16 @@ export function XaiOAuthConnectionCard({
         <Alert color="blue">
           <Stack gap="xs">
             <Text>{pendingDescription}</Text>
+            <Button
+              component="a"
+              href={deviceState.verificationUri || DEVICE_VERIFICATION_URL}
+              target="_blank"
+              rel="noreferrer"
+              rightSection={<IconExternalLink size={16} />}
+              fullWidth
+            >
+              {t("openVerificationPage")}
+            </Button>
             <Paper withBorder p="xs" radius="sm">
               <Group justify="space-between" wrap="nowrap" gap="xs">
                 <Text ff="monospace" truncate>
