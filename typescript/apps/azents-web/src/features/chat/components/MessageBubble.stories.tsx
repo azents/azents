@@ -53,12 +53,13 @@ export const AgentMailboxMessage = {
     message: createChatMessage({
       id: "agent-mailbox",
       role: "user",
-      content: "Check the deployment logs and summarize the failure.",
+      content:
+        "Checked the deployment logs. The rollout failed because the readiness probe timed out.",
       metadata: {
         source: "agent_mailbox",
-        message_kind: "spawn_agent",
-        source_path: "/",
-        target_path: "/deploy-check",
+        message_kind: "send_message",
+        source_path: "/root/deploy-check",
+        target_path: "/root",
       },
     }),
   },
