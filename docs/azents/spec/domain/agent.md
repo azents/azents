@@ -11,6 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_mapping.py
+  - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/src/azents/rdb/models/agent_admin.py
   - python/apps/azents/src/azents/rdb/models/llm_provider_integration.py
@@ -45,7 +46,7 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
 last_verified_at: 2026-07-10
-spec_version: 42
+spec_version: 43
 ---
 
 # Agent Domain Spec
@@ -93,7 +94,7 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 - `model_selection = selectable_model_options[main_model_label].model_selection`
 - `lightweight_model_selection = selectable_model_options[lightweight_model_label].model_selection`
 
-Runtime reads only these effective snapshots. It does not resolve labels, query Workspace defaults, or query model catalogs during run start.
+The denormalized snapshots remain the Agent defaults. Normal human inputs may instead request one label from the same Agent-owned option list for a single run. At run activation, the worker resolves that label against the current Agent snapshot without querying Workspace defaults or model catalogs. Clients never submit provider, integration, model, capability, or token-limit snapshots as run intent.
 
 Required snapshot fields:
 
@@ -252,20 +253,21 @@ Deterministic fixture in local/test environment is development/QA support path a
 
 ## 3. Runtime Resolve
 
-`resolve_invoke_input()` performs following before run start.
+Every run has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model's Default, not the Agent-level reasoning parameter. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, or `parent_run`.
 
-1. Load Agent with `AgentRepository.get_by_id()`.
-2. Return `AgentNotFound` if Agent absent, `AgentDisabled` if disabled.
-3. Read Agent effective `model_selection` and `lightweight_model_selection` snapshots. These snapshots were resolved from selectable model labels before run start.
-4. Load integration including secrets by `llm_provider_integration_id` of each snapshot.
-5. Return `IntegrationNotFound` if integration absent, `IntegrationDisabled` if disabled.
-6. Refresh-capable OAuth integrations refresh near-expiry tokens with their provider-specific `ensure_runtime_tokens()` path. API-key integrations, including `xai`, do not enter an OAuth refresh path.
-7. Convert `provider` + `model_identifier` into LiteLLM runtime model string.
-8. Compute max input token from `normalized_capabilities.context_window.max_input_tokens`.
-9. Validate Agent `model_parameters` by capability and pass to runtime request fields.
-10. Materialize user input attachment into runtime attachment/FilePart.
+Before a new normal run starts, runtime resolution:
 
-Runtime does not query workspace default or model listing. Workspace default acts only as copy source at create/update submit time.
+1. Loads the Agent and rejects missing or disabled Agents.
+2. Resolves the requested label against the Agent's current `selectable_model_options`; missing labels fail with `model_target_not_found` and never fall back to another option.
+3. Validates non-null requested effort against the selected snapshot's normalized reasoning capabilities; unsupported effort fails with `reasoning_effort_unsupported` before provider invocation.
+4. Loads and validates the selected main integration plus the Agent's lightweight integration, including provider token refresh where required.
+5. Builds the main runtime model from the selected option while retaining the Agent's `lightweight_model_selection` for compaction.
+6. Computes and fixes the run's effective context window and automatic compaction threshold.
+7. Validates Agent model parameters, applies the requested effort, and materializes user attachments.
+
+Successful activation stores the full selected `AgentModelSelection`, resolved effort, effective limits, and resolution timestamp on `AgentRun`. Subsequent turns, automatic retries, recovery, and worker takeover rebuild from that stored snapshot rather than resolving the label again. Resolution failures are terminal typed run failures with no fallback or automatic retry.
+
+Runtime does not query Workspace defaults or model listing. Workspace defaults act only as copy sources at Agent create/update submit time, and model catalog changes do not mutate an activated run.
 
 ## 4. Built-in Tool Validation
 
@@ -304,12 +306,13 @@ Following contracts do not exist in current system.
 - `agents.model_parameter_overrides`
 - runtime `ModelConfig` lookup / default parameter merge
 - legacy subagent role, junction, API, and blocking runtime delegation tool
-- subagent model runtime inheritance
+- legacy persistent subagent-Agent model inheritance
 
 ## 8. Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-10 | 43 | Added per-run Agent-owned target resolution, nullable effort validation, and immutable activated profile semantics |
 | 2026-07-10 | 42 | Added the stable xAI API-key integration contract and clarified provider-specific OAuth refresh |
 | 2026-07-09 | 41 | Added selectable model option lists, label-based Agent/Workspace model selection, and effective snapshot semantics |
 | 2026-07-09 | 40 | Added Agent `subagent_settings` persistence/API contract for subagent concurrency and depth limits |

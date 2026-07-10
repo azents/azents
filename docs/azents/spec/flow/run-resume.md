@@ -14,14 +14,15 @@ code_paths:
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/agent_run/**
+  - python/apps/azents/src/azents/repos/agent_execution/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-08
-spec_version: 14
+last_verified_at: 2026-07-10
+spec_version: 15
 ---
 
 # Run Resume
@@ -37,7 +38,7 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Broker wake-up | New session wake-up signal | Live sticky owner receives the wake-up directly; otherwise a worker can take over after owner heartbeat expiry |
 | Broker redelivery | Unacked session wake-up signal | Another worker receives and resumes from durable DB state |
 | Stale session activity | Worker recovery scan of `agent_sessions.run_state` | Worker enqueues a wake-up signal for the affected session |
-| Active event run | `agent_runs.phase`, `active_tool_calls`, and `retry_state` | Runtime reconciles phase/tool/retry state and repairs missing interrupted results |
+| Active event run | pending/running `agent_runs`, resolved inference provenance, phase, active tools, and retry state | Runtime preserves the run/input boundary, resumes from an activated snapshot, and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime executes or interrupts the missing result path without duplicating completed results |
 | Blocked operation action | Session has pending action execution that failed or has not completed | Worker preserves later pending buffers and does not create a model run until the action completes or is discarded |
 
@@ -185,6 +186,12 @@ instead of creating a replacement row. Retry wait may be resumed from `next_retr
 waiting finalizes the failed run with `finalization_reason = retry_stopped_by_user`. Shutdown while
 waiting leaves the run `running` for the next worker instead of writing durable failed history.
 
+## Inference Profile Recovery
+
+Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. A pending normal run retains requested label, effort, and source, then resolves once during activation. A running run must already contain the full resolved model snapshot and effective limits; recovery rebuilds `RunRequest` from those values and never re-resolves current Agent labels.
+
+Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations, marks source `retry_original`, and leaves resolved provenance empty so current Agent routing is resolved once at activation. The first child subagent run is different: it is precreated with source `parent_run` and the exact parent resolved snapshot, effort, limits, and parent run id, so recovery does not depend on whether the original target label still exists.
+
 ## Tool Recovery
 
 If a foreground tool call has no corresponding result after interruption, the runtime appends a
@@ -209,7 +216,8 @@ that next run to observe `check_stop()` as true.
 
 ## Invariants
 
-- Durable transcript and `agent_runs` are the resume source of truth.
+- Durable transcript, ordered run-input associations, and pending/running `agent_runs` are the resume source of truth.
+- Activated inference snapshots and effective limits remain immutable across recovery and automatic retry.
 - `agent_runs.retry_state` is the resume source for failed-run retry progress while a run remains running.
 - A live sticky owner must receive follow-up broker wake-ups directly.
 - A non-owner worker must not process a session while the owner heartbeat is live.
@@ -225,6 +233,7 @@ that next run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-10** (spec_version 15) — Added pending/activated profile recovery, retry intent re-resolution, and exact inherited parent-run snapshot recovery.
 - **2026-07-08** (spec_version 14) — Clarified that failed TurnActions continue FIFO processing and context invalidation uses a cancelled run boundary plus follow-up wake-up, not a completed run marker.
 - **2026-07-08** (spec_version 13) — Clarified that running workers process TurnActions at model-call turn boundaries and hand off after context invalidation.
 - **2026-07-06** (spec_version 12) — Removed session-initialization recovery and documented durable terminal action result recovery.

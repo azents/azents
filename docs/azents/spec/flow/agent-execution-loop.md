@@ -18,6 +18,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/deps.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/core/config.py
+  - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/action_execution.py
@@ -38,7 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-10
-spec_version: 68
+spec_version: 69
 ---
 
 # Agent Execution Loop
@@ -55,7 +56,7 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker promotes input buffers to durable event input, including ordered `action_message` and `agent_message` events, at wake-up entry and at each model-call turn boundary.
+1. Worker selects the next requested inference profile, precreates or claims one pending `AgentRun`, and promotes only the matching FIFO input prefix to ordered durable run input.
 2. Worker executes operation TurnActions such as `create_git_worktree` before the next model dispatch; a failed operation is marked failed and FIFO processing continues to later pending input.
 3. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
@@ -91,6 +92,10 @@ Phase enum:
 `active_tool_calls` contains `call_id`, `name`, redacted/summarized `arguments`, `started_at`,
 and `background`. The UI LLM running indicator uses `waiting_for_model` / `streaming_model`, and
 tool activity uses `executing_tools` and `active_tool_calls`.
+
+A newly selected run begins as `pending`. The worker promotes and associates the matching input events, resolves the Agent-owned target label, validates optional effort, and atomically activates the run with its physical model snapshot and effective limits before provider execution. Resolution failure marks the pending run failed and emits only a user-safe error. A `running` run always resumes from its stored resolution; no turn or automatic retry re-resolves current Agent routing.
+
+Requested profile selection precedence for implicit execution is session-last-used then Agent `main_model_label`; explicit human input wins over both. Session-last-used is updated only after successful normal activation. Commands use the implicit selection but have no client-submitted profile. Background/control inputs may join only when they do not cross a requested-profile or action boundary.
 
 `terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. Subagent parent observation and Subagent Tree unread/result previews read this projection instead of scanning child transcript history.
 
@@ -200,10 +205,7 @@ The pre-lower order is significant. Event attachment/file availability filters r
 compaction. Scheduler-owned file cleanup does not run in run input preparation. The runtime does not omit old tool outputs in normal model input. If the lowered request
 is still too large, `NativeRequestSizeGuard` remains the final post-lower hard guard.
 
-`AgentWorker` resolves effective model snapshots before the engine starts. Agent selectable model labels
-are not a runtime concern: Agent and Workspace settings services resolve labels into saved
-`model_selection` and `lightweight_model_selection` snapshots before run start, and the execution loop
-receives only those effective snapshots in `RunRequest`.
+`AgentWorker` resolves the requested main target before the engine starts. The target label is resolved only against the current Agent-owned selectable option snapshots; Workspace defaults and model catalogs are not consulted. The selected main snapshot, requested effort, effective context limit, and compaction threshold become immutable `AgentRun` provenance. The Agent's lightweight snapshot remains the compaction model. The execution core receives physical selections and limits in `RunRequest`, never the target label.
 
 `LiteLLMResponsesLowerer` owns the full provider-native request surface for the Responses adapter:
 transport credential kwargs, generation kwargs, client function tool passthrough, and provider-hosted
@@ -271,7 +273,7 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   `SessionAgent` row lock for the tree. It fails with a tool error instead of queueing when the root
   tree already has `subagent_settings.max_subagents` active subagents or the requested child would
   exceed `subagent_settings.max_depth`. If allowed, it creates
-  a child `SessionAgent` plus hidden child `AgentSession`, forks the parent's current model-visible
+  a child `SessionAgent` plus hidden child `AgentSession`, precreates the child's first pending run with the exact current parent-run resolved profile and limits, forks the parent's current model-visible
   context by default, appends that selected context to the child transcript, appends a
   `system_reminder` event rendered as a `<system-reminder>` boundary when any parent history
   was copied, writes an initial `agent_message`, marks the child running, and sends a broker
@@ -496,6 +498,7 @@ Primary checks:
 - deterministic action-based Git worktree lifecycle E2E coverage, including existing-session Register Project worktree actions and action retry/discard recovery
 - `cd testenv/azents/e2e && uv run pyright src/tests/azents/public/test_chat_input_buffer.py`
 - Failed-run retry recovery E2E: `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_agent_execution_persistence.py -q -k failed_run`
+- Per-prompt target, effort, provenance, and resolution-failure E2E: `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_per_prompt_inference_profile.py -q`
 - REST chat write targeted verification: `cd python/apps/azents && uv run pytest -q src/azents/api/public/chat/v1/chat_api_test.py src/azents/repos/chat_write_request/repository_test.py src/azents/services/chat/input_buffer_test.py`
 - REST chat write and preemptive stop E2E/browser blocker tracking: GitHub issues #4468 and #4469
 - static scan for removed `openai-agents`, `azents.engine.sdk`, `azents.runtime.llm`, and
@@ -504,6 +507,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-10** — v69. Added profile-aware FIFO promotion, atomic run activation, immutable resolved provenance, and exact parent-run profile inheritance.
 - **2026-07-10** — v68. Documented shared xAI API-key/OAuth transport lowering while preserving OAuth-only credential refresh.
 - **2026-07-09** — v66. Documented forked-history `<system-reminder>` boundaries, explicit agent-message envelopes, and Codex v2 agent targeting and list visibility.
 - **2026-07-09** — v65. Clarified that selectable model labels are resolved before run start and runtime receives effective model snapshots only.

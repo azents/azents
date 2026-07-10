@@ -2,6 +2,7 @@
 title: "Per-Prompt Inference Profile Design"
 created: 2026-07-10
 updated: 2026-07-10
+implemented: 2026-07-10
 tags: [api, backend, chat, database, engine, frontend, routing, subagent]
 ---
 
