@@ -307,6 +307,24 @@ class SessionLifecycleService:
             await db_session.commit()
             return run
 
+    async def activate_inherited_pending_agent_run(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+    ) -> AgentRunState:
+        """Activate a pre-resolved child run without replacing its provenance."""
+        async with self.session_manager() as db_session:
+            run = await self.agent_run_repository.activate_inherited_pending(
+                db_session,
+                run_id=run_id,
+                activated_at=datetime.datetime.now(datetime.UTC),
+            )
+            if run.session_id != session_id:
+                raise ValueError("AgentRun session mismatch")
+            await db_session.commit()
+            return run
+
     async def fail_pending_agent_run_profile(
         self,
         session_id: str,

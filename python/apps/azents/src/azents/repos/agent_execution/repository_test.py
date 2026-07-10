@@ -589,6 +589,92 @@ class TestEventExecutionRepositories:
         assert summaries[second_event.id].run_id == pending.id
         assert "integration" not in summary.model_dump(mode="json")
 
+    async def test_inherited_pending_activation_preserves_parent_snapshot(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Activate an inherited child without replacing its stored provenance."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-inherited-profile",
+        )
+        session_repo = _agent_session_repository()
+        parent_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        child_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        resolved_at = datetime.datetime.now(datetime.UTC)
+        parent = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=parent_session.id,
+                requested_model_target_label="Quality",
+                requested_reasoning_effort=ModelReasoningEffort.HIGH,
+                inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
+                resolved_model_selection=_model_selection(),
+                resolved_reasoning_effort=ModelReasoningEffort.HIGH,
+                resolved_at=resolved_at,
+                effective_context_window_tokens=128_000,
+                effective_auto_compaction_threshold_tokens=115_200,
+                inference_profile_failure_code=None,
+                inference_profile_failure_message=None,
+                parent_agent_run_id=None,
+            ),
+        )
+        child = await repo.create_pending(
+            rdb_session,
+            session_id=child_session.id,
+            requested_model_target_label=parent.requested_model_target_label,
+            requested_reasoning_effort=parent.requested_reasoning_effort,
+            inference_profile_source=InferenceProfileSource.PARENT_RUN,
+            parent_agent_run_id=parent.id,
+            resolved_model_selection=parent.resolved_model_selection,
+            resolved_reasoning_effort=parent.resolved_reasoning_effort,
+            resolved_at=parent.resolved_at,
+            effective_context_window_tokens=parent.effective_context_window_tokens,
+            effective_auto_compaction_threshold_tokens=(
+                parent.effective_auto_compaction_threshold_tokens
+            ),
+        )
+        activated_at = resolved_at + datetime.timedelta(seconds=1)
+
+        activated = await repo.activate_inherited_pending(
+            rdb_session,
+            run_id=child.id,
+            activated_at=activated_at,
+        )
+        refreshed_session = await session_repo.get_by_id(
+            rdb_session,
+            child_session.id,
+        )
+
+        assert activated.status == AgentRunStatus.RUNNING
+        assert activated.started_at == activated_at
+        assert activated.parent_agent_run_id == parent.id
+        assert activated.requested_model_target_label == "Quality"
+        assert activated.requested_reasoning_effort == ModelReasoningEffort.HIGH
+        assert activated.resolved_model_selection == parent.resolved_model_selection
+        assert activated.resolved_reasoning_effort == parent.resolved_reasoning_effort
+        assert activated.resolved_at == parent.resolved_at
+        assert activated.effective_context_window_tokens == 128_000
+        assert activated.effective_auto_compaction_threshold_tokens == 115_200
+        assert refreshed_session is not None
+        assert refreshed_session.last_model_target_label == "Quality"
+        assert refreshed_session.last_reasoning_effort == ModelReasoningEffort.HIGH
+
     async def test_input_event_association_rejects_another_session(
         self,
         rdb_session: AsyncSession,

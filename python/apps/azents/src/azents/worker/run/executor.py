@@ -65,7 +65,12 @@ from azents.engine.hooks.types import (
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.commands import CommandHandler
-from azents.engine.run.contracts import AgentEngineProtocol, RunContext, ToolkitBinding
+from azents.engine.run.contracts import (
+    AgentEngineProtocol,
+    RunContext,
+    RunRequest,
+    ToolkitBinding,
+)
 from azents.engine.run.emit import Emit, handle_engine_event
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.failure import (
@@ -454,6 +459,7 @@ class RunExecutor:
             user_id=message.user_id,
         )
 
+        run_request: RunRequest | None = None
         if agent_run.status == AgentRunStatus.RUNNING:
             if (
                 agent_run.resolved_model_selection is None
@@ -513,17 +519,74 @@ class RunExecutor:
                 ),
             )
         elif agent_run.status == AgentRunStatus.PENDING:
-            resolved = await resolve_invoke_input_with_profile(
-                invoke_input,
-                requested_profile=selected_profile.profile,
-                agent_repository=self.agent_repository,
-                integration_repository=self.integration_repository,
-                session_manager=self.session_manager,
-                exchange_file_service=self.exchange_file_service,
-                model_file_service=self.model_file_service,
+            inherited_pending = (
+                agent_run.inference_profile_source == InferenceProfileSource.PARENT_RUN
             )
-            if resolved.failure:
-                failure = _profile_resolution_failure(resolved.error)
+            resolution_error: object | None = None
+            resolved_profile = None
+            if inherited_pending:
+                if (
+                    agent_run.parent_agent_run_id is None
+                    or agent_run.resolved_model_selection is None
+                    or agent_run.resolved_at is None
+                    or agent_run.effective_context_window_tokens is None
+                    or agent_run.effective_auto_compaction_threshold_tokens is None
+                ):
+                    resolution_error = ValueError(
+                        "Inherited pending AgentRun has incomplete provenance"
+                    )
+                else:
+                    inherited_resolution = (
+                        await resolve_invoke_input_with_resolved_profile(
+                            invoke_input,
+                            resolved_model_selection=(
+                                agent_run.resolved_model_selection
+                            ),
+                            resolved_reasoning_effort=(
+                                agent_run.resolved_reasoning_effort
+                            ),
+                            agent_repository=self.agent_repository,
+                            integration_repository=self.integration_repository,
+                            session_manager=self.session_manager,
+                            exchange_file_service=self.exchange_file_service,
+                            model_file_service=self.model_file_service,
+                        )
+                    )
+                    if inherited_resolution.failure:
+                        resolution_error = inherited_resolution.error
+                    else:
+                        effective_context_window_tokens = (
+                            agent_run.effective_context_window_tokens
+                        )
+                        run_request = dataclasses.replace(
+                            inherited_resolution.value,
+                            max_input_tokens=effective_context_window_tokens,
+                            context_window_tokens=effective_context_window_tokens,
+                            compaction_max_input_tokens=(
+                                effective_context_window_tokens
+                            ),
+                            auto_compaction_threshold_tokens=(
+                                agent_run.effective_auto_compaction_threshold_tokens
+                            ),
+                        )
+            else:
+                resolved = await resolve_invoke_input_with_profile(
+                    invoke_input,
+                    requested_profile=selected_profile.profile,
+                    agent_repository=self.agent_repository,
+                    integration_repository=self.integration_repository,
+                    session_manager=self.session_manager,
+                    exchange_file_service=self.exchange_file_service,
+                    model_file_service=self.model_file_service,
+                )
+                if resolved.failure:
+                    resolution_error = resolved.error
+                else:
+                    resolved_profile = resolved.value
+                    run_request = resolved_profile.run_request
+
+            if resolution_error is not None:
+                failure = _profile_resolution_failure(resolution_error)
                 failure_code = failure.code
                 error_message = failure.message
                 await self.session_lifecycle.fail_pending_agent_run_profile(
@@ -560,26 +623,36 @@ class RunExecutor:
                     terminal_run_status=AgentRunStatus.FAILED,
                 )
 
-            resolved_profile = resolved.value
-            run_request = resolved_profile.run_request
-            await self.session_lifecycle.activate_pending_agent_run(
-                message.session_id,
-                run_id=run_id,
-                resolved_model_selection=resolved_profile.model_selection,
-                resolved_reasoning_effort=resolved_profile.reasoning_effort,
-                effective_context_window_tokens=run_request.effective_max_input_tokens,
-                effective_auto_compaction_threshold_tokens=(
-                    compute_auto_compaction_threshold_tokens(
+            if inherited_pending:
+                await self.session_lifecycle.activate_inherited_pending_agent_run(
+                    message.session_id,
+                    run_id=run_id,
+                )
+            else:
+                if resolved_profile is None or run_request is None:
+                    raise ValueError("Resolved pending AgentRun has no profile")
+                await self.session_lifecycle.activate_pending_agent_run(
+                    message.session_id,
+                    run_id=run_id,
+                    resolved_model_selection=resolved_profile.model_selection,
+                    resolved_reasoning_effort=resolved_profile.reasoning_effort,
+                    effective_context_window_tokens=(
                         run_request.effective_max_input_tokens
-                    )
-                ),
-            )
+                    ),
+                    effective_auto_compaction_threshold_tokens=(
+                        compute_auto_compaction_threshold_tokens(
+                            run_request.effective_max_input_tokens
+                        )
+                    ),
+                )
             await self._publish_inference_run_event_projections(
                 session_id=message.session_id,
                 run_id=run_id,
             )
         else:
             raise ValueError("Recoverable AgentRun is already terminal")
+        if run_request is None:
+            raise ValueError("AgentRun resolution produced no request")
         now = loop.time()
         logger.info(
             "Run invoke input resolved",
