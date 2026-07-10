@@ -20,12 +20,13 @@ from azents.core.enums import (
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
+    EventKind,
     InputBufferKind,
     SessionAgentKind,
 )
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
-from azents.engine.events.types import AgentRunState
+from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
 from azents.engine.run.types import FunctionToolError
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
@@ -86,6 +87,18 @@ def _session_agent(
         parent_observed_event_id=None,
         created_at=_NOW,
         updated_at=_NOW,
+    )
+
+
+def _event(kind: EventKind, payload: UserMessagePayload, model_order: int) -> Event:
+    """Create Event fixture."""
+    return Event(
+        id=str(model_order).rjust(32, "0"),
+        session_id="root-session",
+        kind=kind,
+        payload=payload,
+        model_order=model_order,
+        created_at=_NOW,
     )
 
 
@@ -181,11 +194,24 @@ class _AgentSessionRepository:
         current_session_agent_id: str,
         path: str,
     ) -> SessionAgent | None:
-        """Resolve the child fixture by name or path."""
-        del session, current_session_agent_id
-        if path in {"child", "/root/child"}:
-            return self.target
-        return None
+        """Resolve absolute or current-agent-relative fixture paths."""
+        del session
+        current = next(
+            (agent for agent in self.tree if agent.id == current_session_agent_id),
+            None,
+        )
+        if current is None:
+            raise ValueError("SessionAgent not found")
+        if path == ".":
+            resolved_path = current.path
+        elif path.startswith("/"):
+            resolved_path = path
+        else:
+            resolved_path = f"{current.path}/{path}"
+        return next(
+            (agent for agent in self.tree if agent.path == resolved_path),
+            None,
+        )
 
     async def lock_session_agent_by_id(
         self,
@@ -275,9 +301,15 @@ class _AgentSessionRepository:
         session_agent_id: str,
         include_self: bool,
     ) -> list[SessionAgent]:
-        """Return the child fixture as the only descendant."""
-        del session, session_agent_id, include_self
-        return [self.target]
+        """Return descendants of the requested fixture agent."""
+        del session
+        current = next(agent for agent in self.tree if agent.id == session_agent_id)
+        descendants = [
+            agent for agent in self.tree if agent.path.startswith(f"{current.path}/")
+        ]
+        if include_self:
+            return [current, *descendants]
+        return descendants
 
     async def update_session_agent_observation_cursor(
         self,
@@ -360,6 +392,7 @@ class _EventTranscriptRepository:
     def __init__(self) -> None:
         """Initialize fake state."""
         self.appended: list[EventCreate] = []
+        self.forked_events: list[Event] = []
 
     async def list_for_model_input(
         self,
@@ -370,7 +403,7 @@ class _EventTranscriptRepository:
     ) -> list[Any]:
         """Return no forked events by default."""
         del session, session_id, head_event_id
-        return []
+        return list(self.forked_events)
 
     async def append(
         self,
@@ -534,6 +567,35 @@ async def test_send_message_is_queue_only() -> None:
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
 
 
+async def test_send_message_from_child_can_target_root() -> None:
+    """send_message matches Codex by allowing upward communication."""
+    toolkit, repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="child-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "send_message")
+
+    result = await tool.handler(
+        json.dumps({"agent_name": "/root", "message": "status update"})
+    )
+
+    assert json.loads(cast(str, result)) == {
+        "status": "queued",
+        "agent_name": "root",
+        "agent_path": "/root",
+    }
+    assert input_service.enqueued[0].metadata["source_path"] == "/root/child"
+    assert input_service.enqueued[0].metadata["target_path"] == "/root"
+    assert repo.last_task_updates == [("root-agent", "status update")]
+
+
 async def test_followup_task_wakes_target_child() -> None:
     """followup_task writes mailbox input and wakes the target child."""
     (
@@ -577,6 +639,73 @@ async def test_followup_task_wakes_target_child() -> None:
     assert isinstance(wake, SessionWakeUp)
     assert wake.session_id == "child-session"
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
+
+
+async def test_followup_task_from_child_rejects_root() -> None:
+    """followup_task matches Codex by rejecting the root agent."""
+    toolkit, _repo, input_service, broker, _run_repo, _events = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="child-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "followup_task")
+
+    with pytest.raises(
+        FunctionToolError,
+        match="Follow-up tasks can't target the root agent",
+    ):
+        await tool.handler(json.dumps({"agent_name": "/root", "task": "work"}))
+
+    assert input_service.enqueued == []
+    assert broker.messages == []
+
+
+async def test_interrupt_agent_rejects_root_and_self() -> None:
+    """interrupt_agent matches Codex root and self restrictions."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="child-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "interrupt_agent")
+
+    with pytest.raises(FunctionToolError, match="root is not a spawned agent"):
+        await tool.handler(json.dumps({"agent_name": "/root"}))
+    with pytest.raises(FunctionToolError, match="an agent cannot interrupt itself"):
+        await tool.handler(json.dumps({"agent_name": "."}))
+
+
+async def test_list_agents_from_child_includes_root_tree() -> None:
+    """list_agents matches Codex by exposing the root and known agent tree."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="child-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "list_agents")
+
+    result = await tool.handler("{}")
+
+    agents = json.loads(cast(str, result))["agents"]
+    assert [agent["agent_path"] for agent in agents] == ["/root", "/root/child"]
 
 
 async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
@@ -767,6 +896,75 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionWakeUp)
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
+
+
+async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
+    """spawn_agent separates copied parent history from the child task."""
+    (
+        toolkit,
+        _repo,
+        input_service,
+        _broker,
+        _run_repo,
+        _published_events,
+    ) = await _make_toolkit()
+    event_repo = cast(_EventTranscriptRepository, toolkit.event_transcript_repository)
+    event_repo.forked_events = [
+        _event(EventKind.USER_MESSAGE, UserMessagePayload(content="Make the PR"), 1000)
+    ]
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+
+    await tool.handler(json.dumps({"name": "reviewer", "task": "Review only"}))
+
+    assert [event.kind for event in event_repo.appended] == [
+        EventKind.USER_MESSAGE,
+        EventKind.SYSTEM_REMINDER,
+    ]
+    assert event_repo.appended[0].model_order == 1000
+    assert event_repo.appended[1].model_order is None
+    reminder_text = event_repo.appended[1].payload["text"]
+    assert isinstance(reminder_text, str)
+    assert "inherited conversation history" in reminder_text
+    assert "direct assignment begins after this reminder" in reminder_text
+    assert input_service.enqueued[0].content == "Review only"
+
+
+async def test_spawn_agent_does_not_insert_boundary_without_forked_history() -> None:
+    """spawn_agent omits the fork boundary when no parent events are copied."""
+    (
+        toolkit,
+        _repo,
+        _input_service,
+        _broker,
+        _run_repo,
+        _published_events,
+    ) = await _make_toolkit()
+    event_repo = cast(_EventTranscriptRepository, toolkit.event_transcript_repository)
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+
+    await tool.handler(json.dumps({"name": "reviewer", "task": "Review only"}))
+
+    assert event_repo.appended == []
 
 
 async def test_spawn_agent_rejects_when_active_subagent_limit_is_reached() -> None:

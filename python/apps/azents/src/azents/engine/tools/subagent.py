@@ -7,12 +7,18 @@ import time
 from textwrap import dedent
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
 from azents.core.agent import SubagentSettings
-from azents.core.enums import AgentRunStatus, AgentSessionRunState, InputBufferKind
+from azents.core.enums import (
+    AgentRunStatus,
+    AgentSessionRunState,
+    EventKind,
+    InputBufferKind,
+    SessionAgentKind,
+)
 from azents.core.tools import (
     PublishEventFn,
     ResolveContext,
@@ -30,7 +36,7 @@ from azents.engine.events.fork_context import (
     parse_fork_turns,
     select_fork_events,
 )
-from azents.engine.events.types import AgentRunState, Event
+from azents.engine.events.types import AgentRunState, Event, SystemReminderPayload
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.rdb.models.event import JSONValue
@@ -68,14 +74,14 @@ class SpawnAgentInput(BaseModel):
 class SendMessageInput(BaseModel):
     """send_message tool input."""
 
-    agent_name: str = Field(description="Target agent path or child name")
+    agent_name: str = Field(description="Target agent path or name")
     message: str = Field(description="Message to queue for the target agent")
 
 
 class FollowupTaskInput(BaseModel):
     """followup_task tool input."""
 
-    agent_name: str = Field(description="Target agent path or child name")
+    agent_name: str = Field(description="Target agent path or name")
     task: str = Field(description="Follow-up task to assign and wake")
 
 
@@ -102,8 +108,10 @@ class WaitAgentInput(BaseModel):
 class InterruptAgentInput(BaseModel):
     """interrupt_agent tool input."""
 
-    agent_name: str = Field(description="Target agent path or child name")
+    agent_name: str = Field(description="Target agent path or name")
 
+
+_JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 
 _TERMINAL_STATUSES = {
     AgentRunStatus.COMPLETED,
@@ -113,6 +121,13 @@ _TERMINAL_STATUSES = {
     AgentRunStatus.CANCELLED,
 }
 _WAIT_AGENT_POLL_INTERVAL_SECONDS = 0.1
+_FORKED_HISTORY_BOUNDARY_REMINDER = "\n".join(
+    [
+        "The messages above are inherited conversation history from the parent agent.",
+        "Treat them as background context for the subagent task.",
+        "The subagent's direct assignment begins after this reminder.",
+    ]
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -253,6 +268,11 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                             model_order=event.model_order,
                         ),
                     )
+                if forked:
+                    await self._append_forked_history_boundary_reminder(
+                        session,
+                        child.agent_session_id,
+                    )
                 await self._enqueue_agent_message(
                     session,
                     source=current,
@@ -276,7 +296,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     def _send_message_tool(self) -> FunctionTool:
         async def send_message(input: SendMessageInput) -> str:
-            """Queue a message for a target child agent without waking it."""
+            """Queue a message for a target agent without waking it."""
             if not input.message.strip():
                 raise FunctionToolError("message is required")
             async with self.session_manager() as session:
@@ -312,7 +332,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     def _followup_task_tool(self) -> FunctionTool:
         async def followup_task(input: FollowupTaskInput) -> str:
-            """Assign a follow-up task to an existing child agent and wake it."""
+            """Assign a follow-up task to an existing agent and wake it."""
             if not input.task.strip():
                 raise FunctionToolError("task is required")
             async with self.session_manager() as session:
@@ -320,6 +340,10 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 if resolution.target is None:
                     return _json(
                         {"status": "not_found", "agent_name": input.agent_name}
+                    )
+                if resolution.target.kind == SessionAgentKind.ROOT:
+                    raise FunctionToolError(
+                        "Follow-up tasks can't target the root agent"
                     )
                 target_session = await self._session_or_error(
                     session,
@@ -438,11 +462,18 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     def _interrupt_agent_tool(self) -> FunctionTool:
         async def interrupt_agent(input: InterruptAgentInput) -> str:
-            """Interrupt the target child agent's current run without deleting it."""
+            """Interrupt the target agent's current run without deleting it."""
             async with self.session_manager() as session:
                 resolution = await self._resolve_target(session, input.agent_name)
                 if resolution.target is None:
                     return _json({"previous_status": "not_found"})
+                if resolution.target.kind == SessionAgentKind.ROOT:
+                    raise FunctionToolError("root is not a spawned agent")
+                if resolution.target.id == resolution.current.id:
+                    raise FunctionToolError(
+                        "an agent cannot interrupt itself; return your result and let "
+                        "the parent interrupt you if needed"
+                    )
                 target_session = await self._session_or_error(
                     session,
                     resolution.target.agent_session_id,
@@ -521,8 +552,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 path=agent_name,
             )
         except ValueError:
-            target = None
-        if target is not None and target.id == current.id:
             target = None
         return _TargetResolution(current=current, target=target)
 
@@ -604,6 +633,24 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 "Cannot spawn subagent: max_subagents "
                 f"{max_subagents} is already reached for this root session."
             )
+
+    async def _append_forked_history_boundary_reminder(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> None:
+        """Append the model-visible boundary after copied parent history."""
+        payload = SystemReminderPayload(text=_FORKED_HISTORY_BOUNDARY_REMINDER)
+        await self.event_transcript_repository.append(
+            session,
+            EventCreate(
+                session_id=session_id,
+                kind=EventKind.SYSTEM_REMINDER,
+                payload=_JSON_OBJECT_ADAPTER.validate_python(
+                    payload.model_dump(mode="json")
+                ),
+            ),
+        )
 
     async def _enqueue_agent_message(
         self,

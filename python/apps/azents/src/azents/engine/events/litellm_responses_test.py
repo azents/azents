@@ -38,6 +38,7 @@ from azents.engine.events.system_reminders import (
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
     format_interrupted_reminder,
+    format_plain_system_reminder,
     format_system_reminder,
 )
 from azents.engine.events.types import (
@@ -188,8 +189,8 @@ class TestLiteLLMResponsesLowerer:
             {"role": "user", "content": "Review this PR"},
         ]
 
-    def test_lowers_agent_message_with_source_label(self) -> None:
-        """agent_message events become sourced user-role tasks."""
+    def test_lowers_agent_message_with_task_envelope(self) -> None:
+        """agent_message events become explicit parent-to-child task envelopes."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
         transcript = [
             _event(
@@ -210,7 +211,41 @@ class TestLiteLLMResponsesLowerer:
         assert request.input[-1] == {
             "role": "user",
             "content": (
-                "Message from agent /root (followup task):\ncontinue the investigation"
+                "Message Type: NEW_TASK\n"
+                "Task name: /root/child\n"
+                "Sender: /root\n"
+                "Payload:\n"
+                "continue the investigation"
+            ),
+        }
+
+    def test_lowers_send_message_as_message_envelope(self) -> None:
+        """send_message mailbox events render as non-task messages."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        transcript = [
+            _event(
+                EventKind.AGENT_MESSAGE,
+                AgentMessagePayload(
+                    message_kind="send_message",
+                    source_session_agent_id="source-agent",
+                    source_path="/root",
+                    target_session_agent_id="target-agent",
+                    target_path="/root/child",
+                    content="status note",
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input[-1] == {
+            "role": "user",
+            "content": (
+                "Message Type: MESSAGE\n"
+                "Task name: /root/child\n"
+                "Sender: /root\n"
+                "Payload:\n"
+                "status note"
             ),
         }
 
@@ -600,8 +635,8 @@ class TestLiteLLMResponsesLowerer:
                 item.attrib["name"]: item.text for item in data.findall("item")
             } == expected_data
 
-    def test_lowers_system_reminder_with_shared_xml_envelope(self) -> None:
-        """Lower system_reminder event to same XML envelope."""
+    def test_lowers_plain_system_reminder_with_hyphenated_envelope(self) -> None:
+        """Lower a plain system reminder to the model-facing envelope."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
         transcript = [
             _event(
@@ -615,11 +650,7 @@ class TestLiteLLMResponsesLowerer:
         assert request.input == [
             {
                 "role": "user",
-                "content": format_system_reminder(
-                    reminder_type="system_reminder",
-                    instruction="Use <safe> mode & continue.",
-                    data=(),
-                ),
+                "content": format_plain_system_reminder("Use <safe> mode & continue."),
             }
         ]
 
