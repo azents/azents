@@ -282,10 +282,7 @@ def _resolve_reasoning_effort(
     reasoning = selection.normalized_capabilities.reasoning
     if not reasoning.supported:
         return None
-    if (
-        reasoning.effort_levels
-        and params.reasoning_effort not in reasoning.effort_levels
-    ):
+    if params.reasoning_effort not in reasoning.effort_levels:
         return None
     return params.reasoning_effort
 
@@ -465,9 +462,9 @@ async def resolve_invoke_input_with_model_source(
             requested_effort = requested_profile.reasoning_effort
             if requested_effort is not None:
                 reasoning = main_selection.normalized_capabilities.reasoning
-                if not reasoning.supported or (
-                    reasoning.effort_levels
-                    and requested_effort not in reasoning.effort_levels
+                if (
+                    not reasoning.supported
+                    or requested_effort not in reasoning.effort_levels
                 ):
                     return Failure(
                         ReasoningEffortUnsupported(

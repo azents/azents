@@ -46,7 +46,7 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
 last_verified_at: 2026-07-10
-spec_version: 43
+spec_version: 44
 ---
 
 # Agent Domain Spec
@@ -253,13 +253,13 @@ Deterministic fixture in local/test environment is development/QA support path a
 
 ## 3. Runtime Resolve
 
-Every run has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model's Default, not the Agent-level reasoning parameter. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, or `parent_run`.
+Every run has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, or `parent_run`.
 
 Before a new normal run starts, runtime resolution:
 
 1. Loads the Agent and rejects missing or disabled Agents.
 2. Resolves the requested label against the Agent's current `selectable_model_options`; missing labels fail with `model_target_not_found` and never fall back to another option.
-3. Validates non-null requested effort against the selected snapshot's normalized reasoning capabilities; unsupported effort fails with `reasoning_effort_unsupported` before provider invocation.
+3. Validates every non-null requested effort against the selected snapshot's explicit normalized effort list; an empty list rejects every explicit effort, and unsupported effort fails with `reasoning_effort_unsupported` before provider invocation.
 4. Loads and validates the selected main integration plus the Agent's lightweight integration, including provider token refresh where required.
 5. Builds the main runtime model from the selected option while retaining the Agent's `lightweight_model_selection` for compaction.
 6. Computes and fixes the run's effective context window and automatic compaction threshold.
@@ -312,6 +312,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-10 | 44 | Required concrete user-facing effort selection when advertised and made explicit-effort validation strict for empty lists |
 | 2026-07-10 | 43 | Added per-run Agent-owned target resolution, nullable effort validation, and immutable activated profile semantics |
 | 2026-07-10 | 42 | Added the stable xAI API-key integration contract and clarified provider-specific OAuth refresh |
 | 2026-07-09 | 41 | Added selectable model option lists, label-based Agent/Workspace model selection, and effective snapshot semantics |

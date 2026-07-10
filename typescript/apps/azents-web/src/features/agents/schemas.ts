@@ -28,7 +28,10 @@ export const agentFormSchema = z
     system_prompt: z.string().optional(),
     type: z.enum(["public", "private"]),
     enabled: z.boolean(),
-    reasoning_effort: z.enum(["low", "medium", "high"]).nullable().optional(),
+    reasoning_effort: z
+      .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+      .nullable()
+      .optional(),
     context_window_tokens: z.number().int().positive().nullable().optional(),
     max_output_tokens: z.number().int().positive().nullable().optional(),
     shell_enabled: z.boolean().optional(),

@@ -1510,11 +1510,14 @@
     "composerProfile": {
       "model": "Modèle",
       "effortLabel": "Effort de raisonnement",
-      "defaultEffort": "Par défaut",
       "effort": {
+        "none": "Aucun",
+        "minimal": "Minimal",
         "low": "Faible",
         "medium": "Moyen",
-        "high": "Élevé"
+        "high": "Élevé",
+        "xhigh": "Très élevé",
+        "max": "Maximum"
       },
       "send": "Envoyer"
     },
@@ -1524,9 +1527,13 @@
       "requestedModel": "Modèle demandé",
       "requestedEffort": "Effort demandé",
       "defaultEffort": "Par défaut",
+      "effortNone": "Aucun",
+      "effortMinimal": "Minimal",
       "effortLow": "Faible",
       "effortMedium": "Moyen",
       "effortHigh": "Élevé",
+      "effortXhigh": "Très élevé",
+      "effortMax": "Maximum",
       "awaitingActivation": "En attente de l’activation du run",
       "run": "Run",
       "runValue": "#{index} · {status}",

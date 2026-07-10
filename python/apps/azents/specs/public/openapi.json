@@ -14430,18 +14430,12 @@
           "reasoning_effort": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "low",
-                  "medium",
-                  "high"
-                ]
+                "$ref": "#/components/schemas/ModelReasoningEffort"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Reasoning Effort",
             "description": "Reasoning effort, only for models with thinking support"
           },
           "builtin_tools": {
@@ -14491,12 +14485,16 @@
       "ModelReasoningEffort": {
         "type": "string",
         "enum": [
+          "none",
+          "minimal",
           "low",
           "medium",
-          "high"
+          "high",
+          "xhigh",
+          "max"
         ],
         "title": "ModelReasoningEffort",
-        "description": "Normalized reasoning effort level."
+        "description": "Normalized reasoning effort level in ascending order."
       },
       "ModelToolCallingCapabilities": {
         "properties": {

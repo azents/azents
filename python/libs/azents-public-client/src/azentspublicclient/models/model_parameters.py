@@ -17,10 +17,11 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from typing_extensions import Annotated
 from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig
+from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -34,20 +35,10 @@ class ModelParameters(BaseModel):
     top_p: Optional[Union[Annotated[float, Field(le=1.0, strict=True, ge=0.0)], Annotated[int, Field(le=1, strict=True, ge=0)]]] = None
     top_k: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     stop_sequences: Optional[Annotated[List[StrictStr], Field(max_length=4)]] = None
-    reasoning_effort: Optional[StrictStr] = None
+    reasoning_effort: Optional[ModelReasoningEffort] = None
     builtin_tools: Optional[List[BuiltinToolConfig]] = Field(default=None, description="Built-in tool list to enable")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["temperature", "context_window_tokens", "max_output_tokens", "top_p", "top_k", "stop_sequences", "reasoning_effort", "builtin_tools"]
-
-    @field_validator('reasoning_effort')
-    def reasoning_effort_validate_enum(cls, value):
-        """Validates the enum"""
-        if value is None:
-            return value
-
-        if value not in set(['low', 'medium', 'high']):
-            raise ValueError("must be one of enum values ('low', 'medium', 'high')")
-        return value
 
     model_config = ConfigDict(
         populate_by_name=True,

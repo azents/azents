@@ -20,15 +20,19 @@ from typing_extensions import Self
 
 class ModelReasoningEffort(str, Enum):
     """
-    Normalized reasoning effort level.
+    Normalized reasoning effort level in ascending order.
     """
 
     """
     allowed enum values
     """
+    NONE = 'none'
+    MINIMAL = 'minimal'
     LOW = 'low'
     MEDIUM = 'medium'
     HIGH = 'high'
+    XHIGH = 'xhigh'
+    MAX = 'max'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:

@@ -32,6 +32,10 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
+  normalizeReasoningEffort,
+  reasoningEffortLevels,
+} from "@/shared/lib/reasoning-effort";
+import {
   findSelectableModelOptionByLabel,
   selectableModelOptionFormValuesFromStoredOptions,
 } from "../model-selection";
@@ -162,6 +166,15 @@ export function AgentForm({
   useEffect(() => {
     if (formState.type === "EDIT") {
       const agent = formState.agent;
+      const mainOption = agent.selectable_model_options.find(
+        (option) => option.label === agent.main_model_label,
+      );
+      const defaultReasoningEffort = normalizeReasoningEffort(
+        agent.model_parameters?.reasoning_effort ?? null,
+        reasoningEffortLevels(
+          mainOption?.model_selection.normalized_capabilities,
+        ),
+      );
       form.setValues({
         name: agent.name,
         description: agent.description ?? "",
@@ -174,7 +187,7 @@ export function AgentForm({
         system_prompt: agent.system_prompt ?? "",
         type: agent.type,
         enabled: agent.enabled,
-        reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
+        reasoning_effort: defaultReasoningEffort,
         context_window_tokens:
           agent.model_parameters?.context_window_tokens ?? null,
         max_output_tokens: agent.model_parameters?.max_output_tokens ?? null,
@@ -199,14 +212,25 @@ export function AgentForm({
     if (form.isDirty()) {
       return;
     }
+    const selectableModelOptions =
+      selectableModelOptionFormValuesFromStoredOptions(
+        workspaceModelSettings.default_selectable_model_options ?? [],
+      );
+    const mainModelLabel =
+      workspaceModelSettings.default_main_model_label ?? null;
+    const mainOption = findSelectableModelOptionByLabel(
+      selectableModelOptions,
+      mainModelLabel,
+    );
     form.setValues({
-      selectable_model_options:
-        selectableModelOptionFormValuesFromStoredOptions(
-          workspaceModelSettings.default_selectable_model_options ?? [],
-        ),
-      main_model_label: workspaceModelSettings.default_main_model_label ?? null,
+      selectable_model_options: selectableModelOptions,
+      main_model_label: mainModelLabel,
       lightweight_model_label:
         workspaceModelSettings.default_lightweight_model_label ?? null,
+      reasoning_effort: normalizeReasoningEffort(
+        null,
+        reasoningEffortLevels(mainOption?.normalized_capabilities),
+      ),
     });
     form.resetDirty();
     setHasSubmitAttempted(false);
@@ -220,8 +244,11 @@ export function AgentForm({
   const selectedModelCapabilities =
     selectedMainModelOption?.normalized_capabilities ?? null;
 
-  const selectedModelSupportsReasoning =
-    selectedModelCapabilities?.reasoning?.supported ?? false;
+  const selectedModelEffortLevels = useMemo(
+    () => reasoningEffortLevels(selectedModelCapabilities),
+    [selectedModelCapabilities],
+  );
+  const selectedModelSupportsReasoning = selectedModelEffortLevels.length > 0;
 
   const selectedModelBuiltinTools = useMemo(() => {
     if (selectedMainModelOption == null) {
@@ -230,14 +257,24 @@ export function AgentForm({
     return selectedModelCapabilities?.built_in_tools?.supported ?? [];
   }, [selectedMainModelOption, selectedModelCapabilities]);
 
-  const reasoningEffortOptions = useMemo(() => {
-    const supported = selectedModelCapabilities?.reasoning?.effort_levels ?? [];
-    const values = supported.length > 0 ? supported : ["low", "medium", "high"];
-    return values.map((value) => ({
-      value,
-      label: value.charAt(0).toUpperCase() + value.slice(1),
-    }));
-  }, [selectedModelCapabilities]);
+  const reasoningEffortOptions = useMemo(
+    () =>
+      selectedModelEffortLevels.map((value) => ({
+        value,
+        label: value.charAt(0).toUpperCase() + value.slice(1),
+      })),
+    [selectedModelEffortLevels],
+  );
+
+  useEffect(() => {
+    const normalizedEffort = normalizeReasoningEffort(
+      form.values.reasoning_effort ?? null,
+      selectedModelEffortLevels,
+    );
+    if (form.values.reasoning_effort !== normalizedEffort) {
+      form.setFieldValue("reasoning_effort", normalizedEffort);
+    }
+  }, [form, form.values.reasoning_effort, selectedModelEffortLevels]);
 
   if (formState.type === "LOADING") {
     return (
@@ -337,7 +374,6 @@ export function AgentForm({
               onChangeMainModelLabel={(label) => {
                 form.setFieldValue("main_model_label", label);
                 form.setFieldValue("builtin_tools", []);
-                form.setFieldValue("reasoning_effort", null);
               }}
               onChangeLightweightModelLabel={(label) =>
                 form.setFieldValue("lightweight_model_label", label)
@@ -349,13 +385,13 @@ export function AgentForm({
             <Select
               label={t("reasoningEffortLabel")}
               data={reasoningEffortOptions}
-              clearable
+              allowDeselect={false}
               value={form.values.reasoning_effort ?? null}
               onChange={(value) => {
                 const nextValue =
-                  value === "low" || value === "medium" || value === "high"
-                    ? value
-                    : null;
+                  selectedModelEffortLevels.find(
+                    (effort) => effort === value,
+                  ) ?? null;
                 form.setFieldValue("reasoning_effort", nextValue);
               }}
               error={form.errors.reasoning_effort}

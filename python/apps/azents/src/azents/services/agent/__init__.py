@@ -189,10 +189,7 @@ class AgentService:
         reasoning = selection.normalized_capabilities.reasoning
         if not reasoning.supported:
             return False
-        return (
-            not reasoning.effort_levels
-            or params.reasoning_effort in reasoning.effort_levels
-        )
+        return params.reasoning_effort in reasoning.effort_levels
 
     def _parse_model_parameters(
         self,

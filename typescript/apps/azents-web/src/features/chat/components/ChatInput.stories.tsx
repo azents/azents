@@ -29,10 +29,31 @@ const reasoningModel: AgentModelSelection = {
   last_refreshed_at: "2026-05-14T00:00:00Z",
 };
 
-const unrestrictedReasoningModel: AgentModelSelection = {
+const fullReasoningModel: AgentModelSelection = {
   ...reasoningModel,
   model_identifier: "gpt-5.6",
   model_display_name: "GPT 5.6",
+  normalized_capabilities: {
+    ...reasoningModel.normalized_capabilities,
+    reasoning: {
+      supported: true,
+      effort_levels: [
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ],
+    },
+  },
+};
+
+const emptyEffortModel: AgentModelSelection = {
+  ...reasoningModel,
+  model_identifier: "reasoning-without-explicit-efforts",
+  model_display_name: "Reasoning without explicit efforts",
   normalized_capabilities: {
     ...reasoningModel.normalized_capabilities,
     reasoning: { supported: true, effort_levels: [] },
@@ -194,6 +215,22 @@ export const TargetWithoutEffort = {
   },
 } satisfies Story;
 
+export const EmptyEffortList = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-empty-effort-list",
+    selectableModelOptions: [
+      { label: "Default", model_selection: emptyEffortModel },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByLabelText("Reasoning effort"),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
 export const Mobile = {
   args: {
     ...baseArgs,
@@ -209,13 +246,13 @@ export const Mobile = {
   ],
 } satisfies Story;
 
-export const MobileUnrestrictedReasoningEffort = {
+export const MobileFullReasoningEffort = {
   args: {
     ...baseArgs,
-    sessionId: "story-session-mobile-unrestricted-reasoning",
+    sessionId: "story-session-mobile-full-reasoning",
     isMobile: true,
     selectableModelOptions: [
-      { label: "Default", model_selection: unrestrictedReasoningModel },
+      { label: "Default", model_selection: fullReasoningModel },
     ],
   },
   decorators: [
@@ -228,7 +265,14 @@ export const MobileUnrestrictedReasoningEffort = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole("button", { name: "Model" }));
-    await expect(page.getByLabelText("Reasoning effort")).toBeVisible();
+    const effortSelect = page.getByLabelText("Reasoning effort");
+    await expect(effortSelect).toBeVisible();
+    await expect(effortSelect).toHaveValue("medium");
+    await userEvent.click(effortSelect);
+    await expect(page.getByRole("option", { name: "Maximum" })).toBeVisible();
+    await expect(
+      page.queryByRole("option", { name: "Default" }),
+    ).not.toBeInTheDocument();
   },
 } satisfies Story;
 

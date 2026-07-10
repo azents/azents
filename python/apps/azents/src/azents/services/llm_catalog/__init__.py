@@ -10,7 +10,8 @@ from typing import Annotated, Any
 import litellm
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from pydantic import BaseModel, Field
+from litellm.types.utils import ProviderSpecificModelInfo
+from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, AgentModelSelectionInput
@@ -31,6 +32,7 @@ from azents.core.llm_catalog import (
     ModelModalities,
     ModelModality,
     ModelReasoningCapabilities,
+    ModelReasoningEffort,
     ModelToolCallingCapabilities,
 )
 from azents.rdb.deps import get_session_manager
@@ -65,6 +67,7 @@ _LITELLM_SOURCE_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/"
     "model_prices_and_context_window.json"
 )
+_PROVIDER_MODEL_INFO_ADAPTER = TypeAdapter(ProviderSpecificModelInfo)
 
 
 def _get_integration_repository(
@@ -832,7 +835,7 @@ def project_integration_entries(
             else LLMCatalogEntryVisibility.SELECTABLE
         )
         capabilities = (
-            _capabilities_from_litellm_metadata(metadata)
+            _capabilities_from_litellm_metadata(metadata, model_identifier=source_key)
             if hidden_reason is None
             else candidate.normalized_capabilities
         )
@@ -902,7 +905,7 @@ def project_system_entries(
                 runtime_model_identifier=_runtime_model_identifier(provider, model_key),
                 display_name=_display_name(model_key),
                 normalized_capabilities=_capabilities_from_litellm_metadata(
-                    metadata
+                    metadata, model_identifier=model_key
                 ).model_dump(mode="json"),
                 lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                 visibility_status=visibility,
@@ -1011,7 +1014,10 @@ def _projection_diagnostics(
     }
 
 
-def _capabilities_from_litellm_metadata(metadata: dict[str, Any]) -> ModelCapabilities:
+def _capabilities_from_litellm_metadata(
+    metadata: dict[str, Any], *, model_identifier: str
+) -> ModelCapabilities:
+    provider_info = _PROVIDER_MODEL_INFO_ADAPTER.validate_python(metadata)
     return ModelCapabilities(
         context_window=ModelContextWindow(
             max_input_tokens=_positive_int(metadata.get("max_input_tokens")),
@@ -1027,7 +1033,10 @@ def _capabilities_from_litellm_metadata(metadata: dict[str, Any]) -> ModelCapabi
             strict_json_schema=metadata.get("supports_response_schema"),
         ),
         reasoning=ModelReasoningCapabilities(
-            supported=metadata.get("supports_reasoning") is True,
+            supported=provider_info.get("supports_reasoning") is True,
+            effort_levels=_reasoning_effort_levels(
+                provider_info, model_identifier=model_identifier
+            ),
         ),
         built_in_tools=ModelBuiltInToolCapabilities(
             supported=_supported_builtin_tools(metadata)
@@ -1037,6 +1046,35 @@ def _capabilities_from_litellm_metadata(metadata: dict[str, Any]) -> ModelCapabi
             responses_api=True,
         ),
     )
+
+
+def _reasoning_effort_levels(
+    model_info: ProviderSpecificModelInfo, *, model_identifier: str
+) -> list[ModelReasoningEffort]:
+    """Reconstruct ordered explicit efforts from LiteLLM capability flags."""
+    if model_info.get("supports_reasoning") is not True:
+        return []
+
+    efforts: list[ModelReasoningEffort] = []
+    if model_info.get("supports_none_reasoning_effort") is True:
+        efforts.append(ModelReasoningEffort.NONE)
+    if model_info.get("supports_minimal_reasoning_effort") is True:
+        efforts.append(ModelReasoningEffort.MINIMAL)
+
+    model_name = model_identifier.rsplit("/", maxsplit=1)[-1]
+    uses_gpt5_effort_contract = model_name.startswith("gpt-5")
+    if uses_gpt5_effort_contract:
+        if model_info.get("supports_low_reasoning_effort") is not False:
+            efforts.append(ModelReasoningEffort.LOW)
+        efforts.extend((ModelReasoningEffort.MEDIUM, ModelReasoningEffort.HIGH))
+    elif model_info.get("supports_low_reasoning_effort") is True:
+        efforts.append(ModelReasoningEffort.LOW)
+
+    if model_info.get("supports_xhigh_reasoning_effort") is True:
+        efforts.append(ModelReasoningEffort.XHIGH)
+    if model_info.get("supports_max_reasoning_effort") is True:
+        efforts.append(ModelReasoningEffort.MAX)
+    return efforts
 
 
 def _supported_builtin_tools(metadata: dict[str, Any]) -> list[str]:

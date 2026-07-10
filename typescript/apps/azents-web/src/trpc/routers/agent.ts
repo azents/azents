@@ -65,7 +65,10 @@ const modelParametersSchema = z
     top_p: z.number().min(0).max(1).nullable().optional(),
     top_k: z.number().int().positive().nullable().optional(),
     stop_sequences: z.array(z.string()).max(4).nullable().optional(),
-    reasoning_effort: z.enum(["low", "medium", "high"]).nullable().optional(),
+    reasoning_effort: z
+      .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+      .nullable()
+      .optional(),
     builtin_tools: z.array(builtinToolConfigSchema).optional(),
   })
   .nullable();

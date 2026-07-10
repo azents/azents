@@ -15,11 +15,11 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-10 | 43 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-10 | 92 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-10 | 44 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-10 | 93 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-09 | 4 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-10 | 3 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-10 | 4 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-10 | 54 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-08 | 6 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-08 | 36 |
@@ -175,8 +175,9 @@ _15 documents_
 - [ADR-0120: Expose Typed Actionable Profile Resolution Failures](adr/0120-typed-profile-resolution-failures.md)
 - [ADR-0121: Atomically Activate the Resolved Run and Session Profile](adr/0121-atomic-run-profile-activation.md)
 - [ADR-0122: Project Compact Inference Summaries with User Messages](adr/0122-inline-user-message-inference-summary.md)
+- [ADR-0123: Require an Explicit Reasoning Effort in User Input](adr/0123-require-explicit-reasoning-effort-in-user-input.md)
 
-_125 documents_
+_126 documents_
 
 ## Issues (Bug Tracking)
 
@@ -209,4 +210,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 393
+- Total documents: 394
