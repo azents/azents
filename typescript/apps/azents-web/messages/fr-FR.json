@@ -1316,7 +1316,9 @@
       "completion": "Complétion",
       "cached": "Lecture du cache",
       "cacheCreation": "Écriture du cache",
-      "reasoning": "Raisonnement"
+      "reasoning": "Raisonnement",
+      "modelIdentity": "{model} · {provider}",
+      "unknownProvenance": "La provenance de l’exécution n’est pas encore disponible."
     },
     "editMessage": "Modifier",
     "editingMessage": "Modification du message",
@@ -1504,6 +1506,46 @@
       "phaseStopping": "Arrêt en cours",
       "retryAction": "Relancer l’exécution",
       "retryUnavailable": "La relance est disponible uniquement pour le dernier échec lorsque la session est inactive."
+    },
+    "composerProfile": {
+      "model": "Modèle",
+      "effortLabel": "Effort de raisonnement",
+      "defaultEffort": "Par défaut",
+      "effort": {
+        "low": "Faible",
+        "medium": "Moyen",
+        "high": "Élevé"
+      },
+      "send": "Envoyer"
+    },
+    "inferenceProvenance": {
+      "title": "Profil d’inférence",
+      "detailsAriaLabel": "Ouvrir les détails d’inférence pour {target}",
+      "requestedModel": "Modèle demandé",
+      "requestedEffort": "Effort demandé",
+      "defaultEffort": "Par défaut",
+      "effortLow": "Faible",
+      "effortMedium": "Moyen",
+      "effortHigh": "Élevé",
+      "awaitingActivation": "En attente de l’activation du run",
+      "run": "Run",
+      "runValue": "#{index} · {status}",
+      "effectiveEffort": "Effort effectif",
+      "provider": "Provider",
+      "model": "Modèle résolu",
+      "modelIdentifier": "Identifiant du modèle",
+      "developer": "Développeur",
+      "contextWindow": "Fenêtre de contexte",
+      "compactionThreshold": "Seuil d’auto-compaction",
+      "failureCode": "Code d’échec",
+      "failureMessage": "Échec",
+      "statusPending": "En attente",
+      "statusRunning": "En cours",
+      "statusCompleted": "Terminé",
+      "statusStopped": "Arrêté",
+      "statusFailed": "Échec",
+      "statusInterrupted": "Interrompu",
+      "statusCancelled": "Annulé"
     }
   },
   "oauth": {

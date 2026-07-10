@@ -6,10 +6,11 @@ Current live run state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**run_id** | **str** | AgentRun ID | 
-**phase** | [**AgentRunPhase**](AgentRunPhase.md) | Current run phase | 
-**status** | [**AgentRunStatus**](AgentRunStatus.md) | Current run status | 
-**retry** | [**ChatLiveRunRetryStateResponse**](ChatLiveRunRetryStateResponse.md) |  | [optional] 
+**run_id** | **str** | AgentRun ID |
+**phase** | [**AgentRunPhase**](AgentRunPhase.md) | Current run phase |
+**status** | [**AgentRunStatus**](AgentRunStatus.md) | Current run status |
+**inference_run_summary** | [**InferenceRunSummary**](InferenceRunSummary.md) | Allowlisted provenance for the active run |
+**retry** | [**ChatLiveRunRetryStateResponse**](ChatLiveRunRetryStateResponse.md) |  | [optional]
 
 ## Example
 

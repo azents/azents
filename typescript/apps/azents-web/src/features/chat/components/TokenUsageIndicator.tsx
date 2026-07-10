@@ -1,6 +1,6 @@
 "use client";
 
-/** chat header of current token usage indicator. */
+/** Chat header token usage bound to immutable run provenance. */
 
 import {
   ActionIcon,
@@ -14,12 +14,12 @@ import {
 import { useTranslations } from "next-intl";
 import { memo, useMemo, useState } from "react";
 import type { TokenUsageSummary } from "../types";
+import type { InferenceRunSummary } from "@azents/public-client";
 
 interface TokenUsageIndicatorProps {
   usage: TokenUsageSummary | null;
-  effectiveContextWindowTokens: number | null;
-  autoCompactionThresholdTokens: number | null;
-  modelName: string | null;
+  activeRunSummary: InferenceRunSummary | null;
+  terminalRunSummaries: InferenceRunSummary[];
 }
 
 function formatNumber(value: number | null): string {
@@ -53,24 +53,63 @@ function progressColor(percent: number | null): string {
   return "var(--mantine-color-teal-6)";
 }
 
+function isTerminalSummary(summary: InferenceRunSummary): boolean {
+  return summary.status !== "pending" && summary.status !== "running";
+}
+
+function resolveUsageSummary(
+  usage: TokenUsageSummary | null,
+  activeRunSummary: InferenceRunSummary | null,
+  terminalRunSummaries: InferenceRunSummary[],
+): InferenceRunSummary | null {
+  const runId = usage?.runId ?? null;
+  if (runId === null) {
+    return null;
+  }
+  if (activeRunSummary?.run_id === runId) {
+    return activeRunSummary;
+  }
+  return (
+    terminalRunSummaries.find(
+      (summary) =>
+        summary.run_id === runId &&
+        isTerminalSummary(summary) &&
+        summary.resolved_profile !== null,
+    ) ?? null
+  );
+}
+
 export const TokenUsageIndicator = memo(function TokenUsageIndicator({
   usage,
-  effectiveContextWindowTokens,
-  autoCompactionThresholdTokens,
-  modelName,
+  activeRunSummary,
+  terminalRunSummaries,
 }: TokenUsageIndicatorProps): React.ReactElement {
   const t = useTranslations("chat.tokenUsage");
   const [opened, setOpened] = useState(false);
+  const runSummary = useMemo(
+    () => resolveUsageSummary(usage, activeRunSummary, terminalRunSummaries),
+    [activeRunSummary, terminalRunSummaries, usage],
+  );
+  const resolvedProfile = runSummary?.resolved_profile ?? null;
+  const contextWindow = runSummary?.effective_context_window_tokens ?? null;
+  const compactionThreshold =
+    runSummary?.effective_auto_compaction_threshold_tokens ?? null;
   const percent = useMemo(
-    () =>
-      percentUsed(usage?.totalTokens ?? null, autoCompactionThresholdTokens),
-    [autoCompactionThresholdTokens, usage?.totalTokens],
+    () => percentUsed(usage?.totalTokens ?? null, compactionThreshold),
+    [compactionThreshold, usage?.totalTokens],
   );
   const color = progressColor(percent);
   const ringPercent = percent ?? 0;
   const ringRadius = 7;
   const ringCircumference = 2 * Math.PI * ringRadius;
   const ringDashOffset = ringCircumference * (1 - ringPercent / 100);
+  const modelName =
+    resolvedProfile === null
+      ? t("unknownModel")
+      : t("modelIdentity", {
+          model: resolvedProfile.model_display_name,
+          provider: resolvedProfile.provider,
+        });
 
   return (
     <Popover
@@ -133,8 +172,13 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
               {t("title")}
             </Text>
             <Text size="xs" c="dimmed">
-              {modelName ?? t("unknownModel")}
+              {modelName}
             </Text>
+            {usage !== null && usage.runId !== null && runSummary === null && (
+              <Text size="xs" c="dimmed">
+                {t("unknownProvenance")}
+              </Text>
+            )}
           </Box>
           <UsageRow
             label={t("usedPercent")}
@@ -148,11 +192,11 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
           />
           <UsageRow
             label={t("effectiveContextWindow")}
-            value={formatNumber(effectiveContextWindowTokens)}
+            value={formatNumber(contextWindow)}
           />
           <UsageRow
             label={t("autoCompactionThreshold")}
-            value={formatNumber(autoCompactionThresholdTokens)}
+            value={formatNumber(compactionThreshold)}
           />
           <UsageRow
             label={t("prompt")}

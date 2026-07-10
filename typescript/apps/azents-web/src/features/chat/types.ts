@@ -4,13 +4,16 @@ import type {
   ActionExecutionProjectionResponse,
   AgentResponse,
   ChatEventResponse,
+  InferenceRunSummary,
   InputActionDefinitionResponse,
+  RequestedInferenceProfile,
 } from "@azents/public-client";
 
 // --- WebSocket event type ---
 
 /** Token usage (turn_complete marker) */
 export interface WireTokenUsage {
+  run_id?: string | null;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
@@ -20,6 +23,7 @@ export interface WireTokenUsage {
 }
 
 export interface TokenUsageSummary {
+  runId: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
@@ -568,11 +572,13 @@ export interface LiveRunClearedEvent {
 }
 
 export type AgentRunStatus =
+  | "pending"
   | "running"
   | "completed"
   | "stopped"
   | "failed"
-  | "interrupted";
+  | "interrupted"
+  | "cancelled";
 
 export interface ChatLiveRunRetryState {
   status: string;
@@ -588,6 +594,7 @@ export interface ChatLiveRunState {
   run_id: string;
   phase: AgentRunPhase;
   status: AgentRunStatus;
+  inferenceRunSummary: InferenceRunSummary;
   retry?: ChatLiveRunRetryState | null;
 }
 
@@ -663,6 +670,7 @@ export interface PendingInputBuffer {
   metadata: Record<string, string>;
   createdAt: string;
   status: "sending" | "pending" | "deleting";
+  requestedInferenceProfile: RequestedInferenceProfile | null;
 }
 
 export type InputActionDefinition = Omit<
@@ -733,6 +741,10 @@ export interface ChatMessage {
   action?: ChatAction | null;
   /** message metadata. */
   metadata?: Record<string, string> | null;
+  /** requested profile for a run-producing human input */
+  inferenceProfile?: RequestedInferenceProfile | null;
+  /** latest allowlisted run provenance associated with this input */
+  inferenceRunSummary?: InferenceRunSummary | null;
   /** failed-run recovery metadata for terminal failed-run errors */
   failedRunFailure?: FailedRunFailureMetadata | null;
 }

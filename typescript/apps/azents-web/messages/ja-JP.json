@@ -1316,7 +1316,9 @@
       "completion": "補完",
       "cached": "キャッシュ読み取り",
       "cacheCreation": "キャッシュ書き込み",
-      "reasoning": "推論"
+      "reasoning": "推論",
+      "modelIdentity": "{model} · {provider}",
+      "unknownProvenance": "実行の出所情報はまだ利用できません。"
     },
     "editMessage": "編集",
     "editingMessage": "メッセージを編集中",
@@ -1504,6 +1506,46 @@
       "phaseStopping": "停止中",
       "retryAction": "実行を再試行",
       "retryUnavailable": "セッションがアイドルで、この失敗が最新の実行である場合のみ再試行できます。"
+    },
+    "composerProfile": {
+      "model": "モデル",
+      "effortLabel": "推論レベル",
+      "defaultEffort": "デフォルト",
+      "effort": {
+        "low": "低",
+        "medium": "中",
+        "high": "高"
+      },
+      "send": "送信"
+    },
+    "inferenceProvenance": {
+      "title": "推論プロファイル",
+      "detailsAriaLabel": "{target} の推論詳細を開く",
+      "requestedModel": "リクエストしたモデル",
+      "requestedEffort": "リクエストした推論レベル",
+      "defaultEffort": "デフォルト",
+      "effortLow": "低",
+      "effortMedium": "中",
+      "effortHigh": "高",
+      "awaitingActivation": "Run の有効化を待っています",
+      "run": "Run",
+      "runValue": "#{index} · {status}",
+      "effectiveEffort": "適用された推論レベル",
+      "provider": "Provider",
+      "model": "解決済みモデル",
+      "modelIdentifier": "モデル識別子",
+      "developer": "開発元",
+      "contextWindow": "Context window",
+      "compactionThreshold": "Auto-compaction 閾値",
+      "failureCode": "失敗コード",
+      "failureMessage": "失敗",
+      "statusPending": "保留中",
+      "statusRunning": "実行中",
+      "statusCompleted": "完了",
+      "statusStopped": "停止",
+      "statusFailed": "失敗",
+      "statusInterrupted": "中断",
+      "statusCancelled": "キャンセル"
     }
   },
   "oauth": {

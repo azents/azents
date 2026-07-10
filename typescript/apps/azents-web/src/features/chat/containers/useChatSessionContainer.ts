@@ -48,7 +48,10 @@ import type {
   AgentResponse,
   ChatEventResponse,
   ChatWriteResponse,
+  InferenceRunSummary,
   LiveEventListResponse,
+  ModelReasoningEffort,
+  RequestedInferenceProfile,
 } from "@azents/public-client";
 
 export type SessionRunState = "idle" | "running";
@@ -110,10 +113,13 @@ export interface ChatSessionContainerOutput {
   isLoadingMore: boolean;
   /** newer messages loading */
   isLoadingNewer: boolean;
+  /** profile used when Composer has no local unsent override */
+  defaultInferenceProfile: RequestedInferenceProfile;
   /** message send */
   onSendInput: (
     message: string,
-    action?: ChatAction | null,
+    action: ChatAction | null,
+    inferenceProfile: RequestedInferenceProfile,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
   /** delete pending input buffer */
@@ -136,6 +142,7 @@ export interface ChatSessionContainerOutput {
   onSubmitMessageEdit: (
     messageId: string,
     message: string,
+    inferenceProfile: RequestedInferenceProfile,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
   /** retry the latest terminal failed run */
@@ -198,6 +205,179 @@ function booleanField(
   return typeof value === "boolean" ? value : null;
 }
 
+function modelReasoningEffortFromValue(
+  value: unknown,
+): ModelReasoningEffort | null {
+  switch (value) {
+    case "low":
+    case "medium":
+    case "high":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function requestedInferenceProfileFromValue(
+  value: unknown,
+): RequestedInferenceProfile | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const modelTargetLabel = stringField(value, "model_target_label");
+  if (modelTargetLabel === null) {
+    return null;
+  }
+  const effortValue = value.reasoning_effort;
+  const reasoningEffort = modelReasoningEffortFromValue(effortValue);
+  if (effortValue != null && reasoningEffort === null) {
+    return null;
+  }
+  return {
+    model_target_label: modelTargetLabel,
+    reasoning_effort: reasoningEffort,
+  };
+}
+
+function eventRequestedInferenceProfile(
+  event: ChatEventResponse,
+): RequestedInferenceProfile | null {
+  return (
+    event.inference_run_summary?.requested_profile ??
+    requestedInferenceProfileFromValue(
+      event.payload.requested_inference_profile,
+    )
+  );
+}
+
+function isRequestedInferenceProfile(
+  value: unknown,
+): value is RequestedInferenceProfile {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.model_target_label === "string" &&
+    value.model_target_label.length > 0 &&
+    (value.reasoning_effort === null ||
+      modelReasoningEffortFromValue(value.reasoning_effort) !== null)
+  );
+}
+
+function isInferenceRunSummaryStatus(
+  value: unknown,
+): value is InferenceRunSummary["status"] {
+  switch (value) {
+    case "pending":
+    case "running":
+    case "completed":
+    case "stopped":
+    case "failed":
+    case "cancelled":
+    case "interrupted":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isInferenceProfileSource(
+  value: unknown,
+): value is InferenceRunSummary["source"] {
+  switch (value) {
+    case null:
+    case "explicit_input":
+    case "session_last_used":
+    case "agent_default":
+    case "parent_run":
+    case "retry_original":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isInferenceProfileFailureCode(
+  value: unknown,
+): value is InferenceRunSummary["failure_code"] {
+  switch (value) {
+    case null:
+    case "model_target_not_found":
+    case "model_target_resolution_failed":
+    case "reasoning_effort_unsupported":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isLlmProvider(value: unknown): boolean {
+  switch (value) {
+    case "openai":
+    case "chatgpt_oauth":
+    case "xai_oauth":
+    case "anthropic":
+    case "google_gemini":
+    case "aws_bedrock":
+    case "google_vertex_ai":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isLlmModelDeveloper(value: unknown): boolean {
+  switch (value) {
+    case "openai":
+    case "anthropic":
+    case "google":
+    case "xai":
+    case "meta":
+    case "mistral":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isResolvedInferenceProfileSummary(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isLlmProvider(value.provider) &&
+    typeof value.model_identifier === "string" &&
+    typeof value.model_display_name === "string" &&
+    isLlmModelDeveloper(value.model_developer)
+  );
+}
+
+function isNullableNumber(value: unknown): boolean {
+  return value === null || typeof value === "number";
+}
+
+function isInferenceRunSummary(value: unknown): value is InferenceRunSummary {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.run_id === "string" &&
+    typeof value.run_index === "number" &&
+    isInferenceRunSummaryStatus(value.status) &&
+    (value.requested_profile === null ||
+      isRequestedInferenceProfile(value.requested_profile)) &&
+    isInferenceProfileSource(value.source) &&
+    (value.resolved_profile === null ||
+      isResolvedInferenceProfileSummary(value.resolved_profile)) &&
+    (value.resolved_reasoning_effort === null ||
+      modelReasoningEffortFromValue(value.resolved_reasoning_effort) !==
+        null) &&
+    isNullableNumber(value.effective_context_window_tokens) &&
+    isNullableNumber(value.effective_auto_compaction_threshold_tokens) &&
+    isInferenceProfileFailureCode(value.failure_code) &&
+    (value.failure_message === null ||
+      typeof value.failure_message === "string")
+  );
+}
+
 function chatActionFromValue(value: unknown): ChatAction | null {
   if (!isRecord(value) || typeof value.type !== "string") {
     return null;
@@ -231,6 +411,30 @@ function chatActionFromValue(value: unknown): ChatAction | null {
     };
   }
   return null;
+}
+
+interface DurableInferenceIntent {
+  modelOrder: number;
+  profile: RequestedInferenceProfile;
+}
+
+function latestDurableInferenceIntent(
+  events: ChatEventResponse[],
+): DurableInferenceIntent | null {
+  let latest: DurableInferenceIntent | null = null;
+  for (const event of events) {
+    if (event.kind !== "user_message" && event.kind !== "action_message") {
+      continue;
+    }
+    const profile = eventRequestedInferenceProfile(event);
+    if (
+      profile !== null &&
+      (latest === null || event.model_order >= latest.modelOrder)
+    ) {
+      latest = { modelOrder: event.model_order, profile };
+    }
+  }
+  return latest;
 }
 
 function toolResultStatusFromPayload(
@@ -289,11 +493,13 @@ function isUserBlockingRunPhase(phase: AgentRunPhase | null): boolean {
 
 function agentRunStatusFromValue(value: unknown): AgentRunStatus | null {
   switch (value) {
+    case "pending":
     case "running":
     case "completed":
     case "stopped":
     case "failed":
     case "interrupted":
+    case "cancelled":
       return value;
     default:
       return null;
@@ -447,13 +653,26 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
   const runId = stringField(value, "run_id");
   const phase = agentRunPhaseFromValue(value.phase);
   const status = agentRunStatusFromValue(value.status);
-  if (runId === null || phase === null || status === null) {
+  const inferenceRunSummaryValue =
+    value.inference_run_summary ?? value.inferenceRunSummary;
+  if (
+    runId === null ||
+    phase === null ||
+    status === null ||
+    !isInferenceRunSummary(inferenceRunSummaryValue)
+  ) {
     return null;
   }
   const retry = isRecord(value.retry)
     ? liveRunRetryFromRecord(value.retry)
     : null;
-  return { run_id: runId, phase, status, retry };
+  return {
+    run_id: runId,
+    phase,
+    status,
+    inferenceRunSummary: inferenceRunSummaryValue,
+    retry,
+  };
 }
 
 function usageNumberField(
@@ -472,6 +691,7 @@ function tokenUsageFromRecord(
     return null;
   }
   return {
+    runId: stringField(usage, "run_id"),
     promptTokens: usageNumberField(usage, "prompt_tokens"),
     completionTokens: usageNumberField(usage, "completion_tokens"),
     totalTokens,
@@ -738,6 +958,8 @@ function mapEvents(
             createdAt: event.created_at,
             status: "complete",
             metadata: eventMetadata(event),
+            inferenceProfile: eventRequestedInferenceProfile(event),
+            inferenceRunSummary: event.inference_run_summary ?? null,
             ...(attachments.length > 0 ? { attachments } : {}),
           },
         ];
@@ -757,6 +979,8 @@ function mapEvents(
             createdAt: event.created_at,
             status: "complete",
             metadata: eventMetadata(event),
+            inferenceProfile: eventRequestedInferenceProfile(event),
+            inferenceRunSummary: event.inference_run_summary ?? null,
           },
         ];
       }
@@ -880,7 +1104,12 @@ function mapEvents(
         return messages;
       }
       case "turn_marker": {
-        const usage = isRecord(payload.usage) ? payload.usage : null;
+        const usage = isRecord(payload.usage)
+          ? {
+              ...payload.usage,
+              run_id: stringField(payload, "run_id"),
+            }
+          : null;
         return [
           ...messages,
           {
@@ -890,6 +1119,7 @@ function mapEvents(
             createdAt: event.created_at,
             status: "complete",
             usage,
+            inferenceRunSummary: event.inference_run_summary ?? null,
           },
         ];
       }
@@ -1194,6 +1424,7 @@ function mapInputBufferLiveEvent(
       metadata: { action: "true" },
       createdAt: event.created_at,
       status: "pending",
+      requestedInferenceProfile: eventRequestedInferenceProfile(event),
     };
   }
   const metadata = event.payload.metadata;
@@ -1220,6 +1451,7 @@ function mapInputBufferLiveEvent(
     ),
     createdAt: event.created_at,
     status: "pending",
+    requestedInferenceProfile: eventRequestedInferenceProfile(event),
   };
 }
 
@@ -1527,6 +1759,7 @@ function mapSessionEvents(data: {
   hasMore: boolean;
   hasNewer: boolean;
   newestCursor: string | null;
+  latestDurableInferenceIntent: DurableInferenceIntent | null;
 } {
   const liveState = replaceLiveStateFromSnapshot(data.live);
   return {
@@ -1543,6 +1776,11 @@ function mapSessionEvents(data: {
     hasMore: data.history.has_more,
     hasNewer: data.history.has_newer ?? false,
     newestCursor: data.history.items.at(-1)?.id ?? null,
+    latestDurableInferenceIntent: latestDurableInferenceIntent([
+      ...data.history.items,
+      ...data.live.partial_history.items,
+      ...data.live.input_buffers,
+    ]),
   };
 }
 
@@ -1631,21 +1869,24 @@ export function useChatSessionContainer(
     agentId: agent.id,
     sessionId,
   });
-  const inferenceProfile = useMemo(
-    () =>
-      agentSessionQuery.data == null
-        ? null
-        : {
-            model_target_label:
-              agentSessionQuery.data.last_model_target_label ??
-              agent.main_model_label,
-            reasoning_effort:
-              agentSessionQuery.data.last_model_target_label != null
-                ? agentSessionQuery.data.last_reasoning_effort
-                : (agent.model_parameters?.reasoning_effort ?? null),
-          },
-    [agent.main_model_label, agent.model_parameters, agentSessionQuery.data],
+  const agentDefaultInferenceProfile = useMemo<RequestedInferenceProfile>(
+    () => ({
+      model_target_label: agent.main_model_label,
+      reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
+    }),
+    [agent.main_model_label, agent.model_parameters?.reasoning_effort],
   );
+  const sessionLastUsedInferenceProfile =
+    useMemo((): RequestedInferenceProfile | null => {
+      const session = agentSessionQuery.data;
+      if (session?.last_model_target_label == null) {
+        return null;
+      }
+      return {
+        model_target_label: session.last_model_target_label,
+        reasoning_effort: session.last_reasoning_effort,
+      };
+    }, [agentSessionQuery.data]);
 
   const [chatViewState, setChatViewState] = useState<ChatViewState>({
     type: "LOADING_HISTORY",
@@ -1662,11 +1903,14 @@ export function useChatSessionContainer(
   const [isWritePending, setIsWritePending] = useState(false);
   const [wasRestCommandBlocked, setWasRestCommandBlocked] = useState(false);
   const [historyMessages, setHistoryMessages] = useState<ChatMessage[]>([]);
+  const [latestHumanInferenceProfile, setLatestHumanInferenceProfile] =
+    useState<RequestedInferenceProfile | null>(null);
   const [managedLiveState, setManagedLiveState] = useState<ManagedLiveState>(
     () => emptyManagedLiveState(),
   );
   const [isSubscribeReady, setIsSubscribeReady] = useState(false);
   const historyNewestCursorRef = useRef<string | null>(null);
+  const latestHumanModelOrderRef = useRef<number | null>(null);
   const writeInFlightRef = useRef(false);
   const failedWriteRequestRef = useRef<{ key: string; id: string } | null>(
     null,
@@ -1689,6 +1933,10 @@ export function useChatSessionContainer(
       mergeHistoryAndPartialHistory(historyMessages, partialHistoryMessages),
     [historyMessages, partialHistoryMessages],
   );
+  const defaultInferenceProfile =
+    latestHumanInferenceProfile ??
+    sessionLastUsedInferenceProfile ??
+    agentDefaultInferenceProfile;
   const pendingInputBuffers = managedLiveState.pendingInputBuffers;
   const liveRun = managedLiveState.liveRun;
   const isResponsePending = managedLiveState.isResponsePending;
@@ -1854,6 +2102,19 @@ export function useChatSessionContainer(
         const responseEvent = event.event;
         const pending = mapInputBufferLiveEvent(responseEvent);
         if (pending !== null) {
+          const pendingInferenceIntent = latestDurableInferenceIntent([
+            responseEvent,
+          ]);
+          if (
+            pendingInferenceIntent !== null &&
+            (latestHumanModelOrderRef.current === null ||
+              pendingInferenceIntent.modelOrder >=
+                latestHumanModelOrderRef.current)
+          ) {
+            latestHumanModelOrderRef.current =
+              pendingInferenceIntent.modelOrder;
+            setLatestHumanInferenceProfile(pendingInferenceIntent.profile);
+          }
           setManagedLiveState((prev) => ({
             ...prev,
             pendingInputBuffers: [
@@ -1897,6 +2158,18 @@ export function useChatSessionContainer(
 
       if ("type" in event && event.type === "history_event_appended") {
         const responseEvent = event.event;
+        const appendedInferenceIntent = latestDurableInferenceIntent([
+          responseEvent,
+        ]);
+        if (
+          appendedInferenceIntent !== null &&
+          (latestHumanModelOrderRef.current === null ||
+            appendedInferenceIntent.modelOrder >=
+              latestHumanModelOrderRef.current)
+        ) {
+          latestHumanModelOrderRef.current = appendedInferenceIntent.modelOrder;
+          setLatestHumanInferenceProfile(appendedInferenceIntent.profile);
+        }
         const actionExecution = actionExecutionResultFromEvent(responseEvent);
         setHistoryMessages((prev) =>
           mapEvents([responseEvent], {
@@ -2086,6 +2359,11 @@ export function useChatSessionContainer(
       setHistoryMessages((prev) =>
         mergeWithOlderPages(prev, mapped.historyMessages),
       );
+      latestHumanModelOrderRef.current =
+        mapped.latestDurableInferenceIntent?.modelOrder ?? null;
+      setLatestHumanInferenceProfile(
+        mapped.latestDurableInferenceIntent?.profile ?? null,
+      );
       setManagedLiveState(mapped.liveState);
       setHasMore(mapped.hasMore);
       setChatTimelineState({ type: "LATEST_FOLLOWING" });
@@ -2104,6 +2382,11 @@ export function useChatSessionContainer(
       const mapped = mapSessionEvents(result);
       historyNewestCursorRef.current = mapped.newestCursor;
       setHistoryMessages(mapped.historyMessages);
+      latestHumanModelOrderRef.current =
+        mapped.latestDurableInferenceIntent?.modelOrder ?? null;
+      setLatestHumanInferenceProfile(
+        mapped.latestDurableInferenceIntent?.profile ?? null,
+      );
       setManagedLiveState((prev) => ({
         ...mapped.liveState,
         isResponsePending: continuing
@@ -2121,17 +2404,31 @@ export function useChatSessionContainer(
 
   // message history  withtext complete when message settings
   useEffect(() => {
-    if (chatViewState.type === "LOADING_HISTORY" && eventsQuery.data) {
+    if (
+      chatViewState.type === "LOADING_HISTORY" &&
+      eventsQuery.data &&
+      agentSessionQuery.data
+    ) {
       const mapped = mapSessionEvents(eventsQuery.data);
       historyNewestCursorRef.current = mapped.newestCursor;
       setHistoryMessages(mapped.historyMessages);
+      latestHumanModelOrderRef.current =
+        mapped.latestDurableInferenceIntent?.modelOrder ?? null;
+      setLatestHumanInferenceProfile(
+        mapped.latestDurableInferenceIntent?.profile ?? null,
+      );
       setManagedLiveState(mapped.liveState);
       setHasMore(mapped.hasMore);
       setChatTimelineState({ type: "LATEST_FOLLOWING" });
       setChatViewState({ type: "READY" });
       replayBufferedLiveEvents();
     }
-  }, [chatViewState.type, eventsQuery.data, replayBufferedLiveEvents]);
+  }, [
+    agentSessionQuery.data,
+    chatViewState.type,
+    eventsQuery.data,
+    replayBufferedLiveEvents,
+  ]);
 
   // batch text withtext data text. Detached  in live state  textdoes not..
   useEffect(() => {
@@ -2139,6 +2436,11 @@ export function useChatSessionContainer(
       return;
     }
     const mapped = mapSessionEvents(eventsQuery.data);
+    latestHumanModelOrderRef.current =
+      mapped.latestDurableInferenceIntent?.modelOrder ?? null;
+    setLatestHumanInferenceProfile(
+      mapped.latestDurableInferenceIntent?.profile ?? null,
+    );
     setManagedLiveState(mapped.liveState);
     if (chatTimelineState.type === "DETACHED_HISTORY_BROWSING") {
       setChatTimelineState({
@@ -2331,6 +2633,19 @@ export function useChatSessionContainer(
       if (response.session_id !== sessionId) {
         throw new Error("Chat write response session mismatch");
       }
+      const snapshotInferenceIntent = latestDurableInferenceIntent([
+        ...response.snapshot.partial_history_events,
+        ...response.snapshot.input_buffer_events,
+      ]);
+      if (
+        snapshotInferenceIntent !== null &&
+        (latestHumanModelOrderRef.current === null ||
+          snapshotInferenceIntent.modelOrder >=
+            latestHumanModelOrderRef.current)
+      ) {
+        latestHumanModelOrderRef.current = snapshotInferenceIntent.modelOrder;
+        setLatestHumanInferenceProfile(snapshotInferenceIntent.profile);
+      }
       setManagedLiveState(mapChatWriteSnapshot(response));
       if (response.history_reload_required) {
         void utils.chat.listSessionEvents.invalidate({
@@ -2377,6 +2692,11 @@ export function useChatSessionContainer(
           const mapped = mapSessionEvents(result);
           historyNewestCursorRef.current = mapped.newestCursor;
           setHistoryMessages(mapped.historyMessages);
+          latestHumanModelOrderRef.current =
+            mapped.latestDurableInferenceIntent?.modelOrder ?? null;
+          setLatestHumanInferenceProfile(
+            mapped.latestDurableInferenceIntent?.profile ?? null,
+          );
           setManagedLiveState(mapped.liveState);
           setHasMore(mapped.hasMore);
         }
@@ -2395,15 +2715,16 @@ export function useChatSessionContainer(
   const onSendInput = useCallback(
     (
       message: string,
-      action?: ChatAction | null,
+      action: ChatAction | null,
+      inferenceProfile: RequestedInferenceProfile,
       attachments?: UploadedFile[],
     ): Promise<boolean> => {
+      if (agentSessionQuery.data == null) {
+        return Promise.resolve(false);
+      }
       setWasRestCommandBlocked(false);
       const attachmentUris = attachments?.map((attachment) => attachment.uri);
       const writableAction = writableChatAction(action);
-      if (writableAction?.type !== "command" && inferenceProfile == null) {
-        return Promise.resolve(false);
-      }
       const requestedInferenceProfile =
         writableAction?.type === "command" ? null : inferenceProfile;
       const writeKey = JSON.stringify({
@@ -2425,12 +2746,17 @@ export function useChatSessionContainer(
           inferenceProfile: requestedInferenceProfile,
           attachments: attachmentUris,
         }),
-      );
+      ).then((succeeded) => {
+        if (succeeded && requestedInferenceProfile !== null) {
+          setLatestHumanInferenceProfile(requestedInferenceProfile);
+        }
+        return succeeded;
+      });
     },
     [
       agent.id,
+      agentSessionQuery.data,
       clientRequestIdForWrite,
-      inferenceProfile,
       runWriteMutation,
       sendInputMutation,
       sessionId,
@@ -2441,9 +2767,10 @@ export function useChatSessionContainer(
     (
       messageId: string,
       message: string,
+      inferenceProfile: RequestedInferenceProfile,
       attachments?: UploadedFile[],
     ): Promise<boolean> => {
-      if (isResponsePending || inferenceProfile == null) {
+      if (isResponsePending || agentSessionQuery.data == null) {
         return Promise.resolve(false);
       }
       setWasRestCommandBlocked(false);
@@ -2467,13 +2794,18 @@ export function useChatSessionContainer(
           inferenceProfile,
           attachments: attachmentUris,
         }),
-      );
+      ).then((succeeded) => {
+        if (succeeded) {
+          setLatestHumanInferenceProfile(inferenceProfile);
+        }
+        return succeeded;
+      });
     },
     [
       agent.id,
+      agentSessionQuery.data,
       clientRequestIdForWrite,
       editMessageMutation,
-      inferenceProfile,
       isResponsePending,
       runWriteMutation,
       sessionId,
@@ -2546,7 +2878,7 @@ export function useChatSessionContainer(
                   hasVisibleRunActivity,
               };
             });
-            void utils.chat.listSessionEvents.invalidate({ sessionId });
+            void applyLatestSnapshot(sessionId);
           },
           onError: () => {
             setManagedLiveState((prev) => ({
@@ -2561,7 +2893,7 @@ export function useChatSessionContainer(
         },
       );
     },
-    [deleteInputBufferMutation, sessionId, utils.chat.listSessionEvents],
+    [applyLatestSnapshot, deleteInputBufferMutation, sessionId],
   );
 
   const onUpdateGoal = useCallback(
@@ -2654,6 +2986,7 @@ export function useChatSessionContainer(
     isWritePending,
     isModelResponsePending,
     liveRun,
+    defaultInferenceProfile,
     hasMore,
     isLoadingMore,
     isLoadingNewer,

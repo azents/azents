@@ -574,6 +574,10 @@ class TestEventExecutionRepositories:
             rdb_session,
             event_ids=[event.id, second_event.id, event.id],
         )
+        summaries_by_run_id = await repo.list_inference_run_summaries_by_ids(
+            rdb_session,
+            run_ids=[pending.id, active.id, pending.id],
+        )
 
         assert activated.status == AgentRunStatus.RUNNING
         assert activated.started_at == resolved_at
@@ -587,6 +591,8 @@ class TestEventExecutionRepositories:
         assert summary.resolved_profile.model_identifier == "resolved-model"
         assert summaries[event.id].run_id == pending.id
         assert summaries[second_event.id].run_id == pending.id
+        assert summaries_by_run_id[pending.id].run_id == pending.id
+        assert summaries_by_run_id[active.id].status == AgentRunStatus.COMPLETED
         assert "integration" not in summary.model_dump(mode="json")
 
     async def test_inherited_pending_activation_preserves_parent_snapshot(

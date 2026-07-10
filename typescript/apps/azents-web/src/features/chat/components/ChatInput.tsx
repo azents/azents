@@ -10,9 +10,12 @@
 import {
   ActionIcon,
   Box,
+  Button,
+  Drawer,
   Group,
   Paper,
   rem,
+  Select,
   Stack,
   Text,
   Textarea,
@@ -20,6 +23,8 @@ import {
 } from "@mantine/core";
 import { useLocalStorage } from "@mantine/hooks";
 import {
+  IconAdjustmentsHorizontal,
+  IconChevronDown,
   IconPaperclip,
   IconPlayerStop,
   IconSend,
@@ -36,6 +41,11 @@ import type {
   InputActionDefinition,
   TodoStateSnapshot,
 } from "../types";
+import type {
+  AgentResponse,
+  ModelReasoningEffort,
+  RequestedInferenceProfile,
+} from "@azents/public-client";
 
 const DRAFT_STORAGE_KEY_PREFIX = "azents.chat.inputDraft";
 
@@ -56,6 +66,12 @@ interface ChatInputProps {
   sessionId: string | null;
   /** whether mobile */
   isMobile: boolean;
+  /** Agent-owned selectable model targets */
+  selectableModelOptions: AgentResponse["selectable_model_options"];
+  /** profile restored from durable/session/Agent state */
+  defaultInferenceProfile: RequestedInferenceProfile;
+  /** original profile while editing a durable user message */
+  editingInferenceProfile?: RequestedInferenceProfile | null;
   /** file whether uploading */
   isUploading: boolean;
   /** pending file list */
@@ -77,7 +93,8 @@ interface ChatInputProps {
   /** input send callback */
   onSendInput: (
     message: string,
-    action?: ChatAction | null,
+    action: ChatAction | null,
+    inferenceProfile: RequestedInferenceProfile,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
   /** clear attached file draft state */
@@ -163,6 +180,7 @@ function getInputActionQuery(inputValue: string): string | null {
 interface ComposerDraft {
   message: string;
   action: ChatAction | null;
+  inferenceProfile: RequestedInferenceProfile | null;
 }
 
 interface RankedInputAction {
@@ -188,9 +206,45 @@ function normalizeStoredAction(value: unknown): ChatAction | null {
   return null;
 }
 
+function storedReasoningEffort(value: unknown): ModelReasoningEffort | null {
+  switch (value) {
+    case "low":
+    case "medium":
+    case "high":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function normalizeStoredInferenceProfile(
+  value: unknown,
+): RequestedInferenceProfile | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("model_target_label" in value) ||
+    typeof value.model_target_label !== "string" ||
+    value.model_target_label.length === 0 ||
+    !("reasoning_effort" in value)
+  ) {
+    return null;
+  }
+  if (
+    value.reasoning_effort !== null &&
+    storedReasoningEffort(value.reasoning_effort) === null
+  ) {
+    return null;
+  }
+  return {
+    model_target_label: value.model_target_label,
+    reasoning_effort: storedReasoningEffort(value.reasoning_effort),
+  };
+}
+
 function parseComposerDraft(raw: string): ComposerDraft {
   if (!raw) {
-    return { message: "", action: null };
+    return { message: "", action: null, inferenceProfile: null };
   }
   try {
     const value: unknown = JSON.parse(raw);
@@ -199,26 +253,72 @@ function parseComposerDraft(raw: string): ComposerDraft {
       return {
         message: typeof record.message === "string" ? record.message : "",
         action: normalizeStoredAction(record.action),
+        inferenceProfile: normalizeStoredInferenceProfile(
+          record.inference_profile,
+        ),
       };
     }
   } catch {
     // Legacy drafts were stored as plain message strings.
   }
-  return { message: raw, action: null };
+  return { message: raw, action: null, inferenceProfile: null };
 }
 
 function serializeComposerDraft(
   message: string,
   action: ChatAction | null,
+  inferenceProfile: RequestedInferenceProfile,
 ): string {
-  if (!message && action === null) {
-    return "";
-  }
-  return JSON.stringify({ message, action });
+  return JSON.stringify({
+    message,
+    action,
+    inference_profile: inferenceProfile,
+  });
 }
 
 function actionKey(action: ChatAction | null): string {
   return JSON.stringify(action);
+}
+
+function effortLevelsForTarget(
+  options: AgentResponse["selectable_model_options"],
+  targetLabel: string,
+): ModelReasoningEffort[] {
+  return (
+    options.find((option) => option.label === targetLabel)?.model_selection
+      .normalized_capabilities.reasoning?.effort_levels ?? []
+  );
+}
+
+function normalizeProfileForOptions(
+  profile: RequestedInferenceProfile | null,
+  options: AgentResponse["selectable_model_options"],
+  fallback: RequestedInferenceProfile,
+): RequestedInferenceProfile {
+  const fallbackOption =
+    options.find((option) => option.label === fallback.model_target_label) ??
+    options.at(0);
+  const option =
+    profile === null
+      ? fallbackOption
+      : (options.find(
+          (candidate) => candidate.label === profile.model_target_label,
+        ) ?? fallbackOption);
+  const modelTargetLabel = option?.label ?? fallback.model_target_label;
+  const effortLevels = effortLevelsForTarget(options, modelTargetLabel);
+  const requestedEffort =
+    profile?.model_target_label === modelTargetLabel
+      ? profile.reasoning_effort
+      : fallback.model_target_label === modelTargetLabel
+        ? fallback.reasoning_effort
+        : null;
+  return {
+    model_target_label: modelTargetLabel,
+    reasoning_effort:
+      requestedEffort !== null && effortLevels.includes(requestedEffort)
+        ? requestedEffort
+        : null,
+  };
 }
 
 function fallbackActionDefinition(action: ChatAction): InputActionDefinition {
@@ -354,6 +454,9 @@ export const ChatInput = memo(function ChatInput({
   agentId,
   sessionId,
   isMobile,
+  selectableModelOptions,
+  defaultInferenceProfile,
+  editingInferenceProfile = null,
   isUploading,
   pendingFiles,
   goal,
@@ -400,14 +503,74 @@ export const ChatInput = memo(function ChatInput({
     () => parseComposerDraft(draftValue),
     [draftValue],
   );
+  const normalizedDefaultProfile = useMemo(
+    () =>
+      normalizeProfileForOptions(
+        defaultInferenceProfile,
+        selectableModelOptions,
+        defaultInferenceProfile,
+      ),
+    [defaultInferenceProfile, selectableModelOptions],
+  );
+  const normalizedDraftProfile = useMemo(
+    () =>
+      normalizeProfileForOptions(
+        parsedDraft.inferenceProfile,
+        selectableModelOptions,
+        normalizedDefaultProfile,
+      ),
+    [
+      normalizedDefaultProfile,
+      parsedDraft.inferenceProfile,
+      selectableModelOptions,
+    ],
+  );
   const [inputValue, setInputValue] = useState(
     initialInputValue ?? parsedDraft.message,
   );
+  const [inferenceProfile, setInferenceProfile] = useState(
+    normalizedDraftProfile,
+  );
+  const [profileDrawerOpened, setProfileDrawerOpened] = useState(false);
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
+  const modelSelectData = useMemo(
+    () =>
+      selectableModelOptions.map((option) => ({
+        value: option.label,
+        label: option.label,
+      })),
+    [selectableModelOptions],
+  );
+  const selectableEfforts = useMemo(
+    () =>
+      effortLevelsForTarget(
+        selectableModelOptions,
+        inferenceProfile.model_target_label,
+      ),
+    [inferenceProfile.model_target_label, selectableModelOptions],
+  );
+  const effortSelectData = useMemo(
+    () => [
+      { value: "default", label: t("composerProfile.defaultEffort") },
+      ...selectableEfforts.map((effort) => ({
+        value: effort,
+        label: t(`composerProfile.effort.${effort}`),
+      })),
+    ],
+    [selectableEfforts, t],
+  );
+  const selectedModelLabel =
+    selectableModelOptions.find(
+      (option) => option.label === inferenceProfile.model_target_label,
+    )?.label ?? inferenceProfile.model_target_label;
+  const selectedEffortLabel =
+    inferenceProfile.reasoning_effort === null
+      ? t("composerProfile.defaultEffort")
+      : t(`composerProfile.effort.${inferenceProfile.reasoning_effort}`);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previousEditingMessageIdRef = useRef<string | null>(null);
@@ -438,13 +601,22 @@ export const ChatInput = memo(function ChatInput({
     if (initialInputValue !== void 0) {
       setInputValue(initialInputValue);
       setSelectedAction(null);
+      setInferenceProfile(normalizedDefaultProfile);
       return;
     }
     setInputValue(parsedDraft.message);
     setSelectedAction(
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
-  }, [editingMessageId, initialInputValue, inputActions, parsedDraft]);
+    setInferenceProfile(normalizedDraftProfile);
+  }, [
+    editingMessageId,
+    initialInputValue,
+    inputActions,
+    normalizedDefaultProfile,
+    normalizedDraftProfile,
+    parsedDraft,
+  ]);
 
   useEffect(() => {
     if (selectedAction === null) {
@@ -470,18 +642,17 @@ export const ChatInput = memo(function ChatInput({
   }, [clearStoredDraft]);
 
   const persistDraft = useCallback(
-    (message: string, action: ChatAction | null): void => {
+    (
+      message: string,
+      action: ChatAction | null,
+      profile: RequestedInferenceProfile,
+    ): void => {
       if (editingMessageId !== null || !draftStorageKey) {
         return;
       }
-      const serialized = serializeComposerDraft(message, action);
-      if (serialized === "") {
-        clearStoredDraft();
-        return;
-      }
-      setDraftValue(serialized);
+      setDraftValue(serializeComposerDraft(message, action, profile));
     },
-    [clearStoredDraft, draftStorageKey, editingMessageId, setDraftValue],
+    [draftStorageKey, editingMessageId, setDraftValue],
   );
 
   const updateInputValue = useCallback(
@@ -491,9 +662,10 @@ export const ChatInput = memo(function ChatInput({
       persistDraft(
         nextValue,
         selectedAction === null ? null : normalizeAction(selectedAction.action),
+        inferenceProfile,
       );
     },
-    [persistDraft, selectedAction],
+    [inferenceProfile, persistDraft, selectedAction],
   );
 
   useEffect(() => {
@@ -502,27 +674,58 @@ export const ChatInput = memo(function ChatInput({
       if (editingMessageId !== null) {
         setSelectedAction(null);
         setInputValue(editingInitialValue ?? "");
+        setInferenceProfile(
+          normalizeProfileForOptions(
+            editingInferenceProfile,
+            selectableModelOptions,
+            normalizedDefaultProfile,
+          ),
+        );
         textareaRef.current?.focus();
       }
     }
-  }, [editingInitialValue, editingMessageId]);
+  }, [
+    editingInferenceProfile,
+    editingInitialValue,
+    editingMessageId,
+    normalizedDefaultProfile,
+    selectableModelOptions,
+  ]);
 
-  const handleCancelEdit = useCallback(() => {
-    setInputValue("");
-    setSelectedAction(null);
-    clearDraft();
+  const restorePersistedDraft = useCallback((): void => {
+    setInputValue(parsedDraft.message);
+    setSelectedAction(
+      resolveActionDefinition(parsedDraft.action, inputActions),
+    );
+    setInferenceProfile(normalizedDraftProfile);
+  }, [inputActions, normalizedDraftProfile, parsedDraft]);
+
+  const handleCancelEdit = useCallback((): void => {
+    restorePersistedDraft();
     previousEditingMessageIdRef.current = null;
     onCancelEdit?.();
-  }, [clearDraft, onCancelEdit]);
+  }, [onCancelEdit, restorePersistedDraft]);
 
   const clearInputAfterSend = useCallback((): void => {
     setSendErrorVisible(false);
-    setSelectedAction(null);
-    updateInputValue("");
-    clearDraft();
+    if (editingMessageId !== null) {
+      restorePersistedDraft();
+    } else {
+      setSelectedAction(null);
+      setInputValue("");
+      setInferenceProfile(normalizedDefaultProfile);
+      clearDraft();
+    }
     clearFiles();
     onAfterSend();
-  }, [clearDraft, clearFiles, onAfterSend, updateInputValue]);
+  }, [
+    clearDraft,
+    clearFiles,
+    editingMessageId,
+    normalizedDefaultProfile,
+    onAfterSend,
+    restorePersistedDraft,
+  ]);
 
   const handleSend = useCallback((): void => {
     const send = async (): Promise<void> => {
@@ -565,6 +768,7 @@ export const ChatInput = memo(function ChatInput({
             const sentWithoutAttachments = await onSendInput(
               trimmed,
               normalizedAction,
+              inferenceProfile,
             );
             if (sentWithoutAttachments) {
               clearInputAfterSend();
@@ -573,7 +777,12 @@ export const ChatInput = memo(function ChatInput({
             }
             return;
           }
-          const sent = await onSendInput(trimmed, normalizedAction, uploaded);
+          const sent = await onSendInput(
+            trimmed,
+            normalizedAction,
+            inferenceProfile,
+            uploaded,
+          );
           if (sent) {
             clearInputAfterSend();
           } else {
@@ -587,7 +796,11 @@ export const ChatInput = memo(function ChatInput({
         return;
       }
 
-      const sent = await onSendInput(trimmed, normalizedAction);
+      const sent = await onSendInput(
+        trimmed,
+        normalizedAction,
+        inferenceProfile,
+      );
       if (sent) {
         clearInputAfterSend();
       } else {
@@ -598,6 +811,7 @@ export const ChatInput = memo(function ChatInput({
   }, [
     inputValue,
     selectedAction,
+    inferenceProfile,
     isUploading,
     editSendDisabled,
     inputDisabled,
@@ -648,10 +862,58 @@ export const ChatInput = memo(function ChatInput({
       }
       setSelectedAction(definition);
       setInputValue("");
-      persistDraft("", normalizedAction);
+      persistDraft("", normalizedAction, inferenceProfile);
       textareaRef.current?.focus();
     },
-    [persistDraft],
+    [inferenceProfile, persistDraft],
+  );
+
+  const updateInferenceProfile = useCallback(
+    (nextProfile: RequestedInferenceProfile): void => {
+      setInferenceProfile(nextProfile);
+      persistDraft(
+        inputValue,
+        selectedAction === null ? null : normalizeAction(selectedAction.action),
+        nextProfile,
+      );
+    },
+    [inputValue, persistDraft, selectedAction],
+  );
+
+  const handleModelChange = useCallback(
+    (modelTargetLabel: string | null): void => {
+      if (modelTargetLabel === null) {
+        return;
+      }
+      const nextEfforts = effortLevelsForTarget(
+        selectableModelOptions,
+        modelTargetLabel,
+      );
+      const currentEffort = inferenceProfile.reasoning_effort;
+      updateInferenceProfile({
+        model_target_label: modelTargetLabel,
+        reasoning_effort:
+          currentEffort !== null && nextEfforts.includes(currentEffort)
+            ? currentEffort
+            : null,
+      });
+    },
+    [
+      inferenceProfile.reasoning_effort,
+      selectableModelOptions,
+      updateInferenceProfile,
+    ],
+  );
+
+  const handleEffortChange = useCallback(
+    (value: string | null): void => {
+      updateInferenceProfile({
+        ...inferenceProfile,
+        reasoning_effort:
+          value === "default" ? null : storedReasoningEffort(value),
+      });
+    },
+    [inferenceProfile, updateInferenceProfile],
   );
 
   return (
@@ -770,152 +1032,238 @@ export const ChatInput = memo(function ChatInput({
             </Stack>
           </Paper>
         )}
-        <Group align="flex-end" gap="xs">
-          <ActionIcon
-            size="input-sm"
-            variant="subtle"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={
-              inputDisabled ||
-              isUploading ||
-              Boolean(editingMessageId) ||
-              selectedAction?.attachments.policy === "unsupported"
-            }
-            aria-label={t("attachment.attach")}
-          >
-            <IconPaperclip size={18} />
-          </ActionIcon>
-          <Box flex={1} style={{ minWidth: 0 }}>
-            <Stack gap={rem(4)}>
-              {pendingFiles.length > 0 && !editingMessageId && (
-                <AttachmentPreviewBar
-                  pendingFiles={pendingFiles}
-                  onRemove={removeFile}
-                />
-              )}
-              <Box style={{ minWidth: 0, position: "relative" }}>
-                {todo !== null && !editingMessageId && (
-                  <TodoPreviewBar
-                    goal={goal}
-                    isMobile={isMobile}
-                    todo={todo}
-                    onClearGoal={onClearGoal}
-                    onUpdateGoal={onUpdateGoal}
-                    onPauseGoal={onPauseGoal}
-                    onResumeGoal={onResumeGoal}
-                  />
-                )}
-                {selectedAction !== null &&
-                  !editingMessageId &&
-                  !inputDisabled && (
-                    <Group
-                      gap={rem(4)}
-                      wrap="nowrap"
-                      px={rem(7)}
-                      py={rem(2)}
-                      style={{
-                        position: "absolute",
-                        top: rem(7),
-                        left: rem(12),
-                        zIndex: 1,
-                        borderRadius: rem(999),
-                        background: "var(--mantine-color-blue-light)",
-                        maxWidth: "calc(100% - 24px)",
-                        pointerEvents: "auto",
-                      }}
-                    >
-                      <Text size="xs" fw={700} c="blue" truncate>
-                        /{selectedAction.keyword}
-                      </Text>
-                      <ActionIcon
-                        variant="transparent"
-                        size={rem(14)}
-                        c="dimmed"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setSelectedAction(null);
-                          persistDraft(inputValue, null);
-                          textareaRef.current?.focus();
-                        }}
-                        aria-label={t("cancelEdit")}
-                      >
-                        <IconX size={10} />
-                      </ActionIcon>
-                    </Group>
-                  )}
-                <Textarea
-                  ref={textareaRef}
-                  placeholder={
-                    inputDisabled
-                      ? (disabledPlaceholder ?? t("inputDisabledPlaceholder"))
-                      : (selectedAction?.message.placeholder ??
-                        (isMobile
-                          ? t("inputPlaceholder")
-                          : t("inputPlaceholderDesktop")))
-                  }
-                  value={inputDisabled ? "" : inputValue}
-                  onChange={(e) => updateInputValue(e.currentTarget.value)}
-                  onKeyDown={handleKeyDown}
-                  onFocus={onFocus}
-                  disabled={inputDisabled}
-                  autosize
-                  minRows={1}
-                  maxRows={5}
-                  flex={1}
-                  styles={{
-                    input: {
-                      fontSize: rem(16),
-                      paddingTop:
-                        selectedAction !== null &&
-                        !editingMessageId &&
-                        !inputDisabled
-                          ? rem(34)
-                          : void 0,
-                    },
-                  }}
-                />
-                {selectedAction?.availability_hint?.message &&
-                  !editingMessageId &&
-                  !inputDisabled && (
-                    <Text size="xs" c="orange" mt={rem(4)}>
+        <Paper
+          withBorder
+          radius="xl"
+          px="xs"
+          py={rem(6)}
+          shadow="xs"
+          style={{ position: "relative" }}
+        >
+          <Stack gap={rem(4)}>
+            {pendingFiles.length > 0 && !editingMessageId && (
+              <AttachmentPreviewBar
+                pendingFiles={pendingFiles}
+                onRemove={removeFile}
+              />
+            )}
+            {todo !== null && !editingMessageId && (
+              <TodoPreviewBar
+                goal={goal}
+                isMobile={isMobile}
+                todo={todo}
+                onClearGoal={onClearGoal}
+                onUpdateGoal={onUpdateGoal}
+                onPauseGoal={onPauseGoal}
+                onResumeGoal={onResumeGoal}
+              />
+            )}
+            {selectedAction !== null && !editingMessageId && !inputDisabled && (
+              <Group
+                justify="space-between"
+                gap="xs"
+                wrap="nowrap"
+                px="xs"
+                py={rem(4)}
+                style={{
+                  borderRadius: rem(10),
+                  background: "var(--mantine-color-blue-light)",
+                }}
+              >
+                <Box style={{ minWidth: 0 }}>
+                  <Text size="xs" fw={700} c="blue" truncate>
+                    /{selectedAction.keyword}
+                  </Text>
+                  {selectedAction.availability_hint?.message && (
+                    <Text size="xs" c="orange" lineClamp={1}>
                       {selectedAction.availability_hint.message}
                     </Text>
                   )}
-              </Box>
-            </Stack>
-          </Box>
-          {isStopAvailable &&
-          (inputDisabled || (!inputValue.trim() && selectedAction === null)) ? (
-            <ActionIcon
-              size="input-sm"
-              variant="filled"
-              color="red"
-              onClick={onStopRequest}
-              onMouseDown={(e) => e.preventDefault()}
-              loading={isStopPending}
-              aria-label={t("stopRun")}
-            >
-              <IconPlayerStop size={18} />
-            </ActionIcon>
-          ) : (
-            <ActionIcon
-              size="input-sm"
-              variant="filled"
-              onClick={handleSend}
-              onMouseDown={(e) => e.preventDefault()}
-              disabled={
-                inputDisabled ||
-                editSendDisabled ||
-                (!inputValue.trim() &&
-                  selectedAction?.message.policy === "required")
+                </Box>
+                <ActionIcon
+                  variant="subtle"
+                  size={rem(32)}
+                  c="dimmed"
+                  onClick={() => {
+                    setSelectedAction(null);
+                    persistDraft(inputValue, null, inferenceProfile);
+                    textareaRef.current?.focus();
+                  }}
+                  aria-label={t("cancelEdit")}
+                >
+                  <IconX size={14} />
+                </ActionIcon>
+              </Group>
+            )}
+            <Textarea
+              ref={textareaRef}
+              variant="unstyled"
+              placeholder={
+                inputDisabled
+                  ? (disabledPlaceholder ?? t("inputDisabledPlaceholder"))
+                  : (selectedAction?.message.placeholder ??
+                    (isMobile
+                      ? t("inputPlaceholder")
+                      : t("inputPlaceholderDesktop")))
               }
-              loading={isUploading}
-            >
-              <IconSend size={18} />
-            </ActionIcon>
-          )}
-        </Group>
+              value={inputDisabled ? "" : inputValue}
+              onChange={(event) => updateInputValue(event.currentTarget.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={onFocus}
+              disabled={inputDisabled}
+              autosize
+              minRows={1}
+              maxRows={5}
+              styles={{
+                input: {
+                  fontSize: rem(16),
+                  lineHeight: 1.45,
+                  paddingInline: rem(6),
+                  paddingBlock: rem(4),
+                },
+              }}
+            />
+            <Group gap="xs" wrap="nowrap">
+              <ActionIcon
+                size={rem(40)}
+                variant="subtle"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={
+                  inputDisabled ||
+                  isUploading ||
+                  Boolean(editingMessageId) ||
+                  selectedAction?.attachments.policy === "unsupported"
+                }
+                aria-label={t("attachment.attach")}
+              >
+                <IconPaperclip size={18} />
+              </ActionIcon>
+              {isMobile ? (
+                <>
+                  <Button
+                    variant="light"
+                    size="compact-sm"
+                    leftSection={<IconAdjustmentsHorizontal size={16} />}
+                    rightSection={<IconChevronDown size={14} />}
+                    disabled={
+                      inputDisabled || selectableModelOptions.length === 0
+                    }
+                    onClick={() => setProfileDrawerOpened(true)}
+                    aria-label={t("composerProfile.model")}
+                    style={{
+                      minWidth: 0,
+                      minHeight: rem(40),
+                      flex: "1 1 auto",
+                    }}
+                  >
+                    <Text size="sm" truncate>
+                      {selectableEfforts.length > 0
+                        ? `${selectedModelLabel} · ${selectedEffortLabel}`
+                        : selectedModelLabel}
+                    </Text>
+                  </Button>
+                  <Drawer
+                    opened={profileDrawerOpened}
+                    onClose={() => setProfileDrawerOpened(false)}
+                    title={t("composerProfile.model")}
+                    position="bottom"
+                    size="auto"
+                    keepMounted
+                    styles={{
+                      content: {
+                        borderTopLeftRadius: rem(12),
+                        borderTopRightRadius: rem(12),
+                      },
+                      body: {
+                        paddingBottom:
+                          "max(var(--mantine-spacing-md), env(safe-area-inset-bottom))",
+                      },
+                    }}
+                  >
+                    <Stack gap="md">
+                      <Select
+                        label={t("composerProfile.model")}
+                        data={modelSelectData}
+                        value={inferenceProfile.model_target_label}
+                        onChange={handleModelChange}
+                        allowDeselect={false}
+                        styles={{ input: { fontSize: rem(16) } }}
+                      />
+                      {selectableEfforts.length > 0 && (
+                        <Select
+                          label={t("composerProfile.effortLabel")}
+                          data={effortSelectData}
+                          value={inferenceProfile.reasoning_effort ?? "default"}
+                          onChange={handleEffortChange}
+                          allowDeselect={false}
+                          styles={{ input: { fontSize: rem(16) } }}
+                        />
+                      )}
+                    </Stack>
+                  </Drawer>
+                </>
+              ) : (
+                <>
+                  <Select
+                    aria-label={t("composerProfile.model")}
+                    data={modelSelectData}
+                    value={inferenceProfile.model_target_label}
+                    onChange={handleModelChange}
+                    allowDeselect={false}
+                    disabled={inputDisabled || modelSelectData.length === 0}
+                    w={rem(176)}
+                    styles={{ input: { minHeight: rem(40) } }}
+                  />
+                  {selectableEfforts.length > 0 && (
+                    <Select
+                      aria-label={t("composerProfile.effortLabel")}
+                      data={effortSelectData}
+                      value={inferenceProfile.reasoning_effort ?? "default"}
+                      onChange={handleEffortChange}
+                      allowDeselect={false}
+                      disabled={inputDisabled}
+                      w={rem(136)}
+                      styles={{ input: { minHeight: rem(40) } }}
+                    />
+                  )}
+                </>
+              )}
+              <Box style={{ flex: "1 1 auto" }} />
+              {isStopAvailable &&
+              (inputDisabled ||
+                (!inputValue.trim() && selectedAction === null)) ? (
+                <ActionIcon
+                  size={rem(40)}
+                  variant="filled"
+                  color="red"
+                  onClick={onStopRequest}
+                  onMouseDown={(event) => event.preventDefault()}
+                  loading={isStopPending}
+                  aria-label={t("stopRun")}
+                >
+                  <IconPlayerStop size={18} />
+                </ActionIcon>
+              ) : (
+                <ActionIcon
+                  size={rem(40)}
+                  variant="filled"
+                  onClick={handleSend}
+                  onMouseDown={(event) => event.preventDefault()}
+                  disabled={
+                    inputDisabled ||
+                    editSendDisabled ||
+                    (!inputValue.trim() &&
+                      selectedAction?.message.policy === "required")
+                  }
+                  loading={isUploading}
+                  aria-label={t("composerProfile.send")}
+                >
+                  <IconSend size={18} />
+                </ActionIcon>
+              )}
+            </Group>
+          </Stack>
+        </Paper>
       </Stack>
     </>
   );

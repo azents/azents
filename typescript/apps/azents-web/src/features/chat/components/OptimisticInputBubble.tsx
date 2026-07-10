@@ -5,6 +5,7 @@
 import { Group } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { ChatCopyButton } from "./ChatCopyButton";
+import { InferenceProfileLabel } from "./InferenceProfileLabel";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
 import type { PendingInputBuffer } from "../types";
 
@@ -25,7 +26,8 @@ export function OptimisticInputBubble({
       attachmentFiles={buffer.attachmentFiles}
       opacity={0.6}
       actions={
-        <Group gap={2} mt={4} justify="flex-end">
+        <Group gap="xs" mt="2xs" justify="space-between" wrap="nowrap">
+          <InferenceProfileLabel profile={buffer.requestedInferenceProfile} />
           <ChatCopyButton
             value={buffer.content}
             copyLabel={t("copy")}

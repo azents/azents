@@ -21,7 +21,9 @@ from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.inference_profile import (
     InferenceProfileFailureCode,
     InferenceProfileSource,
+    InferenceRunSummary,
     RequestedInferenceProfile,
+    ResolvedInferenceProfileSummary,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import ToolkitProvider
@@ -75,6 +77,7 @@ from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_title import SessionTitleService
 from azents.testing.model_selection import make_test_model_selection
+from azents.transport.chat import chat_live_run_updated_dump
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import (
@@ -274,6 +277,32 @@ class _SessionLifecycle:
         if self.order is not None:
             self.order.append("activate_inherited")
         return _PendingRun(status=AgentRunStatus.RUNNING)
+
+    async def get_inference_run_summary(
+        self,
+        *,
+        run_id: str,
+    ) -> InferenceRunSummary:
+        """Return safe resolved provenance for live-run projection tests."""
+        selection = make_test_model_selection()
+        return InferenceRunSummary(
+            run_id=run_id,
+            run_index=1,
+            status=AgentRunStatus.RUNNING,
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=None,
+            ),
+            source=InferenceProfileSource.AGENT_DEFAULT,
+            resolved_profile=ResolvedInferenceProfileSummary.from_model_selection(
+                selection
+            ),
+            resolved_reasoning_effort=None,
+            effective_context_window_tokens=64_000,
+            effective_auto_compaction_threshold_tokens=51_200,
+            failure_code=None,
+            failure_message=None,
+        )
 
     async def fail_pending_agent_run_profile(
         self,
@@ -2119,7 +2148,17 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
     assert len(retry_updates) == 1
     assert retry_updates[0].last_error_message == "An internal error occurred."
     assert retry_updates[0].attempts[0].error_type == "RuntimeError"
-    assert live_event_projector.live_run_updates[-1][1].retry is None
+    assert all(
+        run.inference_run_summary.run_id == result.run_id
+        and run.inference_run_summary.resolved_profile is not None
+        for _, run in live_event_projector.live_run_updates
+    )
+    latest_live_run = live_event_projector.live_run_updates[-1][1]
+    assert latest_live_run.retry is None
+    wire_event = chat_live_run_updated_dump("session-001", latest_live_run)
+    wire_run = wire_event["run"]
+    assert isinstance(wire_run, dict)
+    assert wire_run["inference_run_summary"]["run_id"] == result.run_id
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_run_phase import AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus
 from azentspublicclient.models.chat_live_run_retry_state_response import ChatLiveRunRetryStateResponse
+from azentspublicclient.models.inference_run_summary import InferenceRunSummary
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -32,9 +33,10 @@ class ChatLiveRunStateResponse(BaseModel):
     run_id: StrictStr = Field(description="AgentRun ID")
     phase: AgentRunPhase = Field(description="Current run phase")
     status: AgentRunStatus = Field(description="Current run status")
+    inference_run_summary: InferenceRunSummary = Field(description="Allowlisted provenance for the active run")
     retry: Optional[ChatLiveRunRetryStateResponse] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["run_id", "phase", "status", "retry"]
+    __properties: ClassVar[List[str]] = ["run_id", "phase", "status", "inference_run_summary", "retry"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -77,6 +79,9 @@ class ChatLiveRunStateResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of inference_run_summary
+        if self.inference_run_summary:
+            _dict['inference_run_summary'] = self.inference_run_summary.to_dict()
         # override the default output from pydantic by calling `to_dict()` of retry
         if self.retry:
             _dict['retry'] = self.retry.to_dict()
@@ -105,6 +110,7 @@ class ChatLiveRunStateResponse(BaseModel):
             "run_id": obj.get("run_id"),
             "phase": obj.get("phase"),
             "status": obj.get("status"),
+            "inference_run_summary": InferenceRunSummary.from_dict(obj["inference_run_summary"]) if obj.get("inference_run_summary") is not None else None,
             "retry": ChatLiveRunRetryStateResponse.from_dict(obj["retry"]) if obj.get("retry") is not None else None
         })
         # store additional fields in additional_properties
