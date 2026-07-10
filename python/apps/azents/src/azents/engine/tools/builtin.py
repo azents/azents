@@ -267,7 +267,6 @@ _MIN_PROCESS_YIELD_TIME_MS = 250
 _DEFAULT_PROCESS_YIELD_TIME_MS = 10_000
 _MAX_PROCESS_YIELD_TIME_MS = 30_000
 _DEFAULT_PROCESS_WRITE_YIELD_TIME_MS = 250
-_MIN_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 5_000
 _DEFAULT_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 5_000
 _MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS = 300_000
 _DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 64 * 1024
@@ -318,8 +317,9 @@ class WriteStdinInput(BaseModel):
         le=_MAX_PROCESS_EMPTY_POLL_YIELD_TIME_MS,
         description=(
             "How long to wait for process output before yielding, in milliseconds. "
-            "Non-empty writes default to 250 ms and cap at 30000 ms; "
-            "empty polls default to 5000 ms and allow 5000-300000 ms."
+            "Zero returns currently buffered output immediately. Non-empty writes "
+            "default to 250 ms and cap at 30000 ms; empty polls default to 5000 ms "
+            "and cap at 300000 ms."
         ),
     )
     max_output_bytes: int = Field(
@@ -340,15 +340,7 @@ class WriteStdinInput(BaseModel):
 
     @model_validator(mode="after")
     def _validate_yield_time_range(self) -> "WriteStdinInput":
-        if self.chars == "":
-            if self.yield_time_ms < _MIN_PROCESS_EMPTY_POLL_YIELD_TIME_MS:
-                msg = "empty poll yield_time_ms must be at least 5000"
-                raise ValueError(msg)
-            return self
-        if self.yield_time_ms < _MIN_PROCESS_YIELD_TIME_MS:
-            msg = "non-empty write yield_time_ms must be at least 250"
-            raise ValueError(msg)
-        if self.yield_time_ms > _MAX_PROCESS_YIELD_TIME_MS:
+        if self.chars != "" and self.yield_time_ms > _MAX_PROCESS_YIELD_TIME_MS:
             msg = "non-empty write yield_time_ms must be at most 30000"
             raise ValueError(msg)
         return self
@@ -1536,9 +1528,10 @@ def make_write_stdin_tool(
         name="write_stdin",
         description=(
             "Write characters to a running exec_command process. Pass an empty "
-            "chars string to poll for unread output without sending input. Non-empty "
-            "writes default to 250 ms and cap at 30000 ms; empty polls default to "
-            "5000 ms and allow 5000-300000 ms."
+            "chars string to poll for unread output without sending input. A zero "
+            "yield returns currently buffered output immediately. Non-empty writes "
+            "default to 250 ms and cap at 30000 ms; empty polls default to 5000 ms "
+            "and cap at 300000 ms."
         ),
     )
     return dataclasses.replace(

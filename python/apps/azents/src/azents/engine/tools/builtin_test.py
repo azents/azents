@@ -1309,16 +1309,39 @@ class TestProcessToolHandler:
         assert runner_operations.process_write_calls[-1]["yield_time_ms"] == 5000
 
     @pytest.mark.asyncio
-    async def test_write_stdin_rejects_out_of_range_mode_specific_yields(self) -> None:
-        """write_stdin validates mode-specific yield ranges in its input model."""
+    async def test_write_stdin_accepts_zero_yield_for_all_modes(self) -> None:
+        """write_stdin forwards zero yields for immediate process snapshots."""
+        toolkit = _make_toolkit()
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        state = await toolkit.update_context(_make_context())
+        tool = _find_tool(state.tools, "write_stdin")
+
+        await tool.handler(json.dumps({"process_id": "proc-1", "yield_time_ms": 0}))
+        await tool.handler(
+            json.dumps(
+                {
+                    "process_id": "proc-1",
+                    "chars": "input\n",
+                    "yield_time_ms": 0,
+                }
+            )
+        )
+
+        assert runner_operations.process_write_calls[-2]["yield_time_ms"] == 0
+        assert runner_operations.process_write_calls[-2]["stdin"] == ""
+        assert runner_operations.process_write_calls[-1]["yield_time_ms"] == 0
+        assert runner_operations.process_write_calls[-1]["stdin"] == "input\n"
+
+    @pytest.mark.asyncio
+    async def test_write_stdin_rejects_non_empty_yield_above_maximum(self) -> None:
+        """Non-empty write_stdin calls keep their shorter maximum yield."""
         toolkit = _make_toolkit()
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "write_stdin")
 
-        with pytest.raises(FunctionToolError, match="empty poll yield_time_ms"):
-            await tool.handler(
-                json.dumps({"process_id": "proc-1", "yield_time_ms": 250})
-            )
         with pytest.raises(FunctionToolError, match="non-empty write yield_time_ms"):
             await tool.handler(
                 json.dumps(
@@ -1351,7 +1374,12 @@ class TestProcessToolHandler:
         assert exec_yield["maximum"] == 30000
         assert "accepted range is 250-30000 ms" in exec_yield["description"]
         assert write_yield["default"] == 250
+        assert write_yield["minimum"] == 0
         assert write_yield["maximum"] == 300000
+        assert (
+            "Zero returns currently buffered output immediately"
+            in write_yield["description"]
+        )
         assert "Non-empty writes default to 250 ms" in write_yield["description"]
         assert "empty polls default to 5000 ms" in write_yield["description"]
 
