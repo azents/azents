@@ -6,7 +6,7 @@ import enum
 import logging
 import time
 from collections import Counter, deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Protocol, TypeAlias
 
@@ -127,8 +127,15 @@ class RunnerConnectionRejected(RuntimeError):
     """Control rejected a heartbeat or generation fence."""
 
 
+RunnerOperationHandler: TypeAlias = Callable[[RunnerOperationEnvelope], Awaitable[None]]
+
+
 class RunnerControlClient(Protocol):
     """Transport implementation used by the Runtime Runner process."""
+
+    def set_operation_handler(self, handler: RunnerOperationHandler) -> None:
+        """Set the direct operation admission handler."""
+        ...
 
     async def register_runner(
         self,
@@ -267,6 +274,8 @@ class RunnerRunLoop:
         self._active_operation_tasks: dict[asyncio.Task[None], _ActiveOperation] = {}
         self._pending_control_operations: deque[_PendingOperation] = deque()
         self._active_control_tasks: dict[asyncio.Task[None], _ActiveOperation] = {}
+        self._scheduler_wake = asyncio.Event()
+        self._client.set_operation_handler(self._receive_operation)
 
     @property
     def accepted(self) -> RunnerRegistrationAccepted | None:
@@ -320,32 +329,35 @@ class RunnerRunLoop:
             consumer_id=self._consumer_id,
             block_ms=0 if has_pending else block_ms,
         )
-        progressed = False
         if operation is not None:
-            progressed = True
-            _LOGGER.info(
-                "Runtime Runner operation claimed",
-                extra=self._operation_log_extra(operation),
-            )
-            if operation.operation_type in _CONTROL_OPERATION_TYPES:
-                if (
-                    len(self._pending_control_operations)
-                    >= self._max_pending_operations_per_owner
-                ):
-                    await self._append_final_error(
-                        operation,
-                        error_code="operation_queue_full",
-                        error_message="Runner control operation queue is full",
-                    )
-                else:
-                    self._pending_control_operations.append(
-                        _PendingOperation(operation, self._monotonic())
-                    )
-            else:
-                await self._admit_operation(operation)
+            await self._receive_operation(operation)
         control_scheduled = await self._schedule_pending_control_operation()
         operation_scheduled = await self._schedule_pending_operation()
-        return progressed or control_scheduled or operation_scheduled
+        return operation is not None or control_scheduled or operation_scheduled
+
+    async def _receive_operation(self, operation: RunnerOperationEnvelope) -> None:
+        """Admit one operation delivered directly by the transport."""
+        _LOGGER.info(
+            "Runtime Runner operation claimed",
+            extra=self._operation_log_extra(operation),
+        )
+        if operation.operation_type in _CONTROL_OPERATION_TYPES:
+            if (
+                len(self._pending_control_operations)
+                >= self._max_pending_operations_per_owner
+            ):
+                await self._append_final_error(
+                    operation,
+                    error_code="operation_queue_full",
+                    error_message="Runner control operation queue is full",
+                )
+            else:
+                self._pending_control_operations.append(
+                    _PendingOperation(operation, self._monotonic())
+                )
+        else:
+            await self._admit_operation(operation)
+        self._scheduler_wake.set()
 
     async def run_forever(self, *, block_ms: int = 500) -> None:
         """Run until cancelled."""
@@ -353,8 +365,12 @@ class RunnerRunLoop:
             await self.start()
         try:
             while True:
-                await self.run_once(block_ms=block_ms)
-                await asyncio.sleep(0)
+                self._scheduler_wake.clear()
+                progressed = await self.run_once(block_ms=0)
+                if progressed:
+                    await asyncio.sleep(0)
+                    continue
+                await self._wait_for_scheduler_wake(block_ms=block_ms)
         finally:
             await self._cancel_operations()
 
@@ -477,6 +493,22 @@ class RunnerRunLoop:
             },
         )
         return True
+
+    async def _wait_for_scheduler_wake(self, *, block_ms: int) -> None:
+        wake_task = asyncio.create_task(self._scheduler_wake.wait())
+        active_tasks = tuple(self._active_operation_tasks) + tuple(
+            self._active_control_tasks
+        )
+        try:
+            await asyncio.wait(
+                (wake_task, *active_tasks),
+                timeout=max(block_ms, 1) / 1000,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            if not wake_task.done():
+                wake_task.cancel()
+            await asyncio.gather(wake_task, return_exceptions=True)
 
     async def _heartbeat_if_due(self, accepted: RunnerRegistrationAccepted) -> None:
         now = self._monotonic()
@@ -648,14 +680,21 @@ def _validate_limits(
         raise ValueError(
             "max_concurrent_system_operations must not exceed max_concurrent_operations"
         )
-    if max_pending_operations_per_owner < max_concurrent_operations_per_session:
+    if max_pending_operations_per_owner < max(
+        max_concurrent_operations_per_session,
+        max_concurrent_system_operations,
+    ):
         raise ValueError(
-            "max_pending_operations_per_owner must not be smaller than "
-            "max_concurrent_operations_per_session"
+            "max_pending_operations_per_owner must not be smaller than an owner "
+            "concurrency limit"
         )
     if max_pending_operations < max_concurrent_operations:
         raise ValueError(
             "max_pending_operations must not be smaller than max_concurrent_operations"
+        )
+    if max_pending_operations_per_owner > max_pending_operations:
+        raise ValueError(
+            "max_pending_operations_per_owner must not exceed max_pending_operations"
         )
 
 

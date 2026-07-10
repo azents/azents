@@ -22,6 +22,7 @@ from azents_runtime_control.runner import (
     RunnerControlClient,
     RunnerOperationEnvelope,
     RunnerOperationEvent,
+    RunnerOperationHandler,
     RunnerRegistration,
     RunnerRegistrationAccepted,
     RunnerStateReport,
@@ -67,9 +68,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerMessage] = (
             asyncio.Queue()
         )
-        self._operations: asyncio.Queue[RunnerOperationEnvelope] = asyncio.Queue(
-            maxsize=1
-        )
+        self._operation_handler: RunnerOperationHandler | None = None
         self._pending_heartbeat_acks: dict[str, asyncio.Future[bool]] = {}
         self._accepted: asyncio.Future[RunnerRegistrationAccepted] | None = None
         self._receiver_task: asyncio.Task[None] | None = None
@@ -93,6 +92,10 @@ class GrpcRunnerControlClient(RunnerControlClient):
             heartbeat_ack_timeout_seconds=heartbeat_ack_timeout_seconds,
             control_auth_token=control_auth_token,
         )
+
+    def set_operation_handler(self, handler: RunnerOperationHandler) -> None:
+        """Set the direct operation admission handler."""
+        self._operation_handler = handler
 
     async def register_runner(
         self,
@@ -171,20 +174,9 @@ class GrpcRunnerControlClient(RunnerControlClient):
         consumer_id: str,
         block_ms: int,
     ) -> RunnerOperationEnvelope | None:
-        """Wait for the next Runner operation from the stream."""
-        del runtime_id, generation, consumer_id
-        if block_ms <= 0:
-            try:
-                return self._operations.get_nowait()
-            except asyncio.QueueEmpty:
-                return None
-        try:
-            return await asyncio.wait_for(
-                self._operations.get(),
-                timeout=block_ms / 1000,
-            )
-        except TimeoutError:
-            return None
+        """Return no operation because stream delivery uses direct admission."""
+        del runtime_id, generation, consumer_id, block_ms
+        return None
 
     async def append_runner_event(self, event: RunnerOperationEvent) -> None:
         """Append one Runner operation event."""
@@ -255,7 +247,11 @@ class GrpcRunnerControlClient(RunnerControlClient):
                 future.set_result(True)
             return
         if payload == "operation_request":
-            await self._operations.put(_operation(message))
+            if self._operation_handler is None:
+                raise RuntimeRunnerControlStreamClosed(
+                    "Runner operation handler is not registered"
+                )
+            await self._operation_handler(_operation(message))
             return
         if payload == "error":
             raise RuntimeRunnerControlStreamClosed(message.error.message)

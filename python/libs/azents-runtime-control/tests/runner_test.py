@@ -2,7 +2,7 @@
 
 import asyncio
 import dataclasses
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TypedDict
 
@@ -30,6 +30,16 @@ class FakeRunnerControlClient(RunnerControlClient):
         self.heartbeats: list[tuple[str, int]] = []
         self.reports: list[RunnerStateReport] = []
         self.events: list[RunnerOperationEvent] = []
+        self.operation_handler: (
+            Callable[[RunnerOperationEnvelope], Awaitable[None]] | None
+        ) = None
+
+    def set_operation_handler(
+        self,
+        handler: Callable[[RunnerOperationEnvelope], Awaitable[None]],
+    ) -> None:
+        """Record the direct operation handler."""
+        self.operation_handler = handler
 
     async def register_runner(
         self,
