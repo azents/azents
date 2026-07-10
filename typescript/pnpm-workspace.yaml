@@ -9,3 +9,11 @@ allowBuilds:
   esbuild: false
   sharp: true
   unrs-resolver: true
+overrides:
+  "@types/node": "24.12.4"
+  postcss: "8.5.16"
+  esbuild: "0.28.1"
+  "@babel/core": "7.29.7"
+  "@opentelemetry/core": "2.9.0"
+  js-yaml: "4.3.0"
+  ws: "8.21.0"
