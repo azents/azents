@@ -304,6 +304,7 @@ class SkillProjectionService:
                 runner_operations=runner_operations,
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=session_id,
                 projects=projects,
             )
         except Exception:
@@ -345,6 +346,7 @@ class SkillProjectionService:
         runner_operations: RuntimeRunnerOperationClient,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str,
         projects: Sequence[SessionWorkspaceProject],
     ) -> list[SkillProjectionItem]:
         """Scan all Skill source roots through Runtime Runner file operations."""
@@ -355,6 +357,7 @@ class SkillProjectionService:
                 runner_operations=runner_operations,
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
                 root_path=root.root_path,
             )
             for skill_path in paths:
@@ -362,6 +365,7 @@ class SkillProjectionService:
                     runner_operations=runner_operations,
                     runtime_id=runtime_id,
                     runner_generation=runner_generation,
+                    owner_session_id=owner_session_id,
                     source=root,
                     skill_path=skill_path,
                 )
@@ -383,6 +387,7 @@ class SkillProjectionService:
         runner_operations: RuntimeRunnerOperationClient,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str,
         root_path: str,
     ) -> list[str]:
         """Return direct child SKILL.md paths under a source root."""
@@ -390,6 +395,7 @@ class SkillProjectionService:
             result = await runner_operations.list_files(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
                 path=root_path,
                 recursive=False,
                 deadline_at=_runner_file_operation_deadline(),
@@ -416,6 +422,7 @@ class SkillProjectionService:
         runner_operations: RuntimeRunnerOperationClient,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str,
         source: SkillSourceRoot,
         skill_path: str,
     ) -> SkillProjectionItem | None:
@@ -424,6 +431,7 @@ class SkillProjectionService:
             result = await runner_operations.read_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
                 path=skill_path,
                 offset=0,
                 max_bytes=_SKILL_READ_MAX_BYTES,

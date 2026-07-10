@@ -1168,6 +1168,7 @@ class RuntimeRunnerFileStorage:
             result = await self._runner_operations.read_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path,
                 offset=0,
                 max_bytes=None,
@@ -1184,6 +1185,7 @@ class RuntimeRunnerFileStorage:
             result = await self._runner_operations.stat_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path,
                 deadline_at=_runtime_file_operation_deadline(),
             )
@@ -1210,6 +1212,7 @@ class RuntimeRunnerFileStorage:
             result = await self._runner_operations.write_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path,
                 data=data,
                 deadline_at=_runtime_file_operation_deadline(),
@@ -1231,6 +1234,7 @@ class RuntimeRunnerFileStorage:
             result = await self._runner_operations.run_bash(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 command=f"rm -rf -- {shlex.quote(path)}",
                 timeout_seconds=30,
                 env=None,
@@ -1315,6 +1319,7 @@ class RuntimeRunnerFileStorage:
             result = await self._runner_operations.grep_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path,
                 pattern=pattern,
                 recursive=recursive,
@@ -1359,6 +1364,7 @@ class RuntimeRunnerFileStorage:
             result = await self._runner_operations.list_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path,
                 recursive=recursive,
                 exclude_patterns=exclude_patterns,

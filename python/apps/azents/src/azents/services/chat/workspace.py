@@ -767,6 +767,7 @@ class AgentWorkspaceFileService:
             result = await self._runner_operations.mkdir_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path.as_posix(),
                 parents=parents,
                 deadline_at=_runner_file_operation_deadline(),
@@ -806,6 +807,7 @@ class AgentWorkspaceFileService:
             result = await self._runner_operations.delete_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path.as_posix(),
                 recursive=recursive,
                 deadline_at=_runner_file_operation_deadline(),
@@ -861,6 +863,7 @@ class AgentWorkspaceFileService:
             result = await self._runner_operations.move_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 source_path=source_path.as_posix(),
                 destination_path=destination_path.as_posix(),
                 overwrite=overwrite,
@@ -922,6 +925,7 @@ class AgentWorkspaceFileService:
             result = await self._runner_operations.bulk_delete_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 paths=[path.as_posix() for path in paths],
                 recursive=recursive,
                 deadline_at=_runner_file_operation_deadline(),
@@ -983,6 +987,7 @@ class AgentWorkspaceFileService:
             result = await self._runner_operations.bulk_move_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 source_paths=[path.as_posix() for path in source_paths],
                 destination_directory=destination_directory.as_posix(),
                 overwrite=overwrite,
@@ -1219,6 +1224,7 @@ class AgentWorkspaceFileService:
                 await self._runner_operations.stat_file(
                     runtime_id=runtime.id,
                     runner_generation=runtime.runner_generation,
+                    owner_session_id=None,
                     path=path.as_posix(),
                     deadline_at=_runner_file_operation_deadline(),
                 )
@@ -1240,6 +1246,7 @@ class AgentWorkspaceFileService:
             result = await self._runner_operations.list_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path.as_posix(),
                 deadline_at=_runner_file_operation_deadline(),
             )
@@ -1263,6 +1270,7 @@ class AgentWorkspaceFileService:
             result = await self._runner_operations.read_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path.as_posix(),
                 offset=0,
                 max_bytes=max_bytes,

@@ -217,6 +217,7 @@ class AgentProjectCatalogService:
             stat = await self.runner_operations.stat_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
+                owner_session_id=None,
                 path=path,
                 deadline_at=_project_status_sync_deadline(),
             )
