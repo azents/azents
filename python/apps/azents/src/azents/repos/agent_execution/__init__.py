@@ -19,6 +19,7 @@ from azents.core.inference_profile import (
     ResolvedInferenceProfileSummary,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentRunState,
@@ -57,7 +58,7 @@ def _serialize_payload(payload: EventPayload) -> dict[str, JSONValue]:
         payload.model_dump(mode="json", exclude_none=True)
     )
     if (
-        isinstance(payload, UserMessagePayload)
+        isinstance(payload, (UserMessagePayload, ActionMessagePayload))
         and payload.requested_inference_profile is not None
     ):
         serialized["requested_inference_profile"] = (
