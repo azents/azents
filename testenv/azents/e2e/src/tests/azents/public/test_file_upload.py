@@ -617,6 +617,10 @@ class TestUploadMessagePath:
                     "agent_id": agent_id,
                     "client_request_id": f"upload-message-{unique()}",
                     "message": _UPLOAD_PROMPT,
+                    "inference_profile": {
+                        "model_target_label": "default",
+                        "reasoning_effort": None,
+                    },
                     "attachments": [image_uri, file_uri],
                 },
                 timeout=10,

@@ -230,6 +230,10 @@ def _run_message(
             "agent_id": agent_id,
             "client_request_id": f"agent-execution-message-{unique()}",
             "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
         timeout=10,
     )
@@ -262,6 +266,7 @@ def _run_command(
             "client_request_id": f"agent-execution-command-{unique()}",
             "message": "",
             "action": {"type": "command", "name": command},
+            "inference_profile": None,
         },
         timeout=10,
     )
@@ -299,6 +304,10 @@ def _edit_user_message(
             "client_request_id": f"agent-execution-edit-{unique()}",
             "message_id": message_id,
             "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
         },
         timeout=10,
     )
