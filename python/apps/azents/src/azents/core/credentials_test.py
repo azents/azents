@@ -7,6 +7,7 @@ from pydantic import TypeAdapter
 from azents.core.credentials import (
     PROVIDER_SECRET_TYPES,
     PROVIDERS_WITH_CONFIG,
+    ApiKeySecrets,
     ChatGPTOAuthConfig,
     ChatGPTOAuthSecrets,
     ProviderConfig,
@@ -69,6 +70,22 @@ def test_chatgpt_oauth_provider_mappings() -> None:
     """Provider mapping includes ChatGPT OAuth."""
     assert PROVIDER_SECRET_TYPES[LLMProvider.CHATGPT_OAUTH] == "chatgpt_oauth"
     assert LLMProvider.CHATGPT_OAUTH in PROVIDERS_WITH_CONFIG
+
+
+def test_xai_api_key_provider_mappings() -> None:
+    """Provider mapping uses generic API key secrets for stable xAI."""
+    assert PROVIDER_SECRET_TYPES[LLMProvider.XAI] == "api_key"
+    assert LLMProvider.XAI not in PROVIDERS_WITH_CONFIG
+
+
+def test_xai_api_key_secrets_parse_from_provider_union() -> None:
+    """ProviderSecrets union parses the generic API key secret used by xAI."""
+    adapter = TypeAdapter(ProviderSecrets)
+
+    secrets = adapter.validate_python({"type": "api_key", "api_key": "fake-xai-key"})
+
+    assert isinstance(secrets, ApiKeySecrets)
+    assert secrets.api_key == "fake-xai-key"
 
 
 def test_xai_oauth_secrets_parse_from_provider_union() -> None:

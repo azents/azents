@@ -80,7 +80,8 @@ from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import BuiltinToolSpec
 
 _DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
-_PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS = {LLMProvider.XAI_OAUTH}
+_XAI_PROVIDER_IDS = {LLMProvider.XAI, LLMProvider.XAI_OAUTH}
+_PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS = _XAI_PROVIDER_IDS
 _PROVIDER_NAMES_WITH_INPUT_MESSAGE_INSTRUCTIONS = {"xai", "xai_oauth"}
 _PROMPT_CACHE_KEY_PREFIX = "azs"
 _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
@@ -317,7 +318,7 @@ class LiteLLMResponsesLowerer:
             if base_url is not None:
                 kwargs.setdefault("base_url", base_url)
                 kwargs.setdefault("api_base", base_url)
-        if self._provider_id == LLMProvider.XAI_OAUTH:
+        if self._provider_id in _XAI_PROVIDER_IDS:
             kwargs.setdefault("custom_llm_provider", "xai")
             base_url = kwargs.get("base_url") or kwargs.get("api_base")
             if base_url is not None:
@@ -530,6 +531,7 @@ def _uses_anthropic_cache_control(
     if provider_id in {
         LLMProvider.OPENAI,
         LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.XAI,
         LLMProvider.XAI_OAUTH,
         LLMProvider.GOOGLE_GEMINI,
     }:
@@ -658,7 +660,7 @@ def _hosted_tool_target(
     """Choose hosted tool lowering target from provider/model developer pair."""
     if provider_id in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         return "openai"
-    if provider_id == LLMProvider.XAI_OAUTH:
+    if provider_id in _XAI_PROVIDER_IDS:
         return "xai"
     if model_developer == LLMModelDeveloper.GOOGLE:
         return "google"
@@ -666,7 +668,7 @@ def _hosted_tool_target(
         return "anthropic"
     if provider in {"openai", "chatgpt_oauth"}:
         return "openai"
-    if provider == "xai_oauth":
+    if provider in {"xai", "xai_oauth"}:
         return "xai"
     if provider in {"google_gemini", "google_vertex_ai"}:
         return "google"

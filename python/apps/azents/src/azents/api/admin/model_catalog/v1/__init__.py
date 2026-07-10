@@ -24,6 +24,7 @@ router = APIRouter()
 _SYSTEM_CATALOG_PROVIDERS: tuple[LLMProvider, ...] = (
     LLMProvider.OPENAI,
     LLMProvider.CHATGPT_OAUTH,
+    LLMProvider.XAI,
     LLMProvider.XAI_OAUTH,
     LLMProvider.ANTHROPIC,
     LLMProvider.GOOGLE_GEMINI,

@@ -2,6 +2,8 @@
 
 import datetime
 
+import pytest
+
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -20,7 +22,7 @@ from azents.core.llm_mapping import (
     to_litellm_model,
     to_runtime_model,
 )
-from azents.core.xai_oauth import XAI_OAUTH_BACKEND_BASE_URL
+from azents.core.xai import XAI_API_BASE_URL
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
@@ -100,6 +102,12 @@ class TestToLitellmModel:
 
         assert result == "gpt-5.1-codex"
 
+    def test_xai(self) -> None:
+        """xAI API key provider uses LiteLLM xAI routing prefix."""
+        result = to_litellm_model(LLMProvider.XAI, "grok-4.5")
+
+        assert result == "xai/grok-4.5"
+
     def test_xai_oauth(self) -> None:
         """xAI OAuth provider uses LiteLLM xAI routing prefix."""
         result = to_litellm_model(LLMProvider.XAI_OAUTH, "grok-4.5")
@@ -131,9 +139,10 @@ class TestToRuntimeModel:
 
         assert result == "bedrock/anthropic.claude-v2"
 
-    def test_xai_oauth_uses_litellm_routing_id(self) -> None:
-        """xAI OAuth uses LiteLLM xAI routing."""
-        result = to_runtime_model(LLMProvider.XAI_OAUTH, "grok-4.5")
+    @pytest.mark.parametrize("provider", [LLMProvider.XAI, LLMProvider.XAI_OAUTH])
+    def test_xai_uses_litellm_routing_id(self, provider: LLMProvider) -> None:
+        """Both xAI credential modes use LiteLLM xAI routing."""
+        result = to_runtime_model(provider, "grok-4.5")
 
         assert result == "xai/grok-4.5"
 
@@ -154,6 +163,22 @@ class TestBuildCredentialKwargs:
 
         # Then: contains only api_key
         assert result == {"api_key": "sk-test-key-123"}
+
+    def test_xai_api_key_secrets(self) -> None:
+        """xAI API key credentials include explicit provider routing."""
+        integration = _make_integration(
+            provider=LLMProvider.XAI,
+            secrets=ApiKeySecrets(api_key="xai-test-key"),
+        )
+
+        result = build_credential_kwargs(integration)
+
+        assert result == {
+            "api_key": "xai-test-key",
+            "base_url": XAI_API_BASE_URL,
+            "api_base": XAI_API_BASE_URL,
+            "custom_llm_provider": "xai",
+        }
 
     def test_aws_secrets(self) -> None:
         """AwsSecrets + AwsConfig to aws_* kwargs conversion."""
@@ -230,7 +255,7 @@ class TestBuildCredentialKwargs:
 
         assert result == {
             "api_key": "access-token",
-            "base_url": XAI_OAUTH_BACKEND_BASE_URL,
-            "api_base": XAI_OAUTH_BACKEND_BASE_URL,
+            "base_url": XAI_API_BASE_URL,
+            "api_base": XAI_API_BASE_URL,
             "custom_llm_provider": "xai",
         }

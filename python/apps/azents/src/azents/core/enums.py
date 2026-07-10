@@ -38,6 +38,7 @@ class LLMProvider(enum.StrEnum):
 
     OPENAI = "openai"
     CHATGPT_OAUTH = "chatgpt_oauth"
+    XAI = "xai"
     XAI_OAUTH = "xai_oauth"
     ANTHROPIC = "anthropic"
     GOOGLE_GEMINI = "google_gemini"

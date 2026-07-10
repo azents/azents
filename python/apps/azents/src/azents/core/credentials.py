@@ -169,6 +169,7 @@ ProviderConfig = Annotated[
 PROVIDER_SECRET_TYPES: dict[LLMProvider, str] = {
     LLMProvider.OPENAI: "api_key",
     LLMProvider.CHATGPT_OAUTH: "chatgpt_oauth",
+    LLMProvider.XAI: "api_key",
     LLMProvider.XAI_OAUTH: "xai_oauth",
     LLMProvider.ANTHROPIC: "api_key",
     LLMProvider.GOOGLE_GEMINI: "api_key",

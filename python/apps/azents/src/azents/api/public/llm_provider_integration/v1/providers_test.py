@@ -7,9 +7,8 @@ from azents.core.enums import LLMProvider, WorkspaceUserRole
 from . import list_integration_providers
 
 
-async def test_xai_oauth_is_available_without_operator_configuration() -> None:
-    """Expose xAI OAuth through its built-in public client identity."""
-    member = WorkspaceMember(
+def _member() -> WorkspaceMember:
+    return WorkspaceMember(
         user_id="user-1",
         workspace_id="workspace-1",
         workspace_user_id="workspace-user-1",
@@ -18,7 +17,20 @@ async def test_xai_oauth_is_available_without_operator_configuration() -> None:
         session_id="session-1",
     )
 
-    response = await list_integration_providers(member)
+
+async def test_xai_api_key_is_available_as_stable_provider() -> None:
+    """Expose stable xAI API key credentials without operator configuration."""
+    response = await list_integration_providers(_member())
+
+    xai = next(item for item in response.items if item.provider == LLMProvider.XAI)
+    assert xai.display_name == "xAI API key"
+    assert xai.credential_type == "api_key"
+    assert xai.experimental is False
+
+
+async def test_xai_oauth_is_available_without_operator_configuration() -> None:
+    """Expose xAI OAuth through its built-in public client identity."""
+    response = await list_integration_providers(_member())
 
     xai = next(
         item for item in response.items if item.provider == LLMProvider.XAI_OAUTH

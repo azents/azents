@@ -77,6 +77,7 @@ def _get_integration_repository(
 _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER: dict[LLMProvider, tuple[str, ...]] = {
     LLMProvider.OPENAI: ("openai",),
     LLMProvider.CHATGPT_OAUTH: ("openai",),
+    LLMProvider.XAI: ("xai",),
     LLMProvider.XAI_OAUTH: ("xai",),
     LLMProvider.ANTHROPIC: ("anthropic",),
     LLMProvider.GOOGLE_GEMINI: ("gemini",),
@@ -85,6 +86,7 @@ _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER: dict[LLMProvider, tuple[str, ...]] = {
 _PROVIDER_TO_DEVELOPER: dict[LLMProvider, LLMModelDeveloper] = {
     LLMProvider.OPENAI: LLMModelDeveloper.OPENAI,
     LLMProvider.CHATGPT_OAUTH: LLMModelDeveloper.OPENAI,
+    LLMProvider.XAI: LLMModelDeveloper.XAI,
     LLMProvider.XAI_OAUTH: LLMModelDeveloper.XAI,
     LLMProvider.ANTHROPIC: LLMModelDeveloper.ANTHROPIC,
     LLMProvider.GOOGLE_GEMINI: LLMModelDeveloper.GOOGLE,
@@ -938,7 +940,9 @@ def _hidden_reason(model_key: str, metadata: dict[str, Any]) -> str | None:
 def _provider_model_identifier(provider: LLMProvider, model_key: str) -> str:
     if provider == LLMProvider.GOOGLE_GEMINI and model_key.startswith("gemini/"):
         return model_key.removeprefix("gemini/")
-    if provider == LLMProvider.XAI_OAUTH and model_key.startswith("xai/"):
+    if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH} and model_key.startswith(
+        "xai/"
+    ):
         return model_key.removeprefix("xai/")
     return model_key.removeprefix("openai/").removeprefix("anthropic/")
 
