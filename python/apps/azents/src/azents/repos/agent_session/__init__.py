@@ -363,17 +363,17 @@ class AgentSessionRepository:
         await session.flush()
         return self._build_session_agent(rdb)
 
-    async def mark_session_agent_message_sent(
+    async def mark_session_agent_message_activity(
         self,
         session: AsyncSession,
         *,
         session_agent_id: str,
     ) -> SessionAgent | None:
-        """Record the latest agent-to-agent message sent time."""
+        """Record the latest agent-to-agent message activity time."""
         result = await session.execute(
             sa.update(RDBSessionAgent)
             .where(RDBSessionAgent.id == session_agent_id)
-            .values(last_message_sent_at=sa.func.now())
+            .values(last_message_at=sa.func.now())
             .returning(RDBSessionAgent)
         )
         rdb = result.scalar_one_or_none()
@@ -1159,7 +1159,7 @@ class AgentSessionRepository:
             agent_type=rdb.agent_type,
             parent_session_agent_id=rdb.parent_session_agent_id,
             last_task_message=rdb.last_task_message,
-            last_message_sent_at=rdb.last_message_sent_at,
+            last_message_at=rdb.last_message_at,
             parent_observed_run_index=rdb.parent_observed_run_index,
             parent_observed_event_id=rdb.parent_observed_event_id,
             created_at=rdb.created_at,

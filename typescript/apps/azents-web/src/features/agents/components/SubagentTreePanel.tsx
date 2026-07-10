@@ -58,7 +58,7 @@ function countChildren(nodes: SubagentTreeNodeResponse[]): number {
   );
 }
 
-function messageSentAtSortValue(value?: string | null): number | null {
+function messageAtSortValue(value?: string | null): number | null {
   if (value === null || typeof value === "undefined") {
     return null;
   }
@@ -102,8 +102,8 @@ function finalizeSubagentNodes(
       };
     })
     .sort((left, right) => {
-      const leftSentAt = messageSentAtSortValue(left.last_message_sent_at);
-      const rightSentAt = messageSentAtSortValue(right.last_message_sent_at);
+      const leftSentAt = messageAtSortValue(left.last_message_at);
+      const rightSentAt = messageAtSortValue(right.last_message_at);
       if (leftSentAt !== null || rightSentAt !== null) {
         if (leftSentAt === null) {
           return 1;

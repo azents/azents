@@ -37,8 +37,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-09
-spec_version: 66
+last_verified_at: 2026-07-10
+spec_version: 67
 ---
 
 # Agent Execution Loop
@@ -276,7 +276,9 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   wake-up. The caller may still
   explicitly select no context or a bounded number of recent turns through `fork_turns`. The
   boundary reminder is inserted immediately after copied parent history for `fork_turns=all` or a
-  positive integer selection, and it marks preceding messages as inherited conversation history.
+  positive integer selection. It identifies the child by name and full path, marks preceding messages
+  as inherited parent context, and states that `wait_agent` only observes descendants rather than the
+  current agent. `wait_agent` also rejects an explicitly resolved self target at tool execution time.
 - Agent references follow Codex v2 visibility and targeting semantics within the current root tree.
   `list_agents` includes the root and the known agent tree, including ancestors of the caller.
 - `send_message` writes an `agent_message` to any resolved agent, including the root, without waking it.
@@ -565,6 +567,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-10** (spec_version 67) — Added explicit child identity to forked-history boundaries and rejected self-targeted `wait_agent` calls.
 - **2026-07-09** (spec_version 65) — Clarified that retry live state is cleared before the next retry attempt starts so stale retry errors do not remain visible during successful progress.
 - **2026-07-06** (spec_version 58) — Promoted existing-session Register Project worktree actions and action retry/discard mutation semantics.
 - **2026-07-05** (spec_version 57) — Added operation TurnAction execution projection updates during status/log changes.

@@ -15931,7 +15931,7 @@
             "title": "Last Task Message",
             "description": "Latest task text"
           },
-          "last_message_sent_at": {
+          "last_message_at": {
             "anyOf": [
               {
                 "type": "string",
@@ -15941,8 +15941,8 @@
                 "type": "null"
               }
             ],
-            "title": "Last Message Sent At",
-            "description": "Latest agent-to-agent or terminal message sent time"
+            "title": "Last Message At",
+            "description": "Latest agent-to-agent or terminal message activity time"
           },
           "unread_result": {
             "type": "boolean",

@@ -33,7 +33,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-10
-spec_version: 51
+spec_version: 52
 ---
 
 # Toolkit
@@ -334,7 +334,9 @@ The static toolkit prompt includes the configured Codex-compatible concurrency s
 `max_subagents + 1`, which counts the root/current agent, and the configured maximum depth.
 The child prompt describes that it has almost the same tool set as the parent because subagent
 execution mode intentionally removes root/user-facing capabilities while preserving collaboration and
-runtime work tools.
+runtime work tools. When parent history is forked, the boundary reminder identifies the child by name
+and full path, distinguishes inherited parent actions from the child's own actions, and reserves
+`wait_agent` for descendants. A self-targeted `wait_agent` call fails as a tool error.
 The toolkit stores inter-agent delivery as target session `agent_message` input buffers. `send_message`
 queues without waking the target, while `spawn_agent` and `followup_task` mark the target session
 running and send normal broker wake-up signals. `wait_agent` reads unread terminal run projections and
@@ -539,6 +541,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-10** (spec_version 52) — Identified children in forked-history boundaries and rejected self-targeted `wait_agent` calls.
 - **2026-07-10** (spec_version 51) — Allowed `write_stdin` zero-yield calls in both write and poll modes so callers can drain currently buffered process output immediately.
 - **2026-07-09** (spec_version 50) — Added Codex-compatible subagent concurrency slot prompt text and `spawn_agent` active capacity/depth limit enforcement from Agent settings.
 - **2026-07-09** (spec_version 48) — Corrected `wait_agent` timeout behavior to wait for running child results until the requested timeout expires before returning a timeout response.

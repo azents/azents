@@ -14,7 +14,7 @@ Name | Type | Description | Notes
 **agent_type** | **str** | Spawned agent type snapshot | 
 **status** | **str** | Projected execution status | 
 **last_task_message** | **str** |  | [optional] 
-**last_message_sent_at** | **datetime** |  | [optional]
+**last_message_at** | **datetime** |  | [optional]
 **unread_result** | **bool** | Whether latest terminal result is unread | 
 **latest_run_id** | **str** |  | [optional] 
 **latest_run_index** | **int** |  | [optional] 

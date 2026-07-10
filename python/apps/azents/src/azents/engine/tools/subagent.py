@@ -121,13 +121,6 @@ _TERMINAL_STATUSES = {
     AgentRunStatus.CANCELLED,
 }
 _WAIT_AGENT_POLL_INTERVAL_SECONDS = 0.1
-_FORKED_HISTORY_BOUNDARY_REMINDER = "\n".join(
-    [
-        "The messages above are inherited conversation history from the parent agent.",
-        "Treat them as background context for the subagent task.",
-        "The subagent's direct assignment begins after this reminder.",
-    ]
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -271,7 +264,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 if forked:
                     await self._append_forked_history_boundary_reminder(
                         session,
-                        child.agent_session_id,
+                        child,
                     )
                 await self._enqueue_agent_message(
                     session,
@@ -572,8 +565,13 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 )
             except ValueError:
                 return []
-            if resolved is None or resolved.id == current.id:
+            if resolved is None and agent_name != current.name:
                 return []
+            if resolved is None or resolved.id == current.id:
+                raise FunctionToolError(
+                    "an agent cannot wait for itself; wait_agent only observes "
+                    "descendants"
+                )
             return [resolved]
         descendants = (
             await self.agent_session_repository.list_descendant_session_agents(
@@ -637,14 +635,29 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     async def _append_forked_history_boundary_reminder(
         self,
         session: AsyncSession,
-        session_id: str,
+        child: SessionAgent,
     ) -> None:
         """Append the model-visible boundary after copied parent history."""
-        payload = SystemReminderPayload(text=_FORKED_HISTORY_BOUNDARY_REMINDER)
+        text = dedent(
+            f"""\
+            The messages above are inherited conversation history from the parent
+            agent. They reflect the parent agent's earlier perspective and are
+            background context only.
+
+            You are the subagent named "{child.name}".
+            Your full agent path is "{child.path}".
+            The next message is your current direct assignment.
+
+            Do not treat agent identities or tool calls in the inherited history as
+            your own actions. Never call wait_agent on yourself. wait_agent is only
+            for observing your descendants.
+            """
+        )
+        payload = SystemReminderPayload(text=text)
         await self.event_transcript_repository.append(
             session,
             EventCreate(
-                session_id=session_id,
+                session_id=child.agent_session_id,
                 kind=EventKind.SYSTEM_REMINDER,
                 payload=_JSON_OBJECT_ADAPTER.validate_python(
                     payload.model_dump(mode="json")
@@ -683,10 +696,12 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 file_parts=[],
             ),
         )
-        await self.agent_session_repository.mark_session_agent_message_sent(
-            session,
-            session_agent_id=source.id,
+        mark_message_activity = (
+            self.agent_session_repository.mark_session_agent_message_activity
         )
+        await mark_message_activity(session, session_agent_id=source.id)
+        if target.id != source.id:
+            await mark_message_activity(session, session_agent_id=target.id)
         if wake:
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
