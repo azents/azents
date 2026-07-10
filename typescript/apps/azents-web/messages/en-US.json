@@ -982,7 +982,7 @@
     "loadingHistory": "Loading conversation history…",
     "startConversation": "Send a message to start the conversation",
     "inputPlaceholder": "Type a message…",
-    "inputPlaceholderDesktop": "Type a message… (Shift+Enter for newline)",
+    "inputPlaceholderDesktop": "Type a message…",
     "connected": "Connected",
     "connecting": "Connecting",
     "reconnecting": "Reconnecting",

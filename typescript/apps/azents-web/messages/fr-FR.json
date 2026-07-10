@@ -982,7 +982,7 @@
     "loadingHistory": "Chargement de l'historique…",
     "startConversation": "Envoyez un message pour démarrer la conversation",
     "inputPlaceholder": "Saisissez un message…",
-    "inputPlaceholderDesktop": "Saisissez un message… (Maj+Entrée pour un saut de ligne)",
+    "inputPlaceholderDesktop": "Saisissez un message…",
     "connected": "Connecté",
     "connecting": "Connexion",
     "reconnecting": "Reconnexion",

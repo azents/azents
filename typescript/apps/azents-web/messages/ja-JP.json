@@ -982,7 +982,7 @@
     "loadingHistory": "会話履歴を読み込み中…",
     "startConversation": "メッセージを送信して会話を始めましょう",
     "inputPlaceholder": "メッセージを入力…",
-    "inputPlaceholderDesktop": "メッセージを入力… (Shift+Enterで改行)",
+    "inputPlaceholderDesktop": "メッセージを入力…",
     "connected": "接続済み",
     "connecting": "接続中",
     "reconnecting": "再接続中",
