@@ -1,5 +1,7 @@
 """Subagent collaboration Toolkit."""
 
+# ruff: noqa: E501
+
 import asyncio
 import dataclasses
 import json
@@ -47,6 +49,55 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+
+_ROOT_AGENT_USAGE_HINT_TEXT = """You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
+
+At the start of your turn, you are the active agent.
+You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.
+All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to almost the same set of tools, except for Azents root/user-facing capabilities that are not available in subagent mode.
+
+You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.
+Child agents can also spawn their own sub-agents.
+You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.
+Use `wait_agent` to observe unread terminal child results when you need completion output from child agents.
+
+You will receive messages in the model input in the form:
+```
+Message Type: MESSAGE
+Task name: <recipient>
+Sender: <author>
+Payload:
+<payload text>
+```
+They may be addressed as to=/root"""
+
+_SUBAGENT_USAGE_HINT_TEXT = """You are an agent in a team of agents collaborating to complete a task.
+
+You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents. All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to almost the same set of tools, except for Azents root/user-facing capabilities that are not available in subagent mode.
+
+You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent.
+Child agents can also spawn their own sub-agents.
+
+When you provide a final response, that content is stored as a terminal child result for your parent to observe with `wait_agent`.
+
+You will receive messages in the model input in the form:
+```
+Message Type: NEW_TASK | MESSAGE
+Task name: <recipient>
+Sender: <author>
+Payload:
+<payload text>
+```
+You may also see them addressed as to=/root/..., which indicates your identity is /root/..."""
+
+_SHARED_USAGE_HINT_TEXT = """Note that collaboration tools cannot be called from inside `exec_command`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, since they are intentionally absent from `exec_command`.
+
+All agents share the same directory. In detail:
+- All agents have access to the same container and filesystem as you.
+- All agents use the same current working directory.
+- As a result, edits made by one agent are immediately visible to all other agents."""
+
+_EXPLICIT_REQUEST_ONLY_MODE_TEXT = "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work."
 
 
 class SubagentToolkitConfig(BaseModel):
@@ -176,40 +227,27 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         )
 
     async def get_static_prompt(self, context: TurnContext) -> str:
-        """Return subagent collaboration guidance."""
-        del context
+        """Return role-specific Codex V2 collaboration guidance."""
+        self.session_id = context.session_id or self.session_id
+        async with self.session_manager() as session:
+            current = await self._current_session_agent(session)
+        usage_hint = (
+            _ROOT_AGENT_USAGE_HINT_TEXT
+            if current.kind == SessionAgentKind.ROOT
+            else _SUBAGENT_USAGE_HINT_TEXT
+        )
         max_concurrency = self.subagent_settings.max_subagents + 1
-        max_depth = self.subagent_settings.max_depth
-        return dedent(
-            f"""\
-            You are an agent in a team of agents collaborating to fulfill the
-            user's goals.
-
-            At the start of your turn, you are the active agent.
-            There are {max_concurrency} available concurrency slots, meaning
-            that up to {max_concurrency} agents can be active at once,
-            including you. The maximum subagent depth below the root agent is
-            {max_depth}.
-            You can spawn sub-agents to handle subtasks, and those sub-agents
-            can spawn their own sub-agents when depth allows.
-            All agents in the team are similarly capable and have access to
-            almost the same set of tools, except for Azents root/user-facing
-            capabilities that are not available in subagent mode.
-
-            You can use `spawn_agent` to create a new agent, `followup_task`
-            to give an existing agent a new task and wake it, and
-            `send_message` to pass a message to a running agent without
-            waking it.
-            Child agents can also spawn their own sub-agents.
-            You can decide how much context you want to propagate to your
-            sub-agents with the `fork_turns` parameter, which defaults to
-            `all`.
-            Use `wait_agent` to observe unread terminal child results when
-            you need completion output from child agents.
-
-            When you provide a final response, that content is delivered back
-            to your parent agent as a terminal child result.
-            """
+        concurrency_hint = (
+            f"There are {max_concurrency} available concurrency slots, meaning that "
+            f"up to {max_concurrency} agents can be active at once, including you."
+        )
+        return "\n\n".join(
+            [
+                usage_hint,
+                _SHARED_USAGE_HINT_TEXT,
+                concurrency_hint,
+                _EXPLICIT_REQUEST_ONLY_MODE_TEXT,
+            ]
         )
 
     def _spawn_agent_tool(self) -> FunctionTool:

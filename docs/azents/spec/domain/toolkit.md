@@ -33,7 +33,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-10
-spec_version: 53
+spec_version: 54
 ---
 
 # Toolkit
@@ -330,11 +330,15 @@ capacity is checked. `max_subagents` limits active subagents across the root `Se
 subagent counts as active when its linked `AgentSession.run_state` is `running` or its latest run
 status is `running`. `max_depth` limits child creation by depth below `/root`. Limit failures are
 returned as clear tool errors and do not queue the requested task.
-The static toolkit prompt includes the configured Codex-compatible concurrency slot count as
-`max_subagents + 1`, which counts the root/current agent, and the configured maximum depth.
-The child prompt describes that it has almost the same tool set as the parent because subagent
-execution mode intentionally removes root/user-facing capabilities while preserving collaboration and
-runtime work tools. When parent history is forked, the boundary reminder identifies the child by name
+The static toolkit prompt selects the Codex Multi-Agent V2 root or child usage hint from the current
+`SessionAgent.kind`. Both variants append the shared direct-tool-call and shared-workspace hint, the
+configured concurrency slot count as `max_subagents + 1`, and the explicit-request-only delegation
+policy. Azents changes only provider/runtime terminology, terminal-result delivery wording, and the
+tool-availability claim: mailbox envelopes are described as model input, `exec_command` replaces
+Codex `functions.exec` namespaces, terminal child results remain observable through `wait_agent`, and
+child execution is described as lacking Azents root/user-facing capabilities. Maximum depth remains a
+runtime spawn constraint and is not included in the prompt. When parent history is forked, the
+boundary reminder identifies the child by name
 and full path, distinguishes inherited parent actions from the child's own actions, and reserves
 `wait_agent` for descendants. A self-targeted `wait_agent` call fails as a tool error.
 The toolkit stores inter-agent delivery as target session `agent_message` input buffers. `send_message`
@@ -542,6 +546,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-10** (spec_version 54) — Aligned the root and child Subagent Toolkit prompts with the frozen Codex Multi-Agent V2 usage, workspace, concurrency, and explicit-delegation guidance.
 - **2026-07-10** (spec_version 53) — Made untargeted `wait_agent` calls report explicitly when no descendants exist.
 - **2026-07-10** (spec_version 52) — Identified children in forked-history boundaries and rejected self-targeted `wait_agent` calls.
 - **2026-07-10** (spec_version 51) — Allowed `write_stdin` zero-yield calls in both write and poll modes so callers can drain currently buffered process output immediately.

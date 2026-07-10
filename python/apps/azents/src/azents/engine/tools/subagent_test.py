@@ -1,5 +1,7 @@
 """Subagent collaboration Toolkit tests."""
 
+# ruff: noqa: E501
+
 import asyncio
 import datetime
 import json
@@ -509,8 +511,71 @@ async def _make_toolkit() -> tuple[
     )
 
 
-async def test_subagent_static_prompt_matches_azents_semantics() -> None:
-    """Expose Codex-style team guidance with Azents delivery semantics."""
+_EXPECTED_ROOT_USAGE_HINT = """You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
+
+At the start of your turn, you are the active agent.
+You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.
+All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to almost the same set of tools, except for Azents root/user-facing capabilities that are not available in subagent mode.
+
+You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.
+Child agents can also spawn their own sub-agents.
+You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.
+Use `wait_agent` to observe unread terminal child results when you need completion output from child agents.
+
+You will receive messages in the model input in the form:
+```
+Message Type: MESSAGE
+Task name: <recipient>
+Sender: <author>
+Payload:
+<payload text>
+```
+They may be addressed as to=/root"""
+
+_EXPECTED_CHILD_USAGE_HINT = """You are an agent in a team of agents collaborating to complete a task.
+
+You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents. All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to almost the same set of tools, except for Azents root/user-facing capabilities that are not available in subagent mode.
+
+You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent.
+Child agents can also spawn their own sub-agents.
+
+When you provide a final response, that content is stored as a terminal child result for your parent to observe with `wait_agent`.
+
+You will receive messages in the model input in the form:
+```
+Message Type: NEW_TASK | MESSAGE
+Task name: <recipient>
+Sender: <author>
+Payload:
+<payload text>
+```
+You may also see them addressed as to=/root/..., which indicates your identity is /root/..."""
+
+_EXPECTED_SHARED_USAGE_HINT = """Note that collaboration tools cannot be called from inside `exec_command`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, since they are intentionally absent from `exec_command`.
+
+All agents share the same directory. In detail:
+- All agents have access to the same container and filesystem as you.
+- All agents use the same current working directory.
+- As a result, edits made by one agent are immediately visible to all other agents."""
+
+_EXPECTED_CONCURRENCY_HINT = "There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you."
+_EXPECTED_DELEGATION_POLICY = "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work."
+
+
+def _expected_static_prompt(usage_hint: str) -> str:
+    """Build the exact frozen prompt expected by Toolkit tests."""
+    return "\n\n".join(
+        [
+            usage_hint,
+            _EXPECTED_SHARED_USAGE_HINT,
+            _EXPECTED_CONCURRENCY_HINT,
+            _EXPECTED_DELEGATION_POLICY,
+        ]
+    )
+
+
+async def test_subagent_static_prompt_matches_codex_root_prompt() -> None:
+    """Render the exact Codex V2 root prompt with Azents terminology."""
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
 
     prompt = await toolkit.get_static_prompt(
@@ -524,13 +589,29 @@ async def test_subagent_static_prompt_matches_azents_semantics() -> None:
         )
     )
 
-    assert "There are 4 available concurrency slots" in prompt
-    assert "maximum subagent depth below the root agent is" in prompt
-    assert "1" in prompt
-    assert "almost the same set of tools" in prompt
-    assert "fork_turns` parameter, which defaults to" in prompt
-    assert "terminal child result" in prompt
-    assert "immediately delivered" not in prompt
+    assert prompt == _expected_static_prompt(_EXPECTED_ROOT_USAGE_HINT)
+    assert "immediately delivered back to your parent agent" not in prompt
+    assert "maximum subagent depth" not in prompt
+
+
+async def test_subagent_static_prompt_matches_codex_child_prompt() -> None:
+    """Render the exact Codex V2 child prompt with Azents terminology."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+
+    prompt = await toolkit.get_static_prompt(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=cast(Any, _noop_publish),
+            session_id="child-session",
+        )
+    )
+
+    assert prompt == _expected_static_prompt(_EXPECTED_CHILD_USAGE_HINT)
+    assert "primary agent" not in prompt
+    assert "maximum subagent depth" not in prompt
 
 
 def test_spawn_agent_fork_turns_defaults_to_all() -> None:
