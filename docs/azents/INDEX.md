@@ -155,8 +155,28 @@ _15 documents_
 - [ADR-0100: Label-Based Model Targets](adr/0100-label-based-model-targets.md)
 - [ADR-0101: Mark Forked History Boundaries for Subagent Tasks](adr/0101-subagent-forked-history-task-boundaries.md)
 - [ADR-0102: Session-Scoped Runner Operation Concurrency](adr/0102-session-scoped-runner-operation-concurrency.md)
+- [ADR-0103: Per-Prompt Models Form FIFO Run Boundaries](adr/0103-per-prompt-model-fifo-run-boundaries.md)
+- [ADR-0104: Per-Prompt Reasoning Effort Is a Run Boundary](adr/0104-per-prompt-reasoning-effort-run-boundaries.md)
+- [ADR-0105: Resolve Prompt Model Targets at Run Time](adr/0105-run-time-model-target-resolution.md)
+- [ADR-0106: Persist the Session Last-Used Inference Profile](adr/0106-session-last-used-inference-profile.md)
+- [ADR-0107: Re-Execution Preserves Model Target Intent](adr/0107-reexecution-model-target-intent.md)
+- [ADR-0108: Subagents Inherit the Parent Run Profile](adr/0108-subagent-parent-run-profile-inheritance.md)
+- [ADR-0109: Keep Agent Main Model as the Default Target](adr/0109-agent-default-model-target-role.md)
+- [ADR-0110: Use a Compact Integrated Chat Composer](adr/0110-integrated-compact-chat-composer.md)
+- [ADR-0111: Expose Default as a Reasoning Effort Selection](adr/0111-reasoning-effort-default-selection.md)
+- [ADR-0112: Display Inference Provenance from User Message Metadata](adr/0112-user-message-profile-provenance-display.md)
+- [ADR-0113: Restore the Latest Composer Profile Intent on Reload](adr/0113-composer-profile-reload-precedence.md)
+- [ADR-0114: Display Context Usage from the Resolved Run Profile](adr/0114-run-scoped-context-usage-display.md)
+- [ADR-0115: Use an Explicit Nested Inference Profile Request](adr/0115-public-inference-profile-request-contract.md)
+- [ADR-0116: Store Requested Inference Profiles as Typed Durable Data](adr/0116-durable-requested-inference-profile-storage.md)
+- [ADR-0117: Persist Requested and Resolved AgentRun Provenance](adr/0117-agent-run-inference-provenance.md)
+- [ADR-0118: Reuse the Active Run Profile for Matching Inputs](adr/0118-current-profile-matching-run-join-policy.md)
+- [ADR-0119: Precreate the Inherited First Subagent Run](adr/0119-precreate-inherited-subagent-run.md)
+- [ADR-0120: Expose Typed Actionable Profile Resolution Failures](adr/0120-typed-profile-resolution-failures.md)
+- [ADR-0121: Atomically Activate the Resolved Run and Session Profile](adr/0121-atomic-run-profile-activation.md)
+- [ADR-0122: Project Compact Inference Summaries with User Messages](adr/0122-inline-user-message-inference-summary.md)
 
-_105 documents_
+_125 documents_
 
 ## Issues (Bug Tracking)
 
@@ -189,4 +209,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 372
+- Total documents: 393
