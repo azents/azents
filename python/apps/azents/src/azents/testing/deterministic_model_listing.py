@@ -9,6 +9,8 @@ from azents.core.llm_catalog import (
     ModelContextWindow,
     ModelModalities,
     ModelModality,
+    ModelReasoningCapabilities,
+    ModelReasoningEffort,
     ModelToolCallingCapabilities,
 )
 from azents.services.model_listing.data import (
@@ -157,6 +159,15 @@ def _candidate(
                 output=[ModelModality.TEXT],
             ),
             tool_calling=ModelToolCallingCapabilities(supported=True),
+            reasoning=ModelReasoningCapabilities(
+                supported=not lightweight,
+                effort_levels=(
+                    [ModelReasoningEffort.LOW, ModelReasoningEffort.HIGH]
+                    if not lightweight
+                    else []
+                ),
+                summaries=not lightweight,
+            ),
         ),
         model_snapshot={
             "source": source,

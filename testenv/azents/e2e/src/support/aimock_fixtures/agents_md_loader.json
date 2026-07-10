@@ -746,6 +746,26 @@
         },
         "status": 429
       }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Per prompt quality profile",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Quality profile response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Per prompt fast profile",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Fast profile response."
+      }
     }
   ]
 }
