@@ -27,14 +27,14 @@ Commands:
 - `cd python/apps/azents && uv run pyright`
 - `cd python/apps/azents && uv run pytest -q`
 - `cd python/apps/azents && uv run alembic -c db-schemas/rdb/alembic.ini heads`
-- `cd python/apps/azents && uv run alembic -c db-schemas/rdb/alembic.ini history -r b754406b3aee:heads`
+- `cd python/apps/azents && uv run alembic -c db-schemas/rdb/alembic.ini history -r 9fa56656fede:heads`
 
 Results:
 
 - Ruff: PASS
 - Pyright: PASS, 0 errors
 - Pytest: PASS, 1,134 passed and 351 skipped
-- Alembic: PASS, one head at `25a661df4ff6`; the revision follows `b754406b3aee`
+- Alembic: PASS, one head at `25a661df4ff6`; the revision follows `9fa56656fede`
 
 ### API schemas and generated clients
 
@@ -84,7 +84,8 @@ Static checks:
 
 Execution result:
 
-- LOCAL ENVIRONMENT BLOCKED: the runtime has no Docker socket, so the session-scoped test network could not start. The failure occurred before product setup or the test body. Required deterministic CI must execute this scenario in its Docker-enabled runner.
+- LOCAL ENVIRONMENT BLOCKED: the runtime has no Docker socket, so the session-scoped test network could not start. The failure occurred before product setup or the test body.
+- DOCKER-ENABLED CI: PASS. PR #312 completed `ci-python-e2e-run` and the aggregate `ci-python-e2e` check successfully in [GitHub Actions run 29071750152](https://github.com/azents/azents/actions/runs/29071750152).
 
 ## E2E Coverage
 
@@ -115,9 +116,8 @@ Existing mutation-route guards remain unchanged and require `LLM_INTEGRATIONS_WR
 
 ## Remaining Verification
 
-- Docker-enabled deterministic CI must run the added public API E2E.
-- Optional live smoke testing may be performed with an operator-supplied `XAI_API_KEY` and a current model. It must not emit the key, bearer header, raw request, or raw provider response.
+Optional live smoke testing may be performed with an operator-supplied `XAI_API_KEY` and a current model. It must not emit the key, bearer header, raw request, or raw provider response. Live verification is not a required CI gate.
 
 ## Conclusion
 
-Backend, schema/client, frontend, and static E2E quality gates pass locally. The implementation matches the approved design boundaries. The only incomplete local evidence is execution of the Docker-backed deterministic E2E; CI is the required execution environment for that scenario.
+Backend, schema/client, frontend, static E2E quality gates, and the Docker-backed deterministic E2E pass. The implementation matches the approved design boundaries. Local E2E execution remained unavailable because this runtime has no Docker socket; the required scenario completed successfully in Docker-enabled CI.
