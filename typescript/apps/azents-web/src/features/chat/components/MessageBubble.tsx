@@ -18,6 +18,7 @@ import {
   Stack,
   Text,
   Tooltip,
+  UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import {
@@ -25,6 +26,7 @@ import {
   IconCheck,
   IconChevronRight,
   IconClock,
+  IconMessageCircle,
   IconPencil,
   IconRobot,
   IconTargetArrow,
@@ -355,6 +357,52 @@ function MessageSurface({
   );
 }
 
+const HTML_COMMENT_PATTERN =
+  /<!--[\s\S]*?-->|<!—[\s\S]*?(?:—>|-->)|<!--|-->|<!—|—>/gu;
+
+function removeHtmlComments(content: string): string {
+  return content.replace(HTML_COMMENT_PATTERN, "");
+}
+
+function markdownLineToPlainText(line: string): string {
+  return line
+    .replace(/^(?:`{3,}|~{3,})[^`~]*$/u, "")
+    .replace(/^(?:\s*[-*_]){3,}\s*$/u, "")
+    .replace(/^\s*[-+*]\s+\[[ xX]\]\s+/u, "")
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s*|[-+*]\s+|\d+[.)]\s+)/u, "")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/gu, "$1")
+    .replace(/<\/?[A-Za-z][^>]*>/gu, "")
+    .replace(/<([^>]+)>/gu, "$1")
+    .replace(/(\*\*|__|~~)(.*?)\1/gu, "$2")
+    .replace(/(^|\s)([*_])([^*_]+)\2(?=\s|[.,!?]|$)/gu, "$1$3")
+    .replace(/`([^`]*)`/gu, "$1")
+    .replace(/\\([\\`*_{}\[\]()#+\-.!>])/gu, "$1")
+    .replace(/&nbsp;/gu, " ")
+    .replace(/&amp;/gu, "&")
+    .replace(/&lt;/gu, "<")
+    .replace(/&gt;/gu, ">")
+    .replace(/&quot;/gu, '"')
+    .replace(/&#39;|&apos;/gu, "'")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function getThinkingPreview(reasoningSummary: string): string | null {
+  const firstNonEmptyLine = removeHtmlComments(reasoningSummary)
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+  if (!firstNonEmptyLine) {
+    return null;
+  }
+
+  const preview = markdownLineToPlainText(firstNonEmptyLine);
+  return preview.length > 0 ? preview : null;
+}
+
 function ThinkingBlock({
   hasContent,
   reasoningSummary,
@@ -364,41 +412,77 @@ function ThinkingBlock({
 }): React.ReactElement {
   const t = useTranslations("chat");
   const [thinkingOpened, { toggle: toggleThinking }] = useDisclosure(false);
+  const sanitizedReasoningSummary = useMemo(
+    () => removeHtmlComments(reasoningSummary).trim(),
+    [reasoningSummary],
+  );
+  const preview = useMemo(
+    () => getThinkingPreview(sanitizedReasoningSummary),
+    [sanitizedReasoningSummary],
+  );
+  const canExpand = sanitizedReasoningSummary.length > 0;
+  const label =
+    thinkingOpened || preview === null ? t("thinkingLabel") : preview;
+  const headerContent = (
+    <>
+      {canExpand && (
+        <IconChevronRight
+          aria-hidden="true"
+          size={rem(12)}
+          className={classes.thinkingChevron}
+          data-opened={thinkingOpened}
+          color="var(--mantine-color-dimmed)"
+        />
+      )}
+      <IconMessageCircle
+        aria-hidden="true"
+        size={rem(14)}
+        stroke={1.8}
+        className={classes.thinkingIcon}
+      />
+      <Text
+        key={thinkingOpened ? "opened" : "closed"}
+        component="span"
+        size="xs"
+        c="dimmed"
+        fw={500}
+        className={classes.thinkingLabel}
+      >
+        {label}
+      </Text>
+    </>
+  );
 
   return (
     <Box mb={hasContent ? "xs" : 0}>
-      <Group
-        gap={rem(4)}
-        wrap="nowrap"
-        style={{ cursor: "pointer", userSelect: "none", width: "100%" }}
-        onClick={toggleThinking}
-      >
-        <IconChevronRight
-          size={rem(12)}
-          style={{
-            flexShrink: 0,
-            transform: thinkingOpened ? "rotate(90deg)" : "none",
-            transition: "transform 200ms",
-          }}
-          color="var(--mantine-color-dimmed)"
-        />
-        <Text
-          size="xs"
-          c="dimmed"
-          fw={500}
-          lineClamp={1}
-          style={{ flex: 1, minWidth: 0 }}
+      {canExpand ? (
+        <UnstyledButton
+          className={classes.thinkingHeader}
+          onClick={toggleThinking}
+          aria-expanded={thinkingOpened}
         >
-          {t("thinkingLabel")}
-        </Text>
-      </Group>
-      <Collapse expanded={thinkingOpened}>
-        <ScrollArea.Autosize mah={rem(300)} mt={rem(4)}>
-          <Box c="dimmed">
-            <MarkdownContent>{reasoningSummary}</MarkdownContent>
-          </Box>
-        </ScrollArea.Autosize>
-      </Collapse>
+          <Group
+            gap={rem(4)}
+            wrap="nowrap"
+            className={classes.thinkingHeaderContent}
+          >
+            {headerContent}
+          </Group>
+        </UnstyledButton>
+      ) : (
+        <Group gap={rem(4)} wrap="nowrap" className={classes.thinkingHeader}>
+          {headerContent}
+        </Group>
+      )}
+      {canExpand && (
+        <Collapse expanded={thinkingOpened}>
+          <ScrollArea.Autosize mah={rem(300)} mt={rem(4)}>
+            <Box c="dimmed">
+              <MarkdownContent>{sanitizedReasoningSummary}</MarkdownContent>
+            </Box>
+          </ScrollArea.Autosize>
+        </Collapse>
+      )}
     </Box>
   );
 }
@@ -408,11 +492,9 @@ function TextMessageContent({
   hasContent,
   hasReasoning,
 }: TextMessageProps): React.ReactElement {
-  const t = useTranslations("chat");
-
   return (
     <>
-      {hasReasoning && (
+      {(hasReasoning || (message.status === "partial" && !message.content)) && (
         <ThinkingBlock
           hasContent={hasContent}
           reasoningSummary={message.reasoningSummary ?? ""}
@@ -428,13 +510,6 @@ function TextMessageContent({
             </Text>
           )}
         </>
-      )}
-
-      {/* streamingand content if absent loading display (reasoning existstextwhen above of Thinking block shown instead) */}
-      {message.status === "partial" && !message.content && !hasReasoning && (
-        <Text size="sm" c="dimmed">
-          {t("thinking")}
-        </Text>
       )}
     </>
   );
