@@ -92,6 +92,16 @@ Local environment:
 | `cd infra/charts/azents && python -m pytest tests/runtime_provider_kubernetes_render_test.py -q` | Skipped locally — Helm binary absent; required in GitHub CI |
 | `cd infra/charts/azents && python -m json.tool values.schema.json` | Pass |
 
+## GitHub CI Evidence
+
+GitHub Actions run [29084737006](https://github.com/azents/azents/actions/runs/29084737006) validated commit `b24e97e` from PR #331 in the required Docker- and Helm-capable environment.
+
+- Runtime Control library, Runtime Runner, Docker Provider, Kubernetes Provider, and server Python jobs passed.
+- The Docker-backed Azents E2E job passed in 4 minutes 17 seconds.
+- Helm render/lint validation passed.
+- Runtime image and server/web image builds passed.
+- Pre-commit and all aggregate required checks passed.
+
 ## Fixture Assessment
 
 No external credential or live integration is required. The existing product E2E fixture can start a real Runtime Runner and validates process tool results, but it does not expose deterministic handler hold/release, request labels, or generation replacement controls. Adding a test-only model-visible operation or production control API solely for scheduler synchronization would expand the product surface and weaken the Runner boundary.
