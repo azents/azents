@@ -693,7 +693,7 @@ export function TodoPreviewBar({
             minWidth: 0,
             overflow: "hidden",
             border: `${rem(1)} solid var(--mantine-color-default-border)`,
-            borderBottom: 0,
+            borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
             borderTopLeftRadius: rem(8),
             borderTopRightRadius: rem(8),
             background: "var(--mantine-color-body)",
