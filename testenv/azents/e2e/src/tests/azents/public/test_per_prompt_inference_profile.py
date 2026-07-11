@@ -495,6 +495,13 @@ class TestPerPromptInferenceProfile:
         )
         assert first_resolved["model_identifier"] == "gpt-5.5-mini"
         assert first_child["resolved_reasoning_effort"] is None
+        _wait_for_summary(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=root_session_id,
+            message=_SPAWN_OVERRIDE_MESSAGE,
+            status="completed",
+        )
 
         _write_profile(
             server_url=azents_public_server_url,
