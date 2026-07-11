@@ -393,7 +393,27 @@ async def test_create_agent_upload_stores_object_and_metadata() -> None:
     assert file.object_key == f"exchange/workspace-1/files/{file.id}/original"
     assert file.uri == f"exchange://{file.object_key}"
     assert s3_service.objects[file.object_key] == b"a,b\n1,2\n"
+    assert file.preview_summary == "a,b\n1,2\n"
     assert repository.files[file.id].sha256
+
+
+@pytest.mark.asyncio
+async def test_create_text_upload_truncates_preview() -> None:
+    """Text upload stores a bounded preview alongside the original."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="long.txt",
+        media_type="text/plain",
+        body=("a" * 2100).encode(),
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.preview_summary == "a" * 2000 + "\n... (truncated)"
 
 
 @pytest.mark.asyncio

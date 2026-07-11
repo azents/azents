@@ -13,15 +13,8 @@ import {
   Text,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
-import {
-  IconDownload,
-  IconFile,
-  IconMinus,
-  IconPlus,
-  IconX,
-} from "@tabler/icons-react";
+import { IconDownload, IconFile, IconX } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { type TouchEvent, useEffect, useRef, useState } from "react";
 import { formatFileSize } from "./FileAttachmentList";
 
 export type AttachmentPreviewContent =
@@ -53,6 +46,11 @@ interface AttachmentPreviewViewerProps {
   preview: AttachmentPreviewContent;
 }
 
+function inlinePreviewUrl(url: string): string {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}disposition=inline`;
+}
+
 function previewUsesImage(
   preview: AttachmentPreviewContent,
 ): preview is Extract<
@@ -73,14 +71,6 @@ export function AttachmentPreviewViewer({
 }: AttachmentPreviewViewerProps): React.ReactElement {
   const t = useTranslations("chat.attachment");
   const isMobile = useMediaQuery("(max-width: 48em)");
-  const [zoom, setZoom] = useState(1);
-  const pinchStart = useRef<{ distance: number; zoom: number } | null>(null);
-
-  useEffect(() => {
-    if (opened) {
-      setZoom(1);
-    }
-  }, [opened, preview]);
 
   const detail = [mediaType, size == null ? null : formatFileSize(size)]
     .filter(Boolean)
@@ -97,31 +87,6 @@ export function AttachmentPreviewViewer({
       : preview.type === "document-page"
         ? `${name} page ${preview.pageNumber}`
         : "";
-  const touchDistance = (event: TouchEvent<HTMLDivElement>): number => {
-    const first = event.touches.item(0);
-    const second = event.touches.item(1);
-    return Math.hypot(
-      second.clientX - first.clientX,
-      second.clientY - first.clientY,
-    );
-  };
-  const startPinch = (event: TouchEvent<HTMLDivElement>): void => {
-    if (event.touches.length !== 2) {
-      return;
-    }
-    pinchStart.current = { distance: touchDistance(event), zoom };
-  };
-  const updatePinch = (event: TouchEvent<HTMLDivElement>): void => {
-    if (event.touches.length !== 2 || pinchStart.current === null) {
-      return;
-    }
-    event.preventDefault();
-    const nextZoom =
-      pinchStart.current.zoom *
-      (touchDistance(event) / pinchStart.current.distance);
-    setZoom(Math.min(3, Math.max(1, nextZoom)));
-  };
-
   return (
     <Modal
       opened={opened}
@@ -231,73 +196,46 @@ export function AttachmentPreviewViewer({
         ) : (
           <Box
             bg="var(--mantine-color-dark-9)"
-            onTouchStart={startPinch}
-            onTouchMove={updatePinch}
-            onTouchEnd={() => {
-              pinchStart.current = null;
-            }}
             style={{
               alignItems: "center",
               display: "flex",
               flex: 1,
               justifyContent: "center",
               minHeight: 0,
-              overflow: "auto",
+              overflow: "hidden",
               padding: "var(--mantine-spacing-md)",
-              position: "relative",
             }}
           >
-            {previewUsesImage(preview) && (
-              <img
-                src={imageUrl ?? ""}
-                alt={imageAlt}
+            {previewUsesImage(preview) && imageUrl !== null ? (
+              <a
+                href={inlinePreviewUrl(imageUrl)}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t("openOriginal")}
                 style={{
-                  display: "block",
-                  height: "auto",
-                  margin: "auto",
-                  maxHeight: zoom === 1 ? "100%" : "none",
-                  maxWidth: zoom === 1 ? "100%" : "none",
-                  objectFit: "contain",
-                  width: zoom === 1 ? "auto" : `${zoom * 100}%`,
+                  alignItems: "center",
+                  display: "flex",
+                  height: "100%",
+                  justifyContent: "center",
+                  minHeight: 0,
+                  width: "100%",
                 }}
-              />
-            )}
-
-            <Group
-              gap="2xs"
-              wrap="nowrap"
-              bg="color-mix(in srgb, var(--mantine-color-black) 72%, transparent)"
-              p="2xs"
-              style={{
-                borderRadius: "var(--mantine-radius-xl)",
-                bottom: `max(var(--mantine-spacing-md), env(safe-area-inset-bottom))`,
-                left: "50%",
-                position: "absolute",
-                transform: "translateX(-50%)",
-              }}
-            >
-              <ActionIcon
-                variant="transparent"
-                color="white"
-                disabled={zoom <= 1}
-                onClick={() => setZoom((value) => Math.max(1, value - 0.25))}
-                aria-label={t("zoomOut")}
               >
-                <IconMinus size={18} />
-              </ActionIcon>
-              <Text c="white" size="xs" w={rem(44)} ta="center">
-                {Math.round(zoom * 100)}%
-              </Text>
-              <ActionIcon
-                variant="transparent"
-                color="white"
-                disabled={zoom >= 3}
-                onClick={() => setZoom((value) => Math.min(3, value + 0.25))}
-                aria-label={t("zoomIn")}
-              >
-                <IconPlus size={18} />
-              </ActionIcon>
-            </Group>
+                <img
+                  src={imageUrl}
+                  alt={imageAlt}
+                  style={{
+                    cursor: "zoom-in",
+                    display: "block",
+                    height: "auto",
+                    maxHeight: "100%",
+                    maxWidth: "100%",
+                    objectFit: "contain",
+                    width: "auto",
+                  }}
+                />
+              </a>
+            ) : null}
           </Box>
         )}
       </Box>

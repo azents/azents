@@ -13,6 +13,13 @@ import {
 } from "@/trpc/context";
 
 const ROUTE = "/api/chat/exchange-files/[fileId]/download";
+const INLINE_IMAGE_MEDIA_TYPES = new Set([
+  "image/avif",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 function copyHeaders(source: Headers, target: Headers): void {
   source.forEach((value, key) => {
@@ -21,7 +28,7 @@ function copyHeaders(source: Headers, target: Headers): void {
 }
 
 async function get(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ fileId: string }> },
 ): Promise<NextResponse | Response> {
   const resHeaders = new Headers();
@@ -70,7 +77,12 @@ async function get(
   headers.set("Content-Type", contentType);
   headers.set("Content-Length", String(body.byteLength));
 
-  if (contentDisposition) {
+  const requestsInlineImage =
+    request.nextUrl.searchParams.get("disposition") === "inline" &&
+    INLINE_IMAGE_MEDIA_TYPES.has(contentType.toLowerCase());
+  if (requestsInlineImage) {
+    headers.set("Content-Disposition", "inline");
+  } else if (contentDisposition) {
     headers.set("Content-Disposition", contentDisposition);
   }
 

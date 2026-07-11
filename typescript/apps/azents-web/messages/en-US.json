@@ -1280,8 +1280,7 @@
       "openPreview": "Preview {name}",
       "downloadFile": "Download {name}",
       "closePreview": "Close preview",
-      "zoomOut": "Zoom out",
-      "zoomIn": "Zoom in",
+      "openOriginal": "Open original image",
       "previewUnavailable": "Preview unavailable",
       "downloadToOpen": "Download the file to open it in a supported app.",
       "errorReason": {

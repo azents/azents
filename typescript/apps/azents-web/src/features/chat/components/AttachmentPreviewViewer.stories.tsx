@@ -1,3 +1,4 @@
+import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { AttachmentPreviewViewer } from "./AttachmentPreviewViewer";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -35,6 +36,13 @@ export const ImagePreview = {
       url: "/api/chat/exchange-files/story-image/download",
       altText: "Mobile model picker screenshot",
     },
+  },
+  play: async () => {
+    const body = within(document.body);
+    await expect(
+      body.getByRole("link", { name: "Open original image" }),
+    ).toHaveAttribute("href", expect.stringContaining("disposition=inline"));
+    await expect(body.queryByLabelText("Zoom in")).toBeNull();
   },
 } satisfies Story;
 

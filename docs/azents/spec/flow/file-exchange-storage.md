@@ -30,7 +30,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewViewer.tsx
 last_verified_at: 2026-07-11
-spec_version: 12
+spec_version: 13
 ---
 
 # File Exchange Storage
@@ -94,9 +94,10 @@ When `spawn_agent` forks parent model-visible context into a child session, File
 - Agent-originated image-only output renders as an adaptive gallery whenever the original images are available; generated thumbnail metadata is optional. A single image preserves its aspect ratio with a 480px maximum height. Multiple images use square two-column cells, and sets larger than four expose a `+N` count on the fourth visible cell.
 - Agent-originated non-image files use the compact strip. Mixed Agent output groups the image gallery and compact file strip inside one bordered attachment group.
 - Every available sent attachment opens `AttachmentPreviewViewer` from its tile body or gallery cell. The trailing tile download action downloads the original without opening the viewer.
-- `AttachmentPreviewViewer` selects image or text rendering from available preview capability data and shows a download-guidance fallback for other file types. It uses a full-screen mobile overlay and a bounded centered desktop modal with persistent close, metadata, download, and image zoom controls. Image previews support pinch zoom and scroll panning; text previews scroll inside a pre-wrapped monospaced surface.
+- Exchange-file creation stores a bounded UTF-8 `preview_summary` for `text/*`, JSON, XML, and JavaScript payloads. User uploads and Agent-presented text files therefore use the same text preview path while retaining the complete original for download.
+- `AttachmentPreviewViewer` selects image or text rendering from available preview capability data and shows a download-guidance fallback for other file types. It uses a full-screen mobile overlay and a bounded centered desktop modal with persistent close, metadata, and download controls. Images remain fitted inside the viewer; selecting an image opens the original with inline disposition in the browser's native image viewer. Text previews scroll inside a pre-wrapped monospaced surface.
 - Expired or unavailable attachments retain their metadata tile but disable preview and download.
-- Closing a preview restores focus to the tile or gallery cell that opened it. Viewer, download, and zoom controls provide localized accessible labels.
+- Closing a preview restores focus to the tile or gallery cell that opened it. Viewer, download, and original-image controls provide localized accessible labels.
 - Project management in the concrete Agent session Workspace surface provides existing Agent Workspace folder registration. Project Source upload/delete/load implementation does not currently exist.
 
 ## Related Specs
@@ -107,6 +108,7 @@ When `spawn_agent` forks parent model-visible context into a child session, File
 
 ## Changelog
 
+- **2026-07-11** — v13. Added persisted previews for uploaded text files and delegated original-image zooming to the browser's native image viewer.
 - **2026-07-11** — v12. Clarified universal preview activation, isolated download actions, unsupported-file fallback, and original-only Agent image galleries.
 - **2026-07-11** — v11. Documented compact attachment strips, Agent image galleries and mixed groups, dynamic overflow masks, and the shared responsive preview viewer.
 - **2026-07-08** — v10. Documented subagent context-fork FilePart placeholder degradation and the no-blob-copy boundary.
