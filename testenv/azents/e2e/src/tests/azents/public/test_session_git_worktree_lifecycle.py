@@ -330,6 +330,22 @@ def _action_execution_id(projection: dict[str, object]) -> str:
     return execution_id
 
 
+def _terminal_action_execution_projection(
+    history: dict[str, object],
+) -> dict[str, object] | None:
+    """Return the latest durable action execution result projection."""
+    events = _object_list(history.get("items"), label="history events")
+    for event in reversed(events):
+        if event.get("kind") != "action_execution_result":
+            continue
+        payload = _OBJECT_ADAPTER.validate_python(event.get("payload"))
+        projection = payload.get("action_execution")
+        if projection is None:
+            raise AssertionError(f"action result projection is missing: {event!r}")
+        return _OBJECT_ADAPTER.validate_python(projection)
+    return None
+
+
 def _wait_for_action_execution_status(
     *,
     server_url: str,
@@ -350,8 +366,16 @@ def _wait_for_action_execution_status(
         try:
             projection = _action_execution_projection(live)
         except AssertionError:
-            time.sleep(0.5)
-            continue
+            history = _get_json(
+                server_url=server_url,
+                token=token,
+                path=f"/chat/v1/sessions/{session_id}/history",
+                params={"limit": "100"},
+            )
+            projection = _terminal_action_execution_projection(history)
+            if projection is None:
+                time.sleep(0.5)
+                continue
         current_status = _action_execution_status(projection)
         if current_status == status:
             return projection
@@ -359,6 +383,28 @@ def _wait_for_action_execution_status(
             raise AssertionError(f"action execution failed: {projection!r}")
         time.sleep(0.5)
     raise TimeoutError(f"action execution did not reach {status}: {last_live!r}")
+
+
+def _assert_action_retry_controls_removed(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    action_execution_id: str,
+) -> None:
+    """Verify deprecated action retry and discard routes are unavailable."""
+    base_path = (
+        f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}"
+        f"/action-executions/{action_execution_id}"
+    )
+    for operation in ("retry", "discard"):
+        response = requests.post(
+            f"{base_path}/{operation}",
+            headers=_headers(token),
+            timeout=10,
+        )
+        assert response.status_code in {404, 405}
 
 
 def _list_session_projects(
@@ -477,7 +523,14 @@ class TestSessionGitWorktreeLifecycle:
             session_id=session_id,
             status="completed",
         )
-        assert _action_execution_id(projection)
+        action_execution_id = _action_execution_id(projection)
+        _assert_action_retry_controls_removed(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            action_execution_id=action_execution_id,
+        )
         events = _object_list(projection.get("events"), label="action events")
         assert {event.get("step_key") for event in events} >= {
             "create_git_worktree",
@@ -485,6 +538,49 @@ class TestSessionGitWorktreeLifecycle:
             "upsert_catalog",
             "refresh_project_status",
         }
+
+        failed_session_id = _create_git_worktree_session(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            source_project_path=source_path,
+            starting_ref="missing-e2e-ref",
+        )
+        failed_projection = _wait_for_action_execution_status(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=failed_session_id,
+            status="failed",
+        )
+        failed_execution_id = _action_execution_id(failed_projection)
+        failed_execution = _OBJECT_ADAPTER.validate_python(
+            failed_projection.get("execution")
+        )
+        assert failed_execution.get("failure_summary")
+        assert (
+            _list_session_projects(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=failed_session_id,
+            )
+            == []
+        )
+        assert (
+            _live_projection(
+                server_url=azents_public_server_url,
+                token=token,
+                session_id=failed_session_id,
+            ).get("action_executions")
+            == []
+        )
+        _assert_action_retry_controls_removed(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=failed_session_id,
+            action_execution_id=failed_execution_id,
+        )
 
         worktree_path = _wait_for_worktree_project_path(
             server_url=azents_public_server_url,

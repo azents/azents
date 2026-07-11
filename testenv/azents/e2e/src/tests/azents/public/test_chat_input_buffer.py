@@ -40,7 +40,8 @@ from support.utils import (
 )
 
 _INITIAL_MESSAGE = "Start chat input buffer long tool"
-_FOLLOW_UP_MESSAGE = "Buffered follow-up should survive"
+_FOLLOW_UP_MESSAGE = "First buffered follow-up should survive"
+_SECOND_FOLLOW_UP_MESSAGE = "Second buffered follow-up should preserve FIFO order"
 _DELETED_MESSAGE = "Deleted pending message must not reach the model"
 _EDITED_MESSAGE = "Edited user message via REST"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
@@ -700,7 +701,7 @@ def _wait_for_mock_openai_journal_contains(
 class TestChatInputBuffer:
     """chat input buffer user patht E2E t verifyt."""
 
-    def test_running_follow_up_is_buffered_then_promoted(
+    def test_running_follow_ups_are_buffered_then_promoted_in_fifo_order(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
@@ -708,7 +709,7 @@ class TestChatInputBuffer:
         azents_engine_worker_container: object,
         mock_openai_url: str,
     ) -> None:
-        """run t follow-up t REST pending t t t user_message t t."""
+        """Promote multiple running-session follow-ups in FIFO order."""
         del azents_engine_worker_container
         _reset_mock_openai(mock_openai_url)
         workspace = _setup_workspace(
@@ -716,7 +717,7 @@ class TestChatInputBuffer:
             admin_api_client,
             azents_public_server_url,
         )
-        agent_id = _create_agent(public_api_client, workspace)
+        agent_id = _create_agent(public_api_client, workspace, delay_seconds=5.0)
 
         initial_response = _write_new_session_message(
             server_url=azents_public_server_url,
@@ -759,28 +760,44 @@ class TestChatInputBuffer:
         assert follow_up_response["client_request_id"] == client_request_id
         assert retry_response["client_request_id"] == client_request_id
         assert _accepted_write(follow_up_response) == _accepted_write(retry_response)
+        second_follow_up_response = _write_session_message(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=session_id,
+            agent_id=agent_id,
+            message=_SECOND_FOLLOW_UP_MESSAGE,
+            client_request_id=f"second-follow-up-{unique()}",
+        )
         follow_up_buffer = _PendingBuffer(
             id=str(_accepted_write(follow_up_response)["id"]),
             content=_FOLLOW_UP_MESSAGE,
+        )
+        second_follow_up_buffer = _PendingBuffer(
+            id=str(_accepted_write(second_follow_up_response)["id"]),
+            content=_SECOND_FOLLOW_UP_MESSAGE,
         )
         pending_payload = _list_live(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=session_id,
         )
-        assert _input_buffer_contents(pending_payload) == [_FOLLOW_UP_MESSAGE]
+        assert _input_buffer_contents(pending_payload) == [
+            _FOLLOW_UP_MESSAGE,
+            _SECOND_FOLLOW_UP_MESSAGE,
+        ]
         history_payload = _list_history(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=session_id,
         )
         assert _FOLLOW_UP_MESSAGE not in _message_contents(history_payload)
+        assert _SECOND_FOLLOW_UP_MESSAGE not in _message_contents(history_payload)
 
         final_payload = _wait_for_rest_state(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=session_id,
-            expected_message=_FOLLOW_UP_MESSAGE,
+            expected_message=_SECOND_FOLLOW_UP_MESSAGE,
             expected_pending=[],
         )
 
@@ -790,9 +807,17 @@ class TestChatInputBuffer:
             label="final history",
         )
         assert follow_up_buffer.id not in json.dumps(final_live)
+        assert second_follow_up_buffer.id not in json.dumps(final_live)
         assert _input_buffer_contents(final_live) == []
-        assert _FOLLOW_UP_MESSAGE in _message_contents(final_history)
+        final_contents = _message_contents(final_history)
+        first_follow_up_index = final_contents.index(_FOLLOW_UP_MESSAGE)
+        second_follow_up_index = final_contents.index(_SECOND_FOLLOW_UP_MESSAGE)
+        assert first_follow_up_index < second_follow_up_index
         _wait_for_mock_openai_journal_contains(mock_openai_url, _FOLLOW_UP_MESSAGE)
+        _wait_for_mock_openai_journal_contains(
+            mock_openai_url,
+            _SECOND_FOLLOW_UP_MESSAGE,
+        )
 
     def test_pending_buffer_delete_prevents_model_injection(
         self,
