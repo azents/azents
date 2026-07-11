@@ -6,6 +6,7 @@ from typing import cast
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
@@ -468,14 +469,14 @@ class TestPerPromptInferenceProfile:
         assert isinstance(failed["failure_message"], str)
         assert failed["resolved_profile"] is None
 
-    def test_subagent_spawn_override_continuation_and_atomic_rejection(
+    def test_subagent_spawn_override_continuation(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         azents_engine_worker_container: object,
     ) -> None:
-        """Persist a spawn override, reuse it, and reject invalid forks atomically."""
+        """Persist a spawn override and reuse it for a follow-up run."""
         del azents_engine_worker_container
         token, agent_id, root_session_id = _setup_profile_agent(
             public_api_client,
@@ -560,43 +561,50 @@ class TestPerPromptInferenceProfile:
             label="follow-up resolved profile",
         )
         assert followup_resolved["model_identifier"] == "gpt-5.5-mini"
-        for message, rejected_name in (
+
+    @pytest.mark.parametrize(
+        ("message", "rejected_name"),
+        [
             (_FULL_HISTORY_REJECTION_MESSAGE, "invalid_history"),
             (_UNKNOWN_TARGET_REJECTION_MESSAGE, "invalid_target"),
-        ):
-            rejection_token, rejection_agent_id, rejection_session_id = (
-                _setup_profile_agent(
-                    public_api_client,
-                    admin_api_client,
-                    azents_public_server_url,
-                )
-            )
-            _wait_for_session_idle(
-                server_url=azents_public_server_url,
-                token=rejection_token,
-                agent_id=rejection_agent_id,
-                session_id=rejection_session_id,
-            )
-            _write_profile(
-                server_url=azents_public_server_url,
-                token=rejection_token,
-                agent_id=rejection_agent_id,
-                session_id=rejection_session_id,
-                message=message,
-                target="Quality",
-                effort="high",
-            )
-            _wait_for_summary(
-                server_url=azents_public_server_url,
-                token=rejection_token,
-                session_id=rejection_session_id,
-                message=message,
-                status="completed",
-            )
-            tree = _subagent_tree(
-                server_url=azents_public_server_url,
-                token=rejection_token,
-                agent_id=rejection_agent_id,
-                session_id=rejection_session_id,
-            )
-            assert rejected_name not in _tree_names(tree)
+        ],
+    )
+    def test_subagent_spawn_override_rejection_is_atomic(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+        message: str,
+        rejected_name: str,
+    ) -> None:
+        """Reject an invalid override without creating a child."""
+        del azents_engine_worker_container
+        token, agent_id, session_id = _setup_profile_agent(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        _write_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=message,
+            target="Quality",
+            effort="high",
+        )
+        _wait_for_summary(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            message=message,
+            status="completed",
+        )
+        tree = _subagent_tree(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        assert rejected_name not in _tree_names(tree)
