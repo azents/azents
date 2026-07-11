@@ -244,36 +244,6 @@ def _wait_for_session_idle(
     raise TimeoutError(f"Session did not become idle: {last_state!r}")
 
 
-def _wait_for_session_cycle(
-    *,
-    server_url: str,
-    token: str,
-    agent_id: str,
-    session_id: str,
-    timeout: float = 120,
-) -> None:
-    """Wait for a newly submitted session run to start and return to idle."""
-    deadline = time.monotonic() + timeout
-    observed_running = False
-    last_state: object = None
-    while time.monotonic() < deadline:
-        response = requests.get(
-            f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
-            headers=_headers(token),
-            timeout=10,
-        )
-        payload = _response_object(response)
-        last_state = payload.get("run_state")
-        observed_running = observed_running or last_state == "running"
-        if observed_running and last_state == "idle":
-            return
-        time.sleep(0.1)
-    raise TimeoutError(
-        "Session did not complete a run cycle: "
-        f"observed_running={observed_running}, last_state={last_state!r}"
-    )
-
-
 def _history(server_url: str, token: str, session_id: str) -> list[dict[str, object]]:
     """Fetch the current history page."""
     response = requests.get(
@@ -282,6 +252,30 @@ def _history(server_url: str, token: str, session_id: str) -> list[dict[str, obj
         timeout=10,
     )
     return _objects(_response_object(response).get("items"), label="history items")
+
+
+def _wait_for_tool_result(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    call_id: str,
+    timeout: float = 120,
+) -> None:
+    """Wait until a tool call has produced a persisted result."""
+    deadline = time.monotonic() + timeout
+    last_kinds: list[object] = []
+    while time.monotonic() < deadline:
+        events = _history(server_url, token, session_id)
+        last_kinds = [event.get("kind") for event in events]
+        for event in events:
+            if event.get("kind") != "client_tool_result":
+                continue
+            payload = _object(event.get("payload"), label="tool result payload")
+            if payload.get("call_id") == call_id:
+                return
+        time.sleep(0.5)
+    raise TimeoutError(f"Tool result was not observed: {call_id}, {last_kinds!r}")
 
 
 def _input_event(
@@ -593,10 +587,18 @@ class TestPerPromptInferenceProfile:
         assert followup_resolved["model_identifier"] == "gpt-5.5-mini"
 
     @pytest.mark.parametrize(
-        ("message", "rejected_name"),
+        ("message", "rejected_name", "call_id"),
         [
-            (_FULL_HISTORY_REJECTION_MESSAGE, "invalid_history"),
-            (_UNKNOWN_TARGET_REJECTION_MESSAGE, "invalid_target"),
+            (
+                _FULL_HISTORY_REJECTION_MESSAGE,
+                "invalid_history",
+                "call_subagent_reject_full_history",
+            ),
+            (
+                _UNKNOWN_TARGET_REJECTION_MESSAGE,
+                "invalid_target",
+                "call_subagent_reject_unknown_target",
+            ),
         ],
     )
     def test_subagent_spawn_override_rejection_is_atomic(
@@ -607,6 +609,7 @@ class TestPerPromptInferenceProfile:
         azents_engine_worker_container: object,
         message: str,
         rejected_name: str,
+        call_id: str,
     ) -> None:
         """Reject an invalid override without creating a child."""
         del azents_engine_worker_container
@@ -624,11 +627,11 @@ class TestPerPromptInferenceProfile:
             target="Quality",
             effort="high",
         )
-        _wait_for_session_cycle(
+        _wait_for_tool_result(
             server_url=azents_public_server_url,
             token=token,
-            agent_id=agent_id,
             session_id=session_id,
+            call_id=call_id,
         )
         tree = _subagent_tree(
             server_url=azents_public_server_url,
