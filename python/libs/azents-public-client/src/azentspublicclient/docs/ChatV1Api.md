@@ -17,7 +17,6 @@ Method | HTTP request | Description
 [**chat_v1_delete_exchange_file**](ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
 [**chat_v1_delete_input_buffer**](ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
 [**chat_v1_delete_session**](ChatV1Api.md#chat_v1_delete_session) | **DELETE** /chat/v1/sessions/{session_id} | Delete Session
-[**chat_v1_discard_action_execution**](ChatV1Api.md#chat_v1_discard_action_execution) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard | Discard Action Execution
 [**chat_v1_download_agent_workspace_file**](ChatV1Api.md#chat_v1_download_agent_workspace_file) | **GET** /chat/v1/agents/{agent_id}/workspace/download | Download Agent Workspace File
 [**chat_v1_download_exchange_file**](ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 [**chat_v1_edit_message**](ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
@@ -41,7 +40,6 @@ Method | HTTP request | Description
 [**chat_v1_preview_project_browser_manifest**](ChatV1Api.md#chat_v1_preview_project_browser_manifest) | **POST** /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview | Preview Project Browser Manifest
 [**chat_v1_read_agent_workspace_path**](ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 [**chat_v1_register_agent_project**](ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
-[**chat_v1_retry_action_execution**](ChatV1Api.md#chat_v1_retry_action_execution) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry | Retry Action Execution
 [**chat_v1_retry_failed_run**](ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 [**chat_v1_stat_agent_workspace_path**](ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
 [**chat_v1_stop_session_run**](ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
@@ -1094,89 +1092,6 @@ void (empty response body)
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **204** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-# **chat_v1_discard_action_execution**
-> ActionExecutionMutationResponse chat_v1_discard_action_execution(agent_id, session_id, action_execution_id)
-
-Discard Action Execution
-
-Finalize a failed operation TurnAction execution as discarded.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.models.action_execution_mutation_response import ActionExecutionMutationResponse
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    session_id = 'session_id_example' # str | 
-    action_execution_id = 'action_execution_id_example' # str | 
-
-    try:
-        # Discard Action Execution
-        api_response = api_instance.chat_v1_discard_action_execution(agent_id, session_id, action_execution_id)
-        print("The response of ChatV1Api->chat_v1_discard_action_execution:\n")
-        pprint(api_response)
-    except Exception as e:
-        print("Exception when calling ChatV1Api->chat_v1_discard_action_execution: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **session_id** | **str**|  | 
- **action_execution_id** | **str**|  | 
-
-### Return type
-
-[**ActionExecutionMutationResponse**](ActionExecutionMutationResponse.md)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -3025,89 +2940,6 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: application/json
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**200** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-# **chat_v1_retry_action_execution**
-> ActionExecutionMutationResponse chat_v1_retry_action_execution(agent_id, session_id, action_execution_id)
-
-Retry Action Execution
-
-Request retry for a failed operation TurnAction execution.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.models.action_execution_mutation_response import ActionExecutionMutationResponse
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.ChatV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    session_id = 'session_id_example' # str | 
-    action_execution_id = 'action_execution_id_example' # str | 
-
-    try:
-        # Retry Action Execution
-        api_response = api_instance.chat_v1_retry_action_execution(agent_id, session_id, action_execution_id)
-        print("The response of ChatV1Api->chat_v1_retry_action_execution:\n")
-        pprint(api_response)
-    except Exception as e:
-        print("Exception when calling ChatV1Api->chat_v1_retry_action_execution: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **session_id** | **str**|  | 
- **action_execution_id** | **str**|  | 
-
-### Return type
-
-[**ActionExecutionMutationResponse**](ActionExecutionMutationResponse.md)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
  - **Accept**: application/json
 
 ### HTTP response details

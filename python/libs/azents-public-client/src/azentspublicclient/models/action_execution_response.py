@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
@@ -31,15 +31,13 @@ class ActionExecutionResponse(BaseModel):
     action_event_id: StrictStr = Field(description="Durable action_message event ID")
     action_type: StrictStr = Field(description="Action discriminator")
     status: StrictStr = Field(description="Execution status")
-    attempt: StrictInt = Field(description="Current attempt number")
     failure_summary: Optional[StrictStr] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     failed_at: Optional[datetime] = None
-    failed_final_at: Optional[datetime] = None
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "action_event_id", "action_type", "status", "attempt", "failure_summary", "started_at", "completed_at", "failed_at", "failed_final_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "action_event_id", "action_type", "status", "failure_summary", "started_at", "completed_at", "failed_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -107,11 +105,6 @@ class ActionExecutionResponse(BaseModel):
         if self.failed_at is None and "failed_at" in self.model_fields_set:
             _dict['failed_at'] = None
 
-        # set to None if failed_final_at (nullable) is None
-        # and model_fields_set contains the field
-        if self.failed_final_at is None and "failed_final_at" in self.model_fields_set:
-            _dict['failed_final_at'] = None
-
         return _dict
 
     @classmethod
@@ -128,12 +121,10 @@ class ActionExecutionResponse(BaseModel):
             "action_event_id": obj.get("action_event_id"),
             "action_type": obj.get("action_type"),
             "status": obj.get("status"),
-            "attempt": obj.get("attempt"),
             "failure_summary": obj.get("failure_summary"),
             "started_at": obj.get("started_at"),
             "completed_at": obj.get("completed_at"),
             "failed_at": obj.get("failed_at"),
-            "failed_final_at": obj.get("failed_final_at"),
             "updated_at": obj.get("updated_at")
         })
         # store additional fields in additional_properties

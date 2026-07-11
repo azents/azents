@@ -1082,8 +1082,7 @@
         "pending": "En attente",
         "running": "En cours",
         "completed": "Terminé",
-        "failed": "Échec",
-        "failed_final": "Ignoré"
+        "failed": "Échec"
       }
     },
     "copy": "Copier",

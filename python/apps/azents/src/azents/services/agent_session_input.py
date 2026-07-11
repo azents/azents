@@ -137,7 +137,7 @@ class AgentSessionInputService:
     ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
         """Store user input as durable InputBuffer row."""
         async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
+            agent_session = await self.agent_session_repository.lock_by_id(
                 session, agent_session_id
             )
             if agent_session is None:
@@ -186,7 +186,7 @@ class AgentSessionInputService:
     ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
         """Store user action input as durable InputBuffer row."""
         async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
+            agent_session = await self.agent_session_repository.lock_by_id(
                 session, agent_session_id
             )
             if agent_session is None:

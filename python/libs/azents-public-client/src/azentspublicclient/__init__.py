@@ -47,7 +47,6 @@ __all__ = [
     "AcceptDeclineResponse",
     "Action",
     "ActionExecutionEventResponse",
-    "ActionExecutionMutationResponse",
     "ActionExecutionProjectionResponse",
     "ActionExecutionResponse",
     "AgentAdminAddRequest",
@@ -347,7 +346,6 @@ from azentspublicclient.exceptions import ApiException as ApiException
 from azentspublicclient.models.accept_decline_response import AcceptDeclineResponse as AcceptDeclineResponse
 from azentspublicclient.models.action import Action as Action
 from azentspublicclient.models.action_execution_event_response import ActionExecutionEventResponse as ActionExecutionEventResponse
-from azentspublicclient.models.action_execution_mutation_response import ActionExecutionMutationResponse as ActionExecutionMutationResponse
 from azentspublicclient.models.action_execution_projection_response import ActionExecutionProjectionResponse as ActionExecutionProjectionResponse
 from azentspublicclient.models.action_execution_response import ActionExecutionResponse as ActionExecutionResponse
 from azentspublicclient.models.agent_admin_add_request import AgentAdminAddRequest as AgentAdminAddRequest

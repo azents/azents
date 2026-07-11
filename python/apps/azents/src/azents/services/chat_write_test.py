@@ -442,7 +442,7 @@ class TestChatWriteService:
         )
 
         assert result.input_buffer is not None
-        assert result.input_buffer.kind == InputBufferKind.EDITED_USER_MESSAGE
+        assert result.input_buffer.kind == InputBufferKind.USER_MESSAGE
         assert result.input_buffer.content == "edited"
         assert result.input_buffer.requested_model_target_label == "Primary"
         assert (

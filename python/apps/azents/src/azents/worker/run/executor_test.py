@@ -46,7 +46,6 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.engine.events.user_messages import make_run_user_message
-from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequest
 from azents.engine.run.emit import Emit, ephemeral
@@ -753,7 +752,6 @@ def _executor(
         live_event_projector=cast(LiveEventProjector, live_event_projector),
         user_stop_finalizer=cast(UserStopFinalizer, object()),
         failed_run_finalizer=cast(Any, failed_run_finalizer),
-        background_registry=cast(BackgroundTaskRegistry, object()),
         builtin_toolkit_provider=cast(BuiltinToolkitProvider, object()),
         claude_rules_toolkit_provider=cast(ClaudeRulesToolkitProvider, object()),
         todo_toolkit_provider=cast(TodoToolkitProvider, object()),

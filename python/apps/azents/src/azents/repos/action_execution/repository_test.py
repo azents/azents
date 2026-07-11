@@ -139,7 +139,6 @@ class TestActionExecutionRepository:
                 action_event_id=action_event.id,
                 action_type="create_git_worktree",
                 status=ActionExecutionStatus.PENDING,
-                attempt=1,
             ),
         )
         same_execution = await repo.create(
@@ -150,7 +149,6 @@ class TestActionExecutionRepository:
                 action_event_id=action_event.id,
                 action_type="create_git_worktree",
                 status=ActionExecutionStatus.PENDING,
-                attempt=1,
             ),
         )
         started = await repo.append_event(
@@ -220,6 +218,5 @@ class TestActionExecutionRepository:
                     action_event_id=event.id,
                     action_type="create_git_worktree",
                     status=ActionExecutionStatus.PENDING,
-                    attempt=1,
                 ),
             )

@@ -593,7 +593,7 @@ class _RestWriteIdempotencyService:
             InputBuffer(
                 id="0123456789abcdef0123456789abcdef",
                 session_id=str(kwargs["session_id"]),
-                kind=InputBufferKind.EDITED_USER_MESSAGE,
+                kind=InputBufferKind.USER_MESSAGE,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 actor_user_id=str(kwargs["user_id"]),

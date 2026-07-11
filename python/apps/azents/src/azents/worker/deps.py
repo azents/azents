@@ -18,7 +18,6 @@ from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_appctx, get_config, get_credential_cipher
 from azents.core.redis import create_redis_client
 from azents.core.s3.deps import get_s3_service
-from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.commands import COMMAND_REGISTRY, CommandHandler
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.builtin_agents import ToolkitAgentsAppendixDedupeStateStore
@@ -59,7 +58,6 @@ from azents.utils.appctx import AppContext
 
 from .config import AgentWorkerConfig
 from .health import HealthServer
-from .input.background_result_injector import BackgroundTaskResultInjector
 
 _DEFAULT_HEALTH_PORT = 8012
 _DEFAULT_FAILED_RUN_MAX_RETRIES = 10
@@ -314,20 +312,3 @@ def get_exchange_file_service(
         s3_service=s3_service,
         config=config,
     )
-
-
-def get_background_registry(
-    broker: Annotated[SessionBroker, Depends(get_worker_broker)],
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
-    input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)],
-) -> BackgroundTaskRegistry:
-    """BackgroundTaskRegistry dependency."""
-    background_result_injector = BackgroundTaskResultInjector(
-        broker=broker,
-        session_manager=session_manager,
-        input_buffer_service=input_buffer_service,
-        agent_session_repository=AgentSessionRepository(),
-    )
-    return BackgroundTaskRegistry(on_complete=background_result_injector.inject)

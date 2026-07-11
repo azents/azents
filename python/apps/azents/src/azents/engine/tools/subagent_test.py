@@ -427,6 +427,14 @@ class _AgentSessionRepository:
         del session
         return self.sessions.get(agent_session_id)
 
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Return one locked AgentSession fixture."""
+        return await self.get_by_id(session, agent_session_id)
+
 
 class _AgentRunRepository:
     """AgentRunRepository fake for subagent tool tests."""

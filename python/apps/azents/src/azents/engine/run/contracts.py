@@ -16,7 +16,6 @@ from azents.core.tools import PublishEventFn, Toolkit
 from azents.engine.context.window import compute_effective_context_window_tokens
 from azents.engine.events.types import Event
 from azents.engine.io.user_input import RunUserMessage
-from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.emit import Emit
 from azents.engine.run.types import (
     BuiltinToolSpec,
@@ -160,16 +159,11 @@ class RunContext:
     :param user_id: User ID; None for unlinked user or system context
     :param run_id: Unique ID for message processing unit
     :param publish_event: Engine event publish callback
-    :param background_registry: Registry tracking Background tool results.
-        When None, even if tool handler returns ``BackgroundHandle``, it is not handled
-        through normal path and is treated as error.
-        (Injected only in main engine path)
     """
 
     user_id: str | None
     run_id: str
     publish_event: PublishEventFn
-    background_registry: BackgroundTaskRegistry | None = None
 
 
 class AgentEngineProtocol(Protocol):

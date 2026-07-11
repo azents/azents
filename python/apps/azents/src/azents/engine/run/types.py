@@ -3,7 +3,6 @@
 Defines tools, token usage, and engine callback types.
 """
 
-import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Protocol, TypeAlias
@@ -89,32 +88,8 @@ class FunctionToolResult(BaseModel):
     metadata: JSONObject = Field(default_factory=dict)
 
 
-@dataclasses.dataclass(frozen=True)
-class BackgroundHandle:
-    """Return type for background-running tool.
-
-    When tool handler returns this type, engine treats it as backgrounding.
-    Engine registers future in BackgroundTaskRegistry and immediately returns
-    initial_message to LLM as tool result. When Future completes, registry
-    on_complete callback injects result into parent session.
-
-    It holds ``asyncio.Task``, so it is not serializable and remains dataclass.
-    """
-
-    task_id: str
-    """Unique identifier in registry (uuid7 hex)."""
-
-    future: asyncio.Task[str | FunctionToolResult]
-    """Actual running task. Result is injected into broker on completion."""
-
-    initial_message: str
-    """Tool result string immediately returned to LLM; JSON recommended."""
-
-
 # Async function taking JSON string args and returning string or ToolResult
-FunctionToolHandler: TypeAlias = Callable[
-    [str], Awaitable[str | FunctionToolResult | BackgroundHandle]
-]
+FunctionToolHandler: TypeAlias = Callable[[str], Awaitable[str | FunctionToolResult]]
 
 
 @dataclasses.dataclass(frozen=True)

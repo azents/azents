@@ -10,12 +10,10 @@ Name | Type | Description | Notes
 **action_event_id** | **str** | Durable action_message event ID | 
 **action_type** | **str** | Action discriminator | 
 **status** | **str** | Execution status | 
-**attempt** | **int** | Current attempt number | 
 **failure_summary** | **str** |  | [optional] 
 **started_at** | **datetime** |  | [optional] 
 **completed_at** | **datetime** |  | [optional] 
 **failed_at** | **datetime** |  | [optional] 
-**failed_final_at** | **datetime** |  | [optional] 
 **updated_at** | **datetime** | Updated time | 
 
 ## Example

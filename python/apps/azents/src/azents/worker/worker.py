@@ -20,11 +20,7 @@ from azents.broker.types import (
     BrokerMessage,
     SessionBroker,
 )
-from azents.engine.run.background import BackgroundTaskRegistry
-from azents.worker.deps import (
-    get_background_registry,
-    get_worker_broker,
-)
+from azents.worker.deps import get_worker_broker
 from azents.worker.session.recovery import StuckSessionRecovery
 from azents.worker.session.runner import SessionRunner
 from azents.worker.session.runner_factory import SessionRunnerFactory
@@ -74,9 +70,6 @@ class AgentWorker:
     ]
     session_runner_factory: Annotated[
         SessionRunnerFactory, Depends(SessionRunnerFactory)
-    ]
-    background_registry: Annotated[
-        BackgroundTaskRegistry, Depends(get_background_registry)
     ]
     shutdown_event: asyncio.Event = dataclasses.field(
         init=False,
@@ -147,12 +140,6 @@ class AgentWorker:
                 *(r.shutdown() for r in runners.values()),
                 return_exceptions=True,
             )
-            # Cancel all running background tasks
-            # (clean up tasks surviving after runner shutdown)
-            try:
-                await self.background_registry.cancel_all()
-            except Exception:
-                logger.exception("Failed to cancel background tasks on shutdown")
             logger.info("Agent worker stopped")
 
     def shutdown(self) -> None:

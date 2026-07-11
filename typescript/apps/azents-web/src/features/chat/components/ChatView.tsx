@@ -224,7 +224,7 @@ function shouldRenderUnanchoredActionExecution(
   return (
     shouldRenderActionExecution(actionExecution) &&
     actionExecution.execution.status !== "completed" &&
-    actionExecution.execution.status !== "failed_final"
+    actionExecution.execution.status !== "failed"
   );
 }
 
@@ -250,7 +250,6 @@ function actionExecutionSortTime(
     execution.started_at ??
     execution.completed_at ??
     execution.failed_at ??
-    execution.failed_final_at ??
     execution.updated_at
   );
 }
@@ -422,10 +421,6 @@ interface ChatViewProps {
   onAuthorizationComplete: (toolkitId: string) => void;
   /** current operation TurnAction execution projections */
   actionExecutions: ActionExecutionProjection[];
-  /** retry a failed action execution */
-  onRetryActionExecution: (actionExecutionId: string) => void;
-  /** discard a failed action execution */
-  onDiscardActionExecution: (actionExecutionId: string) => void;
   /** Workspace panel container output */
   workspacePanel: WorkspacePanelContainerOutput;
   /** current session goal snapshot */
@@ -471,8 +466,6 @@ export function ChatView({
   authorizationRequests,
   onAuthorizationComplete,
   actionExecutions,
-  onRetryActionExecution,
-  onDiscardActionExecution,
   workspacePanel,
   goal,
   todo,
@@ -1207,8 +1200,6 @@ export function ChatView({
                           <ActionExecutionTimelineCard
                             key={actionExecution.execution.id}
                             actionExecution={actionExecution}
-                            onRetry={onRetryActionExecution}
-                            onDiscard={onDiscardActionExecution}
                           />
                         ))}
                       <TurnDivider usage={boundaryControls.usage} />
@@ -1256,8 +1247,6 @@ export function ChatView({
                           <ActionExecutionTimelineCard
                             key={actionExecution.execution.id}
                             actionExecution={actionExecution}
-                            onRetry={onRetryActionExecution}
-                            onDiscard={onDiscardActionExecution}
                           />
                         ))}
                     </Fragment>
@@ -1267,8 +1256,6 @@ export function ChatView({
                     <ActionExecutionTimelineCard
                       key={actionExecution.execution.id}
                       actionExecution={actionExecution}
-                      onRetry={onRetryActionExecution}
-                      onDiscard={onDiscardActionExecution}
                     />
                   ))}
               </Stack>

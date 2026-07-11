@@ -2935,138 +2935,6 @@
         }
       }
     },
-    "/chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry": {
-      "post": {
-        "tags": [
-          "Chat v1"
-        ],
-        "summary": "Retry Action Execution",
-        "description": "Request retry for a failed operation TurnAction execution.",
-        "operationId": "chat_v1_retry_action_execution",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          },
-          {
-            "name": "action_execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Action Execution Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActionExecutionMutationResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard": {
-      "post": {
-        "tags": [
-          "Chat v1"
-        ],
-        "summary": "Discard Action Execution",
-        "description": "Finalize a failed operation TurnAction execution as discarded.",
-        "operationId": "chat_v1_discard_action_execution",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          },
-          {
-            "name": "action_execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Action Execution Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActionExecutionMutationResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup": {
       "post": {
         "tags": [
@@ -8065,26 +7933,6 @@
         "title": "ActionExecutionEventResponse",
         "description": "Action execution event response."
       },
-      "ActionExecutionMutationResponse": {
-        "properties": {
-          "requested": {
-            "type": "boolean",
-            "title": "Requested",
-            "description": "Whether a state transition was requested"
-          },
-          "action_execution": {
-            "$ref": "#/components/schemas/ActionExecutionProjectionResponse",
-            "description": "Updated action execution projection"
-          }
-        },
-        "type": "object",
-        "required": [
-          "requested",
-          "action_execution"
-        ],
-        "title": "ActionExecutionMutationResponse",
-        "description": "Action execution mutation response."
-      },
       "ActionExecutionProjectionResponse": {
         "properties": {
           "execution": {
@@ -8129,11 +7977,6 @@
             "type": "string",
             "title": "Status",
             "description": "Execution status"
-          },
-          "attempt": {
-            "type": "integer",
-            "title": "Attempt",
-            "description": "Current attempt number"
           },
           "failure_summary": {
             "anyOf": [
@@ -8186,19 +8029,6 @@
             "title": "Failed At",
             "description": "Failure time"
           },
-          "failed_final_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failed Final At",
-            "description": "Failed-final time"
-          },
           "updated_at": {
             "type": "string",
             "format": "date-time",
@@ -8212,7 +8042,6 @@
           "action_event_id",
           "action_type",
           "status",
-          "attempt",
           "updated_at"
         ],
         "title": "ActionExecutionResponse",
@@ -12039,7 +11868,6 @@
         "type": "string",
         "enum": [
           "user_message",
-          "background_completion",
           "goal_continuation",
           "goal_updated",
           "action_message",

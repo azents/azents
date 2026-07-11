@@ -76,12 +76,6 @@ class RDBActionExecution(RDBModel):
         default=ActionExecutionStatus.PENDING,
         server_default=ActionExecutionStatus.PENDING.value,
     )
-    attempt: Mapped[int] = mapped_column(
-        sa.Integer,
-        nullable=False,
-        default=1,
-        server_default="1",
-    )
     failure_summary: Mapped[str | None] = mapped_column(
         sa.Text,
         nullable=True,
@@ -98,11 +92,6 @@ class RDBActionExecution(RDBModel):
         default=None,
     )
     failed_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    failed_final_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
         nullable=True,
         default=None,

@@ -15,14 +15,10 @@ class ActionExecution(BaseModel):
     action_event_id: str = Field(description="Durable action_message event ID")
     action_type: str = Field(description="Action discriminator")
     status: ActionExecutionStatus = Field(description="Execution status")
-    attempt: int = Field(description="Current execution attempt")
     failure_summary: str | None = Field(description="User-safe failure summary")
     started_at: datetime.datetime | None = Field(description="Start time")
     completed_at: datetime.datetime | None = Field(description="Completion time")
     failed_at: datetime.datetime | None = Field(description="Failure time")
-    failed_final_at: datetime.datetime | None = Field(
-        description="Discard finalization time"
-    )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 
@@ -35,7 +31,6 @@ class ActionExecutionCreate(BaseModel):
     action_event_id: str = Field(description="Durable action_message event ID")
     action_type: str = Field(description="Action discriminator")
     status: ActionExecutionStatus = Field(description="Initial execution status")
-    attempt: int = Field(description="Initial execution attempt")
 
 
 class ActionExecutionEvent(BaseModel):

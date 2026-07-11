@@ -165,10 +165,6 @@ export interface ChatSessionContainerOutput {
   onAuthorizationComplete: (toolkitId: string) => void;
   /** current operation TurnAction execution projections */
   actionExecutions: ActionExecutionProjection[];
-  /** retry a failed action execution */
-  onRetryActionExecution: (actionExecutionId: string) => void;
-  /** discard a failed action execution */
-  onDiscardActionExecution: (actionExecutionId: string) => void;
   /** latest turn usage */
   tokenUsage: TokenUsageSummary | null;
   /** current session goal snapshot */
@@ -2458,43 +2454,6 @@ export function useChatSessionContainer(
     void applyLatestSnapshot(sessionId);
   }, [applyLatestSnapshot, sessionId]);
 
-  const retryActionExecutionMutation =
-    trpc.chat.retryActionExecution.useMutation();
-  const discardActionExecutionMutation =
-    trpc.chat.discardActionExecution.useMutation();
-
-  const onRetryActionExecution = useCallback(
-    (actionExecutionId: string): void => {
-      if (retryActionExecutionMutation.isPending) {
-        return;
-      }
-      void retryActionExecutionMutation
-        .mutateAsync({
-          agentId: agent.id,
-          sessionId,
-          actionExecutionId,
-        })
-        .then(() => applyLatestSnapshot(sessionId));
-    },
-    [agent.id, applyLatestSnapshot, retryActionExecutionMutation, sessionId],
-  );
-
-  const onDiscardActionExecution = useCallback(
-    (actionExecutionId: string): void => {
-      if (discardActionExecutionMutation.isPending) {
-        return;
-      }
-      void discardActionExecutionMutation
-        .mutateAsync({
-          agentId: agent.id,
-          sessionId,
-          actionExecutionId,
-        })
-        .then(() => applyLatestSnapshot(sessionId));
-    },
-    [agent.id, applyLatestSnapshot, discardActionExecutionMutation, sessionId],
-  );
-
   const onAuthorizationComplete = useCallback((toolkitId: string) => {
     setAuthorizationRequests((prev) =>
       prev.filter((r) => r.toolkitId !== toolkitId),
@@ -2895,8 +2854,6 @@ export function useChatSessionContainer(
     authorizationRequests,
     onAuthorizationComplete,
     actionExecutions: managedLiveState.actionExecutions,
-    onRetryActionExecution,
-    onDiscardActionExecution,
     tokenUsage,
     goal: managedLiveState.goal,
     todo: managedLiveState.todo,

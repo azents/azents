@@ -1,14 +1,8 @@
 import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-const noop = (): void => {};
-
 const meta = {
   component: ActionExecutionTimelineCard,
-  args: {
-    onRetry: noop,
-    onDiscard: noop,
-  },
 } satisfies Meta<typeof ActionExecutionTimelineCard>;
 
 export default meta;
@@ -23,7 +17,6 @@ export const FailedWorktreeAction = {
         action_event_id: "event-action-1",
         action_type: "create_git_worktree",
         status: "failed",
-        attempt: 1,
         failure_summary:
           "Git worktree creation failed because the branch already exists.",
         started_at: "2026-05-19T00:00:00Z",
@@ -64,7 +57,6 @@ export const CompletedWorktreeAction = {
         action_event_id: "event-action-2",
         action_type: "create_git_worktree",
         status: "completed",
-        attempt: 1,
         failure_summary: null,
         started_at: "2026-05-19T00:00:00Z",
         completed_at: "2026-05-19T00:00:04Z",
@@ -94,7 +86,6 @@ export const RunningWorktreeAction = {
         action_event_id: "event-action-3",
         action_type: "create_git_worktree",
         status: "running",
-        attempt: 1,
         failure_summary: null,
         started_at: "2026-05-19T00:00:00Z",
         completed_at: null,

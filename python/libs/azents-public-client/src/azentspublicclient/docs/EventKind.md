@@ -6,8 +6,6 @@ Event transcript event kind.
 
 * `USER_MESSAGE` (value: `'user_message'`)
 
-* `BACKGROUND_COMPLETION` (value: `'background_completion'`)
-
 * `GOAL_CONTINUATION` (value: `'goal_continuation'`)
 
 * `GOAL_UPDATED` (value: `'goal_updated'`)

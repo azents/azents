@@ -100,14 +100,14 @@ def initial_title_from_user_text(text: str) -> str | None:
 
 def initial_title_from_event(event: Event) -> str | None:
     """Create an initial automatic title from a user-like event."""
-    if event.kind not in {EventKind.USER_MESSAGE, EventKind.BACKGROUND_COMPLETION}:
+    if event.kind is not EventKind.USER_MESSAGE:
         return None
     return initial_title_from_user_text(_user_payload_text(event.payload))
 
 
 def title_context_from_initial_prompt(event: Event) -> str:
     """Render the initial user prompt for title generation."""
-    if event.kind not in {EventKind.USER_MESSAGE, EventKind.BACKGROUND_COMPLETION}:
+    if event.kind is not EventKind.USER_MESSAGE:
         return ""
     return _user_payload_text(event.payload)[:_TITLE_CONTEXT_CHAR_LIMIT]
 
@@ -118,7 +118,6 @@ def title_context_from_events(events: Sequence[Event]) -> str:
     for event in events:
         if event.kind in {
             EventKind.USER_MESSAGE,
-            EventKind.BACKGROUND_COMPLETION,
             EventKind.GOAL_CONTINUATION,
         }:
             text = _user_payload_text(event.payload)

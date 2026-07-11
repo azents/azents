@@ -22,7 +22,6 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.types import (
-    BackgroundHandle,
     FunctionTool,
     FunctionToolCancelRequest,
     FunctionToolError,
@@ -249,15 +248,6 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
                 ),
             )
 
-        if isinstance(result, BackgroundHandle):
-            return ClientToolResultPayload(
-                call_id=call.call_id,
-                name=call.name,
-                status="interrupted",
-                output=enforce_tool_output_text_hard_cap(
-                    [OutputTextPart(text=result.initial_message)]
-                ),
-            )
         return _tool_result_payload(call, result)
 
     def request_cancel(self, call: ClientToolCallPayload) -> None:

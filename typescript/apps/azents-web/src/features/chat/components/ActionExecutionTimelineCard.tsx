@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, Box, Button, Group, rem, Stack, Text } from "@mantine/core";
+import { Badge, Box, Group, rem, Stack, Text } from "@mantine/core";
 import { IconAlertCircle, IconCheck, IconLoader2 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import type { ActionExecutionProjection } from "../types";
@@ -8,8 +8,6 @@ import type { ReactNode } from "react";
 
 interface ActionExecutionTimelineCardProps {
   actionExecution: ActionExecutionProjection;
-  onRetry: (actionExecutionId: string) => void;
-  onDiscard: (actionExecutionId: string) => void;
 }
 
 type ActionExecutionEvent = ActionExecutionProjection["events"][number];
@@ -22,8 +20,6 @@ function statusColor(status: string): string {
       return "green";
     case "failed":
       return "red";
-    case "failed_final":
-      return "gray";
     case "running":
       return "blue";
     default:
@@ -36,7 +32,6 @@ function statusIcon(status: string): ReactNode {
     case "completed":
       return <IconCheck size="0.85rem" />;
     case "failed":
-    case "failed_final":
       return <IconAlertCircle size="0.85rem" />;
     default:
       return <IconLoader2 size="0.85rem" />;
@@ -52,8 +47,6 @@ function statusLabel(
       return t("status.completed");
     case "failed":
       return t("status.failed");
-    case "failed_final":
-      return t("status.failed_final");
     case "running":
       return t("status.running");
     default:
@@ -146,7 +139,7 @@ function startingRef(commandArgv: string[] | null): string | null {
 }
 
 function isFailedStatus(status: string): boolean {
-  return status === "failed" || status === "failed_final";
+  return status === "failed";
 }
 
 function resultLabel(
@@ -198,12 +191,9 @@ function TerminalBlock({
 
 export function ActionExecutionTimelineCard({
   actionExecution,
-  onRetry,
-  onDiscard,
 }: ActionExecutionTimelineCardProps): React.ReactElement {
   const t = useTranslations("chat.actionExecution");
   const { execution, events } = actionExecution;
-  const failed = execution.status === "failed";
   const color = statusColor(execution.status);
   const commandEvent = commandStartedEvent(events);
   const commandArgv = commandEvent?.command_argv ?? null;
@@ -238,25 +228,6 @@ export function ActionExecutionTimelineCard({
               {statusLabel(execution.status, t)}
             </Badge>
           </Group>
-          {failed && (
-            <Group gap={rem(4)} wrap="nowrap">
-              <Button
-                size="compact-xs"
-                variant="light"
-                onClick={() => onRetry(execution.id)}
-              >
-                {t("retry")}
-              </Button>
-              <Button
-                size="compact-xs"
-                color="gray"
-                variant="subtle"
-                onClick={() => onDiscard(execution.id)}
-              >
-                {t("discard")}
-              </Button>
-            </Group>
-          )}
         </Group>
 
         {commandArgv !== null ? (

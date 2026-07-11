@@ -74,6 +74,12 @@ class IdleContinuationService:
             for continuation in result.continuations
         ]
         async with self.session_manager() as session:
+            locked = await self.agent_session_repository.lock_by_id(
+                session,
+                message.session_id,
+            )
+            if locked is None:
+                raise ValueError("AgentSession not found")
             enqueue_results = await self.input_buffer_service.enqueue_many(
                 session,
                 continuation_inputs,

@@ -5,7 +5,6 @@ from typing import Protocol
 
 from azents.runtime.coordination.data import (
     JsonValue,
-    RuntimeBackgroundCompletionClaim,
     RuntimeBodyChunk,
     RuntimeBodyChunkRecord,
     RuntimeConnectionKind,
@@ -157,14 +156,6 @@ class RuntimeCoordinationStore(Protocol):
         """Delete operation metadata."""
         ...
 
-    async def list_background_completion_candidates(
-        self,
-        *,
-        limit: int,
-    ) -> list[RuntimeOperationMetadata]:
-        """List final background operations awaiting completion publication."""
-        ...
-
     async def register_connection(
         self,
         *,
@@ -209,39 +200,4 @@ class RuntimeCoordinationStore(Protocol):
         generation: int,
     ) -> bool:
         """Revoke a connection if generation fencing matches."""
-        ...
-
-    async def claim_background_completion(
-        self,
-        *,
-        operation_id: str,
-        claimant_id: str,
-        claimed_at: datetime,
-        ttl_seconds: int,
-    ) -> RuntimeBackgroundCompletionClaim | None:
-        """Claim publishing a background operation completion."""
-        ...
-
-    async def get_background_completion_claim(
-        self,
-        operation_id: str,
-    ) -> RuntimeBackgroundCompletionClaim | None:
-        """Get a background completion claim."""
-        ...
-
-    async def mark_background_completion_published(
-        self,
-        *,
-        operation_id: str,
-        claimant_id: str,
-        published_at: datetime,
-    ) -> RuntimeBackgroundCompletionClaim | None:
-        """Mark a claimed background completion as published."""
-        ...
-
-    async def delete_background_completion_claim(
-        self,
-        operation_id: str,
-    ) -> None:
-        """Delete a background completion claim."""
         ...

@@ -19,7 +19,6 @@ import {
   chatV1DeleteAgentProject,
   chatV1DeleteAgentWorkspacePath,
   chatV1DeleteInputBuffer,
-  chatV1DiscardActionExecution,
   chatV1EditMessage,
   chatV1GetAgentSession,
   chatV1GetAgentSessionContext,
@@ -39,7 +38,6 @@ import {
   chatV1PreviewProjectBrowserManifest,
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
-  chatV1RetryActionExecution,
   chatV1RetryFailedRun,
   chatV1StatAgentWorkspacePath,
   chatV1StopSessionRun,
@@ -558,66 +556,6 @@ export const chatRouter = router({
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",
-        });
-      }
-    }),
-
-  retryActionExecution: publicProcedure
-    .input(
-      z.object({
-        agentId: z.string().min(1),
-        sessionId: z.string().min(1),
-        actionExecutionId: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await chatV1RetryActionExecution({
-          client: ctx.apiClient,
-          path: {
-            agent_id: input.agentId,
-            session_id: input.sessionId,
-            action_execution_id: input.actionExecutionId,
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-          409: "CONFLICT",
-        });
-      }
-    }),
-
-  discardActionExecution: publicProcedure
-    .input(
-      z.object({
-        agentId: z.string().min(1),
-        sessionId: z.string().min(1),
-        actionExecutionId: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await chatV1DiscardActionExecution({
-          client: ctx.apiClient,
-          path: {
-            agent_id: input.agentId,
-            session_id: input.sessionId,
-            action_execution_id: input.actionExecutionId,
-          },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-          409: "CONFLICT",
         });
       }
     }),
