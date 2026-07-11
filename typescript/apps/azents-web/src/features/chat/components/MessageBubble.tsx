@@ -47,10 +47,7 @@ import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { RunRetryCard } from "./RunRetryCard";
 import { ToolCallCard } from "./ToolCallCard";
 import type { ChatMessage } from "../types";
-import type {
-  InferenceRunSummary,
-  RequestedInferenceProfile,
-} from "@azents/public-client";
+import type { RequestedInferenceProfile } from "@azents/public-client";
 
 interface FailedRunRetryAction {
   canRetry: boolean;
@@ -357,7 +354,6 @@ function MessageActionRow({
   createdAt,
   align,
   inferenceProfile = null,
-  inferenceRunSummary = null,
   editable = false,
   onEdit,
 }: {
@@ -365,7 +361,6 @@ function MessageActionRow({
   createdAt: string;
   align: MessageActionAlign;
   inferenceProfile?: RequestedInferenceProfile | null;
-  inferenceRunSummary?: InferenceRunSummary | null;
   editable?: boolean;
   onEdit?: () => void;
 }): React.ReactElement {
@@ -395,7 +390,6 @@ function MessageActionRow({
         <MessageMetadataFooter
           createdAt={createdAt}
           profile={inferenceProfile}
-          summary={inferenceRunSummary}
         />
       )}
       {copyButton}
@@ -444,7 +438,6 @@ function UserTextMessage({
                 createdAt={message.createdAt}
                 align="user"
                 inferenceProfile={message.inferenceProfile}
-                inferenceRunSummary={message.inferenceRunSummary}
                 editable={editable}
                 onEdit={onEdit}
               />
@@ -505,7 +498,6 @@ function UserTextMessage({
                 createdAt={message.createdAt}
                 align="user"
                 inferenceProfile={message.inferenceProfile}
-                inferenceRunSummary={message.inferenceRunSummary}
                 editable={editable}
                 onEdit={onEdit}
               />

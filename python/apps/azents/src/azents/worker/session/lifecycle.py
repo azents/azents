@@ -24,7 +24,7 @@ from azents.engine.events.types import ActiveToolCall, AgentRunState, Event
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.worker.deps import get_worker_broker
 
@@ -52,9 +52,6 @@ class SessionLifecycleService:
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
-    event_transcript_repository: Annotated[
-        EventTranscriptRepository, Depends(EventTranscriptRepository)
-    ]
 
     async def release_session_lock(self, session_id: str) -> None:
         """Release session lock."""
@@ -156,38 +153,6 @@ class SessionLifecycleService:
             if summary is None:
                 raise ValueError("AgentRun not found")
             return summary
-
-    async def list_inference_run_event_projections(
-        self,
-        *,
-        run_id: str,
-    ) -> list[InferenceRunEventProjection]:
-        """Load associated input events with their latest safe run summaries."""
-        async with self.session_manager() as db_session:
-            event_ids = await self.agent_run_repository.list_input_event_ids(
-                db_session,
-                run_id=run_id,
-            )
-            run_repo = self.agent_run_repository
-            summaries = await run_repo.list_latest_inference_run_summaries_by_event_ids(
-                db_session,
-                event_ids=event_ids,
-            )
-            projections: list[InferenceRunEventProjection] = []
-            for event_id in event_ids:
-                event = await self.event_transcript_repository.get_by_id(
-                    db_session,
-                    event_id=event_id,
-                )
-                summary = summaries.get(event_id)
-                if event is not None and summary is not None:
-                    projections.append(
-                        InferenceRunEventProjection(
-                            event=event,
-                            inference_run_summary=summary,
-                        )
-                    )
-            return projections
 
     async def heartbeat_session(self, session_id: str) -> None:
         """Refresh DB heartbeat and Redis owner heartbeat of RUNNING session."""

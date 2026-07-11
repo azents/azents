@@ -43,7 +43,6 @@ import type { ConnectionStatus } from "../types";
 import type {
   AgentResponse,
   AgentSessionResponse,
-  InferenceRunSummary,
   SubagentTreeNodeResponse,
 } from "@azents/public-client";
 
@@ -153,17 +152,6 @@ export function ChatSessionView({
       root,
     };
   }, [subagentTreePanel.state]);
-  const terminalRunSummaries = useMemo<InferenceRunSummary[]>(() => {
-    const byRunId = new Map<string, InferenceRunSummary>();
-    for (const message of output.messages) {
-      const summary = message.inferenceRunSummary;
-      if (summary) {
-        byRunId.set(summary.run_id, summary);
-      }
-    }
-    return [...byRunId.values()];
-  }, [output.messages]);
-
   return (
     <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
       <AgentSessionHeader
@@ -178,7 +166,6 @@ export function ChatSessionView({
             <TokenUsageIndicator
               usage={output.tokenUsage}
               activeRunSummary={output.liveRun?.inferenceRunSummary ?? null}
-              terminalRunSummaries={terminalRunSummaries}
             />
             <ActionIcon
               variant="subtle"

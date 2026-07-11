@@ -489,10 +489,6 @@ class RunExecutor:
                         failure_message=failure.message,
                     )
                 )
-                await self._publish_inference_run_event_projections(
-                    session_id=message.session_id,
-                    run_id=run_id,
-                )
                 await dispatch_event(
                     message.session_id,
                     make_system_error_event(
@@ -596,10 +592,6 @@ class RunExecutor:
                     failure_code=failure_code,
                     failure_message=error_message,
                 )
-                await self._publish_inference_run_event_projections(
-                    session_id=message.session_id,
-                    run_id=run_id,
-                )
                 logger.warning(
                     "Failed to resolve requested inference profile",
                     extra={
@@ -646,10 +638,6 @@ class RunExecutor:
                         )
                     ),
                 )
-            await self._publish_inference_run_event_projections(
-                session_id=message.session_id,
-                run_id=run_id,
-            )
         else:
             raise ValueError("Recoverable AgentRun is already terminal")
         if run_request is None:
@@ -1268,10 +1256,6 @@ class RunExecutor:
                     run_id=run_id,
                     status=terminal_run_status or AgentRunStatus.CANCELLED,
                 )
-                await self._publish_inference_run_event_projections(
-                    session_id=message.session_id,
-                    run_id=run_id,
-                )
             await hook_dispatcher.dispatch_observation(
                 hook_providers,
                 "on_run_end",
@@ -1720,33 +1704,6 @@ class RunExecutor:
                     context_invalidated=False,
                 )
 
-    async def _publish_inference_run_event_projections(
-        self,
-        *,
-        session_id: str,
-        run_id: str,
-    ) -> None:
-        """Refresh associated message provenance for WebSocket clients."""
-        try:
-            projections = (
-                await self.session_lifecycle.list_inference_run_event_projections(
-                    run_id=run_id
-                )
-            )
-            for projection in projections:
-                await self.broadcast.publish(
-                    session_id,
-                    chat_history_event_appended_dump(
-                        projection.event,
-                        inference_run_summary=projection.inference_run_summary,
-                    ),
-                )
-        except Exception:
-            logger.exception(
-                "Failed to broadcast inference run event projections",
-                extra={"session_id": session_id, "run_id": run_id},
-            )
-
     async def _promote_input_buffers(
         self,
         *,
@@ -1800,11 +1757,6 @@ class RunExecutor:
             logger.exception(
                 "Failed to broadcast promoted input buffer events",
                 extra={"session_id": session_id},
-            )
-        if active_run_id is not None:
-            await self._publish_inference_run_event_projections(
-                session_id=session_id,
-                run_id=active_run_id,
             )
         return promoted
 

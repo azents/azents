@@ -15,8 +15,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-10
-spec_version: 23
+last_verified_at: 2026-07-11
+spec_version: 24
 ---
 
 # Chat Session Resync
@@ -78,6 +78,8 @@ sequenceDiagram
 
 Client does not query history/live REST baseline before `subscribed` ack. If health check ack timeout or socket close occurs, switch to ticket refresh/reconnect path.
 
+`history_event_appended` is append-only and idempotent by event ID. A duplicate delivery preserves the existing timeline item and its position. Run lifecycle or provenance changes do not republish an existing history event.
+
 ## 5. REST History Contract
 
 `GET /chat/v1/sessions/{session_id}/history` returns only persisted events.
@@ -119,7 +121,7 @@ Response fields:
 
 `snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.action_executions` is the current nonterminal operation TurnAction projection list.
 
-History events and live/pending projections preserve requested profile intent. Durable human/action inputs may also include one associated allowlisted run summary. Pending or unresolved runs must display unknown physical resolution rather than deriving it from Composer or Agent defaults. Resolution failures expose the typed safe code/message and omit resolved-only fields.
+History events and live/pending event projections preserve immutable requested profile intent. They do not embed associated AgentRun summaries or change when run provenance changes. The dedicated live Run projection carries the current run's allowlisted inference summary. Unknown physical resolution is never derived from Composer or Agent defaults.
 
 Action-execution retry and discard mutation responses return the updated action execution projection immediately. When the mutation schedules more runner work, the backend also sends a normal broker wake-up, and subsequent progress is reconciled through the same `action_execution_updated` WebSocket action and `/live.action_executions` baseline. Clients must upsert the returned projection by execution id and then keep accepting newer projection updates from WebSocket or REST baseline reload.
 
@@ -173,8 +175,8 @@ The local draft stores message, selected action, target label, and nullable effo
 - Operation TurnAction execution is live progress, not model response pending state. It does not by itself replace the composer with a stop control or block new input.
 - When `run.retry` is present, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history; the normal model dots indicator remains below the card when the run phase is `waiting_for_model` or `streaming_model`.
 - Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
-- Human and actionable input rows show compact requested target/effort provenance and the associated run's safe resolved summary when available.
-- Token/context usage binds only when `usage.runId` exactly matches the current live run or a terminal associated-run summary; it is never attributed to the newest message or current Composer selection by position.
+- Human and actionable input rows show their immutable requested target/effort intent. Historical rows do not resolve or embed the associated run's physical model.
+- Token/context usage binds only when `usage.runId` exactly matches the current live run summary; it is never attributed to a historical event, the newest message, or the current Composer selection by position.
 - Follow is active only when scroll viewport is at bottom or in iOS bottom bounce area.
 - When Follow is active, new timeline item and streaming update automatically scroll to bottom.
 - If scroll viewport leaves bottom/bounce area, immediately stop follow; subsequent new timeline items are rendered immediately but do not auto-scroll, and “new message” chip is displayed.
@@ -329,6 +331,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-11** — v24. Kept resolved inference provenance run-owned, removed event-level summaries, and made duplicate history append delivery position-preserving.
 - **2026-07-10** — v23. Added Composer profile restoration, requested/resolved provenance rendering, safe unresolved/failure behavior, and exact run-scoped usage attribution.
 - **2026-07-10** — v22. Treated both sent and received agent messages as recent tree activity so the most recently contacted sibling appears first.
 - **2026-07-10** — v21. Prioritized recent agent message senders within each sibling group and added periodic, focus, and lifecycle-event tree refresh.

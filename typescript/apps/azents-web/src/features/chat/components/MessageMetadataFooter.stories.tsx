@@ -1,34 +1,17 @@
 import { Group, Paper, rem } from "@mantine/core";
-import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
+import { expect, fireEvent, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   MessageMetadataFooter,
   MessageMetadataSurface,
 } from "./MessageMetadataFooter";
-import type { InferenceRunSummary } from "@azents/public-client";
+import type { RequestedInferenceProfile } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-const resolvedSummary = {
-  run_id: "run-metadata-story",
-  run_index: 1,
-  status: "completed",
-  requested_profile: {
-    model_target_label: "Quality",
-    reasoning_effort: "high",
-  },
-  source: "explicit_input",
-  resolved_profile: {
-    provider: "openai",
-    model_identifier: "gpt-5.5",
-    model_display_name: "GPT 5.5",
-    model_developer: "openai",
-  },
-  resolved_reasoning_effort: "high",
-  effective_context_window_tokens: 128_000,
-  effective_auto_compaction_threshold_tokens: 115_200,
-  failure_code: null,
-  failure_message: null,
-} satisfies InferenceRunSummary;
+const requestedProfile = {
+  model_target_label: "Quality",
+  reasoning_effort: "high",
+} satisfies RequestedInferenceProfile;
 
 const meta = {
   component: MessageMetadataFooter,
@@ -57,16 +40,9 @@ type Story = StoryObj<typeof meta>;
 
 export const TimestampOnly: Story = {};
 
-export const AwaitingResolution: Story = {
+export const RequestedProfile: Story = {
   args: {
-    profile: resolvedSummary.requested_profile,
-  },
-};
-
-export const ResolvedModel: Story = {
-  args: {
-    profile: resolvedSummary.requested_profile,
-    summary: resolvedSummary,
+    profile: requestedProfile,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -99,8 +75,6 @@ export const ResolvedModel: Story = {
     });
     await fireEvent.click(trigger);
     const page = within(canvasElement.ownerDocument.body);
-    const actualModel = await page.findByText("GPT 5.5");
-    await waitFor(() => expect(actualModel).toBeVisible());
     await expect(page.getByText("high")).toBeVisible();
     await expect(page.queryByText("Model label")).not.toBeInTheDocument();
     await expect(page.queryByText("Actual model")).not.toBeInTheDocument();
@@ -125,8 +99,8 @@ export const ResolvedModel: Story = {
       boxShadow: "none",
       padding: "5px 10px",
     });
-    await expect(getComputedStyle(page.getByText("GPT 5.5")).fontSize).toBe(
-      "14px",
-    );
+    await expect(
+      getComputedStyle(within(popover).getByText("Quality")).fontSize,
+    ).toBe("14px");
   },
 };

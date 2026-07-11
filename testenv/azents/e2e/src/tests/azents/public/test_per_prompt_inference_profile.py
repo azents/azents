@@ -226,8 +226,8 @@ def _wait_for_session_idle(
     agent_id: str,
     session_id: str,
     timeout: float = 120,
-) -> None:
-    """Wait for the authoritative session run state to become idle."""
+) -> dict[str, object]:
+    """Wait for idle and return the authoritative session projection."""
     deadline = time.monotonic() + timeout
     last_state: object = None
     while time.monotonic() < deadline:
@@ -239,9 +239,39 @@ def _wait_for_session_idle(
         payload = _response_object(response)
         last_state = payload.get("run_state")
         if last_state == "idle":
-            return
+            return payload
         time.sleep(0.5)
     raise TimeoutError(f"Session did not become idle: {last_state!r}")
+
+
+def _wait_for_session_profile(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    target: str,
+    effort: str | None,
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Wait for the authoritative session projection to persist a profile."""
+    deadline = time.monotonic() + timeout
+    last_profile: tuple[object, object] = (None, None)
+    while time.monotonic() < deadline:
+        response = requests.get(
+            f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
+            headers=_headers(token),
+            timeout=10,
+        )
+        payload = _response_object(response)
+        last_profile = (
+            payload.get("last_model_target_label"),
+            payload.get("last_reasoning_effort"),
+        )
+        if last_profile == (target, effort):
+            return payload
+        time.sleep(0.5)
+    raise TimeoutError(f"Session did not persist profile: {last_profile!r}")
 
 
 def _history(server_url: str, token: str, session_id: str) -> list[dict[str, object]]:
@@ -291,29 +321,44 @@ def _input_event(
     return None
 
 
-def _wait_for_summary(
+def _wait_for_input_event(
     *,
     server_url: str,
     token: str,
     session_id: str,
     message: str,
-    status: str,
     timeout: float = 120,
 ) -> dict[str, object]:
-    """Wait for a user event with the requested run-summary status."""
+    """Wait for a durable input event without event-level run provenance."""
     deadline = time.monotonic() + timeout
-    last_event: dict[str, object] | None = None
     while time.monotonic() < deadline:
         event = _input_event(_history(server_url, token, session_id), message)
-        last_event = event
         if event is not None:
-            raw_summary = event.get("inference_run_summary")
-            if raw_summary is not None:
-                summary = _object(raw_summary, label="inference run summary")
-                if summary.get("status") == status:
-                    return summary
+            assert "inference_run_summary" not in event
+            return event
         time.sleep(0.5)
-    raise TimeoutError(f"Run summary did not reach {status}: {last_event!r}")
+    raise TimeoutError(f"Input event was not observed: {message!r}")
+
+
+def _wait_for_mock_models(mock_openai_url: str, *model_ids: str) -> str:
+    """Wait until the mock provider journal contains every expected model."""
+
+    def complete_journal() -> str | None:
+        journal = json.dumps(
+            requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
+        )
+        if all(model_id in journal for model_id in model_ids):
+            return journal
+        return None
+
+    journal = wait_until(
+        complete_journal,
+        timeout=120,
+        interval=0.5,
+        message="Expected model requests were not observed",
+    )
+    assert journal is not None
+    return journal
 
 
 def _subagent_tree(
@@ -425,23 +470,12 @@ class TestPerPromptInferenceProfile:
             target="Quality",
             effort="high",
         )
-        quality = _wait_for_summary(
+        _wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
             message=_QUALITY_MESSAGE,
-            status="completed",
         )
-        assert quality["requested_profile"] == {
-            "model_target_label": "Quality",
-            "reasoning_effort": "high",
-        }
-        quality_resolved = _object(
-            quality.get("resolved_profile"), label="Quality resolved profile"
-        )
-        assert quality_resolved["model_identifier"] == "gpt-5.5"
-        assert quality["resolved_reasoning_effort"] == "high"
-        assert quality["effective_context_window_tokens"] == 64_000
 
         _write_profile(
             server_url=azents_public_server_url,
@@ -452,25 +486,14 @@ class TestPerPromptInferenceProfile:
             target="Fast",
             effort=None,
         )
-        fast = _wait_for_summary(
+        _wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
             message=_FAST_MESSAGE,
-            status="completed",
         )
-        fast_resolved = _object(
-            fast.get("resolved_profile"), label="Fast resolved profile"
-        )
-        assert fast_resolved["model_identifier"] == "gpt-5.5-mini"
-        assert fast["effective_context_window_tokens"] == 64_000
-        assert fast["run_id"] != quality["run_id"]
 
-        journal = json.dumps(
-            requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
-        )
-        assert "gpt-5.5" in journal
-        assert "gpt-5.5-mini" in journal
+        _wait_for_mock_models(mock_openai_url, "gpt-5.5", "gpt-5.5-mini")
 
         unsupported_message = "Unsupported effort must fail safely"
         _write_profile(
@@ -482,16 +505,20 @@ class TestPerPromptInferenceProfile:
             target="Fast",
             effort="high",
         )
-        failed = _wait_for_summary(
+        _wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
             message=unsupported_message,
-            status="failed",
         )
-        assert failed["failure_code"] == "reasoning_effort_unsupported"
-        assert isinstance(failed["failure_message"], str)
-        assert failed["resolved_profile"] is None
+        session = _wait_for_session_idle(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        assert session["last_model_target_label"] == "Fast"
+        assert session["last_reasoning_effort"] is None
 
     def test_subagent_spawn_override_continuation(
         self,
@@ -527,30 +554,25 @@ class TestPerPromptInferenceProfile:
         child_session_id = child.get("agent_session_id")
         if not isinstance(child_session_id, str):
             raise AssertionError(f"Child node has no AgentSession ID: {child!r}")
-        first_child = _wait_for_summary(
+        _wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=child_session_id,
             message=_SPAWN_OVERRIDE_TASK,
-            status="completed",
         )
-        assert first_child["requested_profile"] == {
-            "model_target_label": "Fast",
-            "reasoning_effort": None,
-        }
-        assert first_child["source"] == "spawn_override"
-        first_resolved = _object(
-            first_child.get("resolved_profile"),
-            label="spawn override resolved profile",
+        _wait_for_session_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=child_session_id,
+            target="Fast",
+            effort=None,
         )
-        assert first_resolved["model_identifier"] == "gpt-5.5-mini"
-        assert first_child["resolved_reasoning_effort"] is None
-        _wait_for_summary(
+        _wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=root_session_id,
             message=_SPAWN_OVERRIDE_MESSAGE,
-            status="completed",
         )
         _wait_for_session_idle(
             server_url=azents_public_server_url,
@@ -568,23 +590,20 @@ class TestPerPromptInferenceProfile:
             target="Quality",
             effort="high",
         )
-        followup = _wait_for_summary(
+        _wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=child_session_id,
             message=_FOLLOWUP_TASK,
-            status="completed",
         )
-        assert followup["requested_profile"] == {
-            "model_target_label": "Fast",
-            "reasoning_effort": None,
-        }
-        assert followup["source"] == "session_last_used"
-        followup_resolved = _object(
-            followup.get("resolved_profile"),
-            label="follow-up resolved profile",
+        _wait_for_session_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=child_session_id,
+            target="Fast",
+            effort=None,
         )
-        assert followup_resolved["model_identifier"] == "gpt-5.5-mini"
 
     @pytest.mark.parametrize(
         ("message", "rejected_name", "call_id"),

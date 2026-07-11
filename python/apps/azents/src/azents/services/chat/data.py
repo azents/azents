@@ -22,7 +22,6 @@ class PaginatedEvents:
     """Paginated event result."""
 
     items: list[Event]
-    inference_run_summaries: dict[str, InferenceRunSummary]
     has_more: bool
     has_newer: bool = False
 
@@ -73,7 +72,6 @@ class ChatLiveStateSnapshot:
 
     partial_history_events: list[Event]
     input_buffer_events: list[Event]
-    inference_run_summaries: dict[str, InferenceRunSummary]
     run: ChatLiveRunState | None = None
     session_run_state: AgentSessionRunState = AgentSessionRunState.IDLE
     todo: TodoStateSnapshot | None = None

@@ -21,10 +21,7 @@ import {
   useState,
 } from "react";
 import classes from "./MessageMetadataFooter.module.css";
-import type {
-  InferenceRunSummary,
-  RequestedInferenceProfile,
-} from "@azents/public-client";
+import type { RequestedInferenceProfile } from "@azents/public-client";
 
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
 
@@ -39,7 +36,6 @@ interface MessageMetadataVisibilityContextValue {
 interface MessageMetadataFooterProps {
   createdAt: string;
   profile?: RequestedInferenceProfile | null;
-  summary?: InferenceRunSummary | null;
 }
 
 const MessageMetadataVisibilityContext =
@@ -169,10 +165,8 @@ function MessageTimestamp({
 
 function ModelMetadata({
   profile,
-  summary,
 }: {
   profile: RequestedInferenceProfile;
-  summary: InferenceRunSummary | null;
 }): React.ReactElement {
   const t = useTranslations("chat.inferenceProvenance");
   const visibility = useContext(MessageMetadataVisibilityContext);
@@ -181,9 +175,7 @@ function ModelMetadata({
   const opened = isTouchPrimary
     ? visibility?.activeOverlay === "model"
     : desktopOpened;
-  const requestedProfile = summary?.requested_profile ?? profile;
-  const actualModel = summary?.resolved_profile?.model_display_name ?? "—";
-  const effort = requestedProfile.reasoning_effort ?? t("defaultEffort");
+  const effort = profile.reasoning_effort ?? t("defaultEffort");
 
   function setOpened(nextOpened: boolean): void {
     if (isTouchPrimary && visibility !== null) {
@@ -206,7 +198,7 @@ function ModelMetadata({
       <Popover.Target>
         <UnstyledButton
           aria-label={t("detailsAriaLabel", {
-            target: requestedProfile.model_target_label,
+            target: profile.model_target_label,
           })}
           onClick={() => setOpened(!opened)}
         >
@@ -217,7 +209,7 @@ function ModelMetadata({
             data-message-metadata="model"
             style={{ display: "block" }}
           >
-            {requestedProfile.model_target_label}
+            {profile.model_target_label}
           </Text>
         </UnstyledButton>
       </Popover.Target>
@@ -234,13 +226,7 @@ function ModelMetadata({
       >
         <Group gap={rem(4)} wrap="nowrap">
           <Text size="sm" c="white" truncate>
-            {requestedProfile.model_target_label}
-          </Text>
-          <Text component="span" size="sm" c="gray.5" aria-hidden="true">
-            ·
-          </Text>
-          <Text size="sm" c="white" truncate>
-            {actualModel}
+            {profile.model_target_label}
           </Text>
           <Text component="span" size="sm" c="gray.5" aria-hidden="true">
             ·
@@ -317,7 +303,6 @@ export function MessageMetadataSurface({
 export function MessageMetadataFooter({
   createdAt,
   profile = null,
-  summary = null,
 }: MessageMetadataFooterProps): React.ReactElement {
   return (
     <Group
@@ -338,7 +323,7 @@ export function MessageMetadataFooter({
           >
             ·
           </Text>
-          <ModelMetadata profile={profile} summary={summary} />
+          <ModelMetadata profile={profile} />
         </>
       )}
     </Group>

@@ -21,7 +21,7 @@ from azents.core.enums import (
     InputBufferKind,
 )
 from azents.engine.events.action_messages import CreateGitWorktreeAction
-from azents.engine.events.types import AgentRunState, Event, TurnMarkerPayload
+from azents.engine.events.types import AgentRunState, Event
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
 from azents.rdb.deps import get_session_manager
@@ -943,33 +943,9 @@ class ChatSessionService:
                 before=before,
                 after=after,
             )
-            run_repo = self.agent_run_repository
-            inference_run_summaries = (
-                await run_repo.list_latest_inference_run_summaries_by_event_ids(
-                    session,
-                    event_ids=[event.id for event in items],
-                )
-            )
-            usage_run_ids_by_event_id = {
-                event.id: event.payload.run_id
-                for event in items
-                if isinstance(event.payload, TurnMarkerPayload)
-            }
-            usage_run_summaries = await run_repo.list_inference_run_summaries_by_ids(
-                session,
-                run_ids=list(usage_run_ids_by_event_id.values()),
-            )
-            inference_run_summaries.update(
-                {
-                    event_id: summary
-                    for event_id, run_id in usage_run_ids_by_event_id.items()
-                    if (summary := usage_run_summaries.get(run_id)) is not None
-                }
-            )
             return Success(
                 PaginatedEvents(
                     items=items,
-                    inference_run_summaries=inference_run_summaries,
                     has_more=has_more,
                     has_newer=has_newer,
                 )
@@ -1041,20 +1017,10 @@ class ChatSessionService:
                 if projection.execution.status not in terminal_action_statuses
             ]
             run_repo = self.agent_run_repository
-            inference_run_summaries = (
-                await run_repo.list_latest_inference_run_summaries_by_event_ids(
-                    session,
-                    event_ids=[
-                        event.id
-                        for event in [*partial_history_events, *input_buffer_events]
-                    ],
-                )
-            )
             return Success(
                 ChatLiveStateSnapshot(
                     partial_history_events=partial_history_events,
                     input_buffer_events=input_buffer_events,
-                    inference_run_summaries=inference_run_summaries,
                     run=None
                     if run is None
                     else ChatLiveRunState(
