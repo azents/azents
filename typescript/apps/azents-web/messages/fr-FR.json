@@ -1280,8 +1280,7 @@
       "openPreview": "Prévisualiser {name}",
       "downloadFile": "Télécharger {name}",
       "closePreview": "Fermer l’aperçu",
-      "zoomOut": "Réduire",
-      "zoomIn": "Agrandir",
+      "openOriginal": "Ouvrir l’image originale",
       "previewUnavailable": "Aperçu indisponible",
       "downloadToOpen": "Téléchargez le fichier pour l’ouvrir dans une application compatible.",
       "errorReason": {

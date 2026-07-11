@@ -790,6 +790,8 @@ def _attachment_text_preview(
     availability: Literal["available", "expired", "unavailable"],
 ) -> str | None:
     """Create metadata-only context preview for attachment."""
+    if file.preview_summary is not None:
+        return file.preview_summary
     if file.media_type.startswith("image/"):
         return None
     return (

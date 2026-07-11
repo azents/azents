@@ -77,6 +77,12 @@ ExchangeFileError = (
 )
 _PREVIEW_THUMBNAIL_MAX_SIZE = 512
 _PREVIEW_THUMBNAIL_MEDIA_TYPE = "image/jpeg"
+_MAX_TEXT_PREVIEW_CHARS = 2000
+_TEXT_PREVIEW_MEDIA_TYPES = {
+    "application/javascript",
+    "application/json",
+    "application/xml",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -107,6 +113,19 @@ def _sanitize_display_filename(filename: str | None) -> str:
     if sanitized:
         return sanitized[:255]
     return "upload"
+
+
+def _make_text_preview(body: bytes, media_type: str) -> str | None:
+    """Create a bounded UTF-8 preview for supported text attachments."""
+    supported = (
+        media_type.startswith("text/") or media_type in _TEXT_PREVIEW_MEDIA_TYPES
+    )
+    if not supported:
+        return None
+    text = body.decode("utf-8", errors="replace")
+    if len(text) <= _MAX_TEXT_PREVIEW_CHARS:
+        return text
+    return text[:_MAX_TEXT_PREVIEW_CHARS] + "\n... (truncated)"
 
 
 def _make_preview_thumbnail(body: bytes, media_type: str) -> _PreviewThumbnail | None:
@@ -388,6 +407,7 @@ class ExchangeFileService:
                 created_by_user_id=user_id,
                 expires_at=expires_at,
                 preview_title=safe_filename,
+                preview_summary=_make_text_preview(body, media_type),
                 preview_generated_at=now,
             ),
         )

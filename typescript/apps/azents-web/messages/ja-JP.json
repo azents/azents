@@ -1280,8 +1280,7 @@
       "openPreview": "{name}をプレビュー",
       "downloadFile": "{name}をダウンロード",
       "closePreview": "プレビューを閉じる",
-      "zoomOut": "縮小",
-      "zoomIn": "拡大",
+      "openOriginal": "元の画像を開く",
       "previewUnavailable": "プレビューに対応していないファイルです",
       "downloadToOpen": "ファイルをダウンロードして対応アプリで開いてください。",
       "errorReason": {
