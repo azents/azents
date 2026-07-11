@@ -10999,17 +10999,6 @@
             "format": "date-time",
             "title": "Created At",
             "description": "Created at"
-          },
-          "inference_run_summary": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/InferenceRunSummary"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Latest associated inference run provenance"
           }
         },
         "type": "object",

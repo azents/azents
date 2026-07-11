@@ -242,11 +242,8 @@ function requestedInferenceProfileFromValue(
 function eventRequestedInferenceProfile(
   event: ChatEventResponse,
 ): RequestedInferenceProfile | null {
-  return (
-    event.inference_run_summary?.requested_profile ??
-    requestedInferenceProfileFromValue(
-      event.payload.requested_inference_profile,
-    )
+  return requestedInferenceProfileFromValue(
+    event.payload.requested_inference_profile,
   );
 }
 
@@ -959,7 +956,6 @@ function mapEvents(
             status: "complete",
             metadata: eventMetadata(event),
             inferenceProfile: eventRequestedInferenceProfile(event),
-            inferenceRunSummary: event.inference_run_summary ?? null,
             ...(attachments.length > 0 ? { attachments } : {}),
           },
         ];
@@ -980,7 +976,6 @@ function mapEvents(
             status: "complete",
             metadata: eventMetadata(event),
             inferenceProfile: eventRequestedInferenceProfile(event),
-            inferenceRunSummary: event.inference_run_summary ?? null,
           },
         ];
       }
@@ -1119,7 +1114,6 @@ function mapEvents(
             createdAt: event.created_at,
             status: "complete",
             usage,
-            inferenceRunSummary: event.inference_run_summary ?? null,
           },
         ];
       }
@@ -2171,14 +2165,19 @@ export function useChatSessionContainer(
           setLatestHumanInferenceProfile(appendedInferenceIntent.profile);
         }
         const actionExecution = actionExecutionResultFromEvent(responseEvent);
-        setHistoryMessages((prev) =>
-          mapEvents([responseEvent], {
-            initialMessages: prev.filter(
-              (message) => message.metadata?.event_id !== responseEvent.id,
-            ),
+        setHistoryMessages((prev) => {
+          if (
+            prev.some(
+              (message) => message.metadata?.event_id === responseEvent.id,
+            )
+          ) {
+            return prev;
+          }
+          return mapEvents([responseEvent], {
+            initialMessages: prev,
             renderIncompleteToolCalls: true,
-          }),
-        );
+          });
+        });
         setManagedLiveState((prev) => ({
           ...prev,
           partialHistory: removePartialHistoryCounterpart(

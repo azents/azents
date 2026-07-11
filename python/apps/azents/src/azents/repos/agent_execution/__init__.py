@@ -799,68 +799,6 @@ class AgentRunRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
-    async def get_latest_by_input_event_id(
-        self,
-        session: AsyncSession,
-        *,
-        event_id: str,
-    ) -> AgentRunState | None:
-        """Fetch the latest run associated with one input event."""
-        rdb = await session.scalar(
-            sa.select(RDBAgentRun)
-            .join(
-                RDBAgentRunInputEvent,
-                RDBAgentRunInputEvent.agent_run_id == RDBAgentRun.id,
-            )
-            .where(RDBAgentRunInputEvent.event_id == event_id)
-            .order_by(RDBAgentRun.run_index.desc(), RDBAgentRun.created_at.desc())
-            .limit(1)
-        )
-        if rdb is None:
-            return None
-        return self._build(rdb)
-
-    async def get_latest_inference_run_summary_by_event_id(
-        self,
-        session: AsyncSession,
-        *,
-        event_id: str,
-    ) -> InferenceRunSummary | None:
-        """Project the latest associated run through the safe public allowlist."""
-        run = await self.get_latest_by_input_event_id(session, event_id=event_id)
-        if run is None:
-            return None
-        return self.build_inference_run_summary(run)
-
-    async def list_latest_inference_run_summaries_by_event_ids(
-        self,
-        session: AsyncSession,
-        *,
-        event_ids: Sequence[str],
-    ) -> dict[str, InferenceRunSummary]:
-        """Project each event's latest associated run through the public allowlist."""
-        unique_event_ids = list(dict.fromkeys(event_ids))
-        if not unique_event_ids:
-            return {}
-        result = await session.execute(
-            sa.select(RDBAgentRunInputEvent.event_id, RDBAgentRun)
-            .join(
-                RDBAgentRun,
-                RDBAgentRun.id == RDBAgentRunInputEvent.agent_run_id,
-            )
-            .where(RDBAgentRunInputEvent.event_id.in_(unique_event_ids))
-            .order_by(
-                RDBAgentRunInputEvent.event_id.asc(),
-                RDBAgentRun.run_index.desc(),
-                RDBAgentRun.created_at.desc(),
-            )
-        )
-        summaries: dict[str, InferenceRunSummary] = {}
-        for event_id, rdb in result.all():
-            if event_id not in summaries:
-                summaries[event_id] = self.build_inference_run_summary(self._build(rdb))
-        return summaries
-
     @staticmethod
     def build_inference_run_summary(run: AgentRunState) -> InferenceRunSummary:
         """Build the safe public summary for one run."""
@@ -956,24 +894,6 @@ class AgentRunRepository:
         if run is None:
             return None
         return self.build_inference_run_summary(run)
-
-    async def list_inference_run_summaries_by_ids(
-        self,
-        session: AsyncSession,
-        *,
-        run_ids: Sequence[str],
-    ) -> dict[str, InferenceRunSummary]:
-        """Fetch allowlisted summaries keyed by AgentRun ID."""
-        unique_run_ids = list(dict.fromkeys(run_ids))
-        if not unique_run_ids:
-            return {}
-        result = await session.scalars(
-            sa.select(RDBAgentRun).where(RDBAgentRun.id.in_(unique_run_ids))
-        )
-        return {
-            rdb.id: self.build_inference_run_summary(self._build(rdb))
-            for rdb in result.all()
-        }
 
     async def get_failed_by_terminal_result_event_id(
         self,

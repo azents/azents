@@ -566,34 +566,12 @@ class TestEventExecutionRepositories:
             rdb_session,
             event_session.id,
         )
-        summary = await repo.get_latest_inference_run_summary_by_event_id(
-            rdb_session,
-            event_id=event.id,
-        )
-        summaries = await repo.list_latest_inference_run_summaries_by_event_ids(
-            rdb_session,
-            event_ids=[event.id, second_event.id, event.id],
-        )
-        summaries_by_run_id = await repo.list_inference_run_summaries_by_ids(
-            rdb_session,
-            run_ids=[pending.id, active.id, pending.id],
-        )
-
         assert activated.status == AgentRunStatus.RUNNING
         assert activated.started_at == resolved_at
         assert activated.resolved_model_selection == _model_selection()
         assert refreshed_session is not None
         assert refreshed_session.last_model_target_label == "Quality"
         assert refreshed_session.last_reasoning_effort == ModelReasoningEffort.HIGH
-        assert summary is not None
-        assert summary.run_id == pending.id
-        assert summary.resolved_profile is not None
-        assert summary.resolved_profile.model_identifier == "resolved-model"
-        assert summaries[event.id].run_id == pending.id
-        assert summaries[second_event.id].run_id == pending.id
-        assert summaries_by_run_id[pending.id].run_id == pending.id
-        assert summaries_by_run_id[active.id].status == AgentRunStatus.COMPLETED
-        assert "integration" not in summary.model_dump(mode="json")
 
     @pytest.mark.parametrize(
         "source",

@@ -34,7 +34,7 @@ _8 documents_
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-11 | 15 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-10 | 23 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-11 | 24 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-10 | 19 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-11 | 13 |
@@ -176,9 +176,10 @@ _15 documents_
 - [ADR-0121: Atomically Activate the Resolved Run and Session Profile](adr/0121-atomic-run-profile-activation.md)
 - [ADR-0122: Project Compact Inference Summaries with User Messages](adr/0122-inline-user-message-inference-summary.md)
 - [ADR-0123: Require an Explicit Reasoning Effort in User Input](adr/0123-require-explicit-reasoning-effort-in-user-input.md)
+- [ADR-0124: Keep Resolved Inference Provenance Run-Owned](adr/0124-keep-inference-provenance-run-owned.md)
 - [ADR-0124: Allow Explicit Inference Profiles When Spawning Subagents](adr/0124-subagent-spawn-inference-profile-overrides.md)
 
-_127 documents_
+_128 documents_
 
 ## Issues (Bug Tracking)
 
@@ -211,4 +212,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 397
+- Total documents: 400

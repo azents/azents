@@ -388,7 +388,6 @@ class _RestWriteChatService:
             ChatLiveStateSnapshot(
                 partial_history_events=[],
                 input_buffer_events=[self.event],
-                inference_run_summaries={},
                 run=None,
             )
         )
@@ -771,9 +770,6 @@ class _EventService:
         return Success(
             PaginatedEvents(
                 items=[self.event],
-                inference_run_summaries={
-                    self.event.id: self.inference_run_summary,
-                },
                 has_more=False,
                 has_newer=False,
             )
@@ -792,9 +788,6 @@ class _EventService:
             ChatLiveStateSnapshot(
                 partial_history_events=[self.event],
                 input_buffer_events=[],
-                inference_run_summaries={
-                    self.event.id: self.inference_run_summary,
-                },
                 run=ChatLiveRunState(
                     run_id="2123456789abcdef0123456789abcdef",
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
@@ -1432,22 +1425,6 @@ class TestEventRoutes:
                     "native_format": None,
                     "schema_version": "1",
                     "created_at": "2026-06-04T00:00:00Z",
-                    "inference_run_summary": {
-                        "run_id": "2123456789abcdef0123456789abcdef",
-                        "run_index": 2,
-                        "status": "running",
-                        "requested_profile": {
-                            "model_target_label": "reasoning",
-                            "reasoning_effort": "high",
-                        },
-                        "source": "explicit_input",
-                        "resolved_profile": None,
-                        "resolved_reasoning_effort": "high",
-                        "effective_context_window_tokens": 128000,
-                        "effective_auto_compaction_threshold_tokens": 115200,
-                        "failure_code": None,
-                        "failure_message": None,
-                    },
                 }
             ],
             "has_more": False,

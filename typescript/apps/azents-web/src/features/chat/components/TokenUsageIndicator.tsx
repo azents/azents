@@ -19,7 +19,6 @@ import type { InferenceRunSummary } from "@azents/public-client";
 interface TokenUsageIndicatorProps {
   usage: TokenUsageSummary | null;
   activeRunSummary: InferenceRunSummary | null;
-  terminalRunSummaries: InferenceRunSummary[];
 }
 
 function formatNumber(value: number | null): string {
@@ -53,42 +52,26 @@ function progressColor(percent: number | null): string {
   return "var(--mantine-color-teal-6)";
 }
 
-function isTerminalSummary(summary: InferenceRunSummary): boolean {
-  return summary.status !== "pending" && summary.status !== "running";
-}
-
 function resolveUsageSummary(
   usage: TokenUsageSummary | null,
   activeRunSummary: InferenceRunSummary | null,
-  terminalRunSummaries: InferenceRunSummary[],
 ): InferenceRunSummary | null {
   const runId = usage?.runId ?? null;
   if (runId === null) {
     return null;
   }
-  if (activeRunSummary?.run_id === runId) {
-    return activeRunSummary;
-  }
-  return (
-    terminalRunSummaries.find(
-      (summary) =>
-        summary.run_id === runId &&
-        isTerminalSummary(summary) &&
-        summary.resolved_profile !== null,
-    ) ?? null
-  );
+  return activeRunSummary?.run_id === runId ? activeRunSummary : null;
 }
 
 export const TokenUsageIndicator = memo(function TokenUsageIndicator({
   usage,
   activeRunSummary,
-  terminalRunSummaries,
 }: TokenUsageIndicatorProps): React.ReactElement {
   const t = useTranslations("chat.tokenUsage");
   const [opened, setOpened] = useState(false);
   const runSummary = useMemo(
-    () => resolveUsageSummary(usage, activeRunSummary, terminalRunSummaries),
-    [activeRunSummary, terminalRunSummaries, usage],
+    () => resolveUsageSummary(usage, activeRunSummary),
+    [activeRunSummary, usage],
   );
   const resolvedProfile = runSummary?.resolved_profile ?? null;
   const contextWindow = runSummary?.effective_context_window_tokens ?? null;

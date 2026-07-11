@@ -743,8 +743,6 @@ export interface ChatMessage {
   metadata?: Record<string, string> | null;
   /** requested profile for a run-producing human input */
   inferenceProfile?: RequestedInferenceProfile | null;
-  /** latest allowlisted run provenance associated with this input */
-  inferenceRunSummary?: InferenceRunSummary | null;
   /** failed-run recovery metadata for terminal failed-run errors */
   failedRunFailure?: FailedRunFailureMetadata | null;
 }

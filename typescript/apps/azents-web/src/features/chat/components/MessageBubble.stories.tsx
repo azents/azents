@@ -10,7 +10,6 @@ import {
   textAttachment,
 } from "../story-fixtures";
 import { MessageBubble } from "./MessageBubble";
-import type { InferenceRunSummary } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
@@ -27,28 +26,6 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
-
-const resolvedRunSummary = {
-  run_id: "run-profile-story",
-  run_index: 3,
-  status: "completed",
-  requested_profile: {
-    model_target_label: "Quality",
-    reasoning_effort: "high",
-  },
-  source: "explicit_input",
-  resolved_profile: {
-    provider: "openai",
-    model_identifier: "gpt-5.5",
-    model_display_name: "GPT 5.5",
-    model_developer: "openai",
-  },
-  resolved_reasoning_effort: "high",
-  effective_context_window_tokens: 128_000,
-  effective_auto_compaction_threshold_tokens: 115_200,
-  failure_code: null,
-  failure_message: null,
-} satisfies InferenceRunSummary;
 
 const pngAttachment = {
   ...imageAttachment,
@@ -94,56 +71,15 @@ export const UserText = {
   },
 } satisfies Story;
 
-export const UserAwaitingActivation = {
+export const UserRequestedProfile = {
   args: {
     message: createChatMessage({
-      id: "user-awaiting-profile-activation",
+      id: "user-requested-profile",
       role: "user",
       content: "Use the quality model for this analysis.",
       inferenceProfile: {
         model_target_label: "Quality",
         reasoning_effort: "high",
-      },
-      inferenceRunSummary: null,
-    }),
-  },
-} satisfies Story;
-
-export const UserResolvedProfile = {
-  args: {
-    message: createChatMessage({
-      id: "user-resolved-profile",
-      role: "user",
-      content: "Use the quality model for this analysis.",
-      inferenceProfile: resolvedRunSummary.requested_profile,
-      inferenceRunSummary: resolvedRunSummary,
-    }),
-  },
-} satisfies Story;
-
-export const UserProfileResolutionFailure = {
-  args: {
-    message: createChatMessage({
-      id: "user-profile-resolution-failure",
-      role: "user",
-      content: "Use the archived target for this analysis.",
-      inferenceProfile: {
-        model_target_label: "Archived",
-        reasoning_effort: null,
-      },
-      inferenceRunSummary: {
-        ...resolvedRunSummary,
-        status: "failed",
-        requested_profile: {
-          model_target_label: "Archived",
-          reasoning_effort: null,
-        },
-        resolved_profile: null,
-        resolved_reasoning_effort: null,
-        effective_context_window_tokens: null,
-        effective_auto_compaction_threshold_tokens: null,
-        failure_code: "model_target_not_found",
-        failure_message: "The requested model is no longer available.",
       },
     }),
   },

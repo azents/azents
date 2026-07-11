@@ -26,13 +26,6 @@ const activeRunSummary = {
   failure_message: null,
 } satisfies InferenceRunSummary;
 
-const terminalRunSummary = {
-  ...activeRunSummary,
-  run_id: "run-terminal",
-  run_index: 1,
-  status: "completed",
-} satisfies InferenceRunSummary;
-
 const meta = {
   component: TokenUsageIndicator,
   decorators: [
@@ -44,7 +37,6 @@ const meta = {
   ],
   args: {
     activeRunSummary,
-    terminalRunSummaries: [terminalRunSummary],
     usage: {
       runId: "run-active",
       promptTokens: 47_043,
@@ -63,7 +55,7 @@ type Story = StoryObj<typeof meta>;
 
 export const ActiveRun = {} satisfies Story;
 
-export const AssociatedTerminalRun = {
+export const HistoricalRunUnavailable = {
   args: {
     activeRunSummary: null,
     usage: {
@@ -81,7 +73,6 @@ export const AssociatedTerminalRun = {
 export const UnknownProvenance = {
   args: {
     activeRunSummary: null,
-    terminalRunSummaries: [],
     usage: {
       runId: "run-unknown",
       promptTokens: 12_000,
@@ -98,6 +89,5 @@ export const NoUsageYet = {
   args: {
     usage: null,
     activeRunSummary: null,
-    terminalRunSummaries: [],
   },
 } satisfies Story;
