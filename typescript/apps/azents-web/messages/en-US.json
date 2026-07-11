@@ -1282,6 +1282,8 @@
       "closePreview": "Close preview",
       "zoomOut": "Zoom out",
       "zoomIn": "Zoom in",
+      "previewUnavailable": "Preview unavailable",
+      "downloadToOpen": "Download the file to open it in a supported app.",
       "errorReason": {
         "fileTooLarge": "File too large",
         "invalidRequest": "Invalid file",

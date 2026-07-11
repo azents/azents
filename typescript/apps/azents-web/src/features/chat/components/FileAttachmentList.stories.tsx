@@ -1,3 +1,4 @@
+import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   binaryAttachment,
@@ -28,6 +29,25 @@ type Story = StoryObj<typeof meta>;
 export const MixedFiles = {
   args: {
     files: [imageAttachment, textAttachment, binaryAttachment],
+  },
+} satisfies Story;
+
+export const GenericFileCardInteraction = {
+  args: {
+    files: [binaryAttachment],
+    presentation: "compact",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const card = canvas.getByRole("button", { name: /preview/i });
+    const download = canvas.getByRole("link", { name: /download/i });
+
+    await expect(download).toHaveAttribute(
+      "href",
+      expect.stringContaining("/download"),
+    );
+    await userEvent.click(card);
+    await expect(within(document.body).getByRole("dialog")).toBeVisible();
   },
 } satisfies Story;
 
