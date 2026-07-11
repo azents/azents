@@ -1510,6 +1510,7 @@
     "composerProfile": {
       "model": "モデル",
       "effortLabel": "推論レベル",
+      "done": "完了",
       "send": "送信"
     },
     "inferenceProvenance": {

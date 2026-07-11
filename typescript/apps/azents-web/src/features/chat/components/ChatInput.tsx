@@ -1399,11 +1399,33 @@ export const ChatInput = memo(function ChatInput({
                   <Drawer
                     opened={profilePickerOpened}
                     onClose={() => setProfilePickerOpened(false)}
-                    title={t("composerProfile.model")}
+                    title={
+                      <Group
+                        justify="space-between"
+                        gap="md"
+                        wrap="nowrap"
+                        w="100%"
+                      >
+                        <Text component="span" inherit>
+                          {t("composerProfile.model")}
+                        </Text>
+                        <Button
+                          variant="subtle"
+                          color="blue"
+                          size="compact-sm"
+                          px="xs"
+                          onClick={() => setProfilePickerOpened(false)}
+                        >
+                          {t("composerProfile.done")}
+                        </Button>
+                      </Group>
+                    }
                     position="bottom"
                     size={`min(80dvh, ${rem(720)})`}
+                    withCloseButton={false}
                     keepMounted
                     styles={{
+                      title: { flex: 1 },
                       content: {
                         borderTopLeftRadius: rem(12),
                         borderTopRightRadius: rem(12),
