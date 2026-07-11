@@ -29,7 +29,7 @@ The canonical order is `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max
 
 When a model advertises no explicit effort levels, hide the control and use internal `null`. An empty effort list rejects every non-null effort; it is not unrestricted support. Runtime and persistence may continue to represent provider/model default as `null`, but normal user input must not expose `Default` as a selectable option when explicit efforts are available.
 
-Derive normalized effort lists from LiteLLM's canonical provider model metadata type. `none`, `minimal`, `low`, `xhigh`, and `max` depend on their corresponding capability flags. OpenAI GPT-5-family models additionally use LiteLLM's baseline `medium` and `high` contract and opt-out `low` semantics; other reasoning providers receive only explicitly asserted levels. Preserve deterministic canonical ordering.
+Derive normalized effort lists from LiteLLM's canonical provider model metadata type. Every reasoning-capable model receives the baseline `low`, `medium`, and `high` levels unless LiteLLM explicitly disables `low`. The optional `none`, `minimal`, `xhigh`, and `max` levels depend on their corresponding capability flags. Preserve deterministic canonical ordering.
 
 Store the Agent's configured effort with its default model settings, present it as `Default reasoning effort` beside the default model control, and use it to initialize a new session when supported. Workspace model defaults do not store a separate reasoning effort.
 
