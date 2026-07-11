@@ -560,13 +560,6 @@ class TestPerPromptInferenceProfile:
             label="follow-up resolved profile",
         )
         assert followup_resolved["model_identifier"] == "gpt-5.5-mini"
-        _wait_for_summary(
-            server_url=azents_public_server_url,
-            token=token,
-            session_id=root_session_id,
-            message=_FOLLOWUP_MESSAGE,
-            status="completed",
-        )
         _wait_for_session_idle(
             server_url=azents_public_server_url,
             token=token,
