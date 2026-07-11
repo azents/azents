@@ -1277,6 +1277,11 @@
       "expired": "Expiré",
       "unavailable": "Indisponible",
       "thumbnailExpired": "Image indisponible",
+      "openPreview": "Prévisualiser {name}",
+      "downloadFile": "Télécharger {name}",
+      "closePreview": "Fermer l’aperçu",
+      "zoomOut": "Réduire",
+      "zoomIn": "Agrandir",
       "errorReason": {
         "fileTooLarge": "Fichier trop volumineux",
         "invalidRequest": "Fichier invalide",

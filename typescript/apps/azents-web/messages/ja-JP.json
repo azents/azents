@@ -1277,6 +1277,11 @@
       "expired": "期限切れ",
       "unavailable": "利用不可",
       "thumbnailExpired": "画像を読み込めません",
+      "openPreview": "{name}をプレビュー",
+      "downloadFile": "{name}をダウンロード",
+      "closePreview": "プレビューを閉じる",
+      "zoomOut": "縮小",
+      "zoomIn": "拡大",
       "errorReason": {
         "fileTooLarge": "ファイルが大きすぎます",
         "invalidRequest": "無効なファイルです",

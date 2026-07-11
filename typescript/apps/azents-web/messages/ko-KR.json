@@ -1277,6 +1277,11 @@
       "expired": "만료됨",
       "unavailable": "사용 불가",
       "thumbnailExpired": "이미지를 불러올 수 없습니다",
+      "openPreview": "{name} 미리보기",
+      "downloadFile": "{name} 다운로드",
+      "closePreview": "미리보기 닫기",
+      "zoomOut": "축소",
+      "zoomIn": "확대",
       "errorReason": {
         "fileTooLarge": "파일이 너무 큽니다",
         "invalidRequest": "잘못된 파일입니다",

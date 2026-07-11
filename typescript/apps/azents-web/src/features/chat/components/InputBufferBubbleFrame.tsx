@@ -89,7 +89,9 @@ export function InputBufferBubbleFrame({
       style={{ minWidth: 0 }}
     >
       <Box maw="75%" style={{ minWidth: 0 }}>
-        {files.length > 0 && <FileAttachmentList files={files} />}
+        {files.length > 0 && (
+          <FileAttachmentList files={files} presentation="compact" />
+        )}
         <Paper
           px="sm"
           py="2xs"
