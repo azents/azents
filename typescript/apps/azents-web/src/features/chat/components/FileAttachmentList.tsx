@@ -237,9 +237,11 @@ function AttachmentTile({
           }
         : {})}
       aria-label={
-        canActivate
+        selection !== null
           ? t("openPreview", { name: displayName })
-          : `${displayName} ${statusLabel ?? ""}`.trim()
+          : downloadUrl !== null
+            ? t("downloadFile", { name: displayName })
+            : `${displayName} ${statusLabel ?? ""}`.trim()
       }
       onKeyDown={handleKeyDown}
       style={{
@@ -390,11 +392,14 @@ function AgentImageGallery({
       }}
     >
       {visibleFiles.map((file, index) => {
-        const selection = previewSelection(file);
-        const downloadUrl = buildDownloadUrl(file);
         const displayName = file.name ?? extractFilename(file.uri);
         const isCountCell =
           hiddenCount > 0 && index === visibleFiles.length - 1;
+        const activationFile = isCountCell ? (files.at(4) ?? file) : file;
+        const selection = previewSelection(activationFile);
+        const downloadUrl = buildDownloadUrl(activationFile);
+        const activationDisplayName =
+          activationFile.name ?? extractFilename(activationFile.uri);
         const activate = (): void => {
           if (selection !== null) {
             onPreview(selection);
@@ -407,7 +412,7 @@ function AgentImageGallery({
             key={file.uri}
             role="button"
             tabIndex={0}
-            aria-label={displayName}
+            aria-label={activationDisplayName}
             style={{
               ...(!isSingleImage
                 ? { aspectRatio: "1 / 1" }
