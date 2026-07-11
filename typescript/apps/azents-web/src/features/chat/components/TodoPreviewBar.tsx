@@ -674,12 +674,12 @@ export function TodoPreviewBar({
         aria-label={openLabel}
         style={{
           display: "block",
-          left: "var(--mantine-radius-default)",
+          left: rem(12),
           minWidth: 0,
           overflow: "hidden",
           position: "absolute",
           bottom: "100%",
-          right: "var(--mantine-radius-default)",
+          right: rem(12),
           zIndex: 1,
         }}
       >
@@ -694,8 +694,8 @@ export function TodoPreviewBar({
             overflow: "hidden",
             border: `${rem(1)} solid var(--mantine-color-default-border)`,
             borderBottom: 0,
-            borderTopLeftRadius: rem(6),
-            borderTopRightRadius: rem(6),
+            borderTopLeftRadius: rem(8),
+            borderTopRightRadius: rem(8),
             background: "var(--mantine-color-body)",
           }}
         >
