@@ -77,6 +77,7 @@ from azents.services.input_buffer import (
     InputBufferService,
     PendingInputInferenceProfile,
     PromotedInputBuffers,
+    TurnEffect,
 )
 from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import SessionGitWorktreeService
@@ -1523,6 +1524,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     )
     promoted_batches = [
         PromotedInputBuffers(
+            turn_effect=TurnEffect.FAILED,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1541,6 +1543,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             deduped_count=0,
         ),
         PromotedInputBuffers(
+            turn_effect=TurnEffect.ELIGIBLE,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[user_message],
@@ -1556,6 +1559,17 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             deleted_buffer_ids=["buffer-user"],
             claimed_count=1,
             inserted_count=1,
+            deduped_count=0,
+        ),
+        PromotedInputBuffers(
+            turn_effect=TurnEffect.NEUTRAL,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=[],
+            claimed_count=0,
+            inserted_count=0,
             deduped_count=0,
         ),
     ]
@@ -1596,6 +1610,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         model="gpt-test",
         required_inference_profile=None,
         active_run_id=None,
+        initial_turn_eligible=False,
         poll_fn=None,
         process_actions=True,
     )

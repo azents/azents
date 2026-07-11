@@ -121,7 +121,11 @@ from azents.services.chat.data import (
     ChatLiveRunState,
 )
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
+from azents.services.input_buffer import (
+    InputBufferService,
+    PromotedInputBuffers,
+    fold_turn_eligibility,
+)
 from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
@@ -376,6 +380,22 @@ class RunExecutor:
                 ),
                 source=InferenceProfileSource.SESSION_LAST_USED,
             )
+            if command is None:
+                pending_input = (
+                    await self.input_buffer_service.peek_pending_inference_profile(
+                        message.session_id
+                    )
+                )
+                if (
+                    pending_input.requested_inference_profile is not None
+                    and pending_input.requested_inference_profile
+                    != selected_profile.profile
+                ):
+                    selected_profile = RequestedProfileSelection(
+                        profile=pending_input.requested_inference_profile,
+                        source=InferenceProfileSource.EXPLICIT_INPUT,
+                    )
+                    turn_inference_state = None
             agent_run = recoverable_run
         else:
             explicit_profile: RequestedInferenceProfile | None = None
@@ -432,9 +452,18 @@ class RunExecutor:
                 model=None,
                 required_inference_profile=selected_profile.profile,
                 active_run_id=run_id,
+                initial_turn_eligible=(
+                    recoverable_run is not None
+                    and recoverable_run.status == AgentRunStatus.RUNNING
+                ),
                 poll_fn=None,
                 process_actions=True,
             )
+            if initial_input.requested_inference_profile is not None:
+                selected_profile = RequestedProfileSelection(
+                    profile=initial_input.requested_inference_profile,
+                    source=InferenceProfileSource.EXPLICIT_INPUT,
+                )
             if created_run and (
                 initial_input.context_invalidated
                 or not initial_input.has_actionable_work
@@ -1453,6 +1482,7 @@ class RunExecutor:
                 model=model,
                 required_inference_profile=requested_inference_profile,
                 active_run_id=run_id,
+                initial_turn_eligible=True,
                 poll_fn=poll_fn,
                 process_actions=True,
             )
@@ -1477,6 +1507,7 @@ class RunExecutor:
         model: str | None,
         required_inference_profile: RequestedInferenceProfile | None,
         active_run_id: str | None,
+        initial_turn_eligible: bool,
         poll_fn: PollMessages | None,
         process_actions: bool,
     ) -> RunInputPollResult:
@@ -1485,7 +1516,22 @@ class RunExecutor:
         promoted_event_ids: list[str] = []
         selected_profile = required_inference_profile
         context_invalidated = False
+        turn_eligible = initial_turn_eligible
         while True:
+            pending_profile = (
+                await self.input_buffer_service.peek_pending_inference_profile(
+                    session_id
+                )
+            )
+            if (
+                initial_turn_eligible
+                and pending_profile.exists
+                and pending_profile.requested_inference_profile is not None
+                and selected_profile is not None
+                and pending_profile.requested_inference_profile != selected_profile
+            ):
+                context_invalidated = not user_messages
+                break
             promoted = await self._promote_input_buffers(
                 session_id=session_id,
                 model=model,
@@ -1497,6 +1543,10 @@ class RunExecutor:
                 break
             if promoted.requested_inference_profile is not None:
                 selected_profile = promoted.requested_inference_profile
+            turn_eligible = fold_turn_eligibility(
+                turn_eligible,
+                promoted.turn_effect,
+            )
             promoted_event_ids.extend(promoted.promoted_event_ids)
             user_messages.extend(promoted.user_messages)
             action_result = (
@@ -1511,7 +1561,7 @@ class RunExecutor:
             context_invalidated = (
                 context_invalidated or action_result.context_invalidated
             )
-            if context_invalidated or user_messages:
+            if context_invalidated:
                 break
 
         queued_result = (
@@ -1521,9 +1571,9 @@ class RunExecutor:
         )
         user_messages.extend(queued_result.user_messages)
         context_invalidated = context_invalidated or queued_result.context_invalidated
-        has_actionable_work = bool(
-            user_messages
-        ) or await self._has_actionable_model_input(session_id)
+        has_actionable_work = turn_eligible and (
+            bool(user_messages) or await self._has_actionable_model_input(session_id)
+        )
         return RunInputPollResult(
             user_messages=user_messages,
             requested_inference_profile=selected_profile,

@@ -101,10 +101,19 @@ class GoalStateStore:
     async def load(self, agent_id: str, session_id: str) -> GoalState:
         """Fetch session goal state."""
         async with self._session_manager() as session:
-            handle = await self._make_handle(session, agent_id, session_id)
-            if handle is None:
-                return GoalState()
-            return await handle.load(default_factory=GoalState)
+            return await self.load_in_session(session, agent_id, session_id)
+
+    async def load_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+    ) -> GoalState:
+        """Fetch session goal state inside the caller's transaction."""
+        handle = await self._make_handle(session, agent_id, session_id)
+        if handle is None:
+            return GoalState()
+        return await handle.load(default_factory=GoalState)
 
     async def update(
         self,
@@ -114,18 +123,33 @@ class GoalStateStore:
     ) -> GoalState:
         """Update session goal state with optimistic retry."""
         async with self._session_manager() as session:
-            handle = await self._make_handle(session, agent_id, session_id)
-            if handle is None:
-                return GoalState()
-            saved_state: GoalState | None = None
+            return await self.update_in_session(
+                session,
+                agent_id,
+                session_id,
+                mutator,
+            )
 
-            def capture(current: GoalState) -> GoalState:
-                nonlocal saved_state
-                saved_state = mutator(current)
-                return saved_state
+    async def update_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        mutator: Callable[[GoalState], GoalState],
+    ) -> GoalState:
+        """Update session goal state inside the caller's transaction."""
+        handle = await self._make_handle(session, agent_id, session_id)
+        if handle is None:
+            return GoalState()
+        saved_state: GoalState | None = None
 
-            await handle.update(default_factory=GoalState, mutator=capture)
-            return saved_state or GoalState()
+        def capture(current: GoalState) -> GoalState:
+            nonlocal saved_state
+            saved_state = mutator(current)
+            return saved_state
+
+        await handle.update(default_factory=GoalState, mutator=capture)
+        return saved_state or GoalState()
 
     async def append_briefing_event(
         self,

@@ -149,24 +149,21 @@ class InputBufferRepository:
         result = await session.execute(query)
         return [self._build(rdb) for rdb in result.scalars()]
 
-    async def claim_for_flush(
+    async def lock_oldest_by_session_id(
         self,
         session: AsyncSession,
         session_id: str,
-        *,
-        limit: int | None = None,
-    ) -> list[InputBuffer]:
-        """Claim InputBuffer rows for flush with ordered row lock."""
-        query = (
+    ) -> InputBuffer | None:
+        """Lock and return the oldest accepted InputBuffer for a Session."""
+        result = await session.execute(
             sa.select(RDBInputBuffer)
             .where(RDBInputBuffer.session_id == session_id)
             .order_by(RDBInputBuffer.id.asc())
-            .with_for_update(skip_locked=True)
+            .limit(1)
+            .with_for_update()
         )
-        if limit is not None:
-            query = query.limit(limit)
-        result = await session.execute(query)
-        return [self._build(rdb) for rdb in result.scalars()]
+        rdb = result.scalar_one_or_none()
+        return self._build(rdb) if rdb is not None else None
 
     async def delete_claimed_by_ids(
         self,

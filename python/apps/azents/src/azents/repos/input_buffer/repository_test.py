@@ -285,14 +285,15 @@ class TestInputBufferRepository:
             ),
         )
 
-        claimed = await repo.claim_for_flush(rdb_session, session_id, limit=1)
+        claimed = await repo.lock_oldest_by_session_id(rdb_session, session_id)
+        assert claimed is not None
         deleted_count = await repo.delete_claimed_by_ids(
             rdb_session,
             session_id,
-            [item.id for item in claimed],
+            [claimed.id],
         )
 
-        assert [item.id for item in claimed] == sorted([first.id, second.id])[:1]
+        assert claimed.id == sorted([first.id, second.id])[0]
         assert deleted_count == 1
         remaining = await repo.list_by_session_id(rdb_session, session_id)
         assert [item.id for item in remaining] == sorted([first.id, second.id])[1:]
