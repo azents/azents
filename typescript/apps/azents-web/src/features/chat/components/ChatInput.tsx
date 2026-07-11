@@ -1260,7 +1260,7 @@ export const ChatInput = memo(function ChatInput({
                     p="md"
                     style={{
                       borderRadius: rem(12),
-                      maxHeight: `min(70dvh, ${rem(560)})`,
+                      maxHeight: `min(70dvh, ${rem(440)})`,
                       overflowY: "auto",
                     }}
                   >
