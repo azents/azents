@@ -657,8 +657,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent follow-up after override",
-        "hasToolResult": false
+        "userMessage": "Subagent follow-up after override"
       },
       "response": {
         "toolCalls": [
@@ -695,8 +694,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent reject full-history override",
-        "hasToolResult": false
+        "userMessage": "Subagent reject full-history override"
       },
       "response": {
         "toolCalls": [
@@ -726,8 +724,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent reject unknown target override",
-        "hasToolResult": false
+        "userMessage": "Subagent reject unknown target override"
       },
       "response": {
         "toolCalls": [
