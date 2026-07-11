@@ -3,10 +3,8 @@
 import {
   Box,
   Group,
-  Paper,
   Popover,
   rem,
-  Stack,
   Text,
   Tooltip,
   UnstyledButton,
@@ -31,8 +29,10 @@ import type {
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
 
 interface MessageMetadataVisibilityContextValue {
+  activeOverlay: "model" | "timestamp" | null;
   isTouchPrimary: boolean;
   visible: boolean;
+  setActiveOverlay: (overlay: "model" | "timestamp" | null) => void;
   showForTouch: () => void;
 }
 
@@ -100,19 +100,12 @@ function MessageTimestamp({
   const t = useTranslations("chat");
   const visibility = useContext(MessageMetadataVisibilityContext);
   const isTouchPrimary = visibility?.isTouchPrimary ?? false;
-  const [tooltipOpened, setTooltipOpened] = useState(false);
   const [relativeTimeTick, setRelativeTimeTick] = useState(0);
   const relativeTime = formatRelativeTime(createdAt, t);
   const fullDateTime = useMemo(
     () => formatFullDateTime(createdAt, locale),
     [createdAt, locale],
   );
-
-  useEffect(() => {
-    if (!visibility?.visible) {
-      setTooltipOpened(false);
-    }
-  }, [visibility?.visible]);
 
   useEffect(() => {
     const delay = getNextRelativeTimeDelay(createdAt);
@@ -130,7 +123,9 @@ function MessageTimestamp({
     event.preventDefault();
     event.stopPropagation();
     visibility.showForTouch();
-    setTooltipOpened((opened) => !opened);
+    visibility.setActiveOverlay(
+      visibility.activeOverlay === "timestamp" ? null : "timestamp",
+    );
   }
 
   const timestamp = (
@@ -140,6 +135,7 @@ function MessageTimestamp({
       size="xs"
       c="dimmed"
       aria-label={fullDateTime}
+      data-message-metadata="timestamp"
       tabIndex={0}
       onPointerDown={handlePointerDown}
     >
@@ -152,7 +148,7 @@ function MessageTimestamp({
       <Tooltip
         label={fullDateTime}
         withArrow
-        opened={tooltipOpened && visibility?.visible}
+        opened={visibility?.activeOverlay === "timestamp" && visibility.visible}
         transitionProps={{ transition: "fade", duration: FADE_DURATION_MS }}
       >
         {timestamp}
@@ -171,25 +167,6 @@ function MessageTimestamp({
   );
 }
 
-function MetadataRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}): React.ReactElement {
-  return (
-    <Group justify="space-between" gap="lg" wrap="nowrap" align="flex-start">
-      <Text size="xs" c="dimmed">
-        {label}
-      </Text>
-      <Text size="xs" fw={500} ta="right" style={{ overflowWrap: "anywhere" }}>
-        {value}
-      </Text>
-    </Group>
-  );
-}
-
 function ModelMetadata({
   profile,
   summary,
@@ -198,10 +175,23 @@ function ModelMetadata({
   summary: InferenceRunSummary | null;
 }): React.ReactElement {
   const t = useTranslations("chat.inferenceProvenance");
-  const [opened, setOpened] = useState(false);
+  const visibility = useContext(MessageMetadataVisibilityContext);
+  const [desktopOpened, setDesktopOpened] = useState(false);
+  const isTouchPrimary = visibility?.isTouchPrimary ?? false;
+  const opened = isTouchPrimary
+    ? visibility?.activeOverlay === "model"
+    : desktopOpened;
   const requestedProfile = summary?.requested_profile ?? profile;
   const actualModel = summary?.resolved_profile?.model_display_name ?? "—";
   const effort = requestedProfile.reasoning_effort ?? t("defaultEffort");
+
+  function setOpened(nextOpened: boolean): void {
+    if (isTouchPrimary && visibility !== null) {
+      visibility.setActiveOverlay(nextOpened ? "model" : null);
+      return;
+    }
+    setDesktopOpened(nextOpened);
+  }
 
   return (
     <Popover
@@ -210,46 +200,55 @@ function ModelMetadata({
       position="bottom-end"
       width="auto"
       shadow="none"
+      withArrow
       withinPortal
     >
       <Popover.Target>
         <UnstyledButton
-          className={classes.modelTrigger}
           aria-label={t("detailsAriaLabel", {
             target: requestedProfile.model_target_label,
           })}
-          onClick={() => setOpened((current) => !current)}
+          onClick={() => setOpened(!opened)}
         >
-          <Text component="span" size="xs" c="dimmed">
+          <Text
+            component="span"
+            size="xs"
+            c="dimmed"
+            data-message-metadata="model"
+            style={{ display: "block" }}
+          >
             {requestedProfile.model_target_label}
           </Text>
         </UnstyledButton>
       </Popover.Target>
       <Popover.Dropdown
-        p={0}
+        px="xs"
+        py={rem(5)}
+        bg="gray.9"
+        c="white"
         style={{
-          background: "transparent",
           border: 0,
-          boxShadow: "none",
-          overflow: "visible",
+          maxWidth: `min(80vw, ${rem(360)})`,
         }}
+        data-message-metadata-popover
       >
-        <Paper
-          withBorder
-          radius={rem(12)}
-          shadow="md"
-          p={rem(10)}
-          className={classes.popoverDropdown}
-        >
-          <Stack gap="xs">
-            <MetadataRow
-              label={t("modelLabel")}
-              value={requestedProfile.model_target_label}
-            />
-            <MetadataRow label={t("actualModel")} value={actualModel} />
-            <MetadataRow label={t("reasoningEffort")} value={effort} />
-          </Stack>
-        </Paper>
+        <Group gap={rem(4)} wrap="nowrap">
+          <Text size="sm" c="white" truncate>
+            {requestedProfile.model_target_label}
+          </Text>
+          <Text component="span" size="sm" c="gray.5" aria-hidden="true">
+            ·
+          </Text>
+          <Text size="sm" c="white" truncate>
+            {actualModel}
+          </Text>
+          <Text component="span" size="sm" c="gray.5" aria-hidden="true">
+            ·
+          </Text>
+          <Text size="sm" c="white">
+            {effort}
+          </Text>
+        </Group>
       </Popover.Dropdown>
     </Popover>
   );
@@ -261,6 +260,9 @@ export function MessageMetadataSurface({
   children: React.ReactNode;
 }): React.ReactElement {
   const isTouchPrimary = useMediaQuery("(hover: none)");
+  const [activeOverlay, setActiveOverlay] = useState<
+    "model" | "timestamp" | null
+  >(null);
   const [visible, setVisible] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -282,14 +284,21 @@ export function MessageMetadataSurface({
     }
     setVisible(true);
     hideTimerRef.current = setTimeout(() => {
+      setActiveOverlay(null);
       setVisible(false);
       hideTimerRef.current = null;
     }, 5000);
   }, [isTouchPrimary]);
 
   const value = useMemo(
-    () => ({ isTouchPrimary, visible, showForTouch }),
-    [isTouchPrimary, showForTouch, visible],
+    () => ({
+      activeOverlay,
+      isTouchPrimary,
+      visible,
+      setActiveOverlay,
+      showForTouch,
+    }),
+    [activeOverlay, isTouchPrimary, showForTouch, visible],
   );
 
   return (
@@ -311,11 +320,22 @@ export function MessageMetadataFooter({
   summary = null,
 }: MessageMetadataFooterProps): React.ReactElement {
   return (
-    <Group gap={rem(4)} wrap="nowrap" className={classes.metadata}>
+    <Group
+      gap={rem(4)}
+      wrap="nowrap"
+      align="baseline"
+      className={classes.metadata}
+    >
       <MessageTimestamp createdAt={createdAt} />
       {profile !== null && (
         <>
-          <Text component="span" size="xs" c="dimmed" aria-hidden="true">
+          <Text
+            component="span"
+            size="xs"
+            c="dimmed"
+            aria-hidden="true"
+            data-message-metadata="separator"
+          >
             ·
           </Text>
           <ModelMetadata profile={profile} summary={summary} />

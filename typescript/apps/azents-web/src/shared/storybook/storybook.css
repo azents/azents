@@ -1,4 +1,20 @@
-.storybook-root {
-  --font-geist-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-geist-mono: "Menlo", "Consolas", monospace;
+@font-face {
+  font-family: "Geist Storybook";
+  src: url("../../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2")
+    format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+}
+
+@font-face {
+  font-family: "Geist Mono Storybook";
+  src: url("../../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2")
+    format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+}
+
+:root {
+  --font-geist-sans: "Geist Storybook";
+  --font-geist-mono: "Geist Mono Storybook";
 }
