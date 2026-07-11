@@ -277,11 +277,15 @@ export const DesktopFullReasoningEffort = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await userEvent.click(page.getByRole("button", { name: /Model Default/ }));
     await expect(page.getByText("gpt-5.6")).toBeVisible();
     await expect(page.getByText("gpt-5.5-mini")).toBeVisible();
-    const effortSelect = page.getByLabelText("Reasoning effort");
-    await expect(effortSelect).toBeVisible();
-    await expect(effortSelect).toHaveValue("medium");
+    await userEvent.click(
+      page.getByRole("button", { name: /Reasoning effort medium/ }),
+    );
+    await expect(
+      page.getByRole("button", { name: /^medium$/ }),
+    ).toHaveAttribute("aria-pressed", "true");
   },
 } satisfies Story;
 

@@ -25,6 +25,8 @@ import {
 import { useLocalStorage } from "@mantine/hooks";
 import {
   IconCheck,
+  IconChevronDown,
+  IconChevronRight,
   IconPaperclip,
   IconPlayerStop,
   IconSend,
@@ -536,6 +538,9 @@ export const ChatInput = memo(function ChatInput({
     normalizedDraftProfile,
   );
   const [profilePickerOpened, setProfilePickerOpened] = useState(false);
+  const [desktopProfileSection, setDesktopProfileSection] = useState<
+    "model" | "effort" | null
+  >(null);
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
@@ -911,7 +916,13 @@ export const ChatInput = memo(function ChatInput({
       size="compact-sm"
       radius={rem(12)}
       disabled={inputDisabled || selectableModelOptions.length === 0}
-      onClick={() => setProfilePickerOpened((opened) => !opened)}
+      onClick={() => {
+        setProfilePickerOpened(!profilePickerOpened);
+        if (profilePickerOpened) {
+          setDesktopProfileSection(null);
+        }
+      }}
+      rightSection={<IconChevronDown aria-hidden="true" size={14} />}
       aria-label={t("composerProfile.model")}
       style={{
         minWidth: rem(128),
@@ -926,7 +937,49 @@ export const ChatInput = memo(function ChatInput({
       </Text>
     </Button>
   );
-  const profilePickerContent = (
+  const modelOptionRows = selectableModelOptions.map((option, index) => {
+    const selected = option.label === inferenceProfile.model_target_label;
+    return (
+      <UnstyledButton
+        key={option.label}
+        onClick={() => handleModelChange(option.label)}
+        aria-pressed={selected}
+        style={{
+          background: selected
+            ? "var(--mantine-color-default-hover)"
+            : "var(--mantine-color-body)",
+          borderTop:
+            index === 0
+              ? "none"
+              : `${rem(1)} solid var(--mantine-color-default-border)`,
+          display: "block",
+          padding: `${rem(9)} ${rem(12)}`,
+          textAlign: "left",
+          width: "100%",
+        }}
+      >
+        <Group gap="sm" justify="space-between" wrap="nowrap">
+          <Stack gap={rem(1)} style={{ minWidth: 0 }}>
+            <Text size="sm" fw={600} lh={rem(18)} truncate>
+              {option.label}
+            </Text>
+            <Text size="xs" c="dimmed" lh={rem(16)} truncate>
+              {option.model_selection.model_identifier}
+            </Text>
+          </Stack>
+          {selected && (
+            <IconCheck
+              aria-hidden="true"
+              size={16}
+              color="var(--mantine-color-blue-6)"
+              style={{ flexShrink: 0 }}
+            />
+          )}
+        </Group>
+      </UnstyledButton>
+    );
+  });
+  const mobileProfilePickerContent = (
     <Stack gap="md">
       <Stack
         gap={0}
@@ -936,48 +989,7 @@ export const ChatInput = memo(function ChatInput({
           overflow: "hidden",
         }}
       >
-        {selectableModelOptions.map((option, index) => {
-          const selected = option.label === inferenceProfile.model_target_label;
-          return (
-            <UnstyledButton
-              key={option.label}
-              onClick={() => handleModelChange(option.label)}
-              aria-pressed={selected}
-              style={{
-                background: selected
-                  ? "var(--mantine-color-default-hover)"
-                  : "var(--mantine-color-body)",
-                borderTop:
-                  index === 0
-                    ? "none"
-                    : `${rem(1)} solid var(--mantine-color-default-border)`,
-                display: "block",
-                padding: "var(--mantine-spacing-md)",
-                textAlign: "left",
-                width: "100%",
-              }}
-            >
-              <Group gap="md" justify="space-between" wrap="nowrap">
-                <Stack gap={rem(2)} style={{ minWidth: 0 }}>
-                  <Text fw={600} truncate>
-                    {option.label}
-                  </Text>
-                  <Text size="sm" c="dimmed" truncate>
-                    {option.model_selection.model_identifier}
-                  </Text>
-                </Stack>
-                {selected && (
-                  <IconCheck
-                    aria-hidden="true"
-                    size={20}
-                    color="var(--mantine-color-blue-6)"
-                    style={{ flexShrink: 0 }}
-                  />
-                )}
-              </Group>
-            </UnstyledButton>
-          );
-        })}
+        {modelOptionRows}
       </Stack>
       {selectableEfforts.length > 0 && (
         <Select
@@ -991,6 +1003,122 @@ export const ChatInput = memo(function ChatInput({
         />
       )}
     </Stack>
+  );
+  const desktopProfileMenu = (
+    <Group gap={rem(4)} align="flex-end" wrap="nowrap">
+      <Paper withBorder radius={rem(12)} shadow="md" p={rem(6)} w={rem(260)}>
+        <Stack gap={rem(2)}>
+          <UnstyledButton
+            onMouseEnter={() => setDesktopProfileSection("model")}
+            onFocus={() => setDesktopProfileSection("model")}
+            onClick={() => setDesktopProfileSection("model")}
+            aria-expanded={desktopProfileSection === "model"}
+            style={{
+              background:
+                desktopProfileSection === "model"
+                  ? "var(--mantine-color-default-hover)"
+                  : "transparent",
+              borderRadius: rem(8),
+              padding: `${rem(8)} ${rem(10)}`,
+              width: "100%",
+            }}
+          >
+            <Group justify="space-between" gap="md" wrap="nowrap">
+              <Text size="sm" fw={500}>
+                {t("composerProfile.model")}
+              </Text>
+              <Group gap={rem(6)} wrap="nowrap" style={{ minWidth: 0 }}>
+                <Text size="sm" c="dimmed" truncate>
+                  {selectedModelLabel}
+                </Text>
+                <IconChevronRight
+                  aria-hidden="true"
+                  size={16}
+                  color="var(--mantine-color-dimmed)"
+                  style={{ flexShrink: 0 }}
+                />
+              </Group>
+            </Group>
+          </UnstyledButton>
+          {selectableEfforts.length > 0 && (
+            <UnstyledButton
+              onMouseEnter={() => setDesktopProfileSection("effort")}
+              onFocus={() => setDesktopProfileSection("effort")}
+              onClick={() => setDesktopProfileSection("effort")}
+              aria-expanded={desktopProfileSection === "effort"}
+              style={{
+                background:
+                  desktopProfileSection === "effort"
+                    ? "var(--mantine-color-default-hover)"
+                    : "transparent",
+                borderRadius: rem(8),
+                padding: `${rem(8)} ${rem(10)}`,
+                width: "100%",
+              }}
+            >
+              <Group justify="space-between" gap="md" wrap="nowrap">
+                <Text size="sm" fw={500}>
+                  {t("composerProfile.effortLabel")}
+                </Text>
+                <Group gap={rem(6)} wrap="nowrap">
+                  <Text size="sm" c="dimmed">
+                    {selectedEffortLabel}
+                  </Text>
+                  <IconChevronRight
+                    aria-hidden="true"
+                    size={16}
+                    color="var(--mantine-color-dimmed)"
+                  />
+                </Group>
+              </Group>
+            </UnstyledButton>
+          )}
+        </Stack>
+      </Paper>
+      {desktopProfileSection === "model" && (
+        <Paper
+          withBorder
+          radius={rem(12)}
+          shadow="md"
+          w={rem(280)}
+          style={{ maxHeight: rem(280), overflowY: "auto" }}
+        >
+          <Stack gap={0}>{modelOptionRows}</Stack>
+        </Paper>
+      )}
+      {desktopProfileSection === "effort" && selectableEfforts.length > 0 && (
+        <Paper withBorder radius={rem(12)} shadow="md" p={rem(6)} w={rem(220)}>
+          <Text size="xs" c="dimmed" fw={600} px={rem(8)} py={rem(4)}>
+            {t("composerProfile.effortLabel")}
+          </Text>
+          <Stack gap={rem(2)}>
+            {selectableEfforts.map((effort) => {
+              const selected = effort === inferenceProfile.reasoning_effort;
+              return (
+                <UnstyledButton
+                  key={effort}
+                  onClick={() => handleEffortChange(effort)}
+                  aria-pressed={selected}
+                  style={{
+                    background: selected
+                      ? "var(--mantine-color-default-hover)"
+                      : "transparent",
+                    borderRadius: rem(8),
+                    padding: `${rem(8)} ${rem(10)}`,
+                    width: "100%",
+                  }}
+                >
+                  <Group justify="space-between" gap="sm" wrap="nowrap">
+                    <Text size="sm">{effort}</Text>
+                    {selected && <IconCheck aria-hidden="true" size={16} />}
+                  </Group>
+                </UnstyledButton>
+              );
+            })}
+          </Stack>
+        </Paper>
+      )}
+    </Group>
   );
 
   return (
@@ -1115,7 +1243,11 @@ export const ChatInput = memo(function ChatInput({
           px="xs"
           py={rem(6)}
           shadow="xs"
-          style={{ position: "relative" }}
+          style={{
+            position: "relative",
+            border: `${rem(1)} solid var(--mantine-color-default-border)`,
+            background: "var(--mantine-color-body)",
+          }}
         >
           <Stack gap={rem(4)}>
             {pendingFiles.length > 0 && !editingMessageId && (
@@ -1243,28 +1375,34 @@ export const ChatInput = memo(function ChatInput({
                       },
                     }}
                   >
-                    {profilePickerContent}
+                    {mobileProfilePickerContent}
                   </Drawer>
                 </>
               ) : (
                 <Popover
                   opened={profilePickerOpened}
-                  onChange={setProfilePickerOpened}
+                  onChange={(opened) => {
+                    setProfilePickerOpened(opened);
+                    if (!opened) {
+                      setDesktopProfileSection(null);
+                    }
+                  }}
                   position="top-start"
-                  width={rem(360)}
-                  shadow="md"
+                  width="auto"
+                  shadow="none"
                   withinPortal
                 >
                   <Popover.Target>{profileTrigger}</Popover.Target>
                   <Popover.Dropdown
-                    p="md"
+                    p={0}
                     style={{
-                      borderRadius: rem(12),
-                      maxHeight: `min(70dvh, ${rem(440)})`,
-                      overflowY: "auto",
+                      background: "transparent",
+                      border: 0,
+                      boxShadow: "none",
+                      overflow: "visible",
                     }}
                   >
-                    {profilePickerContent}
+                    {desktopProfileMenu}
                   </Popover.Dropdown>
                 </Popover>
               )}
