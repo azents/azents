@@ -560,44 +560,37 @@ class TestPerPromptInferenceProfile:
             label="follow-up resolved profile",
         )
         assert followup_resolved["model_identifier"] == "gpt-5.5-mini"
-        _wait_for_session_idle(
-            server_url=azents_public_server_url,
-            token=token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-        )
-
-        for message in (
-            _FULL_HISTORY_REJECTION_MESSAGE,
-            _UNKNOWN_TARGET_REJECTION_MESSAGE,
+        for message, rejected_name in (
+            (_FULL_HISTORY_REJECTION_MESSAGE, "invalid_history"),
+            (_UNKNOWN_TARGET_REJECTION_MESSAGE, "invalid_target"),
         ):
+            rejection_token, rejection_agent_id, rejection_session_id = (
+                _setup_profile_agent(
+                    public_api_client,
+                    admin_api_client,
+                    azents_public_server_url,
+                )
+            )
             _write_profile(
                 server_url=azents_public_server_url,
-                token=token,
-                agent_id=agent_id,
-                session_id=root_session_id,
+                token=rejection_token,
+                agent_id=rejection_agent_id,
+                session_id=rejection_session_id,
                 message=message,
                 target="Quality",
                 effort="high",
             )
             _wait_for_summary(
                 server_url=azents_public_server_url,
-                token=token,
-                session_id=root_session_id,
+                token=rejection_token,
+                session_id=rejection_session_id,
                 message=message,
                 status="completed",
             )
-            _wait_for_session_idle(
+            tree = _subagent_tree(
                 server_url=azents_public_server_url,
-                token=token,
-                agent_id=agent_id,
-                session_id=root_session_id,
+                token=rejection_token,
+                agent_id=rejection_agent_id,
+                session_id=rejection_session_id,
             )
-
-        tree = _subagent_tree(
-            server_url=azents_public_server_url,
-            token=token,
-            agent_id=agent_id,
-            session_id=root_session_id,
-        )
-        assert _tree_names(tree).isdisjoint({"invalid_history", "invalid_target"})
+            assert rejected_name not in _tree_names(tree)
