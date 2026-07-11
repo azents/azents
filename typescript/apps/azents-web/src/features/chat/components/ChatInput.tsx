@@ -1256,20 +1256,17 @@ export const ChatInput = memo(function ChatInput({
                 onRemove={removeFile}
               />
             )}
-            {todo !== null &&
-              !editingMessageId &&
-              selectedAction === null &&
-              inputActionQuery === null && (
-                <TodoPreviewBar
-                  goal={goal}
-                  isMobile={isMobile}
-                  todo={todo}
-                  onClearGoal={onClearGoal}
-                  onUpdateGoal={onUpdateGoal}
-                  onPauseGoal={onPauseGoal}
-                  onResumeGoal={onResumeGoal}
-                />
-              )}
+            {todo !== null && !editingMessageId && (
+              <TodoPreviewBar
+                goal={goal}
+                isMobile={isMobile}
+                todo={todo}
+                onClearGoal={onClearGoal}
+                onUpdateGoal={onUpdateGoal}
+                onPauseGoal={onPauseGoal}
+                onResumeGoal={onResumeGoal}
+              />
+            )}
             {selectedAction !== null && !editingMessageId && !inputDisabled && (
               <Stack gap={rem(2)} align="flex-start">
                 <Group
@@ -1280,7 +1277,6 @@ export const ChatInput = memo(function ChatInput({
                   style={{
                     borderRadius: rem(999),
                     background: "var(--mantine-color-blue-light)",
-                    border: `${rem(1)} solid var(--mantine-color-blue-light-color)`,
                     width: "fit-content",
                     maxWidth: "100%",
                   }}
