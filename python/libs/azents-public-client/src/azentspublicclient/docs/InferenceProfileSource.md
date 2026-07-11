@@ -12,6 +12,8 @@ Source of requested inference intent for an AgentRun.
 
 * `PARENT_RUN` (value: `'parent_run'`)
 
+* `SPAWN_OVERRIDE` (value: `'spawn_override'`)
+
 * `RETRY_ORIGINAL` (value: `'retry_original'`)
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

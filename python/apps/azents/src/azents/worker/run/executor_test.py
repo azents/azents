@@ -1225,16 +1225,24 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source",
+    [
+        InferenceProfileSource.PARENT_RUN,
+        InferenceProfileSource.SPAWN_OVERRIDE,
+    ],
+)
 async def test_execute_activates_inherited_pending_run_without_target_routing(
     monkeypatch: pytest.MonkeyPatch,
+    source: InferenceProfileSource,
 ) -> None:
-    """A child first run preserves the parent snapshot and activates before use."""
+    """A pre-resolved child first run activates its exact snapshot before use."""
     now = datetime.datetime.now(datetime.UTC)
     selection = make_test_model_selection()
     recoverable = _PendingRun(
         requested_model_target_label="Parent model",
         requested_reasoning_effort=ModelReasoningEffort.HIGH,
-        inference_profile_source=InferenceProfileSource.PARENT_RUN,
+        inference_profile_source=source,
         resolved_model_selection=selection,
         resolved_reasoning_effort=ModelReasoningEffort.HIGH,
         resolved_at=now,

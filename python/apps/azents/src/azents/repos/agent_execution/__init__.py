@@ -616,8 +616,11 @@ class AgentRunRepository:
         )
         if rdb is None:
             raise ValueError("Pending AgentRun not found")
-        if rdb.inference_profile_source != InferenceProfileSource.PARENT_RUN:
-            raise ValueError("Pending AgentRun is not inherited from a parent run")
+        if rdb.inference_profile_source not in {
+            InferenceProfileSource.PARENT_RUN,
+            InferenceProfileSource.SPAWN_OVERRIDE,
+        }:
+            raise ValueError("Pending AgentRun is not pre-resolved from a parent run")
         if rdb.parent_agent_run_id is None:
             raise ValueError("Inherited AgentRun has no parent run")
         if rdb.requested_model_target_label is None:

@@ -12594,6 +12594,7 @@
           "session_last_used",
           "agent_default",
           "parent_run",
+          "spawn_override",
           "retry_original"
         ],
         "title": "InferenceProfileSource",

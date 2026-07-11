@@ -16,6 +16,7 @@ class InferenceProfileSource(enum.StrEnum):
     SESSION_LAST_USED = "session_last_used"
     AGENT_DEFAULT = "agent_default"
     PARENT_RUN = "parent_run"
+    SPAWN_OVERRIDE = "spawn_override"
     RETRY_ORIGINAL = "retry_original"
 
 
