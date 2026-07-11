@@ -26,6 +26,12 @@ _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 _QUALITY_MESSAGE = "Per prompt quality profile"
 _FAST_MESSAGE = "Per prompt fast profile"
+_SPAWN_OVERRIDE_MESSAGE = "Subagent spawn with Fast override"
+_SPAWN_OVERRIDE_TASK = "Subagent Fast override task"
+_FOLLOWUP_MESSAGE = "Subagent follow-up after override"
+_FOLLOWUP_TASK = "Subagent Fast follow-up task"
+_FULL_HISTORY_REJECTION_MESSAGE = "Subagent reject full-history override"
+_UNKNOWN_TARGET_REJECTION_MESSAGE = "Subagent reject unknown target override"
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -222,14 +228,14 @@ def _history(server_url: str, token: str, session_id: str) -> list[dict[str, obj
     return _objects(_response_object(response).get("items"), label="history items")
 
 
-def _user_event(
+def _input_event(
     events: list[dict[str, object]], message: str
 ) -> dict[str, object] | None:
-    """Find a user event by content."""
+    """Find a user or agent input event by content."""
     for event in events:
-        if event.get("kind") != "user_message":
+        if event.get("kind") not in {"user_message", "agent_message"}:
             continue
-        payload = _object(event.get("payload"), label="user event payload")
+        payload = _object(event.get("payload"), label="input event payload")
         if payload.get("content") == message:
             return event
     return None
@@ -248,7 +254,7 @@ def _wait_for_summary(
     deadline = time.monotonic() + timeout
     last_event: dict[str, object] | None = None
     while time.monotonic() < deadline:
-        event = _user_event(_history(server_url, token, session_id), message)
+        event = _input_event(_history(server_url, token, session_id), message)
         last_event = event
         if event is not None:
             raw_summary = event.get("inference_run_summary")
@@ -258,6 +264,84 @@ def _wait_for_summary(
                     return summary
         time.sleep(0.5)
     raise TimeoutError(f"Run summary did not reach {status}: {last_event!r}")
+
+
+def _subagent_tree(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+) -> dict[str, object]:
+    """Fetch the public Subagent Tree projection."""
+    return _response_object(
+        requests.get(
+            f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree",
+            headers=_headers(token),
+            timeout=10,
+        )
+    )
+
+
+def _find_tree_node(
+    nodes: list[dict[str, object]],
+    name: str,
+) -> dict[str, object] | None:
+    """Find a named node in a raw Subagent Tree."""
+    for node in nodes:
+        if node.get("name") == name:
+            return node
+        child = _find_tree_node(
+            _objects(node.get("children"), label="tree children"),
+            name,
+        )
+        if child is not None:
+            return child
+    return None
+
+
+def _wait_for_tree_node(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    root_session_id: str,
+    name: str,
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Wait for a named Subagent Tree node."""
+    deadline = time.monotonic() + timeout
+    last_tree: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        last_tree = _subagent_tree(
+            server_url=server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+        )
+        node = _find_tree_node(
+            _objects(last_tree.get("nodes"), label="tree nodes"),
+            name,
+        )
+        if node is not None and node.get("status") == "completed":
+            return node
+        time.sleep(0.5)
+    raise TimeoutError(f"Subagent Tree node did not complete: {name}, {last_tree!r}")
+
+
+def _tree_names(tree: dict[str, object]) -> set[str]:
+    """Collect all names in a raw Subagent Tree."""
+    names: set[str] = set()
+
+    def collect(nodes: list[dict[str, object]]) -> None:
+        for node in nodes:
+            name = node.get("name")
+            if isinstance(name, str):
+                names.add(name)
+            collect(_objects(node.get("children"), label="tree children"))
+
+    collect(_objects(tree.get("nodes"), label="tree nodes"))
+    return names
 
 
 class TestPerPromptInferenceProfile:
@@ -358,3 +442,112 @@ class TestPerPromptInferenceProfile:
         assert failed["failure_code"] == "reasoning_effort_unsupported"
         assert isinstance(failed["failure_message"], str)
         assert failed["resolved_profile"] is None
+
+    def test_subagent_spawn_override_continuation_and_atomic_rejection(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Persist a spawn override, reuse it, and reject invalid forks atomically."""
+        del azents_engine_worker_container
+        token, agent_id, root_session_id = _setup_profile_agent(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+
+        _write_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_SPAWN_OVERRIDE_MESSAGE,
+            target="Quality",
+            effort="high",
+        )
+        child = _wait_for_tree_node(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            root_session_id=root_session_id,
+            name="profile_child",
+        )
+        child_session_id = child.get("agent_session_id")
+        if not isinstance(child_session_id, str):
+            raise AssertionError(f"Child node has no AgentSession ID: {child!r}")
+        first_child = _wait_for_summary(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=child_session_id,
+            message=_SPAWN_OVERRIDE_TASK,
+            status="completed",
+        )
+        assert first_child["requested_profile"] == {
+            "model_target_label": "Fast",
+            "reasoning_effort": None,
+        }
+        assert first_child["source"] == "spawn_override"
+        first_resolved = _object(
+            first_child.get("resolved_profile"),
+            label="spawn override resolved profile",
+        )
+        assert first_resolved["model_identifier"] == "gpt-5.5-mini"
+        assert first_child["resolved_reasoning_effort"] is None
+
+        _write_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_FOLLOWUP_MESSAGE,
+            target="Quality",
+            effort="high",
+        )
+        followup = _wait_for_summary(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=child_session_id,
+            message=_FOLLOWUP_TASK,
+            status="completed",
+        )
+        assert followup["requested_profile"] == {
+            "model_target_label": "Fast",
+            "reasoning_effort": None,
+        }
+        assert followup["source"] == "session_last_used"
+        followup_resolved = _object(
+            followup.get("resolved_profile"),
+            label="follow-up resolved profile",
+        )
+        assert followup_resolved["model_identifier"] == "gpt-5.5-mini"
+
+        for message in (
+            _FULL_HISTORY_REJECTION_MESSAGE,
+            _UNKNOWN_TARGET_REJECTION_MESSAGE,
+        ):
+            _write_profile(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=root_session_id,
+                message=message,
+                target="Quality",
+                effort="high",
+            )
+            _wait_for_summary(
+                server_url=azents_public_server_url,
+                token=token,
+                session_id=root_session_id,
+                message=message,
+                status="completed",
+            )
+
+        tree = _subagent_tree(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+        )
+        assert _tree_names(tree).isdisjoint({"invalid_history", "invalid_target"})

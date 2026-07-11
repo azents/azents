@@ -616,6 +616,147 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Subagent spawn with Fast override",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_spawn_override",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "profile_child",
+              "task": "Subagent Fast override task",
+              "agent_type": "default",
+              "fork_turns": "none",
+              "model_target_label": "Fast"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_spawn_override"
+      },
+      "response": {
+        "content": "Subagent Fast override spawned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent Fast override task",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Subagent Fast override completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent follow-up after override",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_followup_override",
+            "name": "followup_task",
+            "arguments": {
+              "agent_name": "profile_child",
+              "task": "Subagent Fast follow-up task"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_followup_override"
+      },
+      "response": {
+        "content": "Subagent follow-up assigned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent Fast follow-up task",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Subagent Fast follow-up completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent reject full-history override",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_reject_full_history",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "invalid_history",
+              "task": "Must not create a child",
+              "agent_type": "default",
+              "fork_turns": "all",
+              "model_target_label": "Fast"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_reject_full_history"
+      },
+      "response": {
+        "content": "Full-history override rejection observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent reject unknown target override",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_reject_unknown_target",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "invalid_target",
+              "task": "Must not create a child",
+              "agent_type": "default",
+              "fork_turns": "none",
+              "model_target_label": "Missing"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_reject_unknown_target"
+      },
+      "response": {
+        "content": "Unknown target override rejection observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Failed run retry once then succeed",
         "hasToolResult": false,
         "sequenceIndex": 0
