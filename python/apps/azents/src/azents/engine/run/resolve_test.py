@@ -292,8 +292,10 @@ class TestResolveInvokeInput:
 
         assert result == Failure(ModelTargetNotFound(model_target_label="deleted"))
 
-    async def test_profile_resolution_accepts_unrestricted_effort(self) -> None:
-        """Empty effort levels allow any normalized effort for reasoning models."""
+    async def test_profile_resolution_rejects_effort_when_levels_are_empty(
+        self,
+    ) -> None:
+        """Empty effort levels reject every explicit effort."""
         agent_repository = AsyncMock()
         agent_repository.get_by_id.return_value = _make_agent(
             reasoning_supported=True,
@@ -322,9 +324,12 @@ class TestResolveInvokeInput:
             model_file_service=AsyncMock(),
         )
 
-        assert isinstance(result, Success)
-        assert result.value.reasoning_effort == ModelReasoningEffort.HIGH
-        assert result.value.run_request.reasoning_effort == ModelReasoningEffort.HIGH
+        assert result == Failure(
+            ReasoningEffortUnsupported(
+                model_target_label="default",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            )
+        )
 
     async def test_profile_resolution_rejects_effort_for_non_reasoning_model(
         self,

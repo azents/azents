@@ -19,7 +19,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-07-10
-spec_version: 3
+spec_version: 4
 ---
 
 # Model Catalog Domain Spec
@@ -60,6 +60,8 @@ Only entries with selectable visibility are returned by the public picker list A
 ## Source snapshots and sync attempts
 
 LiteLLM is the current lowerer target projection source. The source sync service records LiteLLM source snapshots before projection. System and integration projections use the stored LiteLLM source snapshot rather than fetching external model metadata from the picker read path.
+
+Reasoning capabilities are projected from LiteLLM's canonical provider model metadata schema. Explicit effort levels are reconstructed in the deterministic order `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The optional `none`, `minimal`, `low`, `xhigh`, and `max` levels follow their corresponding LiteLLM support flags. OpenAI GPT-5-family models additionally use LiteLLM's baseline `medium` and `high` contract and opt-out `low` flag semantics; those implicit levels are not applied to other reasoning providers. A model with no projected effort levels allows no explicit effort override; an empty list is not interpreted as unrestricted support.
 
 Each catalog sync records an attempt with status, counts, failure metadata, action hint, and diagnostics. Failed syncs keep the last successful snapshot available when one exists.
 
@@ -117,6 +119,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-10 | 4 | Documented canonical LiteLLM reasoning-effort capability projection and strict empty-list semantics |
 | 2026-07-10 | 3 | Added the separate xAI API-key system catalog projected from the shared LiteLLM xAI family |
 | 2026-07-09 | 2 | Documented selectable model option submit normalization through stored catalog projection |
 | 2026-06-21 | 1 | Initial model catalog domain spec |

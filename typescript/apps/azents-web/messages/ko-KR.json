@@ -1510,11 +1510,14 @@
     "composerProfile": {
       "model": "모델",
       "effortLabel": "추론 수준",
-      "defaultEffort": "기본값",
       "effort": {
+        "none": "없음",
+        "minimal": "최소",
         "low": "낮음",
         "medium": "중간",
-        "high": "높음"
+        "high": "높음",
+        "xhigh": "매우 높음",
+        "max": "최대"
       },
       "send": "보내기"
     },
@@ -1524,9 +1527,13 @@
       "requestedModel": "요청한 모델",
       "requestedEffort": "요청한 추론 수준",
       "defaultEffort": "기본값",
+      "effortNone": "없음",
+      "effortMinimal": "최소",
       "effortLow": "낮음",
       "effortMedium": "중간",
       "effortHigh": "높음",
+      "effortXhigh": "매우 높음",
+      "effortMax": "최대",
       "awaitingActivation": "Run 활성화를 기다리는 중",
       "run": "Run",
       "runValue": "#{index} · {status}",

@@ -1510,11 +1510,14 @@
     "composerProfile": {
       "model": "Model",
       "effortLabel": "Reasoning effort",
-      "defaultEffort": "Default",
       "effort": {
+        "none": "None",
+        "minimal": "Minimal",
         "low": "Low",
         "medium": "Medium",
-        "high": "High"
+        "high": "High",
+        "xhigh": "Extra high",
+        "max": "Maximum"
       },
       "send": "Send"
     },
@@ -1524,9 +1527,13 @@
       "requestedModel": "Requested model",
       "requestedEffort": "Requested effort",
       "defaultEffort": "Default",
+      "effortNone": "None",
+      "effortMinimal": "Minimal",
       "effortLow": "Low",
       "effortMedium": "Medium",
       "effortHigh": "High",
+      "effortXhigh": "Extra high",
+      "effortMax": "Maximum",
       "awaitingActivation": "Waiting for run activation",
       "run": "Run",
       "runValue": "#{index} · {status}",

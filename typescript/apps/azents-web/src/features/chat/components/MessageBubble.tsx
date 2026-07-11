@@ -621,12 +621,20 @@ function formatReasoningEffort(
   switch (effort) {
     case null:
       return t("inferenceProvenance.defaultEffort");
+    case "none":
+      return t("inferenceProvenance.effortNone");
+    case "minimal":
+      return t("inferenceProvenance.effortMinimal");
     case "low":
       return t("inferenceProvenance.effortLow");
     case "medium":
       return t("inferenceProvenance.effortMedium");
     case "high":
       return t("inferenceProvenance.effortHigh");
+    case "xhigh":
+      return t("inferenceProvenance.effortXhigh");
+    case "max":
+      return t("inferenceProvenance.effortMax");
   }
 }
 

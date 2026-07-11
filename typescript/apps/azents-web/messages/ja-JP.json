@@ -1510,11 +1510,14 @@
     "composerProfile": {
       "model": "モデル",
       "effortLabel": "推論レベル",
-      "defaultEffort": "デフォルト",
       "effort": {
+        "none": "なし",
+        "minimal": "最小",
         "low": "低",
         "medium": "中",
-        "high": "高"
+        "high": "高",
+        "xhigh": "非常に高い",
+        "max": "最大"
       },
       "send": "送信"
     },
@@ -1524,9 +1527,13 @@
       "requestedModel": "リクエストしたモデル",
       "requestedEffort": "リクエストした推論レベル",
       "defaultEffort": "デフォルト",
+      "effortNone": "なし",
+      "effortMinimal": "最小",
       "effortLow": "低",
       "effortMedium": "中",
       "effortHigh": "高",
+      "effortXhigh": "非常に高い",
+      "effortMax": "最大",
       "awaitingActivation": "Run の有効化を待っています",
       "run": "Run",
       "runValue": "#{index} · {status}",

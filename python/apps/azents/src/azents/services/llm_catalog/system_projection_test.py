@@ -97,3 +97,85 @@ def test_project_system_entries_filters_non_chat_models() -> None:
     ]
     assert hidden[0].provider_model_identifier == "dall-e-3"
     assert hidden[0].hidden_reason == "unsupported_mode:image_generation"
+
+
+def test_project_system_entries_reconstructs_reasoning_efforts() -> None:
+    """Projection reconstructs the ordered effort list from LiteLLM flags."""
+    source_snapshot = LiteLLMSourceSnapshot(
+        id="source-id",
+        source_key="litellm_model_cost",
+        source_url=None,
+        source_hash="hash",
+        model_count=2,
+        litellm_version="1.0.0",
+        loaded_source="fixture",
+        payload={
+            "gpt-5-reasoning-full": {
+                "litellm_provider": "openai",
+                "mode": "chat",
+                "supports_reasoning": True,
+                "supports_none_reasoning_effort": True,
+                "supports_minimal_reasoning_effort": True,
+                "supports_xhigh_reasoning_effort": True,
+                "supports_max_reasoning_effort": True,
+            },
+            "gpt-5-reasoning-restricted": {
+                "litellm_provider": "openai",
+                "mode": "chat",
+                "supports_reasoning": True,
+                "supports_minimal_reasoning_effort": False,
+                "supports_low_reasoning_effort": False,
+            },
+        },
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    entries = project_system_entries(
+        provider=LLMProvider.OPENAI,
+        source_snapshot=source_snapshot,
+    )
+    efforts_by_model = {
+        entry.provider_model_identifier: entry.normalized_capabilities["reasoning"][
+            "effort_levels"
+        ]
+        for entry in entries
+    }
+
+    assert efforts_by_model["gpt-5-reasoning-full"] == [
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]
+    assert efforts_by_model["gpt-5-reasoning-restricted"] == ["medium", "high"]
+
+
+def test_project_system_entries_does_not_infer_gpt5_efforts_for_anthropic() -> None:
+    """Generic reasoning support does not imply OpenAI effort levels."""
+    source_snapshot = LiteLLMSourceSnapshot(
+        id="source-id",
+        source_key="litellm_model_cost",
+        source_url=None,
+        source_hash="hash",
+        model_count=1,
+        litellm_version="1.0.0",
+        loaded_source="fixture",
+        payload={
+            "claude-reasoning": {
+                "litellm_provider": "anthropic",
+                "mode": "chat",
+                "supports_reasoning": True,
+            }
+        },
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    entries = project_system_entries(
+        provider=LLMProvider.ANTHROPIC,
+        source_snapshot=source_snapshot,
+    )
+
+    assert entries[0].normalized_capabilities["reasoning"]["effort_levels"] == []

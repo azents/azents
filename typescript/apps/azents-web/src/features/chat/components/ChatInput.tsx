@@ -32,6 +32,10 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  normalizeReasoningEffort,
+  reasoningEffortLevels,
+} from "@/shared/lib/reasoning-effort";
 import { AttachmentPreviewBar } from "./AttachmentPreviewBar";
 import { TodoPreviewBar } from "./TodoPreviewBar";
 import type { PendingFile, UploadedFile } from "../hooks/useFileUpload";
@@ -48,7 +52,6 @@ import type {
 } from "@azents/public-client";
 
 const DRAFT_STORAGE_KEY_PREFIX = "azents.chat.inputDraft";
-const ALL_REASONING_EFFORTS: ModelReasoningEffort[] = ["low", "medium", "high"];
 
 function getDraftStorageKey(
   agentId: string | null,
@@ -209,9 +212,13 @@ function normalizeStoredAction(value: unknown): ChatAction | null {
 
 function storedReasoningEffort(value: unknown): ModelReasoningEffort | null {
   switch (value) {
+    case "none":
+    case "minimal":
     case "low":
     case "medium":
     case "high":
+    case "xhigh":
+    case "max":
       return value;
     default:
       return null;
@@ -285,14 +292,9 @@ function effortLevelsForTarget(
   options: AgentResponse["selectable_model_options"],
   targetLabel: string,
 ): ModelReasoningEffort[] {
-  const reasoning = options.find((option) => option.label === targetLabel)
-    ?.model_selection.normalized_capabilities.reasoning;
-  if (!reasoning?.supported) {
-    return [];
-  }
-  return reasoning.effort_levels?.length
-    ? reasoning.effort_levels
-    : ALL_REASONING_EFFORTS;
+  const capabilities = options.find((option) => option.label === targetLabel)
+    ?.model_selection.normalized_capabilities;
+  return reasoningEffortLevels(capabilities);
 }
 
 function normalizeProfileForOptions(
@@ -319,10 +321,7 @@ function normalizeProfileForOptions(
         : null;
   return {
     model_target_label: modelTargetLabel,
-    reasoning_effort:
-      requestedEffort !== null && effortLevels.includes(requestedEffort)
-        ? requestedEffort
-        : null,
+    reasoning_effort: normalizeReasoningEffort(requestedEffort, effortLevels),
   };
 }
 
@@ -559,13 +558,11 @@ export const ChatInput = memo(function ChatInput({
     [inferenceProfile.model_target_label, selectableModelOptions],
   );
   const effortSelectData = useMemo(
-    () => [
-      { value: "default", label: t("composerProfile.defaultEffort") },
-      ...selectableEfforts.map((effort) => ({
+    () =>
+      selectableEfforts.map((effort) => ({
         value: effort,
         label: t(`composerProfile.effort.${effort}`),
       })),
-    ],
     [selectableEfforts, t],
   );
   const selectedModelLabel =
@@ -574,7 +571,7 @@ export const ChatInput = memo(function ChatInput({
     )?.label ?? inferenceProfile.model_target_label;
   const selectedEffortLabel =
     inferenceProfile.reasoning_effort === null
-      ? t("composerProfile.defaultEffort")
+      ? ""
       : t(`composerProfile.effort.${inferenceProfile.reasoning_effort}`);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -894,13 +891,12 @@ export const ChatInput = memo(function ChatInput({
         selectableModelOptions,
         modelTargetLabel,
       );
-      const currentEffort = inferenceProfile.reasoning_effort;
       updateInferenceProfile({
         model_target_label: modelTargetLabel,
-        reasoning_effort:
-          currentEffort !== null && nextEfforts.includes(currentEffort)
-            ? currentEffort
-            : null,
+        reasoning_effort: normalizeReasoningEffort(
+          inferenceProfile.reasoning_effort,
+          nextEfforts,
+        ),
       });
     },
     [
@@ -912,13 +908,16 @@ export const ChatInput = memo(function ChatInput({
 
   const handleEffortChange = useCallback(
     (value: string | null): void => {
+      const effort = storedReasoningEffort(value);
+      if (effort === null || !selectableEfforts.includes(effort)) {
+        return;
+      }
       updateInferenceProfile({
         ...inferenceProfile,
-        reasoning_effort:
-          value === "default" ? null : storedReasoningEffort(value),
+        reasoning_effort: effort,
       });
     },
-    [inferenceProfile, updateInferenceProfile],
+    [inferenceProfile, selectableEfforts, updateInferenceProfile],
   );
 
   return (
@@ -1198,7 +1197,7 @@ export const ChatInput = memo(function ChatInput({
                         <Select
                           label={t("composerProfile.effortLabel")}
                           data={effortSelectData}
-                          value={inferenceProfile.reasoning_effort ?? "default"}
+                          value={inferenceProfile.reasoning_effort}
                           onChange={handleEffortChange}
                           allowDeselect={false}
                           styles={{ input: { fontSize: rem(16) } }}
@@ -1223,7 +1222,7 @@ export const ChatInput = memo(function ChatInput({
                     <Select
                       aria-label={t("composerProfile.effortLabel")}
                       data={effortSelectData}
-                      value={inferenceProfile.reasoning_effort ?? "default"}
+                      value={inferenceProfile.reasoning_effort}
                       onChange={handleEffortChange}
                       allowDeselect={false}
                       disabled={inputDisabled}

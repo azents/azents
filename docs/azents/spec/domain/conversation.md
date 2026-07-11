@@ -94,7 +94,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-10
-spec_version: 92
+spec_version: 93
 ---
 
 # Conversation & Events
@@ -571,7 +571,7 @@ requests require `client_request_id`; accepted writes are recorded in `chat_writ
 retries with the same key return the same accepted target instead of creating duplicate side effects.
 REST write idempotency is scoped to `(session_id, user_id, client_request_id)`. The same
 `client_request_id` may be reused independently for different explicit session routes because the URL
-session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent and effort is nullable for Default. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` input buffer
+session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` input buffer
 to the explicit path session before returning success, mark the same session running through
 `InputBufferService`, then send a worker wake-up signal for that session. The message path must not
 resolve runtime current/active session state to replace the requested `session_id`. Edit writes
@@ -669,6 +669,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-10** — v93. Required concrete reasoning-effort choices for normal user input when explicit levels are advertised.
 - **2026-07-10** — v92. Added durable requested/resolved inference profiles, profile-aware FIFO run boundaries, run-input associations, session-last-used intent, and retry/subagent provenance.
 - **2026-07-09** — v91. Clarified that failed-run retry state is cleared when retry wait ends and the next attempt starts, preventing stale live retry errors during later successful progress.
 - **2026-07-09** — v90. Documented child subagent human-write rejection before REST, input-buffer, command, and operation side effects.

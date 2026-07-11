@@ -1,12 +1,12 @@
 """Agent-related core type definitions."""
 
 import datetime
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
-from azents.core.llm_catalog import ModelCapabilities
+from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
 
 
 class AgentModelSelectionInput(BaseModel):
@@ -133,7 +133,7 @@ class ModelParameters(BaseModel):
     stop_sequences: list[str] | None = Field(
         default=None, max_length=4, description="Stop sequences, up to 4"
     )
-    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
+    reasoning_effort: ModelReasoningEffort | None = Field(
         default=None,
         description="Reasoning effort, only for models with thinking support",
     )

@@ -20,11 +20,15 @@ class ModelModality(enum.StrEnum):
 
 
 class ModelReasoningEffort(enum.StrEnum):
-    """Normalized reasoning effort level."""
+    """Normalized reasoning effort level in ascending order."""
 
+    NONE = "none"
+    MINIMAL = "minimal"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    XHIGH = "xhigh"
+    MAX = "max"
 
 
 class UnsupportedMediaPolicy(enum.StrEnum):
