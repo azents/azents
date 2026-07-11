@@ -1510,6 +1510,7 @@
     "composerProfile": {
       "model": "모델",
       "effortLabel": "추론 수준",
+      "done": "완료",
       "send": "보내기"
     },
     "inferenceProvenance": {

@@ -1510,6 +1510,7 @@
     "composerProfile": {
       "model": "Modèle",
       "effortLabel": "Effort de raisonnement",
+      "done": "Terminé",
       "send": "Envoyer"
     },
     "inferenceProvenance": {

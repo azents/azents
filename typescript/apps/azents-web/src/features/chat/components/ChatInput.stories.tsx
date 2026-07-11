@@ -372,6 +372,12 @@ export const MobileFullReasoningEffort = {
       "true",
     );
     await expect(page.queryByRole("option")).not.toBeInTheDocument();
+    await expect(page.getByRole("button", { name: "Done" })).toBeVisible();
+    await expect(
+      page.queryByRole("button", { name: "Close drawer" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(page.getByRole("dialog")).not.toBeVisible());
   },
 } satisfies Story;
 
