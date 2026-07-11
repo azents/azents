@@ -2,6 +2,7 @@ import { rem } from "@mantine/core";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   attachmentToolCall,
+  binaryAttachment,
   createChatMessage,
   imageAttachment,
   markdownSample,
@@ -48,6 +49,31 @@ const resolvedRunSummary = {
   failure_code: null,
   failure_message: null,
 } satisfies InferenceRunSummary;
+
+const pngAttachment = {
+  ...imageAttachment,
+  attachmentId: "story-image-png",
+  uri: "exchange://exchange/story/files/mobile-layout/original",
+  mediaType: "image/png",
+  name: "mobile-layout.png",
+};
+
+const gifAttachment = {
+  ...imageAttachment,
+  attachmentId: "story-image-gif",
+  uri: "exchange://exchange/story/files/interaction/original",
+  mediaType: "image/gif",
+  name: "interaction.gif",
+};
+
+const pdfAttachment = {
+  ...binaryAttachment,
+  attachmentId: "story-pdf",
+  uri: "exchange://exchange/story/files/design-notes/original",
+  mediaType: "application/pdf",
+  name: "design-notes.pdf",
+  size: 1_245_184,
+};
 
 export const UserText = {
   args: {
@@ -282,6 +308,71 @@ export const WithAttachments = {
       attachments: [imageAttachment, textAttachment],
     }),
   },
+} satisfies Story;
+
+export const AgentImageGallery = {
+  args: {
+    message: createChatMessage({
+      id: "agent-image-gallery",
+      content: "요청하신 화면을 비교할 수 있도록 정리했습니다.",
+      attachments: [imageAttachment, pngAttachment, gifAttachment],
+    }),
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+} satisfies Story;
+
+export const AgentMixedAttachmentGroup = {
+  args: {
+    message: createChatMessage({
+      id: "agent-mixed-attachment-group",
+      content: "이미지와 함께 관련 파일을 첨부했습니다.",
+      attachments: [
+        imageAttachment,
+        pngAttachment,
+        textAttachment,
+        pdfAttachment,
+        binaryAttachment,
+      ],
+    }),
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+} satisfies Story;
+
+export const UserWithMixedAttachments = {
+  args: {
+    message: createChatMessage({
+      id: "user-mixed-attachments",
+      role: "user",
+      content: "파일 첨부 테스트",
+      attachments: [
+        imageAttachment,
+        pngAttachment,
+        gifAttachment,
+        textAttachment,
+        pdfAttachment,
+        binaryAttachment,
+      ],
+    }),
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
 } satisfies Story;
 
 export const SkillLoadedIndicator = {

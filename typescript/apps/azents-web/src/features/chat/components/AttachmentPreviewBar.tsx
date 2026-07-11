@@ -20,7 +20,7 @@ import {
 } from "@mantine/core";
 import { IconFile, IconPhoto, IconX } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PendingFile, UploadErrorReason } from "../hooks/useFileUpload";
 
 /** file icon/thumbnail container common style */
@@ -124,6 +124,53 @@ export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
   onRemove,
 }: AttachmentPreviewBarProps): React.ReactElement | null {
   const t = useTranslations("chat.attachment");
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [overflowEdges, setOverflowEdges] = useState({
+    left: false,
+    right: false,
+  });
+  const updateOverflowEdges = useCallback((): void => {
+    const element = scrollerRef.current;
+    if (element === null) {
+      return;
+    }
+    const maxScrollLeft = Math.max(
+      0,
+      element.scrollWidth - element.clientWidth,
+    );
+    setOverflowEdges({
+      left: element.scrollLeft > 1,
+      right: element.scrollLeft < maxScrollLeft - 1,
+    });
+  }, []);
+
+  useEffect(() => {
+    const element = scrollerRef.current;
+    if (element === null) {
+      return;
+    }
+    updateOverflowEdges();
+    const observer = new ResizeObserver(updateOverflowEdges);
+    observer.observe(element);
+    for (const child of element.children) {
+      observer.observe(child);
+    }
+    element.addEventListener("scroll", updateOverflowEdges, { passive: true });
+    return () => {
+      observer.disconnect();
+      element.removeEventListener("scroll", updateOverflowEdges);
+    };
+  }, [pendingFiles.length, updateOverflowEdges]);
+
+  const fadeWidth = rem(40);
+  let maskImage = "none";
+  if (overflowEdges.left && overflowEdges.right) {
+    maskImage = `linear-gradient(to right, transparent 0, var(--mantine-color-black) ${fadeWidth}, var(--mantine-color-black) calc(100% - ${fadeWidth}), transparent 100%)`;
+  } else if (overflowEdges.left) {
+    maskImage = `linear-gradient(to right, transparent 0, var(--mantine-color-black) ${fadeWidth}, var(--mantine-color-black) 100%)`;
+  } else if (overflowEdges.right) {
+    maskImage = `linear-gradient(to right, var(--mantine-color-black) 0, var(--mantine-color-black) calc(100% - ${fadeWidth}), transparent 100%)`;
+  }
 
   // status translation key mapping
   const statusLabels: Record<PendingFile["status"], string> = useMemo(
@@ -141,7 +188,19 @@ export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
   }
 
   return (
-    <Group gap="xs" px="md" py="xs" wrap="wrap">
+    <Group
+      ref={scrollerRef}
+      gap="xs"
+      px="md"
+      py="xs"
+      wrap="nowrap"
+      style={{
+        maskImage,
+        overflowX: "auto",
+        overscrollBehaviorInline: "contain",
+        WebkitMaskImage: maskImage,
+      }}
+    >
       {pendingFiles.map((pf) => {
         const errorReason =
           pf.status === "error"
@@ -161,7 +220,8 @@ export const AttachmentPreviewBar = memo(function AttachmentPreviewBar({
               display: "flex",
               alignItems: "center",
               gap: "var(--mantine-spacing-xs)",
-              maxWidth: rem(260),
+              width: rem(200),
+              flex: "0 0 auto",
             }}
           >
             {/* thumbnail or file icon */}

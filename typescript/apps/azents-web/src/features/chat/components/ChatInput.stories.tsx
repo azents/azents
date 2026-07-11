@@ -338,6 +338,21 @@ export const Mobile = {
   ],
 } satisfies Story;
 
+export const MobileWithPendingFiles = {
+  args: {
+    ...baseArgs,
+    isMobile: true,
+    pendingFiles,
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+} satisfies Story;
+
 export const MobileFullReasoningEffort = {
   args: {
     ...baseArgs,

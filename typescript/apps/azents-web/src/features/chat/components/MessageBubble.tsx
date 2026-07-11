@@ -468,7 +468,10 @@ function UserTextMessage({
       <Box maw="75%" style={{ minWidth: 0 }}>
         <MessageMetadataSurface>
           {message.attachments && message.attachments.length > 0 && (
-            <FileAttachmentList files={message.attachments} />
+            <FileAttachmentList
+              files={message.attachments}
+              presentation="compact"
+            />
           )}
 
           {(hasContent || hasReasoning || message.status === "partial") && (
