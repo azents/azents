@@ -23,8 +23,7 @@ import {
 } from "@mantine/core";
 import { useLocalStorage } from "@mantine/hooks";
 import {
-  IconAdjustmentsHorizontal,
-  IconChevronDown,
+  IconCheck,
   IconPaperclip,
   IconPlayerStop,
   IconSend,
@@ -1031,7 +1030,7 @@ export const ChatInput = memo(function ChatInput({
         )}
         <Paper
           withBorder
-          radius="xl"
+          radius="md"
           px="xs"
           py={rem(6)}
           shadow="xs"
@@ -1044,53 +1043,58 @@ export const ChatInput = memo(function ChatInput({
                 onRemove={removeFile}
               />
             )}
-            {todo !== null && !editingMessageId && (
-              <TodoPreviewBar
-                goal={goal}
-                isMobile={isMobile}
-                todo={todo}
-                onClearGoal={onClearGoal}
-                onUpdateGoal={onUpdateGoal}
-                onPauseGoal={onPauseGoal}
-                onResumeGoal={onResumeGoal}
-              />
-            )}
+            {todo !== null &&
+              !editingMessageId &&
+              selectedAction === null &&
+              inputActionQuery === null && (
+                <TodoPreviewBar
+                  goal={goal}
+                  isMobile={isMobile}
+                  todo={todo}
+                  onClearGoal={onClearGoal}
+                  onUpdateGoal={onUpdateGoal}
+                  onPauseGoal={onPauseGoal}
+                  onResumeGoal={onResumeGoal}
+                />
+              )}
             {selectedAction !== null && !editingMessageId && !inputDisabled && (
-              <Group
-                justify="space-between"
-                gap="xs"
-                wrap="nowrap"
-                px="xs"
-                py={rem(4)}
-                style={{
-                  borderRadius: rem(10),
-                  background: "var(--mantine-color-blue-light)",
-                }}
-              >
-                <Box style={{ minWidth: 0 }}>
+              <Stack gap={rem(2)} align="flex-start">
+                <Group
+                  gap={rem(4)}
+                  wrap="nowrap"
+                  px={rem(8)}
+                  py={rem(3)}
+                  style={{
+                    borderRadius: rem(999),
+                    background: "var(--mantine-color-blue-light)",
+                    border: `${rem(1)} solid var(--mantine-color-blue-light-color)`,
+                    width: "fit-content",
+                    maxWidth: "100%",
+                  }}
+                >
                   <Text size="xs" fw={700} c="blue" truncate>
                     /{selectedAction.keyword}
                   </Text>
-                  {selectedAction.availability_hint?.message && (
-                    <Text size="xs" c="orange" lineClamp={1}>
-                      {selectedAction.availability_hint.message}
-                    </Text>
-                  )}
-                </Box>
-                <ActionIcon
-                  variant="subtle"
-                  size={rem(32)}
-                  c="dimmed"
-                  onClick={() => {
-                    setSelectedAction(null);
-                    persistDraft(inputValue, null, inferenceProfile);
-                    textareaRef.current?.focus();
-                  }}
-                  aria-label={t("cancelEdit")}
-                >
-                  <IconX size={14} />
-                </ActionIcon>
-              </Group>
+                  <ActionIcon
+                    variant="transparent"
+                    size={rem(16)}
+                    c="dimmed"
+                    onClick={() => {
+                      setSelectedAction(null);
+                      persistDraft(inputValue, null, inferenceProfile);
+                      textareaRef.current?.focus();
+                    }}
+                    aria-label={t("cancelEdit")}
+                  >
+                    <IconX size={12} />
+                  </ActionIcon>
+                </Group>
+                {selectedAction.availability_hint?.message && (
+                  <Text size="xs" c="orange" pl={rem(2)}>
+                    {selectedAction.availability_hint.message}
+                  </Text>
+                )}
+              </Stack>
             )}
             <Textarea
               ref={textareaRef}
@@ -1122,7 +1126,8 @@ export const ChatInput = memo(function ChatInput({
             />
             <Group gap="xs" wrap="nowrap">
               <ActionIcon
-                size={rem(40)}
+                size={rem(36)}
+                radius="md"
                 variant="subtle"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={
@@ -1133,27 +1138,30 @@ export const ChatInput = memo(function ChatInput({
                 }
                 aria-label={t("attachment.attach")}
               >
-                <IconPaperclip size={18} />
+                <IconPaperclip size={17} />
               </ActionIcon>
               {isMobile ? (
                 <>
                   <Button
                     variant="light"
                     size="compact-sm"
-                    leftSection={<IconAdjustmentsHorizontal size={16} />}
-                    rightSection={<IconChevronDown size={14} />}
+                    radius="md"
                     disabled={
                       inputDisabled || selectableModelOptions.length === 0
                     }
                     onClick={() => setProfileDrawerOpened(true)}
                     aria-label={t("composerProfile.model")}
                     style={{
-                      minWidth: 0,
-                      minHeight: rem(40),
-                      flex: "1 1 auto",
+                      minWidth: rem(128),
+                      maxWidth: rem(224),
+                      minHeight: rem(36),
                     }}
                   >
-                    <Text size="sm" truncate>
+                    <Text
+                      size="sm"
+                      truncate
+                      style={{ maxWidth: "20ch", minWidth: 0 }}
+                    >
                       {selectableEfforts.length > 0
                         ? `${selectedModelLabel} · ${selectedEffortLabel}`
                         : selectedModelLabel}
@@ -1164,7 +1172,7 @@ export const ChatInput = memo(function ChatInput({
                     onClose={() => setProfileDrawerOpened(false)}
                     title={t("composerProfile.model")}
                     position="bottom"
-                    size="auto"
+                    size={`min(80dvh, ${rem(720)})`}
                     keepMounted
                     styles={{
                       content: {
@@ -1172,20 +1180,70 @@ export const ChatInput = memo(function ChatInput({
                         borderTopRightRadius: rem(12),
                       },
                       body: {
+                        overflowY: "auto",
                         paddingBottom:
                           "max(var(--mantine-spacing-md), env(safe-area-inset-bottom))",
                       },
                     }}
                   >
                     <Stack gap="md">
-                      <Select
-                        label={t("composerProfile.model")}
-                        data={modelSelectData}
-                        value={inferenceProfile.model_target_label}
-                        onChange={handleModelChange}
-                        allowDeselect={false}
-                        styles={{ input: { fontSize: rem(16) } }}
-                      />
+                      <Stack
+                        gap={0}
+                        style={{
+                          border: `${rem(1)} solid var(--mantine-color-default-border)`,
+                          borderRadius: rem(8),
+                          overflow: "hidden",
+                        }}
+                      >
+                        {selectableModelOptions.map((option, index) => {
+                          const selected =
+                            option.label ===
+                            inferenceProfile.model_target_label;
+                          return (
+                            <UnstyledButton
+                              key={option.label}
+                              onClick={() => handleModelChange(option.label)}
+                              aria-pressed={selected}
+                              style={{
+                                background: selected
+                                  ? "var(--mantine-color-default-hover)"
+                                  : "var(--mantine-color-body)",
+                                borderTop:
+                                  index === 0
+                                    ? "none"
+                                    : `${rem(1)} solid var(--mantine-color-default-border)`,
+                                display: "block",
+                                padding: "var(--mantine-spacing-md)",
+                                textAlign: "left",
+                                width: "100%",
+                              }}
+                            >
+                              <Group
+                                gap="md"
+                                justify="space-between"
+                                wrap="nowrap"
+                              >
+                                <Stack gap={rem(2)} style={{ minWidth: 0 }}>
+                                  <Text fw={600} truncate>
+                                    {option.label}
+                                  </Text>
+                                  <Text size="sm" c="dimmed" truncate>
+                                    {option.model_selection.model_identifier}
+                                  </Text>
+                                </Stack>
+                                {selected && (
+                                  <IconCheck
+                                    aria-hidden="true"
+                                    size={20}
+                                    color="var(--mantine-color-blue-6)"
+                                    style={{ flexShrink: 0 }}
+                                  />
+                                )}
+                              </Group>
+                            </UnstyledButton>
+                          );
+                        })}
+                      </Stack>
                       {selectableEfforts.length > 0 && (
                         <Select
                           label={t("composerProfile.effortLabel")}
@@ -1193,6 +1251,7 @@ export const ChatInput = memo(function ChatInput({
                           value={inferenceProfile.reasoning_effort}
                           onChange={handleEffortChange}
                           allowDeselect={false}
+                          radius="md"
                           styles={{ input: { fontSize: rem(16) } }}
                         />
                       )}
@@ -1207,9 +1266,10 @@ export const ChatInput = memo(function ChatInput({
                     value={inferenceProfile.model_target_label}
                     onChange={handleModelChange}
                     allowDeselect={false}
+                    radius="md"
                     disabled={inputDisabled || modelSelectData.length === 0}
                     w={rem(176)}
-                    styles={{ input: { minHeight: rem(40) } }}
+                    styles={{ input: { minHeight: rem(36) } }}
                   />
                   {selectableEfforts.length > 0 && (
                     <Select
@@ -1218,9 +1278,10 @@ export const ChatInput = memo(function ChatInput({
                       value={inferenceProfile.reasoning_effort}
                       onChange={handleEffortChange}
                       allowDeselect={false}
+                      radius="md"
                       disabled={inputDisabled}
                       w={rem(136)}
-                      styles={{ input: { minHeight: rem(40) } }}
+                      styles={{ input: { minHeight: rem(36) } }}
                     />
                   )}
                 </>
@@ -1230,7 +1291,8 @@ export const ChatInput = memo(function ChatInput({
               (inputDisabled ||
                 (!inputValue.trim() && selectedAction === null)) ? (
                 <ActionIcon
-                  size={rem(40)}
+                  size={rem(36)}
+                  radius="md"
                   variant="filled"
                   color="red"
                   onClick={onStopRequest}
@@ -1238,11 +1300,12 @@ export const ChatInput = memo(function ChatInput({
                   loading={isStopPending}
                   aria-label={t("stopRun")}
                 >
-                  <IconPlayerStop size={18} />
+                  <IconPlayerStop size={17} />
                 </ActionIcon>
               ) : (
                 <ActionIcon
-                  size={rem(40)}
+                  size={rem(36)}
+                  radius="md"
                   variant="filled"
                   onClick={handleSend}
                   onMouseDown={(event) => event.preventDefault()}
@@ -1255,7 +1318,7 @@ export const ChatInput = memo(function ChatInput({
                   loading={isUploading}
                   aria-label={t("composerProfile.send")}
                 >
-                  <IconSend size={18} />
+                  <IconSend size={17} />
                 </ActionIcon>
               )}
             </Group>

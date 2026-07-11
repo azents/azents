@@ -4,7 +4,7 @@ import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
 import type { UploadedFile } from "../hooks/useFileUpload";
-import type { InputActionDefinition } from "../types";
+import type { InputActionDefinition, TodoStateSnapshot } from "../types";
 import type { AgentModelSelection, AgentResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -85,6 +85,19 @@ const addFiles: (files: FileList) => void = () => {};
 const removeFile = (): void => {};
 const afterSend = (): void => {};
 const stopRequest = (): void => {};
+const todo: TodoStateSnapshot = {
+  items: [
+    {
+      content: "Polish the composer layout and verify the mobile model picker",
+      status: "in_progress",
+    },
+    {
+      content: "Monitor CI after pushing the fix",
+      status: "pending",
+    },
+  ],
+};
+
 const inputActions: InputActionDefinition[] = [
   {
     id: "command:compact",
@@ -180,10 +193,31 @@ export const CommandBlocked = {
   },
 } satisfies Story;
 
+export const WithTodo = {
+  args: {
+    ...baseArgs,
+    todo,
+  },
+} satisfies Story;
+
 export const InputActionSuggestions = {
   args: {
     ...baseArgs,
     initialInputValue: "/",
+    todo,
+  },
+} satisfies Story;
+
+export const SelectedActionChip = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-selected-action-chip",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByRole("textbox"), "/");
+    await userEvent.click(canvas.getByRole("button", { name: /compact/i }));
+    await expect(canvas.getByText("/compact")).toBeVisible();
   },
 } satisfies Story;
 
@@ -253,6 +287,7 @@ export const MobileFullReasoningEffort = {
     isMobile: true,
     selectableModelOptions: [
       { label: "Default", model_selection: fullReasoningModel },
+      { label: "Fast", model_selection: noEffortModel },
     ],
   },
   decorators: [
@@ -265,6 +300,8 @@ export const MobileFullReasoningEffort = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await expect(page.getByText("gpt-5.6")).toBeVisible();
+    await expect(page.getByText("gpt-5.5-mini")).toBeVisible();
     const effortSelect = page.getByLabelText("Reasoning effort");
     await expect(effortSelect).toBeVisible();
     await expect(effortSelect).toHaveValue("medium");
