@@ -585,6 +585,11 @@ export const ChatInput = memo(function ChatInput({
           a.score - b.score || a.action.keyword.localeCompare(b.action.keyword),
       );
   }, [inputActionQuery, inputActions]);
+  const todoPreviewVisible =
+    todo !== null &&
+    editingMessageId === null &&
+    ((Boolean(goal?.objective) && goal?.status !== "complete") ||
+      todo.items.some((item) => item.status !== "completed"));
 
   useEffect(() => {
     if (editingMessageId !== null) {
@@ -1170,6 +1175,7 @@ export const ChatInput = memo(function ChatInput({
             withBorder
             radius="md"
             p="xs"
+            mb={todoPreviewVisible ? rem(22) : 0}
             style={{
               maxHeight: `min(40dvh, ${rem(320)})`,
               overflowY: "auto",
@@ -1256,7 +1262,7 @@ export const ChatInput = memo(function ChatInput({
                 onRemove={removeFile}
               />
             )}
-            {todo !== null && !editingMessageId && (
+            {todoPreviewVisible && (
               <TodoPreviewBar
                 goal={goal}
                 isMobile={isMobile}

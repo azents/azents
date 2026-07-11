@@ -1,3 +1,4 @@
+import { expect, userEvent, within } from "storybook/test";
 import { TodoPreviewBar } from "./TodoPreviewBar";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -55,6 +56,16 @@ export const Mobile: Story = {
         },
       ],
     },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /todo/i }));
+    const page = within(canvasElement.ownerDocument.body);
+    const sheet = await page.findByRole("dialog");
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getBoundingClientRect().height).toBeLessThanOrEqual(
+      Math.min(window.innerHeight * 0.8, 720) + 1,
+    );
   },
 };
 

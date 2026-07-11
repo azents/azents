@@ -216,6 +216,21 @@ export const InputActionSuggestions = {
     await expect(
       canvas.getByRole("button", { name: /compact/i }),
     ).toBeVisible();
+
+    const suggestions = canvas
+      .getByText("Slash commands")
+      .closest(".mantine-Paper-root");
+    const todoPreview = canvas
+      .getByText(
+        "Polish the composer layout and verify the mobile model picker",
+      )
+      .closest("button");
+    if (suggestions === null || todoPreview === null) {
+      throw new Error("Expected slash suggestions and Todo preview surfaces");
+    }
+    await expect(
+      suggestions.getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(todoPreview.getBoundingClientRect().top);
   },
 } satisfies Story;
 

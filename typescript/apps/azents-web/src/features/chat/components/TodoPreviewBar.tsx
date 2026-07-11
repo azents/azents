@@ -761,7 +761,7 @@ export function TodoPreviewBar({
           onClose={() => setOpened(false)}
           title={<SheetTitle title={title} />}
           position="bottom"
-          size="calc(100dvh - env(safe-area-inset-top))"
+          size={`min(80dvh, ${rem(720)})`}
           keepMounted
           transitionProps={{
             transition: "slide-up",
@@ -772,17 +772,8 @@ export function TodoPreviewBar({
             content: {
               borderTopLeftRadius: rem(12),
               borderTopRightRadius: rem(12),
-              display: "flex",
-              flexDirection: "column",
-              height: "calc(100dvh - env(safe-area-inset-top))",
-              maxHeight: "calc(100dvh - env(safe-area-inset-top))",
-            },
-            header: {
-              flexShrink: 0,
             },
             body: {
-              flex: 1,
-              minHeight: 0,
               overflowY: "auto",
               paddingBottom:
                 "max(var(--mantine-spacing-md), env(safe-area-inset-bottom))",
