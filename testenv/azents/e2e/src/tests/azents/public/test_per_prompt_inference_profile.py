@@ -244,6 +244,36 @@ def _wait_for_session_idle(
     raise TimeoutError(f"Session did not become idle: {last_state!r}")
 
 
+def _wait_for_session_cycle(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    timeout: float = 120,
+) -> None:
+    """Wait for a newly submitted session run to start and return to idle."""
+    deadline = time.monotonic() + timeout
+    observed_running = False
+    last_state: object = None
+    while time.monotonic() < deadline:
+        response = requests.get(
+            f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
+            headers=_headers(token),
+            timeout=10,
+        )
+        payload = _response_object(response)
+        last_state = payload.get("run_state")
+        observed_running = observed_running or last_state == "running"
+        if observed_running and last_state == "idle":
+            return
+        time.sleep(0.1)
+    raise TimeoutError(
+        "Session did not complete a run cycle: "
+        f"observed_running={observed_running}, last_state={last_state!r}"
+    )
+
+
 def _history(server_url: str, token: str, session_id: str) -> list[dict[str, object]]:
     """Fetch the current history page."""
     response = requests.get(
@@ -594,12 +624,11 @@ class TestPerPromptInferenceProfile:
             target="Quality",
             effort="high",
         )
-        _wait_for_summary(
+        _wait_for_session_cycle(
             server_url=azents_public_server_url,
             token=token,
+            agent_id=agent_id,
             session_id=session_id,
-            message=message,
-            status="completed",
         )
         tree = _subagent_tree(
             server_url=azents_public_server_url,
