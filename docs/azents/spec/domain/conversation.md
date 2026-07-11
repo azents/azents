@@ -93,8 +93,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-10
-spec_version: 93
+last_verified_at: 2026-07-11
+spec_version: 94
 ---
 
 # Conversation & Events
@@ -249,7 +249,11 @@ selected.
 `rdb/models/session_agent.py` stores the live participant tree for one root session. A root
 `AgentSession` has one root `SessionAgent` with path `/root`. `spawn_agent` creates child or nested
 `SessionAgent` rows with `kind = subagent`, a linked hidden `AgentSession` whose `session_kind` is
-`subagent`, and the same workspace and Agent boundary as the parent session.
+`subagent`, and the same workspace and Agent boundary as the parent session. Spawn request validation,
+profile derivation, child participant/session/run creation, selected context append, and initial
+mailbox input commit atomically. Invalid target labels, unsupported explicit effort, full-history
+profile overrides, invalid fork selections, or incomplete parent run provenance leave no child
+participant, session, run, activity event, or broker wake-up.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -332,7 +336,7 @@ before destructive cleanup can remove a path or branch.
 | `retry_state` | JSONB \| null | Durable failed-run retry state while the run remains `running`; cleared on terminal transition |
 | `requested_model_target_label` | string | Agent-owned target requested for this run |
 | `requested_reasoning_effort` | enum \| null | Explicit effort or null for model Default |
-| `inference_profile_source` | enum | `explicit_input`, `session_last_used`, `agent_default`, `parent_run`, or `retry_original` |
+| `inference_profile_source` | enum | `explicit_input`, `session_last_used`, `agent_default`, `parent_run`, `spawn_override`, or `retry_original` |
 | `resolved_model_selection` | JSONB \| null | Immutable full model snapshot after successful activation |
 | `resolved_reasoning_effort` | enum \| null | Activated effort; null represents model Default |
 | `resolved_at` | timestamptz \| null | Successful profile activation time |
@@ -357,7 +361,7 @@ completed, stopped, failed, interrupted, or cancelled runs.
 
 A run is precreated as `pending`, associated with its ordered durable input events through `agent_run_input_events`, and then atomically activated as `running` with its resolved profile. A pending run may instead become terminal `failed` with a typed profile-resolution failure. Only one pending run may exist for a session. Pending and running runs are active recovery state.
 
-The requested label is intent; `resolved_model_selection` is the immutable execution snapshot. Normal activation also updates the session-last-used profile in the same transaction. Manual retry creates a new pending run with `retry_original`, copies the original requested profile and ordered input-event associations, and resolves against current Agent routing. It never copies the old resolved snapshot. A subagent's first run is precreated with `parent_run`, `parent_agent_run_id`, and the exact parent resolved snapshot and limits.
+The requested label is intent; `resolved_model_selection` is the immutable execution snapshot. Normal activation also updates the session-last-used profile in the same transaction. Manual retry creates a new pending run with `retry_original`, copies the original requested profile and ordered input-event associations, and resolves against current Agent routing. It never copies the old resolved snapshot. A subagent's first run is precreated with `parent_agent_run_id`. It uses `parent_run` with the exact parent requested/resolved profile and limits when no override is supplied, or `spawn_override` with a statically validated and pre-resolved Agent-owned label/effort profile for a non-full-history fork. Both sources activate from the stored physical snapshot so first-run recovery does not re-route the label. The child session stores the selected requested label and effort as last-used intent for later runs.
 
 ## 4. Event Transcript Events
 
@@ -669,6 +673,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-11** — v94. Added atomic spawn profile validation, `spawn_override` run provenance, and child last-used profile initialization.
 - **2026-07-10** — v93. Required concrete reasoning-effort choices for normal user input when explicit levels are advertised.
 - **2026-07-10** — v92. Added durable requested/resolved inference profiles, profile-aware FIFO run boundaries, run-input associations, session-last-used intent, and retry/subagent provenance.
 - **2026-07-09** — v91. Clarified that failed-run retry state is cleared when retry wait ends and the next attempt starts, preventing stale live retry errors during later successful progress.

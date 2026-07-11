@@ -38,8 +38,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-10
-spec_version: 69
+last_verified_at: 2026-07-11
+spec_version: 70
 ---
 
 # Agent Execution Loop
@@ -273,8 +273,8 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   `SessionAgent` row lock for the tree. It fails with a tool error instead of queueing when the root
   tree already has `subagent_settings.max_subagents` active subagents or the requested child would
   exceed `subagent_settings.max_depth`. If allowed, it creates
-  a child `SessionAgent` plus hidden child `AgentSession`, precreates the child's first pending run with the exact current parent-run resolved profile and limits, forks the parent's current model-visible
-  context by default, appends that selected context to the child transcript, appends a
+  a child `SessionAgent` plus hidden child `AgentSession`. Without a profile override it precreates the child's first pending run with source `parent_run` and the exact current parent-run requested and resolved profile, limits, and parent run id. For `fork_turns = none` or a positive bounded count, optional `model_target_label` and `reasoning_effort` fields may instead pre-resolve an Agent-owned target profile with source `spawn_override`. Full-history `all` forks reject either override. Target-only changes normalize effort from the parent resolved effort; explicit efforts validate exactly. Label, effort, fork, and parent-provenance validation happens before child records or wake-up side effects. The tool description lists Agent-owned labels and explicit effort levels only and does not project physical model or integration metadata. The spawn flow then forks the parent's selected model-visible
+  context, appends that selected context to the child transcript, appends a
   `system_reminder` event rendered as a `<system-reminder>` boundary when any parent history
   was copied, writes an initial `agent_message`, marks the child running, and sends a broker
   wake-up. The caller may still
@@ -295,8 +295,11 @@ Subagent collaboration tools communicate through resolved agent input buffers:
 child session. `spawn_agent` and `followup_task` render `Message Type: NEW_TASK`; `send_message`
 renders `Message Type: MESSAGE`. The envelope includes the target path as task name, sender path,
 and payload text so a subagent can distinguish its current assignment from inherited forked
-history. Broker wake-ups remain payload-free; recovery is based on persisted input buffers and
-`agent_sessions.run_state`.
+history. The first child run initializes `agent_sessions.last_model_target_label` and
+`last_reasoning_effort` from its selected requested profile. Later `followup_task` runs therefore use
+normal session-last-used precedence and re-resolve the saved Agent-owned label against the current
+Agent snapshot rather than pinning the first run's physical snapshot. Broker wake-ups remain
+payload-free; recovery is based on persisted input buffers and `agent_sessions.run_state`.
 
 Human-authored direct writes are root-session only. REST message/edit/command/failed-run retry paths
 and operation retry/discard paths reject `session_kind = subagent` before creating input buffers,
@@ -507,6 +510,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-11** — v70. Added bounded-fork subagent inference overrides, label-only schema guidance, atomic validation, and session-last-used continuation semantics.
 - **2026-07-10** — v69. Added profile-aware FIFO promotion, atomic run activation, immutable resolved provenance, and exact parent-run profile inheritance.
 - **2026-07-10** — v68. Documented shared xAI API-key/OAuth transport lowering while preserving OAuth-only credential refresh.
 - **2026-07-09** — v66. Documented forked-history `<system-reminder>` boundaries, explicit agent-message envelopes, and Codex v2 agent targeting and list visibility.

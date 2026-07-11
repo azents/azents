@@ -12,8 +12,8 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-10 | 44 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-10 | 93 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-11 | 45 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-11 | 94 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-01 | 8 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-09 | 4 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-10 | 4 |
@@ -25,7 +25,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-10 | 69 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-11 | 70 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-11 | 15 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
@@ -35,7 +35,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-11 | 13 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |
-| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-10 | 15 |
+| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-11 | 16 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-06 | 12 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-10 | 6 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |

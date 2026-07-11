@@ -45,8 +45,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-10
-spec_version: 44
+last_verified_at: 2026-07-11
+spec_version: 45
 ---
 
 # Agent Domain Spec
@@ -253,7 +253,7 @@ Deterministic fixture in local/test environment is development/QA support path a
 
 ## 3. Runtime Resolve
 
-Every run has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, or `parent_run`.
+Every run has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
 
 Before a new normal run starts, runtime resolution:
 
@@ -266,6 +266,8 @@ Before a new normal run starts, runtime resolution:
 7. Validates Agent model parameters, applies the requested effort, and materializes user attachments.
 
 Successful activation stores the full selected `AgentModelSelection`, resolved effort, effective limits, and resolution timestamp on `AgentRun`. Subsequent turns, automatic retries, recovery, and worker takeover rebuild from that stored snapshot rather than resolving the label again. Resolution failures are terminal typed run failures with no fallback or automatic retry.
+
+`spawn_agent` exposes the current Agent's selectable labels and their explicit effort levels, but not integration ids, providers, physical model identifiers, display names, families, catalog metadata, context limits, pricing, or resolved snapshots. Omitted override fields preserve the exact concrete parent Run profile. An explicit target label or effort is allowed only with `fork_turns = none` or a positive bounded count; full-history forks reject overrides. A target-only override normalizes from the parent resolved effort using canonical effort order: preserve when supported, otherwise choose the greatest supported lower effort, otherwise the smallest supported effort, or null when no explicit levels exist. Explicit effort is validated exactly and never normalized. Static validation completes before child creation.
 
 Runtime does not query Workspace defaults or model listing. Workspace defaults act only as copy sources at Agent create/update submit time, and model catalog changes do not mutate an activated run.
 
@@ -312,6 +314,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-11 | 45 | Added label-only subagent spawn overrides, bounded-fork restrictions, and effort transition semantics |
 | 2026-07-10 | 44 | Required concrete user-facing effort selection when advertised and made explicit-effort validation strict for empty lists |
 | 2026-07-10 | 43 | Added per-run Agent-owned target resolution, nullable effort validation, and immutable activated profile semantics |
 | 2026-07-10 | 42 | Added the stable xAI API-key integration contract and clarified provider-specific OAuth refresh |
