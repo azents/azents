@@ -25,6 +25,7 @@ from azents.engine.events.action_messages import (
     ActionMessagePayload,
     CreateGitWorktreeAction,
 )
+from azents.engine.events.types import ActionExecutionResultPayload
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -857,9 +858,24 @@ class TestSessionGitWorktreeService:
                 session,
                 result.value.agent_session.id,
             )
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                result.value.agent_session.id,
+                limit=20,
+            )
         assert projection is not None
         assert projection.execution.status is ActionExecutionStatus.FAILED
         assert [buffer.content for buffer in buffers] == ["start invalid"]
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        terminal_payload = terminal_events[0].payload
+        assert isinstance(terminal_payload, ActionExecutionResultPayload)
+        terminal_projection = terminal_payload.action_execution
+        terminal_execution = terminal_projection["execution"]
+        assert isinstance(terminal_execution, dict)
+        assert terminal_execution["status"] == "failed"
 
     async def test_branch_collision_suffixes_final_branch(
         self,
