@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-10
-spec_version: 15
+last_verified_at: 2026-07-11
+spec_version: 16
 ---
 
 # Run Resume
@@ -190,7 +190,7 @@ waiting leaves the run `running` for the next worker instead of writing durable 
 
 Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. A pending normal run retains requested label, effort, and source, then resolves once during activation. A running run must already contain the full resolved model snapshot and effective limits; recovery rebuilds `RunRequest` from those values and never re-resolves current Agent labels.
 
-Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations, marks source `retry_original`, and leaves resolved provenance empty so current Agent routing is resolved once at activation. The first child subagent run is different: it is precreated with source `parent_run` and the exact parent resolved snapshot, effort, limits, and parent run id, so recovery does not depend on whether the original target label still exists.
+Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations, marks source `retry_original`, and leaves resolved provenance empty so current Agent routing is resolved once at activation. The first child subagent run is different: it is precreated with a parent run id and a complete resolved snapshot, effort, and limits. It uses source `parent_run` for exact inheritance or `spawn_override` for a statically resolved non-full-history override. Recovery activates either pre-resolved source without re-routing the requested label, so first-run execution does not depend on whether the original target label still exists. Later child runs resolve the stored session-last-used label normally.
 
 ## Tool Recovery
 
@@ -233,6 +233,7 @@ that next run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-11** (spec_version 16) — Added recovery semantics for pre-resolved `spawn_override` child runs and later session-last-used re-resolution.
 - **2026-07-10** (spec_version 15) — Added pending/activated profile recovery, retry intent re-resolution, and exact inherited parent-run snapshot recovery.
 - **2026-07-08** (spec_version 14) — Clarified that failed TurnActions continue FIFO processing and context invalidation uses a cancelled run boundary plus follow-up wake-up, not a completed run marker.
 - **2026-07-08** (spec_version 13) — Clarified that running workers process TurnActions at model-call turn boundaries and hand off after context invalidation.

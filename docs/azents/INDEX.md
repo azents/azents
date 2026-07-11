@@ -15,8 +15,8 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-10 | 44 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-10 | 93 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-11 | 45 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-11 | 94 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-09 | 4 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-10 | 4 |
@@ -30,7 +30,7 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-10 | 69 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-11 | 70 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-11 | 15 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Background Tool Call](spec/flow/background-tool-call.md) | @Hardtack | 2026-06-13 | 3 |
@@ -40,7 +40,7 @@ _8 documents_
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-08 | 10 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-10 | 15 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-11 | 16 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-06 | 12 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-10 | 6 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |
