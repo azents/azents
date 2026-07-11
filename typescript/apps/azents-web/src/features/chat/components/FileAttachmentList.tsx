@@ -311,6 +311,7 @@ function AttachmentTile({
           size="sm"
           aria-label={t("downloadFile", { name: displayName })}
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
         >
           <IconDownload size={16} />
         </ActionIcon>

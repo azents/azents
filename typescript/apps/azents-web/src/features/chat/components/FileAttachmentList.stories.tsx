@@ -1,4 +1,4 @@
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fireEvent, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   binaryAttachment,
@@ -46,6 +46,10 @@ export const GenericFileCardInteraction = {
       "href",
       expect.stringContaining("/download"),
     );
+    download.focus();
+    await fireEvent.keyDown(download, { key: "Enter" });
+    await expect(within(document.body).queryByRole("dialog")).toBeNull();
+
     await userEvent.click(card);
     await expect(within(document.body).getByRole("dialog")).toBeVisible();
   },
