@@ -154,13 +154,13 @@ async def test_runner_state_sink_preserves_provider_workspace_path(
     assert runtime.failure_code is None
 
 
-async def test_runner_state_sink_rejects_unsupported_runner_state(
+async def test_runner_state_sink_treats_busy_runner_as_ready(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Unsupported Runner states become explicit failures."""
+    """An active Runner operation keeps the Runtime available."""
     repo = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
-        runtime_id = await _create_runtime(session, "runner-sink-unsupported")
+        runtime_id = await _create_runtime(session, "runner-sink-busy")
         await repo.record_provider_observed_state(
             session,
             runtime_id,
@@ -178,8 +178,8 @@ async def test_runner_state_sink_rejects_unsupported_runner_state(
     async with rdb_session_manager() as session:
         runtime = await repo.get_by_id(session, runtime_id)
     assert runtime is not None
-    assert runtime.runner_state == RuntimeRunnerState.FAILED
-    assert runtime.failure_code == "UNSUPPORTED_RUNNER_STATE"
+    assert runtime.runner_state == RuntimeRunnerState.READY
+    assert runtime.failure_code is None
 
 
 async def test_runner_state_sink_records_runner_stream_closed_as_disconnected(

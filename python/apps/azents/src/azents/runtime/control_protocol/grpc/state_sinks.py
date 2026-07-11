@@ -182,6 +182,8 @@ def _runner_state(report: SharedRunnerStateReport) -> RuntimeRunnerState:
     if report.diagnostic.get("reason") == "runner_stream_closed":
         return RuntimeRunnerState.DISCONNECTED
     state = report.runner_state
+    if state == SharedRunnerState.BUSY:
+        return RuntimeRunnerState.READY
     if state in {
         SharedRunnerState.UNKNOWN,
         SharedRunnerState.STARTING,
@@ -202,6 +204,7 @@ def _runner_state_failure(
         SharedRunnerState.UNKNOWN,
         SharedRunnerState.STARTING,
         SharedRunnerState.READY,
+        SharedRunnerState.BUSY,
         SharedRunnerState.DEGRADED,
         SharedRunnerState.FAILED,
     }:
