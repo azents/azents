@@ -571,6 +571,12 @@ class TestPerPromptInferenceProfile:
                     azents_public_server_url,
                 )
             )
+            _wait_for_session_idle(
+                server_url=azents_public_server_url,
+                token=rejection_token,
+                agent_id=rejection_agent_id,
+                session_id=rejection_session_id,
+            )
             _write_profile(
                 server_url=azents_public_server_url,
                 token=rejection_token,
