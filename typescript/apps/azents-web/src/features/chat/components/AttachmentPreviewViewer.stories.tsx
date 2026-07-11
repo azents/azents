@@ -60,3 +60,15 @@ Hello from Azents!`,
     },
   },
 } satisfies Story;
+
+export const UnsupportedPreview = {
+  args: {
+    opened: true,
+    onClose: closePreview,
+    name: "archive.zip",
+    mediaType: "application/zip",
+    size: 1_245_184,
+    downloadUrl: "/api/chat/exchange-files/story-archive/download",
+    preview: { type: "unsupported" },
+  },
+} satisfies Story;

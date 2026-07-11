@@ -1282,6 +1282,8 @@
       "closePreview": "Fermer l’aperçu",
       "zoomOut": "Réduire",
       "zoomIn": "Agrandir",
+      "previewUnavailable": "Aperçu indisponible",
+      "downloadToOpen": "Téléchargez le fichier pour l’ouvrir dans une application compatible.",
       "errorReason": {
         "fileTooLarge": "Fichier trop volumineux",
         "invalidRequest": "Fichier invalide",

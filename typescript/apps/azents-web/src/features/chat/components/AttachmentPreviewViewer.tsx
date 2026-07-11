@@ -13,7 +13,13 @@ import {
   Text,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
-import { IconDownload, IconMinus, IconPlus, IconX } from "@tabler/icons-react";
+import {
+  IconDownload,
+  IconFile,
+  IconMinus,
+  IconPlus,
+  IconX,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { type TouchEvent, useEffect, useRef, useState } from "react";
 import { formatFileSize } from "./FileAttachmentList";
@@ -32,6 +38,9 @@ export type AttachmentPreviewContent =
       type: "document-page";
       imageUrl: string;
       pageNumber: number;
+    }
+  | {
+      type: "unsupported";
     };
 
 interface AttachmentPreviewViewerProps {
@@ -77,17 +86,17 @@ export function AttachmentPreviewViewer({
     .filter(Boolean)
     .join(" · ");
   const imageUrl =
-    preview.type === "text"
-      ? null
-      : preview.type === "image"
-        ? preview.url
-        : preview.imageUrl;
+    preview.type === "image"
+      ? preview.url
+      : preview.type === "document-page"
+        ? preview.imageUrl
+        : null;
   const imageAlt =
-    preview.type === "text"
-      ? ""
-      : preview.type === "image"
-        ? preview.altText
-        : `${name} page ${preview.pageNumber}`;
+    preview.type === "image"
+      ? preview.altText
+      : preview.type === "document-page"
+        ? `${name} page ${preview.pageNumber}`
+        : "";
   const touchDistance = (event: TouchEvent<HTMLDivElement>): number => {
     const first = event.touches.item(0);
     const second = event.touches.item(1);
@@ -199,6 +208,26 @@ export function AttachmentPreviewViewer({
               </Code>
             </Box>
           </ScrollArea>
+        ) : preview.type === "unsupported" ? (
+          <Box
+            style={{
+              alignItems: "center",
+              display: "flex",
+              flex: 1,
+              flexDirection: "column",
+              gap: "var(--mantine-spacing-sm)",
+              justifyContent: "center",
+              minHeight: 0,
+              padding: "var(--mantine-spacing-xl)",
+              textAlign: "center",
+            }}
+          >
+            <IconFile size={48} color="var(--mantine-color-dimmed)" />
+            <Text fw={600}>{t("previewUnavailable")}</Text>
+            <Text size="sm" c="dimmed">
+              {t("downloadToOpen")}
+            </Text>
+          </Box>
         ) : (
           <Box
             bg="var(--mantine-color-dark-9)"

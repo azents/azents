@@ -104,7 +104,7 @@ function previewSelection(file: FileAttachment): PreviewSelection | null {
   if (downloadUrl === null) {
     return null;
   }
-  if (isImageFile(file.mediaType) && file.previewThumbnailUri) {
+  if (isImageFile(file.mediaType)) {
     return {
       file,
       downloadUrl,
@@ -125,7 +125,11 @@ function previewSelection(file: FileAttachment): PreviewSelection | null {
       },
     };
   }
-  return null;
+  return {
+    file,
+    downloadUrl,
+    preview: { type: "unsupported" },
+  };
 }
 
 function useOverflowMask(): OverflowMaskState {
@@ -307,6 +311,7 @@ function AttachmentTile({
           size="sm"
           aria-label={t("downloadFile", { name: displayName })}
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
         >
           <IconDownload size={16} />
         </ActionIcon>
@@ -494,7 +499,6 @@ export function FileAttachmentList({
     (file) =>
       isImageFile(file.mediaType) &&
       isFileAvailable(file) &&
-      Boolean(file.previewThumbnailUri) &&
       buildDownloadUrl(file) !== null,
   );
   const compactFiles = files.filter((file) => !prominentImages.includes(file));

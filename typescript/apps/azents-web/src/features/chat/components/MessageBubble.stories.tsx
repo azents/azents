@@ -66,6 +66,15 @@ const gifAttachment = {
   name: "interaction.gif",
 };
 
+const originalOnlyImageAttachments = [
+  imageAttachment,
+  pngAttachment,
+  gifAttachment,
+].map((attachment) => ({
+  ...attachment,
+  previewThumbnailUri: null,
+}));
+
 const pdfAttachment = {
   ...binaryAttachment,
   attachmentId: "story-pdf",
@@ -316,6 +325,24 @@ export const AgentImageGallery = {
       id: "agent-image-gallery",
       content: "요청하신 화면을 비교할 수 있도록 정리했습니다.",
       attachments: [imageAttachment, pngAttachment, gifAttachment],
+    }),
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+} satisfies Story;
+
+export const AgentPresentedImageGallery = {
+  args: {
+    message: createChatMessage({
+      id: "agent-presented-image-gallery",
+      content:
+        "Original images presented without generated thumbnail metadata.",
+      attachments: originalOnlyImageAttachments,
     }),
   },
   decorators: [
