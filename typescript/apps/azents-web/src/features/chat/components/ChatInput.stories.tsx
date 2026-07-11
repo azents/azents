@@ -1,5 +1,5 @@
 import { rem } from "@mantine/core";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
@@ -358,16 +358,20 @@ export const MobileFullReasoningEffort = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole("button", { name: "Model" }));
-    await expect(page.getByText("gpt-5.6")).toBeVisible();
+    await waitFor(() => expect(page.getByText("gpt-5.6")).toBeVisible());
     await expect(page.getByText("gpt-5.5-mini")).toBeVisible();
-    const effortSelect = page.getByLabelText("Reasoning effort");
-    await expect(effortSelect).toBeVisible();
-    await expect(effortSelect).toHaveValue("medium");
-    await userEvent.click(effortSelect);
-    await expect(page.getByRole("option", { name: "max" })).toBeVisible();
-    await expect(
-      page.queryByRole("option", { name: "Default" }),
-    ).not.toBeInTheDocument();
+    await expect(page.getByText("Reasoning effort")).toBeVisible();
+    await expect(page.getByRole("button", { name: "medium" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByRole("button", { name: "max" })).toBeVisible();
+    await userEvent.click(page.getByRole("button", { name: "max" }));
+    await expect(page.getByRole("button", { name: "max" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.queryByRole("option")).not.toBeInTheDocument();
   },
 } satisfies Story;
 

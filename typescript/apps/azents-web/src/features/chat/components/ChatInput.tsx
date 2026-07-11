@@ -16,7 +16,6 @@ import {
   Paper,
   Popover,
   rem,
-  Select,
   Stack,
   Text,
   Textarea,
@@ -554,10 +553,6 @@ export const ChatInput = memo(function ChatInput({
       ),
     [inferenceProfile.model_target_label, selectableModelOptions],
   );
-  const effortSelectData = useMemo(
-    () => selectableEfforts.map((effort) => ({ value: effort, label: effort })),
-    [selectableEfforts],
-  );
   const selectedModelLabel =
     selectableModelOptions.find(
       (option) => option.label === inferenceProfile.model_target_label,
@@ -984,6 +979,43 @@ export const ChatInput = memo(function ChatInput({
       </UnstyledButton>
     );
   });
+  const effortOptionRows = selectableEfforts.map((effort, index) => {
+    const selected = effort === inferenceProfile.reasoning_effort;
+    return (
+      <UnstyledButton
+        key={effort}
+        onClick={() => handleEffortChange(effort)}
+        aria-pressed={selected}
+        style={{
+          background: selected
+            ? "var(--mantine-color-default-hover)"
+            : "var(--mantine-color-body)",
+          borderTop:
+            index === 0
+              ? "none"
+              : `${rem(1)} solid var(--mantine-color-default-border)`,
+          display: "block",
+          padding: `${rem(12)}`,
+          textAlign: "left",
+          width: "100%",
+        }}
+      >
+        <Group gap="sm" justify="space-between" wrap="nowrap">
+          <Text size="sm" fw={600} lh={rem(18)}>
+            {effort}
+          </Text>
+          {selected && (
+            <IconCheck
+              aria-hidden="true"
+              size={16}
+              color="var(--mantine-color-blue-6)"
+              style={{ flexShrink: 0 }}
+            />
+          )}
+        </Group>
+      </UnstyledButton>
+    );
+  });
   const mobileProfilePickerContent = (
     <Stack gap="md">
       <Stack
@@ -997,15 +1029,21 @@ export const ChatInput = memo(function ChatInput({
         {modelOptionRows}
       </Stack>
       {selectableEfforts.length > 0 && (
-        <Select
-          label={t("composerProfile.effortLabel")}
-          data={effortSelectData}
-          value={inferenceProfile.reasoning_effort}
-          onChange={handleEffortChange}
-          allowDeselect={false}
-          radius={rem(12)}
-          styles={{ input: { fontSize: rem(16) } }}
-        />
+        <Stack gap={rem(6)}>
+          <Text size="sm" fw={600}>
+            {t("composerProfile.effortLabel")}
+          </Text>
+          <Stack
+            gap={0}
+            style={{
+              border: `${rem(1)} solid var(--mantine-color-default-border)`,
+              borderRadius: rem(12),
+              overflow: "hidden",
+            }}
+          >
+            {effortOptionRows}
+          </Stack>
+        </Stack>
       )}
     </Stack>
   );
