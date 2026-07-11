@@ -176,8 +176,9 @@ _15 documents_
 - [ADR-0121: Atomically Activate the Resolved Run and Session Profile](adr/0121-atomic-run-profile-activation.md)
 - [ADR-0122: Project Compact Inference Summaries with User Messages](adr/0122-inline-user-message-inference-summary.md)
 - [ADR-0123: Require an Explicit Reasoning Effort in User Input](adr/0123-require-explicit-reasoning-effort-in-user-input.md)
+- [ADR-0124: Allow Explicit Inference Profiles When Spawning Subagents](adr/0124-subagent-spawn-inference-profile-overrides.md)
 
-_126 documents_
+_127 documents_
 
 ## Issues (Bug Tracking)
 
