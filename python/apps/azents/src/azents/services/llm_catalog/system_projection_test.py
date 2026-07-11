@@ -153,8 +153,8 @@ def test_project_system_entries_reconstructs_reasoning_efforts() -> None:
     assert efforts_by_model["gpt-5-reasoning-restricted"] == ["medium", "high"]
 
 
-def test_project_system_entries_does_not_infer_gpt5_efforts_for_anthropic() -> None:
-    """Generic reasoning support does not imply OpenAI effort levels."""
+def test_project_system_entries_infers_baseline_efforts_for_anthropic() -> None:
+    """Generic reasoning support implies baseline effort levels."""
     source_snapshot = LiteLLMSourceSnapshot(
         id="source-id",
         source_key="litellm_model_cost",
@@ -178,4 +178,40 @@ def test_project_system_entries_does_not_infer_gpt5_efforts_for_anthropic() -> N
         source_snapshot=source_snapshot,
     )
 
-    assert entries[0].normalized_capabilities["reasoning"]["effort_levels"] == []
+    assert entries[0].normalized_capabilities["reasoning"]["effort_levels"] == [
+        "low",
+        "medium",
+        "high",
+    ]
+
+
+def test_project_system_entries_infers_baseline_efforts_for_grok_4_5() -> None:
+    """Grok 4.5 receives baseline efforts from generic reasoning support."""
+    source_snapshot = LiteLLMSourceSnapshot(
+        id="source-id",
+        source_key="litellm_model_cost",
+        source_url=None,
+        source_hash="hash",
+        model_count=1,
+        litellm_version="1.0.0",
+        loaded_source="fixture",
+        payload={
+            "xai/grok-4.5": {
+                "litellm_provider": "xai",
+                "mode": "chat",
+                "supports_reasoning": True,
+            }
+        },
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    entries = project_system_entries(
+        provider=LLMProvider.XAI,
+        source_snapshot=source_snapshot,
+    )
+
+    assert entries[0].normalized_capabilities["reasoning"]["effort_levels"] == [
+        "low",
+        "medium",
+        "high",
+    ]
