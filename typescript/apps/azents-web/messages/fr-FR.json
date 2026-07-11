@@ -682,7 +682,7 @@
       "selectedModelMissingDescription": "Le snapshot de modèle enregistré est peut-être obsolète ou le modèle a été retiré de la dernière projection du catalogue. Synchronisez le catalogue ou sélectionnez un modèle actuel avant d’enregistrer.",
       "useMainOrWorkspaceDefault": "Utiliser le modèle principal/par défaut du workspace",
       "optionalLightweightModel": "Modèle optionnel pour la compaction/léger.",
-      "reasoningEffortLabel": "Effort de raisonnement",
+      "defaultReasoningEffortLabel": "Effort de raisonnement par défaut",
       "builtinToolsLabel": "Outils intégrés",
       "modelCatalogPicker": {
         "selectMainTitle": "Sélectionner le modèle principal",
@@ -1510,15 +1510,6 @@
     "composerProfile": {
       "model": "Modèle",
       "effortLabel": "Effort de raisonnement",
-      "effort": {
-        "none": "Aucun",
-        "minimal": "Minimal",
-        "low": "Faible",
-        "medium": "Moyen",
-        "high": "Élevé",
-        "xhigh": "Très élevé",
-        "max": "Maximum"
-      },
       "send": "Envoyer"
     },
     "inferenceProvenance": {
@@ -1527,13 +1518,6 @@
       "requestedModel": "Modèle demandé",
       "requestedEffort": "Effort demandé",
       "defaultEffort": "Par défaut",
-      "effortNone": "Aucun",
-      "effortMinimal": "Minimal",
-      "effortLow": "Faible",
-      "effortMedium": "Moyen",
-      "effortHigh": "Élevé",
-      "effortXhigh": "Très élevé",
-      "effortMax": "Maximum",
       "awaitingActivation": "En attente de l’activation du run",
       "run": "Run",
       "runValue": "#{index} · {status}",

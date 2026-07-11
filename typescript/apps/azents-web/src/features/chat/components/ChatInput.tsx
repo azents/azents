@@ -558,21 +558,14 @@ export const ChatInput = memo(function ChatInput({
     [inferenceProfile.model_target_label, selectableModelOptions],
   );
   const effortSelectData = useMemo(
-    () =>
-      selectableEfforts.map((effort) => ({
-        value: effort,
-        label: t(`composerProfile.effort.${effort}`),
-      })),
-    [selectableEfforts, t],
+    () => selectableEfforts.map((effort) => ({ value: effort, label: effort })),
+    [selectableEfforts],
   );
   const selectedModelLabel =
     selectableModelOptions.find(
       (option) => option.label === inferenceProfile.model_target_label,
     )?.label ?? inferenceProfile.model_target_label;
-  const selectedEffortLabel =
-    inferenceProfile.reasoning_effort === null
-      ? ""
-      : t(`composerProfile.effort.${inferenceProfile.reasoning_effort}`);
+  const selectedEffortLabel = inferenceProfile.reasoning_effort ?? "";
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const previousEditingMessageIdRef = useRef<string | null>(null);

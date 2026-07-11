@@ -269,7 +269,7 @@ export const MobileFullReasoningEffort = {
     await expect(effortSelect).toBeVisible();
     await expect(effortSelect).toHaveValue("medium");
     await userEvent.click(effortSelect);
-    await expect(page.getByRole("option", { name: "Maximum" })).toBeVisible();
+    await expect(page.getByRole("option", { name: "max" })).toBeVisible();
     await expect(
       page.queryByRole("option", { name: "Default" }),
     ).not.toBeInTheDocument();

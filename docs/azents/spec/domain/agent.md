@@ -253,7 +253,7 @@ Deterministic fixture in local/test environment is development/QA support path a
 
 ## 3. Runtime Resolve
 
-Every run has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, or `parent_run`.
+Every run has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, or `parent_run`.
 
 Before a new normal run starts, runtime resolution:
 

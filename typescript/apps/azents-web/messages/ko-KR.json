@@ -682,7 +682,7 @@
       "selectedModelMissingDescription": "저장된 모델 스냅샷이 오래되었거나 최신 카탈로그 projection에서 제거되었을 수 있습니다. 카탈로그를 동기화하거나 현재 모델을 선택한 뒤 저장하세요.",
       "useMainOrWorkspaceDefault": "메인/워크스페이스 기본값 사용",
       "optionalLightweightModel": "선택 사항인 압축/경량 모델입니다.",
-      "reasoningEffortLabel": "추론 강도",
+      "defaultReasoningEffortLabel": "기본 추론 강도",
       "builtinToolsLabel": "내장 도구",
       "modelCatalogPicker": {
         "selectMainTitle": "메인 모델 선택",
@@ -1510,15 +1510,6 @@
     "composerProfile": {
       "model": "모델",
       "effortLabel": "추론 수준",
-      "effort": {
-        "none": "없음",
-        "minimal": "최소",
-        "low": "낮음",
-        "medium": "중간",
-        "high": "높음",
-        "xhigh": "매우 높음",
-        "max": "최대"
-      },
       "send": "보내기"
     },
     "inferenceProvenance": {
@@ -1527,13 +1518,6 @@
       "requestedModel": "요청한 모델",
       "requestedEffort": "요청한 추론 수준",
       "defaultEffort": "기본값",
-      "effortNone": "없음",
-      "effortMinimal": "최소",
-      "effortLow": "낮음",
-      "effortMedium": "중간",
-      "effortHigh": "높음",
-      "effortXhigh": "매우 높음",
-      "effortMax": "최대",
       "awaitingActivation": "Run 활성화를 기다리는 중",
       "run": "Run",
       "runValue": "#{index} · {status}",

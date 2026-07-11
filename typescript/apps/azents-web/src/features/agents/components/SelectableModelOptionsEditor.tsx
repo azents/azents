@@ -47,6 +47,7 @@ import type {
   SelectableModelOptionFormValue,
 } from "../model-selection";
 import type { DragEndEvent } from "@dnd-kit/core";
+import type { ReactNode } from "react";
 
 export interface SelectableModelOptionsEditorProps {
   handle: string;
@@ -55,6 +56,7 @@ export interface SelectableModelOptionsEditorProps {
   options: SelectableModelOptionFormValue[];
   mainModelLabel: string | null;
   lightweightModelLabel: string | null;
+  defaultReasoningEffortControl?: ReactNode;
   providerOptions: ProviderIntegrationOption[];
   canEdit: boolean;
   showValidationErrors?: boolean;
@@ -216,6 +218,7 @@ export function SelectableModelOptionsEditor({
   options,
   mainModelLabel,
   lightweightModelLabel,
+  defaultReasoningEffortControl,
   providerOptions,
   canEdit,
   showValidationErrors = false,
@@ -386,14 +389,17 @@ export function SelectableModelOptionsEditor({
       )}
 
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
-        <Select
-          label={t("mainLabel")}
-          description={t("mainDescription")}
-          data={labelOptions}
-          value={mainLabelValue}
-          disabled={!canEdit || labelOptions.length === 0}
-          onChange={onChangeMainModelLabel}
-        />
+        <Stack gap="sm">
+          <Select
+            label={t("mainLabel")}
+            description={t("mainDescription")}
+            data={labelOptions}
+            value={mainLabelValue}
+            disabled={!canEdit || labelOptions.length === 0}
+            onChange={onChangeMainModelLabel}
+          />
+          {defaultReasoningEffortControl}
+        </Stack>
         <Select
           label={t("lightweightLabel")}
           description={t("lightweightDescription")}

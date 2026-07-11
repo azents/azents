@@ -682,7 +682,7 @@
       "selectedModelMissingDescription": "保存済みモデルスナップショットが古いか、最新のカタログ projection から削除された可能性があります。カタログを同期するか、現在のモデルを選択してから保存してください。",
       "useMainOrWorkspaceDefault": "メイン/ワークスペース既定値を使用",
       "optionalLightweightModel": "任意の圧縮/軽量モデルです。",
-      "reasoningEffortLabel": "推論強度",
+      "defaultReasoningEffortLabel": "デフォルトの推論強度",
       "builtinToolsLabel": "組み込みツール",
       "modelCatalogPicker": {
         "selectMainTitle": "メインモデルを選択",
@@ -1510,15 +1510,6 @@
     "composerProfile": {
       "model": "モデル",
       "effortLabel": "推論レベル",
-      "effort": {
-        "none": "なし",
-        "minimal": "最小",
-        "low": "低",
-        "medium": "中",
-        "high": "高",
-        "xhigh": "非常に高い",
-        "max": "最大"
-      },
       "send": "送信"
     },
     "inferenceProvenance": {
@@ -1527,13 +1518,6 @@
       "requestedModel": "リクエストしたモデル",
       "requestedEffort": "リクエストした推論レベル",
       "defaultEffort": "デフォルト",
-      "effortNone": "なし",
-      "effortMinimal": "最小",
-      "effortLow": "低",
-      "effortMedium": "中",
-      "effortHigh": "高",
-      "effortXhigh": "非常に高い",
-      "effortMax": "最大",
       "awaitingActivation": "Run の有効化を待っています",
       "run": "Run",
       "runValue": "#{index} · {status}",
