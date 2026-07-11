@@ -1515,6 +1515,9 @@
     "inferenceProvenance": {
       "title": "추론 프로필",
       "detailsAriaLabel": "{target} 추론 상세 열기",
+      "modelLabel": "모델 라벨",
+      "actualModel": "실제 모델",
+      "reasoningEffort": "추론 수준",
       "requestedModel": "요청한 모델",
       "requestedEffort": "요청한 추론 수준",
       "defaultEffort": "기본값",

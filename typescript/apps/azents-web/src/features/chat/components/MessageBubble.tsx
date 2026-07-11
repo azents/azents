@@ -13,7 +13,6 @@ import {
   Collapse,
   Group,
   Paper,
-  Popover,
   rem,
   ScrollArea,
   Stack,
@@ -21,7 +20,7 @@ import {
   Tooltip,
   UnstyledButton,
 } from "@mantine/core";
-import { useDisclosure, useMediaQuery } from "@mantine/hooks";
+import { useDisclosure } from "@mantine/hooks";
 import {
   IconBook,
   IconBubble,
@@ -33,30 +32,23 @@ import {
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
-import {
-  createContext,
-  memo,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useMemo, useRef } from "react";
 import { ChatCopyButton } from "./ChatCopyButton";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
 import { MarkdownContent } from "./MarkdownContent";
 import classes from "./MessageBubble.module.css";
+import {
+  MessageMetadataFooter,
+  MessageMetadataSurface,
+} from "./MessageMetadataFooter";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { RunRetryCard } from "./RunRetryCard";
 import { ToolCallCard } from "./ToolCallCard";
 import type { ChatMessage } from "../types";
 import type {
-  AgentRunStatus,
   InferenceRunSummary,
-  ModelReasoningEffort,
   RequestedInferenceProfile,
 } from "@azents/public-client";
 
@@ -80,42 +72,8 @@ interface TextMessageProps {
   hasReasoning: boolean;
 }
 
-interface MessageSurfaceTimeContextValue {
-  isTouchPrimary: boolean;
-  timeVisible: boolean;
-  showTimeForTouch: () => void;
-}
-
 type MessageActionAlign = "assistant" | "user";
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
-
-const MessageSurfaceTimeContext =
-  createContext<MessageSurfaceTimeContextValue | null>(null);
-const TIMESTAMP_FADE_DURATION_MS = 160;
-
-function formatRelativeTime(iso: string, t: ChatTranslator): string {
-  const createdAt = new Date(iso).getTime();
-  if (!Number.isFinite(createdAt)) {
-    return "";
-  }
-
-  const diff = Math.max(0, Date.now() - createdAt);
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) {
-    return t("justNow");
-  }
-  if (minutes < 60) {
-    return t("minutesAgo", { count: minutes });
-  }
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return t("hoursAgo", { count: hours });
-  }
-
-  const days = Math.floor(hours / 24);
-  return t("daysAgo", { count: days });
-}
 
 function formatDuration(
   totalSeconds: number | null,
@@ -162,207 +120,6 @@ function formatFullDateTime(iso: string, locale: string): string {
     dateStyle: "medium",
     timeStyle: "medium",
   }).format(date);
-}
-
-function getNextRelativeTimeDelay(iso: string): number {
-  const createdAt = new Date(iso).getTime();
-  if (!Number.isFinite(createdAt)) {
-    return 60_000;
-  }
-
-  const diff = Math.max(0, Date.now() - createdAt);
-  if (diff < 60_000) {
-    return 60_000 - diff;
-  }
-
-  return 60_000 - (diff % 60_000);
-}
-
-function MessageTimestamp({
-  createdAt,
-}: {
-  createdAt: string;
-}): React.ReactElement {
-  const locale = useLocale();
-  const t = useTranslations("chat");
-  const surfaceTime = useContext(MessageSurfaceTimeContext);
-  const isTouchPrimary = surfaceTime?.isTouchPrimary ?? false;
-  const surfaceTimeVisible = surfaceTime?.timeVisible ?? false;
-  const [tooltipOpened, setTooltipOpened] = useState(false);
-  const [relativeTimeTick, setRelativeTimeTick] = useState(0);
-
-  const relativeTime = formatRelativeTime(createdAt, t);
-  const fullDateTime = useMemo(
-    () => formatFullDateTime(createdAt, locale),
-    [createdAt, locale],
-  );
-
-  useEffect(() => {
-    if (!surfaceTimeVisible) {
-      setTooltipOpened(false);
-    }
-  }, [surfaceTimeVisible]);
-
-  useEffect(() => {
-    if (!isTouchPrimary || !tooltipOpened) {
-      return;
-    }
-
-    function hideTooltipOnScroll(): void {
-      setTooltipOpened(false);
-    }
-
-    window.addEventListener("scroll", hideTooltipOnScroll, true);
-
-    return () => {
-      window.removeEventListener("scroll", hideTooltipOnScroll, true);
-    };
-  }, [isTouchPrimary, tooltipOpened]);
-
-  useEffect(() => {
-    const delay = getNextRelativeTimeDelay(createdAt);
-    const timer = setTimeout(() => {
-      setRelativeTimeTick((current) => current + 1);
-    }, delay);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [createdAt, relativeTimeTick]);
-
-  function showTouchTooltip(event: React.PointerEvent<HTMLElement>): void {
-    if (!isTouchPrimary || surfaceTime === null) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    surfaceTime.showTimeForTouch();
-    setTooltipOpened(true);
-  }
-
-  function hideTouchTooltip(event: React.PointerEvent<HTMLElement>): void {
-    if (!isTouchPrimary) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    setTooltipOpened(false);
-  }
-
-  const tooltipLabel = isTouchPrimary ? (
-    <Box
-      component="span"
-      className={classes.messageTooltipLabel}
-      onPointerDown={hideTouchTooltip}
-    >
-      {fullDateTime}
-    </Box>
-  ) : (
-    fullDateTime
-  );
-
-  const timestamp = (
-    <Text
-      component="time"
-      dateTime={createdAt}
-      size="xs"
-      c="dimmed"
-      className={classes.messageTime}
-      aria-label={fullDateTime}
-      tabIndex={0}
-      onPointerDown={showTouchTooltip}
-    >
-      {relativeTime}
-    </Text>
-  );
-
-  if (isTouchPrimary) {
-    return (
-      <Tooltip
-        label={tooltipLabel}
-        withArrow
-        opened={tooltipOpened && surfaceTimeVisible}
-        classNames={{ tooltip: classes.messageTooltip }}
-        transitionProps={{
-          transition: "fade",
-          duration: TIMESTAMP_FADE_DURATION_MS,
-        }}
-      >
-        {timestamp}
-      </Tooltip>
-    );
-  }
-
-  return (
-    <Tooltip
-      label={tooltipLabel}
-      withArrow
-      transitionProps={{
-        transition: "fade",
-        duration: TIMESTAMP_FADE_DURATION_MS,
-      }}
-    >
-      {timestamp}
-    </Tooltip>
-  );
-}
-
-function MessageSurface({
-  children,
-}: {
-  children: React.ReactNode;
-}): React.ReactElement {
-  const isTouchPrimary = useMediaQuery("(hover: none)");
-  const [timeVisible, setTimeVisible] = useState(false);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (hideTimerRef.current) {
-        clearTimeout(hideTimerRef.current);
-      }
-    };
-  }, []);
-
-  const showTimeForTouch = useCallback((): void => {
-    if (!isTouchPrimary) {
-      return;
-    }
-
-    if (hideTimerRef.current) {
-      clearTimeout(hideTimerRef.current);
-    }
-
-    setTimeVisible(true);
-    hideTimerRef.current = setTimeout(() => {
-      setTimeVisible(false);
-      hideTimerRef.current = null;
-    }, 5000);
-  }, [isTouchPrimary]);
-
-  const surfaceTime = useMemo(
-    () => ({
-      isTouchPrimary,
-      timeVisible,
-      showTimeForTouch,
-    }),
-    [isTouchPrimary, showTimeForTouch, timeVisible],
-  );
-
-  return (
-    <MessageSurfaceTimeContext.Provider value={surfaceTime}>
-      <Box
-        className={classes.messageSurface}
-        data-time-visible={timeVisible}
-        onPointerDown={showTimeForTouch}
-      >
-        {children}
-      </Box>
-    </MessageSurfaceTimeContext.Provider>
-  );
 }
 
 const HTML_COMMENT_PATTERN =
@@ -595,181 +352,6 @@ function TextMessageContent({
   );
 }
 
-function formatRunStatus(status: AgentRunStatus, t: ChatTranslator): string {
-  switch (status) {
-    case "pending":
-      return t("inferenceProvenance.statusPending");
-    case "running":
-      return t("inferenceProvenance.statusRunning");
-    case "completed":
-      return t("inferenceProvenance.statusCompleted");
-    case "stopped":
-      return t("inferenceProvenance.statusStopped");
-    case "failed":
-      return t("inferenceProvenance.statusFailed");
-    case "interrupted":
-      return t("inferenceProvenance.statusInterrupted");
-    case "cancelled":
-      return t("inferenceProvenance.statusCancelled");
-  }
-}
-
-function formatReasoningEffort(
-  effort: ModelReasoningEffort | null,
-  t: ChatTranslator,
-): string {
-  return effort ?? t("inferenceProvenance.defaultEffort");
-}
-
-function ProvenanceRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}): React.ReactElement {
-  return (
-    <Group justify="space-between" gap="lg" wrap="nowrap" align="flex-start">
-      <Text size="xs" c="dimmed">
-        {label}
-      </Text>
-      <Text size="xs" fw={500} ta="right" style={{ overflowWrap: "anywhere" }}>
-        {value}
-      </Text>
-    </Group>
-  );
-}
-
-function MessageInferenceProvenance({
-  profile,
-  summary,
-}: {
-  profile: RequestedInferenceProfile;
-  summary: InferenceRunSummary | null;
-}): React.ReactElement {
-  const t = useTranslations("chat");
-  const [opened, setOpened] = useState(false);
-  const requestedProfile = summary?.requested_profile ?? profile;
-  const resolved = summary?.resolved_profile ?? null;
-
-  return (
-    <Popover
-      opened={opened}
-      onChange={setOpened}
-      position="bottom-end"
-      withArrow
-      shadow="md"
-      width={rem(340)}
-    >
-      <Popover.Target>
-        <UnstyledButton
-          c="dimmed"
-          aria-label={t("inferenceProvenance.detailsAriaLabel", {
-            target: requestedProfile.model_target_label,
-          })}
-          aria-expanded={opened}
-          aria-haspopup="dialog"
-          onClick={() => setOpened(true)}
-          onFocus={() => setOpened(true)}
-          onBlur={() => setOpened(false)}
-          onMouseEnter={() => setOpened(true)}
-          onMouseLeave={() => setOpened(false)}
-        >
-          <Text component="span" size="xs" inherit>
-            {requestedProfile.model_target_label}
-          </Text>
-        </UnstyledButton>
-      </Popover.Target>
-      <Popover.Dropdown>
-        <Stack gap="xs">
-          <Text size="sm" fw={600}>
-            {t("inferenceProvenance.title")}
-          </Text>
-          <ProvenanceRow
-            label={t("inferenceProvenance.requestedModel")}
-            value={requestedProfile.model_target_label}
-          />
-          <ProvenanceRow
-            label={t("inferenceProvenance.requestedEffort")}
-            value={formatReasoningEffort(requestedProfile.reasoning_effort, t)}
-          />
-          {summary === null ? (
-            <Text size="xs" c="dimmed">
-              {t("inferenceProvenance.awaitingActivation")}
-            </Text>
-          ) : (
-            <>
-              <ProvenanceRow
-                label={t("inferenceProvenance.run")}
-                value={t("inferenceProvenance.runValue", {
-                  index: summary.run_index,
-                  status: formatRunStatus(summary.status, t),
-                })}
-              />
-              {resolved !== null && (
-                <>
-                  <ProvenanceRow
-                    label={t("inferenceProvenance.effectiveEffort")}
-                    value={formatReasoningEffort(
-                      summary.resolved_reasoning_effort,
-                      t,
-                    )}
-                  />
-                  <ProvenanceRow
-                    label={t("inferenceProvenance.provider")}
-                    value={resolved.provider}
-                  />
-                  <ProvenanceRow
-                    label={t("inferenceProvenance.model")}
-                    value={resolved.model_display_name}
-                  />
-                  <ProvenanceRow
-                    label={t("inferenceProvenance.modelIdentifier")}
-                    value={resolved.model_identifier}
-                  />
-                  <ProvenanceRow
-                    label={t("inferenceProvenance.developer")}
-                    value={resolved.model_developer}
-                  />
-                  <ProvenanceRow
-                    label={t("inferenceProvenance.contextWindow")}
-                    value={
-                      summary.effective_context_window_tokens === null
-                        ? "—"
-                        : summary.effective_context_window_tokens.toLocaleString()
-                    }
-                  />
-                  <ProvenanceRow
-                    label={t("inferenceProvenance.compactionThreshold")}
-                    value={
-                      summary.effective_auto_compaction_threshold_tokens ===
-                      null
-                        ? "—"
-                        : summary.effective_auto_compaction_threshold_tokens.toLocaleString()
-                    }
-                  />
-                </>
-              )}
-              {summary.failure_code !== null && (
-                <ProvenanceRow
-                  label={t("inferenceProvenance.failureCode")}
-                  value={summary.failure_code}
-                />
-              )}
-              {summary.failure_message !== null && (
-                <ProvenanceRow
-                  label={t("inferenceProvenance.failureMessage")}
-                  value={summary.failure_message}
-                />
-              )}
-            </>
-          )}
-        </Stack>
-      </Popover.Dropdown>
-    </Popover>
-  );
-}
-
 function MessageActionRow({
   content,
   createdAt,
@@ -809,17 +391,12 @@ function MessageActionRow({
       wrap="nowrap"
       className={actionRowClassName}
     >
-      {align === "user" && <MessageTimestamp createdAt={createdAt} />}
-      {align === "user" && inferenceProfile !== null && (
-        <>
-          <Text component="span" size="xs" c="dimmed" aria-hidden="true">
-            ·
-          </Text>
-          <MessageInferenceProvenance
-            profile={inferenceProfile}
-            summary={inferenceRunSummary}
-          />
-        </>
+      {align === "user" && (
+        <MessageMetadataFooter
+          createdAt={createdAt}
+          profile={inferenceProfile}
+          summary={inferenceRunSummary}
+        />
       )}
       {copyButton}
       {editable && onEdit && (
@@ -835,7 +412,7 @@ function MessageActionRow({
           </ActionIcon>
         </Tooltip>
       )}
-      {align === "assistant" && <MessageTimestamp createdAt={createdAt} />}
+      {align === "assistant" && <MessageMetadataFooter createdAt={createdAt} />}
     </Group>
   );
 }
@@ -852,7 +429,7 @@ function UserTextMessage({
 }): React.ReactElement {
   if (message.action) {
     return (
-      <MessageSurface>
+      <MessageMetadataSurface>
         <InputBufferBubbleFrame
           content={message.content ?? ""}
           action={message.action}
@@ -874,7 +451,7 @@ function UserTextMessage({
             ) : null
           }
         />
-      </MessageSurface>
+      </MessageMetadataSurface>
     );
   }
 
@@ -889,7 +466,7 @@ function UserTextMessage({
       style={{ minWidth: 0 }}
     >
       <Box maw="75%" style={{ minWidth: 0 }}>
-        <MessageSurface>
+        <MessageMetadataSurface>
           {message.attachments && message.attachments.length > 0 && (
             <FileAttachmentList files={message.attachments} />
           )}
@@ -930,7 +507,7 @@ function UserTextMessage({
                 onEdit={onEdit}
               />
             )}
-        </MessageSurface>
+        </MessageMetadataSurface>
       </Box>
     </Group>
   );
@@ -1024,7 +601,7 @@ function AssistantTextMessage({
   return (
     <Box mb="md" w="100%" style={{ minWidth: 0 }}>
       <Box style={{ maxWidth: "100%", minWidth: 0, overflowWrap: "anywhere" }}>
-        <MessageSurface>
+        <MessageMetadataSurface>
           {(hasContent || hasReasoning || message.status === "partial") && (
             <TextMessageContent
               message={message}
@@ -1044,7 +621,7 @@ function AssistantTextMessage({
               align="assistant"
             />
           )}
-        </MessageSurface>
+        </MessageMetadataSurface>
       </Box>
     </Box>
   );
@@ -1264,7 +841,7 @@ function ErrorTextMessage({
 
   return (
     <Box mb="md" w="100%" style={{ minWidth: 0 }}>
-      <MessageSurface>
+      <MessageMetadataSurface>
         <Paper
           withBorder
           radius="md"
@@ -1284,7 +861,7 @@ function ErrorTextMessage({
             align="assistant"
           />
         )}
-      </MessageSurface>
+      </MessageMetadataSurface>
     </Box>
   );
 }

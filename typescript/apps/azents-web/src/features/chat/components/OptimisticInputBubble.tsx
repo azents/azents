@@ -5,8 +5,11 @@
 import { Group } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { ChatCopyButton } from "./ChatCopyButton";
-import { InferenceProfileLabel } from "./InferenceProfileLabel";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
+import {
+  MessageMetadataFooter,
+  MessageMetadataSurface,
+} from "./MessageMetadataFooter";
 import type { PendingInputBuffer } from "../types";
 
 interface OptimisticInputBubbleProps {
@@ -19,23 +22,28 @@ export function OptimisticInputBubble({
   const t = useTranslations("chat.pendingInput");
 
   return (
-    <InputBufferBubbleFrame
-      content={buffer.content}
-      action={buffer.action}
-      attachments={buffer.attachments}
-      attachmentFiles={buffer.attachmentFiles}
-      opacity={0.6}
-      actions={
-        <Group gap="xs" mt="2xs" justify="space-between" wrap="nowrap">
-          <InferenceProfileLabel profile={buffer.requestedInferenceProfile} />
-          <ChatCopyButton
-            value={buffer.content}
-            copyLabel={t("copy")}
-            copiedLabel={t("copied")}
-            position="left"
-          />
-        </Group>
-      }
-    />
+    <MessageMetadataSurface>
+      <InputBufferBubbleFrame
+        content={buffer.content}
+        action={buffer.action}
+        attachments={buffer.attachments}
+        attachmentFiles={buffer.attachmentFiles}
+        opacity={0.6}
+        actions={
+          <Group gap="xs" mt="2xs" justify="space-between" wrap="nowrap">
+            <MessageMetadataFooter
+              createdAt={buffer.createdAt}
+              profile={buffer.requestedInferenceProfile}
+            />
+            <ChatCopyButton
+              value={buffer.content}
+              copyLabel={t("copy")}
+              copiedLabel={t("copied")}
+              position="left"
+            />
+          </Group>
+        }
+      />
+    </MessageMetadataSurface>
   );
 }

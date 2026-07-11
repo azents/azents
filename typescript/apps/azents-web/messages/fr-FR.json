@@ -1515,6 +1515,9 @@
     "inferenceProvenance": {
       "title": "Profil d’inférence",
       "detailsAriaLabel": "Ouvrir les détails d’inférence pour {target}",
+      "modelLabel": "Libellé du modèle",
+      "actualModel": "Modèle réel",
+      "reasoningEffort": "Effort de raisonnement",
       "requestedModel": "Modèle demandé",
       "requestedEffort": "Effort demandé",
       "defaultEffort": "Par défaut",
