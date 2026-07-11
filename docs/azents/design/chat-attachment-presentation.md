@@ -337,5 +337,5 @@ After implementation, update `docs/azents/spec/flow/file-exchange-storage.md`:
 ## Finalized Implementation Details
 
 - The desktop viewer uses Mantine's `xl` Modal width and an 85dvh height bounded to 60rem.
-- The five-plus gallery count overlays the fourth visible image; selecting it previews that visible image. Gallery-index navigation remains outside this delivery.
+- The five-plus gallery count overlays the fourth visible image; selecting it previews the first hidden image so every attachment remains reachable. Gallery-index navigation remains outside this delivery.
 - Future PDF preview generation must still decide whether generalized preview metadata represents only the first page or supports multiple page assets before document preview is introduced.
