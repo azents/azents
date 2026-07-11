@@ -14,6 +14,7 @@ import {
   Drawer,
   Group,
   Paper,
+  Popover,
   rem,
   Select,
   Stack,
@@ -534,20 +535,12 @@ export const ChatInput = memo(function ChatInput({
   const [inferenceProfile, setInferenceProfile] = useState(
     normalizedDraftProfile,
   );
-  const [profileDrawerOpened, setProfileDrawerOpened] = useState(false);
+  const [profilePickerOpened, setProfilePickerOpened] = useState(false);
   const [sendErrorVisible, setSendErrorVisible] = useState(false);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
-  const modelSelectData = useMemo(
-    () =>
-      selectableModelOptions.map((option) => ({
-        value: option.label,
-        label: option.label,
-      })),
-    [selectableModelOptions],
-  );
   const selectableEfforts = useMemo(
     () =>
       effortLevelsForTarget(
@@ -912,6 +905,94 @@ export const ChatInput = memo(function ChatInput({
     [inferenceProfile, selectableEfforts, updateInferenceProfile],
   );
 
+  const profileTrigger = (
+    <Button
+      variant="light"
+      size="compact-sm"
+      radius={rem(12)}
+      disabled={inputDisabled || selectableModelOptions.length === 0}
+      onClick={() => setProfilePickerOpened((opened) => !opened)}
+      aria-label={t("composerProfile.model")}
+      style={{
+        minWidth: rem(128),
+        maxWidth: rem(224),
+        minHeight: rem(36),
+      }}
+    >
+      <Text size="sm" truncate style={{ maxWidth: "20ch", minWidth: 0 }}>
+        {selectableEfforts.length > 0
+          ? `${selectedModelLabel} · ${selectedEffortLabel}`
+          : selectedModelLabel}
+      </Text>
+    </Button>
+  );
+  const profilePickerContent = (
+    <Stack gap="md">
+      <Stack
+        gap={0}
+        style={{
+          border: `${rem(1)} solid var(--mantine-color-default-border)`,
+          borderRadius: rem(12),
+          overflow: "hidden",
+        }}
+      >
+        {selectableModelOptions.map((option, index) => {
+          const selected = option.label === inferenceProfile.model_target_label;
+          return (
+            <UnstyledButton
+              key={option.label}
+              onClick={() => handleModelChange(option.label)}
+              aria-pressed={selected}
+              style={{
+                background: selected
+                  ? "var(--mantine-color-default-hover)"
+                  : "var(--mantine-color-body)",
+                borderTop:
+                  index === 0
+                    ? "none"
+                    : `${rem(1)} solid var(--mantine-color-default-border)`,
+                display: "block",
+                padding: "var(--mantine-spacing-md)",
+                textAlign: "left",
+                width: "100%",
+              }}
+            >
+              <Group gap="md" justify="space-between" wrap="nowrap">
+                <Stack gap={rem(2)} style={{ minWidth: 0 }}>
+                  <Text fw={600} truncate>
+                    {option.label}
+                  </Text>
+                  <Text size="sm" c="dimmed" truncate>
+                    {option.model_selection.model_identifier}
+                  </Text>
+                </Stack>
+                {selected && (
+                  <IconCheck
+                    aria-hidden="true"
+                    size={20}
+                    color="var(--mantine-color-blue-6)"
+                    style={{ flexShrink: 0 }}
+                  />
+                )}
+              </Group>
+            </UnstyledButton>
+          );
+        })}
+      </Stack>
+      {selectableEfforts.length > 0 && (
+        <Select
+          label={t("composerProfile.effortLabel")}
+          data={effortSelectData}
+          value={inferenceProfile.reasoning_effort}
+          onChange={handleEffortChange}
+          allowDeselect={false}
+          radius={rem(12)}
+          styles={{ input: { fontSize: rem(16) } }}
+        />
+      )}
+    </Stack>
+  );
+
   return (
     <>
       {/* hidden file input */}
@@ -1030,7 +1111,7 @@ export const ChatInput = memo(function ChatInput({
         )}
         <Paper
           withBorder
-          radius="md"
+          radius={rem(12)}
           px="xs"
           py={rem(6)}
           shadow="xs"
@@ -1127,7 +1208,7 @@ export const ChatInput = memo(function ChatInput({
             <Group gap="xs" wrap="nowrap">
               <ActionIcon
                 size={rem(36)}
-                radius="md"
+                radius={rem(12)}
                 variant="subtle"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={
@@ -1142,34 +1223,10 @@ export const ChatInput = memo(function ChatInput({
               </ActionIcon>
               {isMobile ? (
                 <>
-                  <Button
-                    variant="light"
-                    size="compact-sm"
-                    radius="md"
-                    disabled={
-                      inputDisabled || selectableModelOptions.length === 0
-                    }
-                    onClick={() => setProfileDrawerOpened(true)}
-                    aria-label={t("composerProfile.model")}
-                    style={{
-                      minWidth: rem(128),
-                      maxWidth: rem(224),
-                      minHeight: rem(36),
-                    }}
-                  >
-                    <Text
-                      size="sm"
-                      truncate
-                      style={{ maxWidth: "20ch", minWidth: 0 }}
-                    >
-                      {selectableEfforts.length > 0
-                        ? `${selectedModelLabel} · ${selectedEffortLabel}`
-                        : selectedModelLabel}
-                    </Text>
-                  </Button>
+                  {profileTrigger}
                   <Drawer
-                    opened={profileDrawerOpened}
-                    onClose={() => setProfileDrawerOpened(false)}
+                    opened={profilePickerOpened}
+                    onClose={() => setProfilePickerOpened(false)}
                     title={t("composerProfile.model")}
                     position="bottom"
                     size={`min(80dvh, ${rem(720)})`}
@@ -1186,105 +1243,30 @@ export const ChatInput = memo(function ChatInput({
                       },
                     }}
                   >
-                    <Stack gap="md">
-                      <Stack
-                        gap={0}
-                        style={{
-                          border: `${rem(1)} solid var(--mantine-color-default-border)`,
-                          borderRadius: rem(8),
-                          overflow: "hidden",
-                        }}
-                      >
-                        {selectableModelOptions.map((option, index) => {
-                          const selected =
-                            option.label ===
-                            inferenceProfile.model_target_label;
-                          return (
-                            <UnstyledButton
-                              key={option.label}
-                              onClick={() => handleModelChange(option.label)}
-                              aria-pressed={selected}
-                              style={{
-                                background: selected
-                                  ? "var(--mantine-color-default-hover)"
-                                  : "var(--mantine-color-body)",
-                                borderTop:
-                                  index === 0
-                                    ? "none"
-                                    : `${rem(1)} solid var(--mantine-color-default-border)`,
-                                display: "block",
-                                padding: "var(--mantine-spacing-md)",
-                                textAlign: "left",
-                                width: "100%",
-                              }}
-                            >
-                              <Group
-                                gap="md"
-                                justify="space-between"
-                                wrap="nowrap"
-                              >
-                                <Stack gap={rem(2)} style={{ minWidth: 0 }}>
-                                  <Text fw={600} truncate>
-                                    {option.label}
-                                  </Text>
-                                  <Text size="sm" c="dimmed" truncate>
-                                    {option.model_selection.model_identifier}
-                                  </Text>
-                                </Stack>
-                                {selected && (
-                                  <IconCheck
-                                    aria-hidden="true"
-                                    size={20}
-                                    color="var(--mantine-color-blue-6)"
-                                    style={{ flexShrink: 0 }}
-                                  />
-                                )}
-                              </Group>
-                            </UnstyledButton>
-                          );
-                        })}
-                      </Stack>
-                      {selectableEfforts.length > 0 && (
-                        <Select
-                          label={t("composerProfile.effortLabel")}
-                          data={effortSelectData}
-                          value={inferenceProfile.reasoning_effort}
-                          onChange={handleEffortChange}
-                          allowDeselect={false}
-                          radius="md"
-                          styles={{ input: { fontSize: rem(16) } }}
-                        />
-                      )}
-                    </Stack>
+                    {profilePickerContent}
                   </Drawer>
                 </>
               ) : (
-                <>
-                  <Select
-                    aria-label={t("composerProfile.model")}
-                    data={modelSelectData}
-                    value={inferenceProfile.model_target_label}
-                    onChange={handleModelChange}
-                    allowDeselect={false}
-                    radius="md"
-                    disabled={inputDisabled || modelSelectData.length === 0}
-                    w={rem(176)}
-                    styles={{ input: { minHeight: rem(36) } }}
-                  />
-                  {selectableEfforts.length > 0 && (
-                    <Select
-                      aria-label={t("composerProfile.effortLabel")}
-                      data={effortSelectData}
-                      value={inferenceProfile.reasoning_effort}
-                      onChange={handleEffortChange}
-                      allowDeselect={false}
-                      radius="md"
-                      disabled={inputDisabled}
-                      w={rem(136)}
-                      styles={{ input: { minHeight: rem(36) } }}
-                    />
-                  )}
-                </>
+                <Popover
+                  opened={profilePickerOpened}
+                  onChange={setProfilePickerOpened}
+                  position="top-start"
+                  width={rem(360)}
+                  shadow="md"
+                  withinPortal
+                >
+                  <Popover.Target>{profileTrigger}</Popover.Target>
+                  <Popover.Dropdown
+                    p="md"
+                    style={{
+                      borderRadius: rem(12),
+                      maxHeight: `min(70dvh, ${rem(440)})`,
+                      overflowY: "auto",
+                    }}
+                  >
+                    {profilePickerContent}
+                  </Popover.Dropdown>
+                </Popover>
               )}
               <Box style={{ flex: "1 1 auto" }} />
               {isStopAvailable &&
@@ -1292,7 +1274,7 @@ export const ChatInput = memo(function ChatInput({
                 (!inputValue.trim() && selectedAction === null)) ? (
                 <ActionIcon
                   size={rem(36)}
-                  radius="md"
+                  radius={rem(12)}
                   variant="filled"
                   color="red"
                   onClick={onStopRequest}
@@ -1305,7 +1287,7 @@ export const ChatInput = memo(function ChatInput({
               ) : (
                 <ActionIcon
                   size={rem(36)}
-                  radius="md"
+                  radius={rem(12)}
                   variant="filled"
                   onClick={handleSend}
                   onMouseDown={(event) => event.preventDefault()}

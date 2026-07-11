@@ -265,6 +265,26 @@ export const EmptyEffortList = {
   },
 } satisfies Story;
 
+export const DesktopFullReasoningEffort = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-desktop-full-reasoning",
+    selectableModelOptions: [
+      { label: "Default", model_selection: fullReasoningModel },
+      { label: "Fast", model_selection: noEffortModel },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await expect(page.getByText("gpt-5.6")).toBeVisible();
+    await expect(page.getByText("gpt-5.5-mini")).toBeVisible();
+    const effortSelect = page.getByLabelText("Reasoning effort");
+    await expect(effortSelect).toBeVisible();
+    await expect(effortSelect).toHaveValue("medium");
+  },
+} satisfies Story;
+
 export const Mobile = {
   args: {
     ...baseArgs,
