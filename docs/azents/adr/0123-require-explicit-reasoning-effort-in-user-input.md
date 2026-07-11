@@ -20,7 +20,7 @@ Supersede ADR-0111's visible `Default` selection behavior.
 
 For every user-facing model selection that advertises one or more explicit reasoning efforts:
 
-- show only the explicit efforts supplied by the normalized model capability;
+- show only the explicit efforts supplied by the normalized model capability, using their raw lowercase enum values without localization;
 - always keep one concrete effort selected;
 - preserve the current effort when supported after a model change;
 - otherwise select the closest supported effort in the canonical order, using `medium` as the initial baseline and preferring the nearest lower effort before a higher effort.
@@ -31,7 +31,7 @@ When a model advertises no explicit effort levels, hide the control and use inte
 
 Derive normalized effort lists from LiteLLM's canonical provider model metadata type. `none`, `minimal`, `low`, `xhigh`, and `max` depend on their corresponding capability flags. OpenAI GPT-5-family models additionally use LiteLLM's baseline `medium` and `high` contract and opt-out `low` semantics; other reasoning providers receive only explicitly asserted levels. Preserve deterministic canonical ordering.
 
-Store the Agent's configured effort with its default model settings and use it to initialize a new session when supported. Workspace model defaults do not store a separate reasoning effort.
+Store the Agent's configured effort with its default model settings, present it as `Default reasoning effort` beside the default model control, and use it to initialize a new session when supported. Workspace model defaults do not store a separate reasoning effort.
 
 ## Rejected options
 

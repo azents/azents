@@ -682,7 +682,7 @@
       "selectedModelMissingDescription": "The saved model snapshot may be stale or the model was removed from the latest catalog projection. Sync the catalog or select a current model before saving changes.",
       "useMainOrWorkspaceDefault": "Use main/workspace default",
       "optionalLightweightModel": "Optional compaction/lightweight model.",
-      "reasoningEffortLabel": "Reasoning effort",
+      "defaultReasoningEffortLabel": "Default reasoning effort",
       "builtinToolsLabel": "Built-in tools",
       "modelCatalogPicker": {
         "selectMainTitle": "Select main model",
@@ -1510,15 +1510,6 @@
     "composerProfile": {
       "model": "Model",
       "effortLabel": "Reasoning effort",
-      "effort": {
-        "none": "None",
-        "minimal": "Minimal",
-        "low": "Low",
-        "medium": "Medium",
-        "high": "High",
-        "xhigh": "Extra high",
-        "max": "Maximum"
-      },
       "send": "Send"
     },
     "inferenceProvenance": {
@@ -1527,13 +1518,6 @@
       "requestedModel": "Requested model",
       "requestedEffort": "Requested effort",
       "defaultEffort": "Default",
-      "effortNone": "None",
-      "effortMinimal": "Minimal",
-      "effortLow": "Low",
-      "effortMedium": "Medium",
-      "effortHigh": "High",
-      "effortXhigh": "Extra high",
-      "effortMax": "Maximum",
       "awaitingActivation": "Waiting for run activation",
       "run": "Run",
       "runValue": "#{index} · {status}",

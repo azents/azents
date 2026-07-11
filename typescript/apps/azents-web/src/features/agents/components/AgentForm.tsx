@@ -258,11 +258,7 @@ export function AgentForm({
   }, [selectedMainModelOption, selectedModelCapabilities]);
 
   const reasoningEffortOptions = useMemo(
-    () =>
-      selectedModelEffortLevels.map((value) => ({
-        value,
-        label: value.charAt(0).toUpperCase() + value.slice(1),
-      })),
+    () => selectedModelEffortLevels.map((value) => ({ value, label: value })),
     [selectedModelEffortLevels],
   );
 
@@ -364,6 +360,24 @@ export function AgentForm({
               options={form.values.selectable_model_options}
               mainModelLabel={form.values.main_model_label}
               lightweightModelLabel={form.values.lightweight_model_label}
+              defaultReasoningEffortControl={
+                selectedModelSupportsReasoning ? (
+                  <Select
+                    label={t("defaultReasoningEffortLabel")}
+                    data={reasoningEffortOptions}
+                    allowDeselect={false}
+                    value={form.values.reasoning_effort ?? null}
+                    onChange={(value) => {
+                      const nextValue =
+                        selectedModelEffortLevels.find(
+                          (effort) => effort === value,
+                        ) ?? null;
+                      form.setFieldValue("reasoning_effort", nextValue);
+                    }}
+                    error={form.errors.reasoning_effort}
+                  />
+                ) : null
+              }
               providerOptions={providerOptions}
               canEdit
               showValidationErrors={hasSubmitAttempted}
@@ -378,23 +392,6 @@ export function AgentForm({
               onChangeLightweightModelLabel={(label) =>
                 form.setFieldValue("lightweight_model_label", label)
               }
-            />
-          )}
-
-          {showModel && selectedModelSupportsReasoning && (
-            <Select
-              label={t("reasoningEffortLabel")}
-              data={reasoningEffortOptions}
-              allowDeselect={false}
-              value={form.values.reasoning_effort ?? null}
-              onChange={(value) => {
-                const nextValue =
-                  selectedModelEffortLevels.find(
-                    (effort) => effort === value,
-                  ) ?? null;
-                form.setFieldValue("reasoning_effort", nextValue);
-              }}
-              error={form.errors.reasoning_effort}
             />
           )}
 

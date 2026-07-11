@@ -13,35 +13,9 @@ interface InferenceProfileLabelProps {
 
 function effortLabel(
   effort: ModelReasoningEffort | null,
-  labels: {
-    defaultEffort: string;
-    none: string;
-    minimal: string;
-    low: string;
-    medium: string;
-    high: string;
-    xhigh: string;
-    max: string;
-  },
+  defaultEffort: string,
 ): string {
-  switch (effort) {
-    case null:
-      return labels.defaultEffort;
-    case "none":
-      return labels.none;
-    case "minimal":
-      return labels.minimal;
-    case "low":
-      return labels.low;
-    case "medium":
-      return labels.medium;
-    case "high":
-      return labels.high;
-    case "xhigh":
-      return labels.xhigh;
-    case "max":
-      return labels.max;
-  }
+  return effort ?? defaultEffort;
 }
 
 export function InferenceProfileLabel({
@@ -61,16 +35,7 @@ export function InferenceProfileLabel({
         ·
       </Text>
       <Text size="xs" c="dimmed">
-        {effortLabel(profile.reasoning_effort, {
-          defaultEffort: t("defaultEffort"),
-          none: t("effortNone"),
-          minimal: t("effortMinimal"),
-          low: t("effortLow"),
-          medium: t("effortMedium"),
-          high: t("effortHigh"),
-          xhigh: t("effortXhigh"),
-          max: t("effortMax"),
-        })}
+        {effortLabel(profile.reasoning_effort, t("defaultEffort"))}
       </Text>
     </Group>
   );
