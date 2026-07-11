@@ -2,6 +2,7 @@
 title: "Chat Attachment Presentation"
 created: 2026-07-11
 updated: 2026-07-11
+implemented: 2026-07-11
 tags: [frontend, chat, attachments, ux]
 ---
 
@@ -333,8 +334,8 @@ After implementation, update `docs/azents/spec/flow/file-exchange-storage.md`:
 - update `last_verified_at` and increment `spec_version`;
 - keep storage, lifecycle, and authorization behavior unchanged.
 
-## Open Questions
+## Finalized Implementation Details
 
-- Exact desktop Modal maximum width and height should be finalized during desktop visual review.
-- Future PDF preview generation must decide whether the generalized preview thumbnail represents only the first page or supports multiple page preview assets.
-- The five-plus image gallery `+N` interaction may open the first hidden image or a gallery index; this should be selected during interaction implementation.
+- The desktop viewer uses Mantine's `xl` Modal width and an 85dvh height bounded to 60rem.
+- The five-plus gallery count overlays the fourth visible image; selecting it previews the first hidden image so every attachment remains reachable. Gallery-index navigation remains outside this delivery.
+- Future PDF preview generation must still decide whether generalized preview metadata represents only the first page or supports multiple page assets before document preview is introduced.
