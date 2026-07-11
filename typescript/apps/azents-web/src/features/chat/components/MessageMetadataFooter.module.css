@@ -20,11 +20,3 @@
     pointer-events: auto;
   }
 }
-
-.modelTrigger {
-  line-height: var(--mantine-line-height-xs);
-}
-
-.popoverDropdown {
-  min-width: rem(240px);
-}
