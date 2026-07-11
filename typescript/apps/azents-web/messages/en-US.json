@@ -1515,6 +1515,9 @@
     "inferenceProvenance": {
       "title": "Inference profile",
       "detailsAriaLabel": "Open inference details for {target}",
+      "modelLabel": "Model label",
+      "actualModel": "Actual model",
+      "reasoningEffort": "Reasoning effort",
       "requestedModel": "Requested model",
       "requestedEffort": "Requested effort",
       "defaultEffort": "Default",

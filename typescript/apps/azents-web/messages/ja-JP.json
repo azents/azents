@@ -1515,6 +1515,9 @@
     "inferenceProvenance": {
       "title": "推論プロファイル",
       "detailsAriaLabel": "{target} の推論詳細を開く",
+      "modelLabel": "モデルラベル",
+      "actualModel": "実際のモデル",
+      "reasoningEffort": "推論レベル",
       "requestedModel": "リクエストしたモデル",
       "requestedEffort": "リクエストした推論レベル",
       "defaultEffort": "デフォルト",

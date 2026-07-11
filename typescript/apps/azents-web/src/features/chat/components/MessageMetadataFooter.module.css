@@ -1,0 +1,30 @@
+.messageSurface {
+  position: relative;
+}
+
+.metadata {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.messageSurface[data-metadata-visible="true"] .metadata {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: hover) {
+  .messageSurface:hover .metadata,
+  .messageSurface:focus-within .metadata {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.modelTrigger {
+  line-height: var(--mantine-line-height-xs);
+}
+
+.popoverDropdown {
+  min-width: rem(240px);
+}
