@@ -200,12 +200,14 @@ def get_subagent_toolkit_provider(
     ],
     broker: Annotated[SessionBroker, Depends(get_worker_broker)],
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)],
+    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
 ) -> SubagentToolkitProvider:
     """SubagentToolkitProvider dependency for Worker."""
     return SubagentToolkitProvider(
         session_manager=session_manager,
         broker=broker,
         input_buffer_service=input_buffer_service,
+        agent_repository=agent_repository,
     )
 
 

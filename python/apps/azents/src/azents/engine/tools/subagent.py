@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
-from azents.core.agent import SubagentSettings
+from azents.core.agent import AgentModelSelection, SubagentSettings
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
@@ -22,6 +22,8 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.inference_profile import InferenceProfileSource
+from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.llm_mapping import to_runtime_model
 from azents.core.tools import (
     PublishEventFn,
     ResolveContext,
@@ -30,6 +32,11 @@ from azents.core.tools import (
     ToolkitState,
     ToolkitStatus,
     TurnContext,
+)
+from azents.engine.context.window import (
+    compute_auto_compaction_threshold_tokens,
+    compute_effective_context_window_tokens,
+    get_max_input_tokens,
 )
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.fork_context import (
@@ -45,6 +52,7 @@ from azents.engine.tooling.make_tool import make_tool
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -121,6 +129,21 @@ class SpawnAgentInput(BaseModel):
             "Defaults to 'all'."
         ),
     )
+    model_target_label: str | None = Field(
+        default=None,
+        description=(
+            "Model target label override for the new agent. Omit unless an explicit "
+            "override is needed. Full-history forks inherit the parent Run profile."
+        ),
+    )
+    reasoning_effort: ModelReasoningEffort | None = Field(
+        default=None,
+        description=(
+            "Reasoning effort override for the new agent. Omit to inherit or "
+            "normalize from the parent Run's effective effort. Full-history forks "
+            "inherit the parent Run profile."
+        ),
+    )
 
 
 class SendMessageInput(BaseModel):
@@ -181,6 +204,17 @@ class _TargetResolution:
     target: SessionAgent | None
 
 
+@dataclasses.dataclass(frozen=True)
+class _SpawnInferenceProfile:
+    requested_model_target_label: str
+    requested_reasoning_effort: ModelReasoningEffort | None
+    source: InferenceProfileSource
+    resolved_model_selection: AgentModelSelection
+    resolved_reasoning_effort: ModelReasoningEffort | None
+    effective_context_window_tokens: int
+    effective_auto_compaction_threshold_tokens: int
+
+
 class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     """Model-visible subagent collaboration tools."""
 
@@ -193,6 +227,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         event_transcript_repository: EventTranscriptRepository,
         input_buffer_service: InputBufferService,
         broker: SessionBroker,
+        agent: Agent,
         subagent_settings: SubagentSettings,
     ) -> None:
         self.session_manager = session_manager
@@ -201,6 +236,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.event_transcript_repository = event_transcript_repository
         self.input_buffer_service = input_buffer_service
         self.broker = broker
+        self.agent = agent
         self.subagent_settings = subagent_settings
         self.session_id: str | None = None
         self.user_id: str | None = None
@@ -251,6 +287,32 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             ]
         )
 
+    def _spawn_agent_description(self) -> str:
+        """Build label-only spawn guidance from the current Agent snapshot."""
+        target_lines: list[str] = []
+        for option in self.agent.selectable_model_options:
+            levels = (
+                option.model_selection.normalized_capabilities.reasoning.effort_levels
+            )
+            efforts = ", ".join(level.value for level in levels)
+            effort_text = efforts if efforts else "none"
+            target_lines.append(f"- `{option.label}` Reasoning efforts: {effort_text}.")
+        targets = "\n".join(target_lines)
+        guidance = dedent(
+            """\
+            Create a child subagent for a concrete, bounded task that can run
+            independently and return its identity.
+
+            Spawned agents inherit the current parent Run's model target by default.
+            Omit `model_target_label` to use that preferred default; set
+            `model_target_label` only when an explicit override is needed.
+
+            Available model target overrides
+            (optional; inherited parent Run target is preferred):
+            """
+        )
+        return f"{guidance}{targets}"
+
     def _spawn_agent_tool(self, *, parent_run_id: str) -> FunctionTool:
         async def spawn_agent(input: SpawnAgentInput) -> str:
             """Create a child subagent and return its identity."""
@@ -271,11 +333,12 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     current=current,
                     parent_run_id=parent_run_id,
                 )
-                requested_model_target_label = parent_run.requested_model_target_label
-                if requested_model_target_label is None:
-                    raise FunctionToolError(
-                        "Current AgentRun has incomplete inference profile provenance"
-                    )
+                profile = self._derive_spawn_inference_profile(
+                    parent_run=parent_run,
+                    fork_selection=fork_selection,
+                    model_target_label=input.model_target_label,
+                    reasoning_effort=input.reasoning_effort,
+                )
                 try:
                     child = (
                         await self.agent_session_repository.create_child_session_agent(
@@ -295,25 +358,25 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 await self.agent_run_repository.create_pending(
                     session,
                     session_id=child.agent_session_id,
-                    requested_model_target_label=requested_model_target_label,
-                    requested_reasoning_effort=parent_run.requested_reasoning_effort,
-                    inference_profile_source=InferenceProfileSource.PARENT_RUN,
+                    requested_model_target_label=(profile.requested_model_target_label),
+                    requested_reasoning_effort=profile.requested_reasoning_effort,
+                    inference_profile_source=profile.source,
                     parent_agent_run_id=parent_run.id,
-                    resolved_model_selection=parent_run.resolved_model_selection,
-                    resolved_reasoning_effort=parent_run.resolved_reasoning_effort,
+                    resolved_model_selection=profile.resolved_model_selection,
+                    resolved_reasoning_effort=profile.resolved_reasoning_effort,
                     resolved_at=parent_run.resolved_at,
                     effective_context_window_tokens=(
-                        parent_run.effective_context_window_tokens
+                        profile.effective_context_window_tokens
                     ),
                     effective_auto_compaction_threshold_tokens=(
-                        parent_run.effective_auto_compaction_threshold_tokens
+                        profile.effective_auto_compaction_threshold_tokens
                     ),
                 )
                 await self.agent_session_repository.set_last_inference_profile(
                     session,
                     session_id=child.agent_session_id,
-                    model_target_label=requested_model_target_label,
-                    reasoning_effort=parent_run.requested_reasoning_effort,
+                    model_target_label=profile.requested_model_target_label,
+                    reasoning_effort=profile.requested_reasoning_effort,
                 )
                 forked = await self._fork_events(
                     session,
@@ -357,7 +420,141 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 }
             )
 
-        return make_tool(spawn_agent, name="spawn_agent")
+        return make_tool(
+            spawn_agent,
+            name="spawn_agent",
+            description=self._spawn_agent_description(),
+        )
+
+    def _derive_spawn_inference_profile(
+        self,
+        *,
+        parent_run: AgentRunState,
+        fork_selection: ForkTurnsSelection,
+        model_target_label: str | None,
+        reasoning_effort: ModelReasoningEffort | None,
+    ) -> _SpawnInferenceProfile:
+        """Validate and derive a pre-resolved first child Run profile."""
+        override_requested = (
+            model_target_label is not None or reasoning_effort is not None
+        )
+        if override_requested and fork_selection.mode == "all":
+            raise FunctionToolError(
+                "Inference profile overrides require fork_turns='none' or a "
+                "positive bounded count; full-history forks inherit the parent "
+                "Run profile"
+            )
+        if (
+            parent_run.requested_model_target_label is None
+            or parent_run.resolved_model_selection is None
+            or parent_run.resolved_at is None
+            or parent_run.effective_context_window_tokens is None
+            or parent_run.effective_auto_compaction_threshold_tokens is None
+        ):
+            raise FunctionToolError(
+                "Current AgentRun has incomplete inference profile provenance"
+            )
+        if not override_requested:
+            return _SpawnInferenceProfile(
+                requested_model_target_label=(parent_run.requested_model_target_label),
+                requested_reasoning_effort=parent_run.requested_reasoning_effort,
+                source=InferenceProfileSource.PARENT_RUN,
+                resolved_model_selection=parent_run.resolved_model_selection,
+                resolved_reasoning_effort=parent_run.resolved_reasoning_effort,
+                effective_context_window_tokens=(
+                    parent_run.effective_context_window_tokens
+                ),
+                effective_auto_compaction_threshold_tokens=(
+                    parent_run.effective_auto_compaction_threshold_tokens
+                ),
+            )
+
+        requested_label = (
+            model_target_label
+            if model_target_label is not None
+            else parent_run.requested_model_target_label
+        )
+        if model_target_label is None:
+            selection = parent_run.resolved_model_selection
+        else:
+            option = next(
+                (
+                    option
+                    for option in self.agent.selectable_model_options
+                    if option.label == model_target_label
+                ),
+                None,
+            )
+            if option is None:
+                raise FunctionToolError(
+                    f"Model target label '{model_target_label}' was not found"
+                )
+            selection = option.model_selection
+
+        supported_efforts = selection.normalized_capabilities.reasoning.effort_levels
+        if reasoning_effort is not None:
+            if reasoning_effort not in supported_efforts:
+                raise FunctionToolError(
+                    f"Reasoning effort '{reasoning_effort.value}' is not supported "
+                    f"by model target label '{requested_label}'"
+                )
+            resolved_effort = reasoning_effort
+        elif model_target_label is not None:
+            resolved_effort = normalize_spawn_reasoning_effort(
+                parent_run.resolved_reasoning_effort,
+                supported_efforts,
+            )
+        else:
+            resolved_effort = parent_run.resolved_reasoning_effort
+
+        if model_target_label is None:
+            effective_context_window_tokens = parent_run.effective_context_window_tokens
+            effective_auto_compaction_threshold_tokens = (
+                parent_run.effective_auto_compaction_threshold_tokens
+            )
+        else:
+            main_model = to_runtime_model(
+                selection.provider,
+                selection.model_identifier,
+            )
+            lightweight = self.agent.lightweight_model_selection
+            lightweight_model = to_runtime_model(
+                lightweight.provider,
+                lightweight.model_identifier,
+            )
+            context_window = compute_effective_context_window_tokens(
+                main_max_input_tokens=get_max_input_tokens(
+                    selection.normalized_capabilities.context_window.max_input_tokens,
+                    main_model,
+                ),
+                compaction_max_input_tokens=get_max_input_tokens(
+                    lightweight.normalized_capabilities.context_window.max_input_tokens,
+                    lightweight_model,
+                ),
+                context_window_tokens=(
+                    self.agent.model_parameters.context_window_tokens
+                    if self.agent.model_parameters is not None
+                    else None
+                ),
+            )
+            effective_context_window_tokens = context_window.effective_max_input_tokens
+            effective_auto_compaction_threshold_tokens = (
+                compute_auto_compaction_threshold_tokens(
+                    effective_context_window_tokens
+                )
+            )
+
+        return _SpawnInferenceProfile(
+            requested_model_target_label=requested_label,
+            requested_reasoning_effort=resolved_effort,
+            source=InferenceProfileSource.SPAWN_OVERRIDE,
+            resolved_model_selection=selection,
+            resolved_reasoning_effort=resolved_effort,
+            effective_context_window_tokens=effective_context_window_tokens,
+            effective_auto_compaction_threshold_tokens=(
+                effective_auto_compaction_threshold_tokens
+            ),
+        )
 
     def _send_message_tool(self) -> FunctionTool:
         async def send_message(input: SendMessageInput) -> str:
@@ -920,10 +1117,12 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
         session_manager: SessionManager[AsyncSession],
         broker: SessionBroker,
         input_buffer_service: InputBufferService,
+        agent_repository: AgentRepository,
     ) -> None:
         self.session_manager = session_manager
         self.broker = broker
         self.input_buffer_service = input_buffer_service
+        self.agent_repository = agent_repository
 
     async def resolve(
         self,
@@ -932,10 +1131,10 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
     ) -> SubagentToolkit:
         """Resolve per-session subagent collaboration tools."""
         del config
-        agent = await AgentRepository().get_by_id(context.session, context.agent_id)
-        subagent_settings = (
-            agent.subagent_settings if agent is not None else SubagentSettings()
-        )
+        agent = await self.agent_repository.get_by_id(context.session, context.agent_id)
+        if agent is None:
+            raise ValueError("Agent not found while resolving subagent Toolkit")
+        subagent_settings = agent.subagent_settings
         toolkit = SubagentToolkit(
             session_manager=self.session_manager,
             agent_session_repository=AgentSessionRepository(),
@@ -943,10 +1142,29 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
             event_transcript_repository=EventTranscriptRepository(),
             input_buffer_service=self.input_buffer_service,
             broker=self.broker,
+            agent=agent,
             subagent_settings=subagent_settings,
         )
         toolkit.set_session_id(context.session_id)
         return toolkit
+
+
+def normalize_spawn_reasoning_effort(
+    baseline: ModelReasoningEffort | None,
+    supported: list[ModelReasoningEffort],
+) -> ModelReasoningEffort | None:
+    """Normalize an inherited effort against a target's canonical levels."""
+    if not supported:
+        return None
+    effective_baseline = baseline or ModelReasoningEffort.MEDIUM
+    if effective_baseline in supported:
+        return effective_baseline
+    ordering = list(ModelReasoningEffort)
+    baseline_index = ordering.index(effective_baseline)
+    lower = [level for level in supported if ordering.index(level) < baseline_index]
+    if lower:
+        return max(lower, key=ordering.index)
+    return min(supported, key=ordering.index)
 
 
 def _session_agent_depth(agent: SessionAgent) -> int:

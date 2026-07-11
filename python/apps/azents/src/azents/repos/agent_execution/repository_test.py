@@ -595,9 +595,17 @@ class TestEventExecutionRepositories:
         assert summaries_by_run_id[active.id].status == AgentRunStatus.COMPLETED
         assert "integration" not in summary.model_dump(mode="json")
 
+    @pytest.mark.parametrize(
+        "source",
+        [
+            InferenceProfileSource.PARENT_RUN,
+            InferenceProfileSource.SPAWN_OVERRIDE,
+        ],
+    )
     async def test_inherited_pending_activation_preserves_parent_snapshot(
         self,
         rdb_session: AsyncSession,
+        source: InferenceProfileSource,
     ) -> None:
         """Activate an inherited child without replacing its stored provenance."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -645,7 +653,7 @@ class TestEventExecutionRepositories:
             session_id=child_session.id,
             requested_model_target_label=parent.requested_model_target_label,
             requested_reasoning_effort=parent.requested_reasoning_effort,
-            inference_profile_source=InferenceProfileSource.PARENT_RUN,
+            inference_profile_source=source,
             parent_agent_run_id=parent.id,
             resolved_model_selection=parent.resolved_model_selection,
             resolved_reasoning_effort=parent.resolved_reasoning_effort,

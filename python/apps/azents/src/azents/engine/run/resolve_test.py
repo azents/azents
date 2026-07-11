@@ -182,10 +182,13 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
 
 def _make_subagent_provider() -> SubagentToolkitProvider:
     """Create SubagentToolkitProvider for resolve_agent_tools tests."""
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = _make_agent()
     return SubagentToolkitProvider(
         session_manager=AsyncMock(),
         broker=AsyncMock(),
         input_buffer_service=AsyncMock(),
+        agent_repository=agent_repository,
     )
 
 

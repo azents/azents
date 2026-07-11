@@ -519,9 +519,10 @@ class RunExecutor:
                 ),
             )
         elif agent_run.status == AgentRunStatus.PENDING:
-            inherited_pending = (
-                agent_run.inference_profile_source == InferenceProfileSource.PARENT_RUN
-            )
+            inherited_pending = agent_run.inference_profile_source in {
+                InferenceProfileSource.PARENT_RUN,
+                InferenceProfileSource.SPAWN_OVERRIDE,
+            }
             resolution_error: object | None = None
             resolved_profile = None
             if inherited_pending:

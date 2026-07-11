@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
-from azents.core.agent import SubagentSettings
+from azents.core.agent import SelectableModelOption, SubagentSettings
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -32,6 +32,7 @@ from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
 from azents.engine.run.types import FunctionToolError
+from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -39,7 +40,11 @@ from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.testing.model_selection import make_test_model_selection
 
-from .subagent import SpawnAgentInput, SubagentToolkit
+from .subagent import (
+    SpawnAgentInput,
+    SubagentToolkit,
+    normalize_spawn_reasoning_effort,
+)
 
 _NOW = datetime.datetime.now(datetime.UTC)
 _PARENT_RUN_ID = "parent-run".rjust(32, "0")
@@ -92,6 +97,34 @@ def _session_agent(
         last_message_at=None,
         parent_observed_run_index=None,
         parent_observed_event_id=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+
+
+def _agent() -> Agent:
+    """Create the Agent snapshot used by subagent tool tests."""
+    selection = make_test_model_selection()
+    selection.normalized_capabilities.reasoning.supported = True
+    selection.normalized_capabilities.reasoning.effort_levels = [
+        ModelReasoningEffort.LOW,
+        ModelReasoningEffort.MEDIUM,
+        ModelReasoningEffort.HIGH,
+    ]
+    return Agent.model_construct(
+        id="agent-1",
+        workspace_id="workspace-1",
+        name="Agent",
+        model_selection=selection,
+        lightweight_model_selection=selection,
+        selectable_model_options=[
+            SelectableModelOption(label="Quality", model_selection=selection)
+        ],
+        main_model_label="Quality",
+        lightweight_model_label="Quality",
+        model_parameters=None,
+        enabled=True,
+        subagent_settings=SubagentSettings(),
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -568,6 +601,7 @@ async def _make_toolkit() -> tuple[
         ),
         input_buffer_service=cast(InputBufferService, input_buffer_service),
         broker=cast(SessionBroker, broker),
+        agent=_agent(),
         subagent_settings=SubagentSettings(),
     )
     state = await toolkit.update_context(
@@ -697,6 +731,84 @@ async def test_subagent_static_prompt_matches_codex_child_prompt() -> None:
 def test_spawn_agent_fork_turns_defaults_to_all() -> None:
     """spawn_agent propagates all context by default."""
     assert SpawnAgentInput.model_fields["fork_turns"].default == "all"
+
+
+@pytest.mark.parametrize(
+    ("baseline", "supported", "expected"),
+    [
+        (ModelReasoningEffort.HIGH, [], None),
+        (
+            ModelReasoningEffort.HIGH,
+            [ModelReasoningEffort.LOW, ModelReasoningEffort.HIGH],
+            ModelReasoningEffort.HIGH,
+        ),
+        (
+            ModelReasoningEffort.HIGH,
+            [ModelReasoningEffort.LOW, ModelReasoningEffort.MEDIUM],
+            ModelReasoningEffort.MEDIUM,
+        ),
+        (
+            ModelReasoningEffort.LOW,
+            [ModelReasoningEffort.HIGH, ModelReasoningEffort.XHIGH],
+            ModelReasoningEffort.HIGH,
+        ),
+        (
+            None,
+            [ModelReasoningEffort.LOW, ModelReasoningEffort.HIGH],
+            ModelReasoningEffort.LOW,
+        ),
+    ],
+)
+def test_normalize_reasoning_effort(
+    baseline: ModelReasoningEffort | None,
+    supported: list[ModelReasoningEffort],
+    expected: ModelReasoningEffort | None,
+) -> None:
+    """Normalize model-only overrides using canonical effort ordering."""
+    assert normalize_spawn_reasoning_effort(baseline, supported) == expected
+
+
+async def test_spawn_agent_schema_lists_labels_without_model_identity() -> None:
+    """Expose Agent-owned labels and effort levels without physical metadata."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    selection = make_test_model_selection(
+        integration_id="secret-integration",
+        model_identifier="secret-physical-model",
+    )
+    selection.model_display_name = "Secret Display Name"
+    selection.model_family = "secret-family"
+    selection.normalized_capabilities.reasoning.supported = True
+    selection.normalized_capabilities.reasoning.effort_levels = [
+        ModelReasoningEffort.MEDIUM,
+        ModelReasoningEffort.XHIGH,
+    ]
+    toolkit.agent.selectable_model_options.append(
+        SelectableModelOption(label="Research", model_selection=selection)
+    )
+
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="secret-parent-runtime-model",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+    rendered = json.dumps(
+        {"description": tool.spec.description, "schema": tool.spec.input_schema}
+    )
+
+    assert "inherited parent Run target is preferred" in rendered
+    assert "`Quality` Reasoning efforts: low, medium, high." in rendered
+    assert "`Research` Reasoning efforts: medium, xhigh." in rendered
+    assert "secret-integration" not in rendered
+    assert "secret-physical-model" not in rendered
+    assert "Secret Display Name" not in rendered
+    assert "secret-family" not in rendered
+    assert "secret-parent-runtime-model" not in rendered
 
 
 async def test_send_message_is_queue_only() -> None:
@@ -1155,6 +1267,103 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionWakeUp)
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
+
+
+async def test_spawn_agent_applies_target_override_and_normalized_effort() -> None:
+    """Pre-resolve a bounded target override and persist its child intent."""
+    toolkit, repo, _input_service, _broker, run_repo, _events = await _make_toolkit()
+    selection = make_test_model_selection(model_identifier="override-model")
+    selection.normalized_capabilities.context_window.max_input_tokens = 32_000
+    selection.normalized_capabilities.reasoning.supported = True
+    selection.normalized_capabilities.reasoning.effort_levels = [
+        ModelReasoningEffort.LOW,
+        ModelReasoningEffort.MEDIUM,
+    ]
+    toolkit.agent.selectable_model_options.append(
+        SelectableModelOption(label="Research", model_selection=selection)
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+
+    await tool.handler(
+        json.dumps(
+            {
+                "name": "researcher",
+                "task": "Research it",
+                "fork_turns": "none",
+                "model_target_label": "Research",
+            }
+        )
+    )
+
+    created = run_repo.pending_creates[0]
+    assert created["requested_model_target_label"] == "Research"
+    assert created["requested_reasoning_effort"] == ModelReasoningEffort.MEDIUM
+    assert created["inference_profile_source"] == InferenceProfileSource.SPAWN_OVERRIDE
+    assert created["resolved_model_selection"] == selection
+    assert created["resolved_reasoning_effort"] == ModelReasoningEffort.MEDIUM
+    assert created["effective_context_window_tokens"] == 32_000
+    assert created["effective_auto_compaction_threshold_tokens"] == 28_800
+    assert repo.last_profiles == [
+        ("researcher-session", "Research", ModelReasoningEffort.MEDIUM)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_error"),
+    [
+        (
+            {"fork_turns": "all", "model_target_label": "Quality"},
+            "full-history forks inherit",
+        ),
+        (
+            {"fork_turns": "none", "model_target_label": "Missing"},
+            "was not found",
+        ),
+        (
+            {"fork_turns": "none", "reasoning_effort": "xhigh"},
+            "is not supported",
+        ),
+    ],
+)
+async def test_spawn_agent_rejects_invalid_override_without_child_residue(
+    arguments: dict[str, str],
+    expected_error: str,
+) -> None:
+    """Reject static override errors before creating or waking a child."""
+    toolkit, repo, input_service, broker, run_repo, events = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _publish_to(events)),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+
+    with pytest.raises(FunctionToolError, match=expected_error):
+        await tool.handler(
+            json.dumps({"name": "reviewer", "task": "Review it", **arguments})
+        )
+
+    assert repo.created_children == []
+    assert run_repo.pending_creates == []
+    assert repo.last_profiles == []
+    assert input_service.enqueued == []
+    assert broker.messages == []
+    assert events == []
 
 
 @pytest.mark.parametrize(
