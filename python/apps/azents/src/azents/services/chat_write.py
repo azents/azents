@@ -13,10 +13,7 @@ from azents.core.enums import (
     EventKind,
     InputBufferKind,
 )
-from azents.core.inference_profile import (
-    InferenceProfileSource,
-    RequestedInferenceProfile,
-)
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.types import FileOutputPart, SystemErrorPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -320,8 +317,6 @@ class ChatWriteService:
             )
             if original_run is None:
                 raise ValueError("Failed AgentRun not found")
-            if original_run.requested_model_target_label is None:
-                raise ValueError("Failed AgentRun has no requested model target")
             original_input_event_ids = (
                 await self.agent_run_repository.list_input_event_ids(
                     session,
@@ -355,19 +350,7 @@ class ChatWriteService:
                 retry_run = await self.agent_run_repository.create_pending(
                     session,
                     session_id=session_id,
-                    requested_model_target_label=(
-                        original_run.requested_model_target_label
-                    ),
-                    requested_reasoning_effort=(
-                        original_run.requested_reasoning_effort
-                    ),
-                    inference_profile_source=InferenceProfileSource.RETRY_ORIGINAL,
                     parent_agent_run_id=None,
-                    resolved_model_selection=None,
-                    resolved_reasoning_effort=None,
-                    resolved_at=None,
-                    effective_context_window_tokens=None,
-                    effective_auto_compaction_threshold_tokens=None,
                 )
                 await self.agent_run_repository.associate_input_events(
                     session,

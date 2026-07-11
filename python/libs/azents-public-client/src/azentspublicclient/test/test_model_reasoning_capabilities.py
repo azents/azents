@@ -37,7 +37,7 @@ class TestModelReasoningCapabilities(unittest.TestCase):
             return ModelReasoningCapabilities(
                 supported = True,
                 effort_levels = [
-                    'low'
+                    'none'
                     ],
                 summaries = True
             )

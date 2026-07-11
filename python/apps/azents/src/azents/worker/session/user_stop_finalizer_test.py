@@ -244,16 +244,6 @@ def _running_run(session_id: str) -> AgentRunState:
         run_index=1,
         phase=AgentRunPhase.STREAMING_MODEL,
         status=AgentRunStatus.RUNNING,
-        requested_model_target_label=None,
-        requested_reasoning_effort=None,
-        inference_profile_source=None,
-        resolved_model_selection=None,
-        resolved_reasoning_effort=None,
-        resolved_at=None,
-        effective_context_window_tokens=None,
-        effective_auto_compaction_threshold_tokens=None,
-        inference_profile_failure_code=None,
-        inference_profile_failure_message=None,
         parent_agent_run_id=None,
         active_tool_calls=[
             ActiveToolCall(

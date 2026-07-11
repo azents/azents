@@ -17,7 +17,7 @@ from azents.core.enums import (
     EventKind,
 )
 from azents.core.inference_profile import (
-    InferenceRunSummary,
+    AppliedInferenceProfile,
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
@@ -1816,8 +1816,8 @@ class ChatLiveRunStateResponse(BaseModel):
     run_id: str = Field(description="AgentRun ID")
     phase: AgentRunPhase = Field(description="Current run phase")
     status: AgentRunStatus = Field(description="Current run status")
-    inference_run_summary: InferenceRunSummary = Field(
-        description="Allowlisted provenance for the active run",
+    inference_profile: AppliedInferenceProfile = Field(
+        description="Inference settings applied to the active turn",
     )
     retry: ChatLiveRunRetryStateResponse | None = Field(
         default=None,
@@ -1832,7 +1832,7 @@ class ChatLiveRunStateResponse(BaseModel):
             run_id=run.run_id,
             phase=run.phase,
             status=run.status,
-            inference_run_summary=run.inference_run_summary,
+            inference_profile=run.inference_profile,
             retry=None
             if run.retry is None
             else ChatLiveRunRetryStateResponse.from_domain(run.retry),
@@ -1885,11 +1885,11 @@ class AgentSessionResponse(BaseModel):
 
     id: str = Field(description="Session ID")
     agent_id: str = Field(description="Agent ID")
-    last_model_target_label: str | None = Field(
-        description="Most recently activated model target label",
+    current_model_target_label: str | None = Field(
+        description="Model target label prepared for the next turn",
     )
-    last_reasoning_effort: ModelReasoningEffort | None = Field(
-        description="Most recently activated reasoning effort, or null for Default",
+    current_reasoning_effort: ModelReasoningEffort | None = Field(
+        description="Reasoning effort prepared for the next turn, or null for Default",
     )
     title: str | None = Field(description="User-facing session title")
     title_source: AgentSessionTitleSource | None = Field(
@@ -1912,8 +1912,16 @@ class AgentSessionResponse(BaseModel):
         return cls(
             id=session.id,
             agent_id=session.agent_id,
-            last_model_target_label=session.last_model_target_label,
-            last_reasoning_effort=session.last_reasoning_effort,
+            current_model_target_label=(
+                session.inference_state.model_target_label
+                if session.inference_state is not None
+                else None
+            ),
+            current_reasoning_effort=(
+                session.inference_state.reasoning_effort
+                if session.inference_state is not None
+                else None
+            ),
             title=session.title,
             title_source=session.title_source,
             status=session.status,

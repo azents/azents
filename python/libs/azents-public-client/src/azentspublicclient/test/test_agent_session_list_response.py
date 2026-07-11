@@ -39,8 +39,8 @@ class TestAgentSessionListResponse(unittest.TestCase):
                     azentspublicclient.models.agent_session_response.AgentSessionResponse(
                         id = '', 
                         agent_id = '', 
-                        last_model_target_label = '', 
-                        last_reasoning_effort = 'low', 
+                        current_model_target_label = '', 
+                        current_reasoning_effort = 'none', 
                         title = '', 
                         title_source = 'manual', 
                         status = 'active', 
@@ -56,8 +56,8 @@ class TestAgentSessionListResponse(unittest.TestCase):
                     azentspublicclient.models.agent_session_response.AgentSessionResponse(
                         id = '', 
                         agent_id = '', 
-                        last_model_target_label = '', 
-                        last_reasoning_effort = 'low', 
+                        current_model_target_label = '', 
+                        current_reasoning_effort = 'none', 
                         title = '', 
                         title_source = 'manual', 
                         status = 'active', 

@@ -94,12 +94,11 @@ def _agent_session(
     """Create AgentSession for tests."""
     now = datetime.datetime.now(datetime.UTC)
     return AgentSession(
+        inference_state=None,
         id=session_id,
         workspace_id=workspace_id,
         agent_id=agent_id,
         handle="test-session-handle",
-        last_model_target_label=None,
-        last_reasoning_effort=None,
         session_kind=session_kind,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,

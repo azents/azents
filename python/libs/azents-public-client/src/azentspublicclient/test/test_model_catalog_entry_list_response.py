@@ -75,7 +75,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                             reasoning = azentspublicclient.models.model_reasoning_capabilities.ModelReasoningCapabilities(
                                 supported = True, 
                                 effort_levels = [
-                                    'low'
+                                    'none'
                                     ], 
                                 summaries = True, ), 
                             built_in_tools = azentspublicclient.models.model_built_in_tool_capabilities.ModelBuiltInToolCapabilities(
@@ -145,7 +145,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                             reasoning = azentspublicclient.models.model_reasoning_capabilities.ModelReasoningCapabilities(
                                 supported = True, 
                                 effort_levels = [
-                                    'low'
+                                    'none'
                                     ], 
                                 summaries = True, ), 
                             built_in_tools = azentspublicclient.models.model_built_in_tool_capabilities.ModelBuiltInToolCapabilities(

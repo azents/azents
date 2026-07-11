@@ -11,7 +11,10 @@ from pydantic import TypeAdapter
 from azents.core.config import Config
 from azents.core.deps import get_appctx
 from azents.core.enums import EventKind, InputBufferKind
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    AppliedInferenceProfile,
+    RequestedInferenceProfile,
+)
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import ActionMessagePayload, ChatAction
 from azents.engine.events.types import (
@@ -236,11 +239,16 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
         metadata = dict(input_buffer.metadata)
         metadata["input_buffer_id"] = input_buffer.id
         metadata["live_projection"] = "input_buffer"
+        requested_profile = _input_buffer_requested_profile(input_buffer)
         payload = UserMessagePayload(
             content=content,
             attachments=[],
             metadata=metadata,
-            requested_inference_profile=_input_buffer_requested_profile(input_buffer),
+            applied_inference_profile=(
+                AppliedInferenceProfile.model_validate(requested_profile)
+                if requested_profile is not None
+                else None
+            ),
         )
     return Event(
         id=input_buffer.id,

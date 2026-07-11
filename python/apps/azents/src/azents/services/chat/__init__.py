@@ -20,6 +20,7 @@ from azents.core.enums import (
     EventKind,
     InputBufferKind,
 )
+from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.engine.events.types import AgentRunState, Event
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
@@ -240,6 +241,15 @@ def _has_unread_subagent_result(
     if agent.parent_observed_run_index is None:
         return True
     return latest_run_index > agent.parent_observed_run_index
+
+
+def _require_session_inference_profile(
+    session: AgentSession,
+) -> AppliedInferenceProfile:
+    """Return the prepared public inference profile for an active run."""
+    if session.inference_state is None:
+        raise ValueError("Active AgentRun has no Session inference state")
+    return session.inference_state.applied_profile
 
 
 class _InvalidGoalStatusTransitionError(Exception):
@@ -1016,7 +1026,6 @@ class ChatSessionService:
                 for projection in projections
                 if projection.execution.status not in terminal_action_statuses
             ]
-            run_repo = self.agent_run_repository
             return Success(
                 ChatLiveStateSnapshot(
                     partial_history_events=partial_history_events,
@@ -1027,7 +1036,9 @@ class ChatSessionService:
                         run_id=run.id,
                         phase=run.phase,
                         status=run.status,
-                        inference_run_summary=run_repo.build_inference_run_summary(run),
+                        inference_profile=_require_session_inference_profile(
+                            agent_session
+                        ),
                         retry=None
                         if run.retry_state is None
                         else ChatLiveRunRetryState(

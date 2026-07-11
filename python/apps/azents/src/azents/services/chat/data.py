@@ -5,7 +5,7 @@ import datetime
 from typing import Literal
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
-from azents.core.inference_profile import InferenceRunSummary
+from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.types import Event
 from azents.engine.run.failure import FailedRunAttemptSource, FailedRunRetryability
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
@@ -62,7 +62,7 @@ class ChatLiveRunState:
     run_id: str
     phase: AgentRunPhase
     status: AgentRunStatus
-    inference_run_summary: InferenceRunSummary
+    inference_profile: AppliedInferenceProfile
     retry: ChatLiveRunRetryState | None = None
 
 

@@ -274,26 +274,9 @@ export const WithLiveRunRetry = {
       run_id: "run-retry-story",
       phase: "waiting_for_model",
       status: "running",
-      inferenceRunSummary: {
-        run_id: "run-retry-story",
-        run_index: 1,
-        status: "running",
-        requested_profile: {
-          model_target_label: "default",
-          reasoning_effort: null,
-        },
-        source: "agent_default",
-        resolved_profile: {
-          provider: "openai",
-          model_identifier: "gpt-5.5",
-          model_display_name: "GPT 5.5",
-          model_developer: "openai",
-        },
-        resolved_reasoning_effort: null,
-        effective_context_window_tokens: 128_000,
-        effective_auto_compaction_threshold_tokens: 115_200,
-        failure_code: null,
-        failure_message: null,
+      inferenceProfile: {
+        model_target_label: "default",
+        reasoning_effort: null,
       },
       retry: {
         status: "running",

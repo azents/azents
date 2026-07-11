@@ -29,6 +29,7 @@ from azents.core.inference_profile import (
     InferenceProfileFailureCode,
     InferenceProfileSource,
     RequestedInferenceProfile,
+    SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import (
@@ -51,7 +52,7 @@ from azents.engine.events.engine_events import (
     RunStopped,
     SubagentTreeChanged,
 )
-from azents.engine.events.types import AgentRunState, Event
+from azents.engine.events.types import Event
 from azents.engine.hooks.dispatcher import (
     RuntimeHookDispatcher,
     RuntimeHookProviderRef,
@@ -211,16 +212,6 @@ class OperationActionProcessResult:
     context_invalidated: bool
 
 
-def _requested_profile_from_run(run: AgentRunState) -> RequestedInferenceProfile:
-    """Return the durable requested profile of a recoverable run."""
-    if run.requested_model_target_label is None:
-        raise ValueError("Recoverable AgentRun has no requested model target")
-    return RequestedInferenceProfile(
-        model_target_label=run.requested_model_target_label,
-        reasoning_effort=run.requested_reasoning_effort,
-    )
-
-
 def _runtime_hook_provider_refs(
     toolkits: list[ToolkitBinding],
 ) -> list[RuntimeHookProviderRef]:
@@ -362,14 +353,30 @@ class RunExecutor:
             message.session_id
         )
         created_run = recoverable_run is None
-        if recoverable_run is not None:
-            agent_run = recoverable_run
-            if agent_run.inference_profile_source is None:
-                raise ValueError("Recoverable AgentRun has no inference profile source")
-            selected_profile = RequestedProfileSelection(
-                profile=_requested_profile_from_run(agent_run),
-                source=agent_run.inference_profile_source,
+        async with self.session_manager() as db_session:
+            session_state = await self.agent_session_repository.get_by_id(
+                db_session, message.session_id
             )
+        if session_state is None:
+            raise ValueError("AgentSession not found")
+
+        if (
+            recoverable_run is not None
+            and recoverable_run.status == AgentRunStatus.RUNNING
+        ):
+            if session_state.inference_state is None:
+                raise ValueError(
+                    "Running AgentRun has no prepared Session inference state"
+                )
+            turn_inference_state = session_state.inference_state
+            selected_profile = RequestedProfileSelection(
+                profile=RequestedInferenceProfile(
+                    model_target_label=turn_inference_state.model_target_label,
+                    reasoning_effort=turn_inference_state.reasoning_effort,
+                ),
+                source=InferenceProfileSource.SESSION_LAST_USED,
+            )
+            agent_run = recoverable_run
         else:
             explicit_profile: RequestedInferenceProfile | None = None
             if command is None:
@@ -378,7 +385,7 @@ class RunExecutor:
                         message.session_id
                     )
                 )
-                if not pending_input.exists:
+                if not pending_input.exists and recoverable_run is None:
                     logger.info(
                         "Session wake-up ignored because no runtime input is pending",
                         extra={
@@ -392,16 +399,29 @@ class RunExecutor:
                         no_actionable_work=True,
                     )
                 explicit_profile = pending_input.requested_inference_profile
-            selected_profile = await self._select_requested_profile(
-                agent_id=message.agent_id,
-                session_id=message.session_id,
-                explicit_profile=explicit_profile,
-            )
-            agent_run = await self.session_lifecycle.create_or_claim_pending_agent_run(
-                message.session_id,
-                requested_profile=selected_profile.profile,
-                source=selected_profile.source,
-                input_event_ids=[],
+
+            if explicit_profile is None and session_state.inference_state is not None:
+                turn_inference_state = session_state.inference_state
+                selected_profile = RequestedProfileSelection(
+                    profile=RequestedInferenceProfile(
+                        model_target_label=turn_inference_state.model_target_label,
+                        reasoning_effort=turn_inference_state.reasoning_effort,
+                    ),
+                    source=InferenceProfileSource.SESSION_LAST_USED,
+                )
+            else:
+                selected_profile = await self._select_requested_profile(
+                    agent_id=message.agent_id,
+                    session_id=message.session_id,
+                    explicit_profile=explicit_profile,
+                )
+                turn_inference_state = None
+
+            agent_run = recoverable_run or (
+                await self.session_lifecycle.create_or_claim_pending_agent_run(
+                    message.session_id,
+                    input_event_ids=[],
+                )
             )
 
         run_id = agent_run.id
@@ -437,6 +457,7 @@ class RunExecutor:
                     terminal_event_observed=False,
                     no_actionable_work=True,
                 )
+
         logger.info(
             "Run execution started",
             extra={
@@ -460,35 +481,22 @@ class RunExecutor:
         )
 
         run_request: RunRequest | None = None
-        if agent_run.status == AgentRunStatus.RUNNING:
-            if (
-                agent_run.resolved_model_selection is None
-                or agent_run.effective_context_window_tokens is None
-                or agent_run.effective_auto_compaction_threshold_tokens is None
-            ):
-                raise ValueError(
-                    "Activated AgentRun has incomplete resolved provenance"
-                )
-            recovered = await resolve_invoke_input_with_resolved_profile(
+        if turn_inference_state is None:
+            resolved = await resolve_invoke_input_with_profile(
                 invoke_input,
-                resolved_model_selection=agent_run.resolved_model_selection,
-                resolved_reasoning_effort=agent_run.resolved_reasoning_effort,
+                requested_profile=selected_profile.profile,
                 agent_repository=self.agent_repository,
                 integration_repository=self.integration_repository,
                 session_manager=self.session_manager,
                 exchange_file_service=self.exchange_file_service,
                 model_file_service=self.model_file_service,
             )
-            if recovered.failure:
-                failure = _profile_resolution_failure(recovered.error)
-                await (
-                    self.session_lifecycle.fail_agent_run_profile_resolution_if_running(
-                        message.session_id,
-                        run_id=run_id,
-                        failure_code=failure.code,
-                        failure_message=failure.message,
+            if resolved.failure:
+                failure = _profile_resolution_failure(resolved.error)
+                if agent_run.status == AgentRunStatus.PENDING:
+                    await self.session_lifecycle.cancel_pending_agent_run(
+                        message.session_id, run_id=run_id
                     )
-                )
                 await dispatch_event(
                     message.session_id,
                     make_system_error_event(
@@ -502,109 +510,60 @@ class RunExecutor:
                     terminal_event_observed=True,
                     no_actionable_work=False,
                     run_id=run_id,
-                    terminal_run_status=AgentRunStatus.FAILED,
+                    terminal_run_status=AgentRunStatus.CANCELLED,
                 )
-            effective_context_window_tokens = agent_run.effective_context_window_tokens
-            run_request = dataclasses.replace(
-                recovered.value,
-                max_input_tokens=effective_context_window_tokens,
-                context_window_tokens=effective_context_window_tokens,
-                compaction_max_input_tokens=effective_context_window_tokens,
-                auto_compaction_threshold_tokens=(
-                    agent_run.effective_auto_compaction_threshold_tokens
+            resolved_profile = resolved.value
+            run_request = resolved_profile.run_request
+            turn_inference_state = SessionInferenceState(
+                model_target_label=selected_profile.profile.model_target_label,
+                model_selection=resolved_profile.model_selection,
+                reasoning_effort=resolved_profile.reasoning_effort,
+                effective_context_window_tokens=run_request.effective_max_input_tokens,
+                effective_auto_compaction_threshold_tokens=(
+                    compute_auto_compaction_threshold_tokens(
+                        run_request.effective_max_input_tokens
+                    )
                 ),
+                resolved_at=datetime.datetime.now(datetime.UTC),
             )
-        elif agent_run.status == AgentRunStatus.PENDING:
-            inherited_pending = agent_run.inference_profile_source in {
-                InferenceProfileSource.PARENT_RUN,
-                InferenceProfileSource.SPAWN_OVERRIDE,
-            }
-            resolution_error: object | None = None
-            resolved_profile = None
-            if inherited_pending:
-                if (
-                    agent_run.parent_agent_run_id is None
-                    or agent_run.resolved_model_selection is None
-                    or agent_run.resolved_at is None
-                    or agent_run.effective_context_window_tokens is None
-                    or agent_run.effective_auto_compaction_threshold_tokens is None
-                ):
-                    resolution_error = ValueError(
-                        "Inherited pending AgentRun has incomplete provenance"
+            async with self.session_manager() as db_session:
+                await self.agent_session_repository.set_inference_state(
+                    db_session,
+                    session_id=message.session_id,
+                    inference_state=turn_inference_state,
+                )
+                await db_session.commit()
+        else:
+            recovered = await resolve_invoke_input_with_resolved_profile(
+                invoke_input,
+                resolved_model_selection=turn_inference_state.model_selection,
+                resolved_reasoning_effort=turn_inference_state.reasoning_effort,
+                agent_repository=self.agent_repository,
+                integration_repository=self.integration_repository,
+                session_manager=self.session_manager,
+                exchange_file_service=self.exchange_file_service,
+                model_file_service=self.model_file_service,
+            )
+            if recovered.failure:
+                failure = _profile_resolution_failure(recovered.error)
+                if agent_run.status == AgentRunStatus.PENDING:
+                    await self.session_lifecycle.cancel_pending_agent_run(
+                        message.session_id,
+                        run_id=run_id,
                     )
+                    terminal_status = AgentRunStatus.CANCELLED
                 else:
-                    inherited_resolution = (
-                        await resolve_invoke_input_with_resolved_profile(
-                            invoke_input,
-                            resolved_model_selection=(
-                                agent_run.resolved_model_selection
-                            ),
-                            resolved_reasoning_effort=(
-                                agent_run.resolved_reasoning_effort
-                            ),
-                            agent_repository=self.agent_repository,
-                            integration_repository=self.integration_repository,
-                            session_manager=self.session_manager,
-                            exchange_file_service=self.exchange_file_service,
-                            model_file_service=self.model_file_service,
-                        )
+                    await self.session_lifecycle.mark_agent_run_terminal_if_running(
+                        message.session_id,
+                        run_id=run_id,
+                        status=AgentRunStatus.FAILED,
                     )
-                    if inherited_resolution.failure:
-                        resolution_error = inherited_resolution.error
-                    else:
-                        effective_context_window_tokens = (
-                            agent_run.effective_context_window_tokens
-                        )
-                        run_request = dataclasses.replace(
-                            inherited_resolution.value,
-                            max_input_tokens=effective_context_window_tokens,
-                            context_window_tokens=effective_context_window_tokens,
-                            compaction_max_input_tokens=(
-                                effective_context_window_tokens
-                            ),
-                            auto_compaction_threshold_tokens=(
-                                agent_run.effective_auto_compaction_threshold_tokens
-                            ),
-                        )
-            else:
-                resolved = await resolve_invoke_input_with_profile(
-                    invoke_input,
-                    requested_profile=selected_profile.profile,
-                    agent_repository=self.agent_repository,
-                    integration_repository=self.integration_repository,
-                    session_manager=self.session_manager,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=self.model_file_service,
-                )
-                if resolved.failure:
-                    resolution_error = resolved.error
-                else:
-                    resolved_profile = resolved.value
-                    run_request = resolved_profile.run_request
-
-            if resolution_error is not None:
-                failure = _profile_resolution_failure(resolution_error)
-                failure_code = failure.code
-                error_message = failure.message
-                await self.session_lifecycle.fail_pending_agent_run_profile(
-                    message.session_id,
-                    run_id=run_id,
-                    failure_code=failure_code,
-                    failure_message=error_message,
-                )
-                logger.warning(
-                    "Failed to resolve requested inference profile",
-                    extra={
-                        "session_id": message.session_id,
-                        "run_id": run_id,
-                        "failure_code": failure_code.value,
-                    },
-                )
+                    terminal_status = AgentRunStatus.FAILED
                 await dispatch_event(
                     message.session_id,
                     make_system_error_event(
                         session_id=message.session_id,
-                        content=error_message,
+                        content=failure.message,
                     ),
                 )
                 await dispatch_event(message.session_id, RunComplete())
@@ -613,38 +572,29 @@ class RunExecutor:
                     terminal_event_observed=True,
                     no_actionable_work=False,
                     run_id=run_id,
-                    terminal_run_status=AgentRunStatus.FAILED,
+                    terminal_run_status=terminal_status,
                 )
+            run_request = recovered.value
 
-            if inherited_pending:
-                await self.session_lifecycle.activate_inherited_pending_agent_run(
-                    message.session_id,
-                    run_id=run_id,
-                )
-            else:
-                if resolved_profile is None or run_request is None:
-                    raise ValueError("Resolved pending AgentRun has no profile")
-                await self.session_lifecycle.activate_pending_agent_run(
-                    message.session_id,
-                    run_id=run_id,
-                    resolved_model_selection=resolved_profile.model_selection,
-                    resolved_reasoning_effort=resolved_profile.reasoning_effort,
-                    effective_context_window_tokens=(
-                        run_request.effective_max_input_tokens
-                    ),
-                    effective_auto_compaction_threshold_tokens=(
-                        compute_auto_compaction_threshold_tokens(
-                            run_request.effective_max_input_tokens
-                        )
-                    ),
-                )
-        else:
-            raise ValueError("Recoverable AgentRun is already terminal")
-        if run_request is None:
-            raise ValueError("AgentRun resolution produced no request")
-        inference_run_summary = await self.session_lifecycle.get_inference_run_summary(
-            run_id=run_id,
+        run_request = dataclasses.replace(
+            run_request,
+            max_input_tokens=turn_inference_state.effective_context_window_tokens,
+            context_window_tokens=turn_inference_state.effective_context_window_tokens,
+            compaction_max_input_tokens=(
+                turn_inference_state.effective_context_window_tokens
+            ),
+            auto_compaction_threshold_tokens=(
+                turn_inference_state.effective_auto_compaction_threshold_tokens
+            ),
         )
+        if agent_run.status == AgentRunStatus.PENDING:
+            agent_run = await self.session_lifecycle.activate_pending_agent_run(
+                message.session_id, run_id=run_id
+            )
+        elif agent_run.status != AgentRunStatus.RUNNING:
+            raise ValueError("Recoverable AgentRun is already terminal")
+
+        inference_profile = turn_inference_state.applied_profile
         now = loop.time()
         logger.info(
             "Run invoke input resolved",
@@ -903,7 +853,10 @@ class RunExecutor:
         )
         boundary_started_at = now
 
-        recovering_running_run = agent_run.status == AgentRunStatus.RUNNING
+        recovering_running_run = (
+            recoverable_run is not None
+            and recoverable_run.status == AgentRunStatus.RUNNING
+        )
         active_tool_calls = (
             list(agent_run.active_tool_calls) if recovering_running_run else []
         )
@@ -925,7 +878,7 @@ class RunExecutor:
                     run_id=run_id,
                     phase=active_phase or AgentRunPhase.IDLE,
                     status=AgentRunStatus.RUNNING,
-                    inference_run_summary=inference_run_summary,
+                    inference_profile=inference_profile,
                     retry=_chat_live_retry_state(live_retry_state),
                 ),
             )
@@ -1454,14 +1407,15 @@ class RunExecutor:
                 session,
                 session_id,
             )
-            if (
-                agent_session is not None
-                and agent_session.last_model_target_label is not None
-            ):
+            if agent_session is not None and agent_session.inference_state is not None:
                 return RequestedProfileSelection(
                     profile=RequestedInferenceProfile(
-                        model_target_label=agent_session.last_model_target_label,
-                        reasoning_effort=agent_session.last_reasoning_effort,
+                        model_target_label=(
+                            agent_session.inference_state.model_target_label
+                        ),
+                        reasoning_effort=(
+                            agent_session.inference_state.reasoning_effort
+                        ),
                     ),
                     source=InferenceProfileSource.SESSION_LAST_USED,
                 )

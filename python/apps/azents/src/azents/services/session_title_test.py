@@ -308,12 +308,11 @@ class _AgentSessionRepository:
         del session, session_id
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
+            inference_state=None,
             id="session-001",
             workspace_id="workspace-001",
             agent_id="agent-001",
             handle="test-session-handle",
-            last_model_target_label=None,
-            last_reasoning_effort=None,
             session_kind=AgentSessionKind.ROOT,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,

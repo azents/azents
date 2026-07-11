@@ -37,8 +37,8 @@ const sessions: AgentSessionResponse[] = [
   {
     id: "sess_primary",
     agent_id: "agent_01",
-    last_model_target_label: null,
-    last_reasoning_effort: null,
+    current_model_target_label: null,
+    current_reasoning_effort: null,
     title: null,
     title_source: null,
     status: "active",
@@ -50,8 +50,8 @@ const sessions: AgentSessionResponse[] = [
   {
     id: "sess_release",
     agent_id: "agent_01",
-    last_model_target_label: null,
-    last_reasoning_effort: null,
+    current_model_target_label: null,
+    current_reasoning_effort: null,
     title: "Release checklist follow-up",
     title_source: "manual",
     status: "active",
@@ -63,8 +63,8 @@ const sessions: AgentSessionResponse[] = [
   {
     id: "sess_ci",
     agent_id: "agent_01",
-    last_model_target_label: null,
-    last_reasoning_effort: null,
+    current_model_target_label: null,
+    current_reasoning_effort: null,
     title: null,
     title_source: null,
     status: "active",

@@ -154,12 +154,11 @@ class _FakeAgentSessionRepository:
         if session_id != "session-1":
             return None
         return AgentSession(
+            inference_state=None,
             id="session-1",
             workspace_id="workspace-1",
             agent_id="agent-1",
             handle="test-session-handle",
-            last_model_target_label=None,
-            last_reasoning_effort=None,
             session_kind=AgentSessionKind.ROOT,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,

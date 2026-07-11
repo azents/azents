@@ -218,9 +218,9 @@ class TestChatSessionInputBuffer:
         assert [event.id for event in result.value.input_buffer_events] == [buffer_id]
         payload = result.value.input_buffer_events[0].payload
         assert isinstance(payload, UserMessagePayload)
-        assert payload.requested_inference_profile is not None
-        assert payload.requested_inference_profile.model_target_label == "main"
-        assert payload.requested_inference_profile.reasoning_effort == (
+        assert payload.applied_inference_profile is not None
+        assert payload.applied_inference_profile.model_target_label == "main"
+        assert payload.applied_inference_profile.reasoning_effort == (
             ModelReasoningEffort.HIGH
         )
         assert result.value.partial_history_events == []
@@ -242,16 +242,6 @@ class TestChatSessionInputBuffer:
                 session,
                 AgentRunCreate(
                     session_id=session_id,
-                    requested_model_target_label=None,
-                    requested_reasoning_effort=None,
-                    inference_profile_source=None,
-                    resolved_model_selection=None,
-                    resolved_reasoning_effort=None,
-                    resolved_at=None,
-                    effective_context_window_tokens=None,
-                    effective_auto_compaction_threshold_tokens=None,
-                    inference_profile_failure_code=None,
-                    inference_profile_failure_message=None,
                     parent_agent_run_id=None,
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                 ),

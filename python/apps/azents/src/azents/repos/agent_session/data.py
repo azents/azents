@@ -14,7 +14,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     SessionAgentKind,
 )
-from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.inference_profile import SessionInferenceState
 
 
 class AgentSession(BaseModel):
@@ -24,11 +24,8 @@ class AgentSession(BaseModel):
     workspace_id: str = Field(description="Workspace ID")
     agent_id: str = Field(description="Agent ID")
     handle: str = Field(description="Human-readable session handle")
-    last_model_target_label: str | None = Field(
-        description="Most recently activated model target label",
-    )
-    last_reasoning_effort: ModelReasoningEffort | None = Field(
-        description="Most recently activated reasoning effort, or null for Default",
+    inference_state: SessionInferenceState | None = Field(
+        description="Resolved inference configuration prepared for the next turn",
     )
     session_kind: AgentSessionKind = Field(description="Session listing category")
     status: AgentSessionStatus = Field(description="AgentSession status")

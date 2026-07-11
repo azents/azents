@@ -258,12 +258,11 @@ async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
 def _make_agent_session() -> AgentSession:
     """Create AgentSession for tests."""
     return AgentSession(
+        inference_state=None,
         id="session-1",
         workspace_id="workspace-1",
         agent_id="agent-1",
         handle="test-session-handle",
-        last_model_target_label=None,
-        last_reasoning_effort=None,
         session_kind=AgentSessionKind.ROOT,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
