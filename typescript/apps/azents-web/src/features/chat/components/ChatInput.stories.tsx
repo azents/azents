@@ -206,18 +206,37 @@ export const InputActionSuggestions = {
     initialInputValue: "/",
     todo,
   },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText(
+        "Polish the composer layout and verify the mobile model picker",
+      ),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("button", { name: /compact/i }),
+    ).toBeVisible();
+  },
 } satisfies Story;
 
 export const SelectedActionChip = {
   args: {
     ...baseArgs,
     sessionId: "story-session-selected-action-chip",
+    todo,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.type(canvas.getByRole("textbox"), "/");
     await userEvent.click(canvas.getByRole("button", { name: /compact/i }));
-    await expect(canvas.getByText("/compact")).toBeVisible();
+    const chip = canvas.getByText("/compact").parentElement;
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveStyle({ borderStyle: "none" });
+    await expect(
+      canvas.getByText(
+        "Polish the composer layout and verify the mobile model picker",
+      ),
+    ).toBeVisible();
   },
 } satisfies Story;
 
