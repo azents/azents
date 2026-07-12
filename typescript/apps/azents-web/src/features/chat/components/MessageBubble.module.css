@@ -57,18 +57,6 @@
   }
 }
 
-.actionRow {
-  min-height: rem(28px);
-}
-
-.actionRowAssistant {
-  justify-content: flex-start;
-}
-
-.actionRowUser {
-  justify-content: flex-end;
-}
-
 .errorMessageText {
   color: light-dark(var(--mantine-color-red-7), var(--mantine-color-red-4));
   font-family: var(

@@ -33,24 +33,17 @@ import {
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import { memo, useMemo, useRef } from "react";
-import { ChatCopyButton } from "./ChatCopyButton";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
 import { MarkdownContent } from "./MarkdownContent";
+import { MessageActionRow } from "./MessageActionRow";
 import classes from "./MessageBubble.module.css";
-import {
-  MessageMetadataFooter,
-  MessageMetadataSurface,
-} from "./MessageMetadataFooter";
+import { MessageMetadataSurface } from "./MessageMetadataFooter";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { RunRetryCard } from "./RunRetryCard";
 import { ToolCallCard } from "./ToolCallCard";
 import type { ChatMessage } from "../types";
-import type {
-  AppliedInferenceProfile,
-  RequestedInferenceProfile,
-} from "@azents/public-client";
 
 interface FailedRunRetryAction {
   canRetry: boolean;
@@ -72,7 +65,6 @@ interface TextMessageProps {
   hasReasoning: boolean;
 }
 
-type MessageActionAlign = "assistant" | "user";
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
 
 function formatDuration(
@@ -352,68 +344,6 @@ function TextMessageContent({
   );
 }
 
-function MessageActionRow({
-  content,
-  createdAt,
-  align,
-  inferenceProfile = null,
-  editable = false,
-  onEdit,
-}: {
-  content: string | null;
-  createdAt: string;
-  align: MessageActionAlign;
-  inferenceProfile?: RequestedInferenceProfile | AppliedInferenceProfile | null;
-  editable?: boolean;
-  onEdit?: () => void;
-}): React.ReactElement {
-  const t = useTranslations("chat");
-  const actionRowClassName =
-    align === "assistant"
-      ? `${classes.actionRow} ${classes.actionRowAssistant}`
-      : `${classes.actionRow} ${classes.actionRowUser}`;
-  const copyButton =
-    content === null ? null : (
-      <ChatCopyButton
-        value={content}
-        copyLabel={t("copy")}
-        copiedLabel={t("copied")}
-        position={align === "user" ? "left" : "right"}
-      />
-    );
-
-  return (
-    <Group
-      gap={rem(4)}
-      mt={rem(4)}
-      wrap="nowrap"
-      className={actionRowClassName}
-    >
-      {align === "user" && (
-        <MessageMetadataFooter
-          createdAt={createdAt}
-          profile={inferenceProfile}
-        />
-      )}
-      {copyButton}
-      {editable && onEdit && (
-        <Tooltip label={t("editMessage")} withArrow position="left">
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size="sm"
-            onClick={onEdit}
-            aria-label={t("editMessage")}
-          >
-            <IconPencil size={14} />
-          </ActionIcon>
-        </Tooltip>
-      )}
-      {align === "assistant" && <MessageMetadataFooter createdAt={createdAt} />}
-    </Group>
-  );
-}
-
 function UserTextMessage({
   message,
   hasContent,
@@ -424,6 +354,22 @@ function UserTextMessage({
   editable?: boolean;
   onEdit?: () => void;
 }): React.ReactElement {
+  const t = useTranslations("chat");
+  const editAction =
+    editable && onEdit ? (
+      <Tooltip label={t("editMessage")} withArrow position="left">
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          onClick={onEdit}
+          aria-label={t("editMessage")}
+        >
+          <IconPencil size={14} />
+        </ActionIcon>
+      </Tooltip>
+    ) : null;
+
   if (message.action) {
     return (
       <MessageMetadataSurface>
@@ -441,8 +387,7 @@ function UserTextMessage({
                 createdAt={message.createdAt}
                 align="user"
                 inferenceProfile={message.inferenceProfile}
-                editable={editable}
-                onEdit={onEdit}
+                additionalActions={editAction}
               />
             ) : null
           }
@@ -501,8 +446,7 @@ function UserTextMessage({
                 createdAt={message.createdAt}
                 align="user"
                 inferenceProfile={message.inferenceProfile}
-                editable={editable}
-                onEdit={onEdit}
+                additionalActions={editAction}
               />
             )}
         </MessageMetadataSurface>
