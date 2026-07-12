@@ -92,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-12
-spec_version: 95
+spec_version: 96
 ---
 
 # Conversation & Events
@@ -338,16 +338,7 @@ before destructive cleanup can remove a path or branch.
 | `status` | enum | `pending`, `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled` |
 | `active_tool_calls` | JSONB array | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, `background` |
 | `retry_state` | JSONB \| null | Durable failed-run retry state while the run remains `running`; cleared on terminal transition |
-| `requested_model_target_label` | string | Agent-owned target requested for this run |
-| `requested_reasoning_effort` | enum \| null | Explicit effort or null for model Default |
-| `inference_profile_source` | enum | `explicit_input`, `session_last_used`, `agent_default`, `parent_run`, `spawn_override`, or `retry_original` |
-| `resolved_model_selection` | JSONB \| null | Immutable full model snapshot after successful activation |
-| `resolved_reasoning_effort` | enum \| null | Activated effort; null represents model Default |
-| `resolved_at` | timestamptz \| null | Successful profile activation time |
-| `effective_context_window_tokens` | int \| null | Context limit fixed for this run |
-| `effective_auto_compaction_threshold_tokens` | int \| null | Auto-compaction threshold fixed for this run |
-| `inference_profile_failure_code` / `inference_profile_failure_message` | enum / text \| null | User-safe terminal resolution failure |
-| `parent_agent_run_id` | FK `agent_runs` \| null | Exact parent run inherited by a subagent's first run |
+| `parent_agent_run_id` | FK `agent_runs` \| null | Parent run lineage for a subagent's first run |
 | `last_completed_event_id` | `str(32)` \| null | Terminal run boundary event id when available |
 | `terminal_result_event_id` | `str(32)` \| null | Terminal assistant/error event used by parent subagent observation |
 | `terminal_result_message` | text \| null | User-safe terminal message returned by `wait_agent` and projected in the Subagent Tree |
@@ -371,13 +362,7 @@ buffer, appends a deterministic `system_error`, preserves the previous Session i
 and completes the active run without retry. Only one pending run may exist for a session. Pending and
 running runs are active recovery state.
 
-The requested label is intent. `AgentRun` stores provenance for the turn activation, while the
-Session-owned current inference snapshot is the execution authority at each turn boundary. A profile
-change arriving during an active run is prepared for the next boundary; the same run rebuilds its
-physical request and effective limits from the new Session snapshot instead of restoring an older
-run-owned selection or creating a replacement run. Manual retry creates a new pending run with
-`retry_original`, copies the original requested profile and ordered input-event associations, and
-resolves against current Agent routing. A subagent's first run is precreated with `parent_agent_run_id`. It uses `parent_run` with the exact parent requested/resolved profile and limits when no override is supplied, or `spawn_override` with a statically validated and pre-resolved Agent-owned label/effort profile for a non-full-history fork. Both sources activate from the stored physical snapshot so first-run recovery does not re-route the label. The child session stores the selected requested label and effort as last-used intent for later runs.
+The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. `AgentRun` stores lifecycle, parentage, activity, retry, and terminal-result state; it does not own or restore model selection. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, and re-resolves the Session's requested profile against current Agent routing before execution. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving model state from the parent run row.
 
 ## 4. Event Transcript Events
 
@@ -660,8 +645,8 @@ storage JSON dump.
 - Web chat stop has a single REST control boundary; WebSocket is not a fallback stop/control path.
 - `client_request_id` retry for chat writes must converge to the same accepted target without duplicate side effects.
 - Input buffers are session-bound and must not store or require `agent_runtime_id`.
-- Run-producing human inputs carry an explicit requested profile, and FIFO promotion never crosses a profile mismatch or action barrier.
-- Requested profile intent and ordered run-input associations are durable; an activated run's resolved snapshot and effective limits are immutable.
+- Run-producing human inputs carry an explicit requested profile, and preparation processes exactly one FIFO head per transaction before folding its effect into the next turn.
+- Requested profile intent and ordered run-input associations are durable; the Session's complete prepared inference snapshot is authoritative for the next turn and may change at a later boundary within the same active run.
 - `SessionAgent` is the subagent tree source of truth; `AgentSession` remains the transcript/run/input boundary.
 - Child sessions are hidden from ordinary Agent session lists by `session_kind = subagent`, not by access-control bypass.
 - Child subagent sessions are human read-only: REST message/edit/command/failed-run retry writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
@@ -673,7 +658,7 @@ storage JSON dump.
 
 Current verification:
 
-- `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/api/public/chat/v1/chat_api_test.py::TestRestMessageWriteContract::test_validate_rest_session_rejects_subagent_before_write src/azents/services/agent_session_input_test.py::TestAgentSessionInputService::test_create_buffered_agent_input_rejects_subagent_before_wake src/azents/services/chat/subagent_tree_test.py::TestSubagentTreeProjection::test_finalize_tree_propagates_interrupted_to_all_descendants src/azents/services/chat_write_test.py::TestChatWriteService::test_pending_command_rejects_subagent_session_before_write src/azents/services/session_git_worktree/service_test.py::TestSessionGitWorktreeService::test_action_execution_retry_rejects_subagent_session src/azents/services/session_git_worktree/service_test.py::TestSessionGitWorktreeService::test_action_execution_discard_rejects_subagent_session src/azents/services/session_git_worktree/service_test.py::TestSessionGitWorktreeService::test_manual_cleanup_rejects_subagent_session -q`
+- `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/api/public/chat/v1/chat_api_test.py::TestRestMessageWriteContract::test_validate_rest_session_rejects_subagent_before_write src/azents/services/agent_session_input_test.py::TestAgentSessionInputService::test_create_buffered_agent_input_rejects_subagent_before_wake src/azents/services/chat/subagent_tree_test.py::TestSubagentTreeProjection::test_finalize_tree_propagates_interrupted_to_all_descendants src/azents/services/chat_write_test.py::TestChatWriteService::test_pending_command_rejects_subagent_session_before_write src/azents/services/session_git_worktree/service_test.py -q`
 - `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/services/chat/subagent_tree_test.py src/azents/worker/run/executor_test.py -q`
 - `cd testenv/azents/e2e && uv run pytest ./src/tests/azents/public/test_subagents.py -q` in Docker-enabled deterministic E2E environments
 
@@ -687,6 +672,8 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-12** — v96. Aligned invariants and verification with Session-owned turn snapshots and terminal buffer-keyed action execution.
+- **2026-07-12** — v95. Promoted sequential single-head preparation, Session inference ownership, buffer-only action transport, and terminal action result history.
 - **2026-07-11** — v94. Added atomic spawn profile validation, `spawn_override` run provenance, and child last-used profile initialization.
 - **2026-07-10** — v93. Required concrete reasoning-effort choices for normal user input when explicit levels are advertised.
 - **2026-07-10** — v92. Added durable requested/resolved inference profiles, profile-aware FIFO run boundaries, run-input associations, session-last-used intent, and retry/subagent provenance.
