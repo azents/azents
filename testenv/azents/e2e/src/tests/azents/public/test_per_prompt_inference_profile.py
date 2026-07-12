@@ -361,6 +361,52 @@ def _wait_for_system_error(
     raise TimeoutError(f"System error was not observed: {content!r}")
 
 
+def _wait_for_turn_provenance(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    target: str,
+    effort: str | None,
+    display_name: str,
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Wait for a durable turn marker with the exact public provenance."""
+    deadline = time.monotonic() + timeout
+    last_profiles: list[object] = []
+    while time.monotonic() < deadline:
+        last_profiles = []
+        for event in _history(server_url, token, session_id):
+            if event.get("kind") != "turn_marker":
+                continue
+            payload = _object(event.get("payload"), label="turn marker payload")
+            profile_value = payload.get("applied_inference_profile")
+            try:
+                profile = _JSON_OBJECT.validate_python(profile_value)
+            except ValidationError:
+                last_profiles.append(profile_value)
+                continue
+            last_profiles.append(profile)
+            if (
+                profile.get("model_target_label") != target
+                or profile.get("reasoning_effort") != effort
+            ):
+                continue
+            assert profile.get("model_display_name") == display_name
+            assert isinstance(payload.get("effective_context_window_tokens"), int)
+            assert isinstance(
+                payload.get("effective_auto_compaction_threshold_tokens"), int
+            )
+            assert "provider" not in payload
+            assert "model_selection" not in payload
+            assert "credential_kwargs" not in payload
+            return payload
+        time.sleep(0.5)
+    raise TimeoutError(
+        f"Turn provenance was not observed: {(target, effort)!r}, {last_profiles!r}"
+    )
+
+
 def _wait_for_mock_models(mock_openai_url: str, *model_ids: str) -> str:
     """Wait until the mock provider journal contains every expected model."""
 
@@ -489,7 +535,7 @@ class TestPerPromptInferenceProfile:
             session_id=session_id,
             message=_QUALITY_MESSAGE,
             target="Quality",
-            effort="high",
+            effort="xhigh",
         )
         _wait_for_input_event(
             server_url=azents_public_server_url,
@@ -547,6 +593,22 @@ class TestPerPromptInferenceProfile:
         )
         assert session["current_model_target_label"] == "Fast"
         assert session["current_reasoning_effort"] is None
+        _wait_for_turn_provenance(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            target="Quality",
+            effort="xhigh",
+            display_name="GPT 5.5 Deterministic",
+        )
+        _wait_for_turn_provenance(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            target="Fast",
+            effort=None,
+            display_name="GPT 5.5 Mini Deterministic",
+        )
 
     def test_subagent_spawn_override_continuation(
         self,

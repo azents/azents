@@ -162,7 +162,14 @@ def _candidate(
             reasoning=ModelReasoningCapabilities(
                 supported=not lightweight,
                 effort_levels=(
-                    [ModelReasoningEffort.LOW, ModelReasoningEffort.HIGH]
+                    [
+                        ModelReasoningEffort.NONE,
+                        ModelReasoningEffort.MINIMAL,
+                        ModelReasoningEffort.LOW,
+                        ModelReasoningEffort.HIGH,
+                        ModelReasoningEffort.XHIGH,
+                        ModelReasoningEffort.MAX,
+                    ]
                     if not lightweight
                     else []
                 ),
