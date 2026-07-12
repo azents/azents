@@ -245,7 +245,10 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
             attachments=[],
             metadata=metadata,
             applied_inference_profile=(
-                AppliedInferenceProfile.model_validate(requested_profile)
+                AppliedInferenceProfile(
+                    model_target_label=requested_profile.model_target_label,
+                    reasoning_effort=requested_profile.reasoning_effort,
+                )
                 if requested_profile is not None
                 else None
             ),
