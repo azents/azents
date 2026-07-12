@@ -193,8 +193,10 @@ _14 documents_
 - [ADR-0138: Separate Input Acceptance and Processing Idempotency](adr/0138-separate-input-acceptance-and-processing-idempotency.md)
 - [ADR-0139: Keep Pending Buffer Deletion State-Neutral](adr/0139-keep-pending-buffer-deletion-state-neutral.md)
 - [ADR-0140: Use Session Current Inference State Per Turn](adr/0140-use-session-current-inference-state-per-turn.md)
+- [ADR-0141: Correlate Terminal Run Events by Run ID](adr/0141-correlate-terminal-run-events.md)
+- [ADR-0142: Persist Inference Provenance on Turn Usage Markers](adr/0142-persist-turn-usage-inference-provenance.md)
 
-_144 documents_
+_146 documents_
 
 ## Issues (Bug Tracking)
 
@@ -227,4 +229,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 418
+- Total documents: 421
