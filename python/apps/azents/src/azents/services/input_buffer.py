@@ -2,9 +2,10 @@
 
 import dataclasses
 import datetime
+import enum
 import logging
 from collections.abc import Sequence
-from typing import Annotated, assert_never
+from typing import Annotated, Protocol, assert_never
 
 from fastapi import Depends
 from pydantic import TypeAdapter
@@ -90,10 +91,32 @@ class PendingInputInferenceProfile:
     requested_inference_profile: RequestedInferenceProfile | None
 
 
+class TurnEffect(enum.StrEnum):
+    """Effect of one prepared InputBuffer on the next model turn."""
+
+    ELIGIBLE = "eligible"
+    NEUTRAL = "neutral"
+    FAILED = "failed"
+
+
+def fold_turn_eligibility(eligible: bool, effect: TurnEffect) -> bool:
+    """Fold one FIFO processor effect into turn eligibility."""
+    match effect:
+        case TurnEffect.ELIGIBLE:
+            return True
+        case TurnEffect.NEUTRAL:
+            return eligible
+        case TurnEffect.FAILED:
+            return False
+        case _:
+            assert_never(effect)
+
+
 @dataclasses.dataclass(frozen=True)
 class PromotedInputBuffers:
-    """InputBuffer flush result."""
+    """Result of preparing one FIFO InputBuffer."""
 
+    turn_effect: TurnEffect
     requested_inference_profile: RequestedInferenceProfile | None
     user_messages: list[RunUserMessage]
     events: list[Event]
@@ -113,6 +136,35 @@ class _PromotedInputBuffer:
     event_kind: EventKind
     payload: dict[str, JSONValue]
     external_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class InputBufferPreparationContext:
+    """Shared context passed to one closed input-buffer processor."""
+
+    session: AsyncSession
+    session_id: str
+    required_inference_profile: RequestedInferenceProfile | None
+
+
+@dataclasses.dataclass(frozen=True)
+class InputBufferPreparationOutcome:
+    """Semantic events and turn effect produced by one processor."""
+
+    promoted: list[_PromotedInputBuffer]
+    turn_effect: TurnEffect
+
+
+class InputBufferProcessor(Protocol):
+    """Prepare one concrete InputBuffer kind."""
+
+    async def process(
+        self,
+        context: InputBufferPreparationContext,
+        buffer: InputBuffer,
+    ) -> InputBufferPreparationOutcome:
+        """Prepare one FIFO buffer inside the caller transaction."""
+        ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -296,14 +348,22 @@ class InputBufferService:
     ) -> PromotedInputBuffers:
         """Flush pending buffers of session in claim, append, delete order."""
         del model
+        del limit
         async with self.session_manager() as session:
-            claimed = await self.input_buffer_repository.claim_for_flush(
+            agent_session = await self.agent_session_repository.lock_by_id(
                 session,
                 session_id,
-                limit=limit,
             )
+            if agent_session is None:
+                raise ValueError("AgentSession not found")
+            oldest = await self.input_buffer_repository.lock_oldest_by_session_id(
+                session,
+                session_id,
+            )
+            claimed = [oldest] if oldest is not None else []
             if not claimed:
                 return PromotedInputBuffers(
+                    turn_effect=TurnEffect.NEUTRAL,
                     requested_inference_profile=None,
                     user_messages=[],
                     events=[],
@@ -314,13 +374,14 @@ class InputBufferService:
                     deduped_count=0,
                 )
 
-            promoted = await self._promote_claimed_buffers(
+            outcome = await self._promote_claimed_buffers(
                 session,
                 session_id=session_id,
                 claimed=claimed,
                 required_inference_profile=required_inference_profile,
                 include_action_messages=include_action_messages,
             )
+            promoted = outcome.promoted
             event_inserted = await self._append_input_buffer_events(
                 session,
                 session_id,
@@ -387,6 +448,7 @@ class InputBufferService:
                 )
 
         return PromotedInputBuffers(
+            turn_effect=outcome.turn_effect,
             requested_inference_profile=(
                 _requested_inference_profile(promoted[0].buffer) if promoted else None
             ),
@@ -409,112 +471,65 @@ class InputBufferService:
         claimed: list[InputBuffer],
         required_inference_profile: RequestedInferenceProfile | None,
         include_action_messages: bool,
-    ) -> list[_PromotedInputBuffer]:
-        """Convert the next profile-aware FIFO segment into durable events."""
-        prefix = _next_flush_prefix(
-            claimed,
-            required_inference_profile=required_inference_profile,
-        )
+    ) -> InputBufferPreparationOutcome:
+        """Dispatch exactly one FIFO head to the closed processor registry."""
+        if not claimed:
+            return InputBufferPreparationOutcome(
+                promoted=[],
+                turn_effect=TurnEffect.NEUTRAL,
+            )
+        buffer = claimed[0]
         if (
-            prefix
-            and prefix[0].kind == InputBufferKind.ACTION_MESSAGE
+            buffer.kind == InputBufferKind.ACTION_MESSAGE
             and not include_action_messages
         ):
-            return []
-        promoted: list[_PromotedInputBuffer] = []
-        for buffer in prefix:
-            if buffer.kind == InputBufferKind.ACTION_MESSAGE:
-                promoted.extend(
-                    await self._promote_action_message_buffer(
-                        session,
-                        session_id=session_id,
-                        buffer=buffer,
-                    )
-                )
-            elif buffer.kind == InputBufferKind.AGENT_MESSAGE:
-                user_message = await self._buffer_to_user_message(
-                    buffer,
-                    fallback_profile=required_inference_profile,
-                )
-                promoted.append(
-                    _PromotedInputBuffer(
-                        buffer=buffer,
-                        user_message=user_message,
-                        event_kind=EventKind.AGENT_MESSAGE,
-                        payload=_JSON_OBJECT_ADAPTER.validate_python(
-                            _agent_message_payload(buffer).model_dump(mode="json")
-                        ),
-                        external_id=user_message.external_id,
-                    )
-                )
-            else:
-                user_message = await self._buffer_to_user_message(
-                    buffer,
-                    fallback_profile=required_inference_profile,
-                )
-                promoted.append(
-                    _PromotedInputBuffer(
-                        buffer=buffer,
-                        user_message=user_message,
-                        event_kind=_event_kind_for_input_buffer(buffer.kind),
-                        payload=_user_message_payload_json(user_message),
-                        external_id=user_message.external_id,
-                    )
-                )
-        return promoted
-
-    async def _promote_action_message_buffer(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        buffer: InputBuffer,
-    ) -> list[_PromotedInputBuffer]:
-        """Promote one action_message buffer and its side-effect events."""
-        if buffer.action is None:
-            raise ValueError("Action message input buffer requires action payload")
-        action = _CHAT_ACTION_ADAPTER.validate_python(buffer.action)
-        action_payload = ActionMessagePayload(
-            action=action,
-            message=buffer.content,
-            requested_inference_profile=_requested_inference_profile(buffer),
-        )
-        promoted = [
-            _PromotedInputBuffer(
-                buffer=buffer,
-                user_message=None,
-                event_kind=EventKind.ACTION_MESSAGE,
-                payload=_JSON_OBJECT_ADAPTER.validate_python(
-                    action_payload.model_dump(mode="json")
-                ),
-                external_id=buffer.id,
+            return InputBufferPreparationOutcome(
+                promoted=[],
+                turn_effect=TurnEffect.NEUTRAL,
             )
-        ]
-        match action:
-            case GoalAction():
-                promoted.extend(
-                    await self._promote_goal_action(
-                        session,
-                        session_id=session_id,
-                        buffer=buffer,
-                    )
-                )
-            case SkillAction():
-                promoted.extend(
-                    await self._promote_skill_action(
-                        session,
-                        session_id=session_id,
-                        buffer=buffer,
-                        action=action,
-                    )
-                )
-            case CreateGitWorktreeAction():
-                pass
-            case _:
-                assert_never(action)
-        return promoted
+        context = InputBufferPreparationContext(
+            session=session,
+            session_id=session_id,
+            required_inference_profile=required_inference_profile,
+        )
+        processor = self._processor_for(buffer)
+        return await processor.process(context, buffer)
 
-    async def _promote_goal_action(
+    def _processor_for(self, buffer: InputBuffer) -> InputBufferProcessor:
+        """Resolve one Buffer through the explicit closed processor registry."""
+        match buffer.kind:
+            case InputBufferKind.USER_MESSAGE:
+                return _UserMessageInputBufferProcessor(self)
+            case InputBufferKind.GOAL_CONTINUATION:
+                return _GoalContinuationInputBufferProcessor(self)
+            case InputBufferKind.AGENT_MESSAGE:
+                return _AgentMessageInputBufferProcessor(self)
+            case InputBufferKind.ACTION_MESSAGE:
+                if buffer.action is None:
+                    raise ValueError(
+                        "Action message input buffer requires action payload"
+                    )
+                action = _CHAT_ACTION_ADAPTER.validate_python(buffer.action)
+                match action:
+                    case GoalAction():
+                        return _GoalActionInputBufferProcessor(self)
+                    case SkillAction():
+                        return _SkillActionInputBufferProcessor(self, action)
+                    case CreateGitWorktreeAction():
+                        return _CreateGitWorktreeActionInputBufferProcessor(action)
+                    case _:
+                        assert_never(action)
+            case InputBufferKind.EDITED_USER_MESSAGE:
+                return _UserMessageInputBufferProcessor(self)
+            case InputBufferKind.BACKGROUND_COMPLETION:
+                return _LegacyDirectInputBufferProcessor(
+                    self,
+                    EventKind.BACKGROUND_COMPLETION,
+                )
+            case _:
+                assert_never(buffer.kind)
+
+    async def promote_goal_action(
         self,
         session: AsyncSession,
         *,
@@ -547,10 +562,20 @@ class InputBufferService:
             )
 
         try:
-            updated = await store.update(agent_session.agent_id, session_id, mutate)
+            updated = await store.update_in_session(
+                session,
+                agent_session.agent_id,
+                session_id,
+                mutate,
+            )
         except _GoalActionError as exc:
             return [_system_error_promoted_buffer(buffer, exc.message)]
         snapshot = GoalStateSnapshot.from_state(updated)
+        user_message = await self.buffer_to_user_message(
+            buffer,
+            external_id=f"{buffer.id}:user_message",
+            fallback_profile=_requested_inference_profile(buffer),
+        )
         return [
             _PromotedInputBuffer(
                 buffer=buffer,
@@ -558,10 +583,17 @@ class InputBufferService:
                 event_kind=EventKind.GOAL_UPDATED,
                 payload=_goal_updated_payload(snapshot, action="create"),
                 external_id=f"{buffer.id}:goal_updated",
-            )
+            ),
+            _PromotedInputBuffer(
+                buffer=buffer,
+                user_message=user_message,
+                event_kind=EventKind.USER_MESSAGE,
+                payload=_user_message_payload_json(user_message),
+                external_id=user_message.external_id,
+            ),
         ]
 
-    async def _promote_skill_action(
+    async def promote_skill_action(
         self,
         session: AsyncSession,
         *,
@@ -599,7 +631,7 @@ class InputBufferService:
             )
         ]
         if buffer.content.strip():
-            user_message = await self._buffer_to_user_message(
+            user_message = await self.buffer_to_user_message(
                 buffer,
                 external_id=f"{buffer.id}:user_message",
                 fallback_profile=_requested_inference_profile(buffer),
@@ -615,7 +647,7 @@ class InputBufferService:
             )
         return promoted
 
-    async def _buffer_to_user_message(
+    async def buffer_to_user_message(
         self,
         buffer: InputBuffer,
         *,
@@ -716,6 +748,213 @@ class InputBufferService:
         return inserted
 
 
+@dataclasses.dataclass(frozen=True)
+class _UserMessageInputBufferProcessor:
+    """Prepare a user message as one durable semantic event."""
+
+    service: InputBufferService
+
+    async def process(
+        self,
+        context: InputBufferPreparationContext,
+        buffer: InputBuffer,
+    ) -> InputBufferPreparationOutcome:
+        user_message = await self.service.buffer_to_user_message(
+            buffer,
+            external_id=f"{buffer.id}:user_message",
+            fallback_profile=context.required_inference_profile,
+        )
+        return _preparation_outcome(
+            [
+                _PromotedInputBuffer(
+                    buffer=buffer,
+                    user_message=user_message,
+                    event_kind=EventKind.USER_MESSAGE,
+                    payload=_user_message_payload_json(user_message),
+                    external_id=user_message.external_id,
+                )
+            ],
+            TurnEffect.ELIGIBLE,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _GoalContinuationInputBufferProcessor:
+    """Prepare a Goal continuation event."""
+
+    service: InputBufferService
+
+    async def process(
+        self,
+        context: InputBufferPreparationContext,
+        buffer: InputBuffer,
+    ) -> InputBufferPreparationOutcome:
+        user_message = await self.service.buffer_to_user_message(
+            buffer,
+            external_id=f"{buffer.id}:goal_continuation",
+            fallback_profile=context.required_inference_profile,
+        )
+        return _preparation_outcome(
+            [
+                _PromotedInputBuffer(
+                    buffer=buffer,
+                    user_message=user_message,
+                    event_kind=EventKind.GOAL_CONTINUATION,
+                    payload=_user_message_payload_json(user_message),
+                    external_id=user_message.external_id,
+                )
+            ],
+            TurnEffect.ELIGIBLE,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _AgentMessageInputBufferProcessor:
+    """Prepare one inter-agent mailbox message."""
+
+    service: InputBufferService
+
+    async def process(
+        self,
+        context: InputBufferPreparationContext,
+        buffer: InputBuffer,
+    ) -> InputBufferPreparationOutcome:
+        user_message = await self.service.buffer_to_user_message(
+            buffer,
+            external_id=f"{buffer.id}:agent_message",
+            fallback_profile=context.required_inference_profile,
+        )
+        return _preparation_outcome(
+            [
+                _PromotedInputBuffer(
+                    buffer=buffer,
+                    user_message=user_message,
+                    event_kind=EventKind.AGENT_MESSAGE,
+                    payload=_JSON_OBJECT_ADAPTER.validate_python(
+                        _agent_message_payload(buffer).model_dump(mode="json")
+                    ),
+                    external_id=user_message.external_id,
+                )
+            ],
+            TurnEffect.ELIGIBLE,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _GoalActionInputBufferProcessor:
+    """Prepare a closed Goal action."""
+
+    service: InputBufferService
+
+    async def process(
+        self,
+        context: InputBufferPreparationContext,
+        buffer: InputBuffer,
+    ) -> InputBufferPreparationOutcome:
+        promoted = await self.service.promote_goal_action(
+            context.session,
+            session_id=context.session_id,
+            buffer=buffer,
+        )
+        return _preparation_outcome(promoted, _turn_effect_for_promoted(promoted))
+
+
+@dataclasses.dataclass(frozen=True)
+class _SkillActionInputBufferProcessor:
+    """Prepare a closed Skill action."""
+
+    service: InputBufferService
+    action: SkillAction
+
+    async def process(
+        self,
+        context: InputBufferPreparationContext,
+        buffer: InputBuffer,
+    ) -> InputBufferPreparationOutcome:
+        promoted = await self.service.promote_skill_action(
+            context.session,
+            session_id=context.session_id,
+            buffer=buffer,
+            action=self.action,
+        )
+        return _preparation_outcome(promoted, _turn_effect_for_promoted(promoted))
+
+
+@dataclasses.dataclass(frozen=True)
+class _CreateGitWorktreeActionInputBufferProcessor:
+    """Preserve the worktree action boundary until durable claims replace it."""
+
+    action: CreateGitWorktreeAction
+
+    async def process(
+        self,
+        context: InputBufferPreparationContext,
+        buffer: InputBuffer,
+    ) -> InputBufferPreparationOutcome:
+        del context
+        action_payload = ActionMessagePayload(
+            action=self.action,
+            message=buffer.content,
+            requested_inference_profile=_requested_inference_profile(buffer),
+        )
+        return _preparation_outcome(
+            [
+                _PromotedInputBuffer(
+                    buffer=buffer,
+                    user_message=None,
+                    event_kind=EventKind.ACTION_MESSAGE,
+                    payload=_JSON_OBJECT_ADAPTER.validate_python(
+                        action_payload.model_dump(mode="json")
+                    ),
+                    external_id=buffer.id,
+                )
+            ],
+            TurnEffect.NEUTRAL,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _LegacyDirectInputBufferProcessor:
+    """Keep a legacy kind processable until its producer is removed."""
+
+    service: InputBufferService
+    event_kind: EventKind
+
+    async def process(
+        self,
+        context: InputBufferPreparationContext,
+        buffer: InputBuffer,
+    ) -> InputBufferPreparationOutcome:
+        user_message = await self.service.buffer_to_user_message(
+            buffer,
+            external_id=f"{buffer.id}:{self.event_kind.value}",
+            fallback_profile=context.required_inference_profile,
+        )
+        return _preparation_outcome(
+            [
+                _PromotedInputBuffer(
+                    buffer=buffer,
+                    user_message=user_message,
+                    event_kind=self.event_kind,
+                    payload=_user_message_payload_json(user_message),
+                    external_id=user_message.external_id,
+                )
+            ],
+            TurnEffect.ELIGIBLE,
+        )
+
+
+def _preparation_outcome(
+    promoted: list[_PromotedInputBuffer],
+    turn_effect: TurnEffect,
+) -> InputBufferPreparationOutcome:
+    """Build one immutable processor result."""
+    return InputBufferPreparationOutcome(
+        promoted=promoted,
+        turn_effect=turn_effect,
+    )
+
+
 class _GoalActionError(Exception):
     """User-visible Goal action failure."""
 
@@ -725,32 +964,17 @@ class _GoalActionError(Exception):
         self.message = message
 
 
-def _next_flush_prefix(
-    claimed: list[InputBuffer],
-    *,
-    required_inference_profile: RequestedInferenceProfile | None,
-) -> list[InputBuffer]:
-    """Return the next FIFO segment bounded by action and profile changes."""
-    if not claimed:
-        return []
-    first = claimed[0]
-    first_profile = _requested_inference_profile(first)
-    effective_first_profile = first_profile or required_inference_profile
-    if (
-        required_inference_profile is not None
-        and effective_first_profile != required_inference_profile
-    ):
-        return []
-    if first.kind == InputBufferKind.ACTION_MESSAGE:
-        return [first]
-    prefix: list[InputBuffer] = []
-    for buffer in claimed:
-        if buffer.kind == InputBufferKind.ACTION_MESSAGE:
-            break
-        if _requested_inference_profile(buffer) != first_profile:
-            break
-        prefix.append(buffer)
-    return prefix
+def _turn_effect_for_promoted(
+    promoted: Sequence[_PromotedInputBuffer],
+) -> TurnEffect:
+    """Derive the fold effect from one processor result."""
+    if any(item.event_kind is EventKind.SYSTEM_ERROR for item in promoted):
+        return TurnEffect.FAILED
+    if any(item.event_kind is EventKind.ACTION_MESSAGE for item in promoted):
+        return TurnEffect.NEUTRAL
+    if promoted:
+        return TurnEffect.ELIGIBLE
+    return TurnEffect.NEUTRAL
 
 
 def _requested_inference_profile(
@@ -813,7 +1037,7 @@ def _system_error_promoted_buffer(
         payload=_JSON_OBJECT_ADAPTER.validate_python(
             payload.model_dump(mode="json", exclude_none=True)
         ),
-        external_id=f"{buffer.id}:system_error",
+        external_id=f"{buffer.id}:failure",
     )
 
 
@@ -855,20 +1079,3 @@ def _goal_updated_payload(
             },
         }
     )
-
-
-def _event_kind_for_input_buffer(kind: InputBufferKind) -> EventKind:
-    """Return durable event kind corresponding to InputBuffer kind."""
-    match kind:
-        case InputBufferKind.USER_MESSAGE | InputBufferKind.EDITED_USER_MESSAGE:
-            return EventKind.USER_MESSAGE
-        case InputBufferKind.BACKGROUND_COMPLETION:
-            return EventKind.BACKGROUND_COMPLETION
-        case InputBufferKind.GOAL_CONTINUATION:
-            return EventKind.GOAL_CONTINUATION
-        case InputBufferKind.ACTION_MESSAGE:
-            return EventKind.ACTION_MESSAGE
-        case InputBufferKind.AGENT_MESSAGE:
-            return EventKind.AGENT_MESSAGE
-        case _:
-            assert_never(kind)

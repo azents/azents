@@ -18,6 +18,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.input_buffer import InputBufferRepository
 from azents.worker.deps import get_worker_broker
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,9 @@ class SessionLifecycleService:
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    input_buffer_repository: Annotated[
+        InputBufferRepository, Depends(InputBufferRepository)
+    ]
 
     async def release_session_lock(self, session_id: str) -> None:
         """Release session lock."""
@@ -81,6 +85,23 @@ class SessionLifecycleService:
         """Revert ``run_state`` to IDLE only after all runs are terminal."""
 
         async def mark_idle_if_no_run(db_session: AsyncSession) -> bool:
+            agent_session = await self.agent_session_repository.lock_by_id(
+                db_session,
+                session_id,
+            )
+            if agent_session is None:
+                raise ValueError("AgentSession not found")
+            pending_input = await self.input_buffer_repository.list_for_flush(
+                db_session,
+                session_id,
+                limit=1,
+            )
+            if pending_input:
+                logger.info(
+                    "Skipped session idle transition because input is pending",
+                    extra={"session_id": session_id},
+                )
+                return False
             active_run = await self.agent_run_repository.get_active_by_session_id(
                 db_session,
                 session_id=session_id,

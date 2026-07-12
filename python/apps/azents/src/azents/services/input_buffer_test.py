@@ -23,7 +23,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.engine.events.action_messages import ActionMessagePayload, SkillAction
+from azents.engine.events.action_messages import SkillAction
 from azents.engine.events.types import (
     AgentMessagePayload,
     FileOutputPart,
@@ -66,7 +66,35 @@ from azents.services.model_file import (
 )
 from azents.testing.model_selection import make_test_model_selection_dict
 
-from .input_buffer import InputBufferEnqueue, InputBufferService
+from .input_buffer import (
+    InputBufferEnqueue,
+    InputBufferService,
+    TurnEffect,
+    fold_turn_eligibility,
+)
+
+
+@pytest.mark.parametrize(
+    ("initial", "effects", "expected"),
+    [
+        (False, [TurnEffect.NEUTRAL], False),
+        (False, [TurnEffect.NEUTRAL, TurnEffect.ELIGIBLE], True),
+        (True, [TurnEffect.NEUTRAL], True),
+        (False, [TurnEffect.ELIGIBLE, TurnEffect.FAILED], False),
+        (False, [TurnEffect.FAILED, TurnEffect.ELIGIBLE], True),
+        (True, [TurnEffect.FAILED], False),
+    ],
+)
+def test_fold_turn_eligibility(
+    initial: bool,
+    effects: list[TurnEffect],
+    expected: bool,
+) -> None:
+    """FIFO effects deterministically control the next turn boundary."""
+    eligible = initial
+    for effect in effects:
+        eligible = fold_turn_eligibility(eligible, effect)
+    assert eligible is expected
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -572,7 +600,7 @@ class TestInputBufferService:
         assert result.promoted_event_ids == [result.events[0].id]
         assert len(result.user_messages) == 1
         assert len(result.events) == 1
-        assert result.events[0].external_id == buffer_id
+        assert result.events[0].external_id == f"{buffer_id}:user_message"
         event_payload = result.events[0].payload
         assert isinstance(event_payload, UserMessagePayload)
         assert event_payload.applied_inference_profile == AppliedInferenceProfile(
@@ -580,7 +608,7 @@ class TestInputBufferService:
             reasoning_effort=None,
         )
         promoted = result.user_messages[0]
-        assert promoted.external_id == buffer_id
+        assert promoted.external_id == f"{buffer_id}:user_message"
         assert promoted.payload.content == "buffered message"
         assert promoted.payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
@@ -640,11 +668,11 @@ class TestInputBufferService:
         assert associated_event_ids == result.promoted_event_ids
         assert remaining is None
 
-    async def test_flush_stops_at_requested_profile_change(
+    async def test_flush_processes_only_oldest_buffer(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Flush only the first exact requested-profile FIFO segment."""
+        """Each preparation transaction consumes exactly one FIFO head."""
         session_id, user_id = await _create_fixture(
             rdb_session_manager,
             "input-buffer-profile-segment",
@@ -683,7 +711,7 @@ class TestInputBufferService:
             active_run_id=None,
         )
 
-        assert result.deleted_buffer_ids == [first_id, second_id]
+        assert result.deleted_buffer_ids == [first_id]
         assert result.requested_inference_profile == RequestedInferenceProfile(
             model_target_label="Fast",
             reasoning_effort=ModelReasoningEffort.HIGH,
@@ -699,13 +727,13 @@ class TestInputBufferService:
                     )
                 ).scalars()
             )
-        assert remaining_ids == [third_id]
+        assert remaining_ids == [second_id, third_id]
 
-    async def test_required_profile_mismatch_keeps_first_buffer_queued(
+    async def test_processor_does_not_apply_run_profile_filtering(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Active-run polling leaves a different-profile prefix queued."""
+        """FIFO preparation is independent from the previous turn profile."""
         session_id, user_id = await _create_fixture(
             rdb_session_manager,
             "input-buffer-profile-mismatch",
@@ -731,12 +759,15 @@ class TestInputBufferService:
             active_run_id=None,
         )
 
-        assert result.claimed_count == 0
-        assert result.requested_inference_profile is None
-        assert result.promoted_event_ids == []
+        assert result.claimed_count == 1
+        assert result.requested_inference_profile == RequestedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
+        assert len(result.promoted_event_ids) == 1
         async with rdb_session_manager() as session:
             remaining = await session.get(RDBInputBuffer, buffer_id)
-        assert remaining is not None
+        assert remaining is None
 
     async def test_flush_promotes_agent_message_payload(
         self,
@@ -768,10 +799,12 @@ class TestInputBufferService:
         assert result.claimed_count == 1
         assert result.inserted_count == 1
         assert result.requested_inference_profile is None
-        assert [message.external_id for message in result.user_messages] == [buffer_id]
+        assert [message.external_id for message in result.user_messages] == [
+            f"{buffer_id}:agent_message"
+        ]
         event = result.events[0]
         assert event.kind == EventKind.AGENT_MESSAGE
-        assert event.external_id == buffer_id
+        assert event.external_id == f"{buffer_id}:agent_message"
         assert isinstance(event.payload, AgentMessagePayload)
         assert event.payload.message_kind == "followup_task"
         assert event.payload.source_path == "/root"
@@ -815,29 +848,18 @@ class TestInputBufferService:
             active_run_id=None,
         )
 
-        assert result.inserted_count == 3
+        assert result.inserted_count == 2
         assert [event.kind for event in result.events] == [
-            EventKind.ACTION_MESSAGE,
             EventKind.SKILL_LOADED,
             EventKind.USER_MESSAGE,
         ]
-        action_event = result.events[0]
-        assert isinstance(action_event.payload, ActionMessagePayload)
-        assert action_event.payload.requested_inference_profile is not None
-        assert (
-            action_event.payload.requested_inference_profile.model_target_label
-            == "Fast"
-        )
-        assert action_event.payload.requested_inference_profile.reasoning_effort == (
-            ModelReasoningEffort.HIGH
-        )
-        skill_event = result.events[1]
+        skill_event = result.events[0]
         assert skill_event.external_id == f"{buffer_id}:skill_loaded"
         assert isinstance(skill_event.payload, SkillLoadedPayload)
         assert skill_event.payload.skill_path == item.skill_path
         assert skill_event.payload.body == item.body
         assert skill_event.payload.user_message == "Review this PR"
-        user_event = result.events[2]
+        user_event = result.events[1]
         assert user_event.external_id == f"{buffer_id}:user_message"
         assert isinstance(user_event.payload, UserMessagePayload)
         assert user_event.payload.content == "Review this PR"

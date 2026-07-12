@@ -51,7 +51,12 @@ from azents.engine.run.types import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session.data import PendingSessionCommand
-from azents.services.input_buffer import InputBufferService, PromotedInputBuffers
+from azents.services.input_buffer import (
+    InputBufferService,
+    PendingInputInferenceProfile,
+    PromotedInputBuffers,
+    TurnEffect,
+)
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import OperationActionProcessResult, RunExecutor
@@ -102,6 +107,20 @@ class _InputBufferService:
     def __init__(self, promoted: PromotedInputBuffers) -> None:
         self.promoted = promoted
         self.calls: list[tuple[str, str | None]] = []
+        self.consumed = False
+
+    async def peek_pending_inference_profile(
+        self,
+        session_id: str,
+    ) -> PendingInputInferenceProfile:
+        """Project the configured result until it has been consumed."""
+        del session_id
+        return PendingInputInferenceProfile(
+            exists=not self.consumed,
+            requested_inference_profile=(
+                self.promoted.requested_inference_profile if not self.consumed else None
+            ),
+        )
 
     async def flush_session_input_buffers(
         self,
@@ -116,6 +135,19 @@ class _InputBufferService:
         """Store flush call arguments and return specified result."""
         del required_inference_profile, active_run_id, limit, include_action_messages
         self.calls.append((session_id, model))
+        if self.consumed:
+            return PromotedInputBuffers(
+                turn_effect=TurnEffect.NEUTRAL,
+                requested_inference_profile=None,
+                user_messages=[],
+                events=[],
+                promoted_event_ids=[],
+                deleted_buffer_ids=[],
+                claimed_count=0,
+                inserted_count=0,
+                deduped_count=0,
+            )
+        self.consumed = True
         return self.promoted
 
 
@@ -1116,6 +1148,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
     )
     promotion = _InputBufferService(
         PromotedInputBuffers(
+            turn_effect=TurnEffect.ELIGIBLE,
             requested_inference_profile=RequestedInferenceProfile(
                 model_target_label="default",
                 reasoning_effort=None,
@@ -1170,7 +1203,10 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
 
     assert poll_result.user_messages == [user_message]
     assert poll_result.context_invalidated is False
-    assert promotion.calls == [("session-1", "gpt-test")]
+    assert promotion.calls == [
+        ("session-1", "gpt-test"),
+        ("session-1", "gpt-test"),
+    ]
     assert scheduled_title_events == ["session-1:1123456789abcdef0123456789abcdeb"]
     event_types = [event.get("type") for _, event in broadcast.events]
     assert event_types == ["history_event_appended", "live_event_removed"]

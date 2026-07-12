@@ -14,6 +14,8 @@ from azents.engine.events.types import ActiveToolCall, AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSession
+from azents.repos.input_buffer import InputBufferRepository
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -69,10 +71,37 @@ class _AgentSessionRepository:
     def __init__(self) -> None:
         self.idle_session_ids: list[str] = []
 
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession:
+        """Return an existing locked Session marker."""
+        del session, agent_session_id
+        return cast(AgentSession, object())
+
     async def mark_idle(self, session: AsyncSession, runtime_id: str) -> None:
         """Record idle transition."""
         del session
         self.idle_session_ids.append(runtime_id)
+
+
+class _InputBufferRepository:
+    """InputBufferRepository test double."""
+
+    def __init__(self, pending: bool) -> None:
+        self.pending = pending
+
+    async def list_for_flush(
+        self,
+        session: AsyncSession,
+        session_id: str,
+        *,
+        limit: int | None = None,
+    ) -> list[object]:
+        """Return the configured queue state at the idle boundary."""
+        del session, session_id, limit
+        return [object()] if self.pending else []
 
 
 class _AgentRunRepository:
@@ -147,6 +176,7 @@ def _service(
     *,
     agent_run_repository: _AgentRunRepository,
     agent_session_repository: _AgentSessionRepository,
+    pending_input: bool,
 ) -> SessionLifecycleService:
     """Create SessionLifecycleService with test doubles."""
     return SessionLifecycleService(
@@ -157,6 +187,10 @@ def _service(
             agent_session_repository,
         ),
         agent_run_repository=cast(AgentRunRepository, agent_run_repository),
+        input_buffer_repository=cast(
+            InputBufferRepository,
+            _InputBufferRepository(pending_input),
+        ),
     )
 
 
@@ -168,6 +202,7 @@ async def test_mark_session_idle_rejects_active_agent_run() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=agent_session_repository,
+        pending_input=False,
     )
 
     marked_idle = await service.mark_session_idle("session-001")
@@ -178,6 +213,23 @@ async def test_mark_session_idle_rejects_active_agent_run() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mark_session_idle_rechecks_queue_under_session_lock() -> None:
+    """A concurrently accepted input prevents the empty boundary from idling."""
+    agent_run_repository = _AgentRunRepository(None)
+    agent_session_repository = _AgentSessionRepository()
+    service = _service(
+        agent_run_repository=agent_run_repository,
+        agent_session_repository=agent_session_repository,
+        pending_input=True,
+    )
+
+    marked_idle = await service.mark_session_idle("session-001")
+
+    assert not marked_idle
+    assert agent_session_repository.idle_session_ids == []
+
+
+@pytest.mark.asyncio
 async def test_mark_session_idle_allows_terminal_run_boundary() -> None:
     """Runtime becomes idle only when there is no running AgentRun."""
     agent_run_repository = _AgentRunRepository(None)
@@ -185,6 +237,7 @@ async def test_mark_session_idle_allows_terminal_run_boundary() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=agent_session_repository,
+        pending_input=False,
     )
 
     marked_idle = await service.mark_session_idle("session-001")
@@ -205,6 +258,7 @@ async def test_activate_pending_rejects_session_mismatch() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=_AgentSessionRepository(),
+        pending_input=False,
     )
 
     with pytest.raises(ValueError, match="AgentRun session mismatch"):
