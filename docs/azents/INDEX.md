@@ -178,8 +178,24 @@ _15 documents_
 - [ADR-0123: Require an Explicit Reasoning Effort in User Input](adr/0123-require-explicit-reasoning-effort-in-user-input.md)
 - [ADR-0124: Keep Resolved Inference Provenance Run-Owned](adr/0124-keep-inference-provenance-run-owned.md)
 - [ADR-0124: Allow Explicit Inference Profiles When Spawning Subagents](adr/0124-subagent-spawn-inference-profile-overrides.md)
+- [ADR-0125: Drain Input Buffers Sequentially Before Turn Start](adr/0125-drain-input-buffers-before-turn-start.md)
+- [ADR-0126: Resolve User Message Profiles During Buffer Preparation](adr/0126-resolve-user-message-profile-during-buffer-preparation.md)
+- [ADR-0127: Handle Message Edits as Transactional Preparation](adr/0127-handle-message-edits-as-transactional-preparation.md)
+- [ADR-0128: Treat Goal Actions as Model-Producing Preparation](adr/0128-treat-goal-actions-as-model-producing-preparation.md)
+- [ADR-0129: Consume Failed Buffer Items Without Starting a Turn](adr/0129-consume-failed-buffer-items-without-starting-a-turn.md)
+- [ADR-0130: Treat Skill Actions as Model-Producing Preparation](adr/0130-treat-skill-actions-as-model-producing-preparation.md)
+- [ADR-0131: Keep Action Messages Buffer-Only](adr/0131-keep-action-messages-buffer-only.md)
+- [ADR-0132: Separate Durable Events, Model Lowering, and Turn Eligibility](adr/0132-separate-durable-events-model-lowering-and-turn-eligibility.md)
+- [ADR-0133: Fold Turn Eligibility with Failure Veto](adr/0133-fold-turn-eligibility-with-failure-veto.md)
+- [ADR-0134: Remove Deprecated Background Completion Input](adr/0134-remove-background-completion-input.md)
+- [ADR-0135: Directly Promote Continuation and Agent Messages](adr/0135-directly-promote-continuation-and-agent-messages.md)
+- [ADR-0136: Use Polymorphic Input Buffer Processors](adr/0136-use-polymorphic-input-buffer-processors.md)
+- [ADR-0137: Linearize Input Buffer Boundaries on the Session Row Lock](adr/0137-linearize-input-buffer-boundaries-on-session-row-lock.md)
+- [ADR-0138: Separate Input Acceptance and Processing Idempotency](adr/0138-separate-input-acceptance-and-processing-idempotency.md)
+- [ADR-0139: Keep Pending Buffer Deletion State-Neutral](adr/0139-keep-pending-buffer-deletion-state-neutral.md)
+- [ADR-0140: Use Session Current Inference State Per Turn](adr/0140-use-session-current-inference-state-per-turn.md)
 
-_128 documents_
+_144 documents_
 
 ## Issues (Bug Tracking)
 
@@ -212,4 +228,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 400
+- Total documents: 417
