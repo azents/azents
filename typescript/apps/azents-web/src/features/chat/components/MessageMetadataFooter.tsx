@@ -40,6 +40,16 @@ type MessageInferenceProfile =
   | RequestedInferenceProfile
   | AppliedInferenceProfile;
 
+function profileModelDisplayName(
+  profile: MessageInferenceProfile,
+): string | null {
+  if (!("model_display_name" in profile)) {
+    return null;
+  }
+  const value = profile.model_display_name;
+  return typeof value === "string" ? value : null;
+}
+
 interface MessageMetadataFooterProps {
   createdAt: string;
   profile?: MessageInferenceProfile | null;
@@ -139,6 +149,7 @@ function MessageTimestamp({
       c="dimmed"
       aria-label={fullDateTime}
       data-message-metadata="timestamp"
+      data-message-metadata-trigger="timestamp"
       tabIndex={0}
       onPointerDown={handlePointerDown}
     >
@@ -182,8 +193,7 @@ function ModelMetadata({
   const opened = isTouchPrimary
     ? visibility?.activeOverlay === "model"
     : desktopOpened;
-  const actualModel =
-    "model_display_name" in profile ? (profile.model_display_name ?? "—") : "—";
+  const actualModel = profileModelDisplayName(profile);
   const effort = profile.reasoning_effort ?? t("defaultEffort");
 
   function setOpened(nextOpened: boolean): void {
@@ -209,6 +219,7 @@ function ModelMetadata({
           aria-label={t("detailsAriaLabel", {
             target: profile.model_target_label,
           })}
+          data-message-metadata-trigger="model"
           onClick={() => setOpened(!opened)}
         >
           <Text
@@ -237,12 +248,16 @@ function ModelMetadata({
           <Text size="sm" c="white" truncate>
             {profile.model_target_label}
           </Text>
-          <Text component="span" size="sm" c="gray.5" aria-hidden="true">
-            ·
-          </Text>
-          <Text size="sm" c="white" truncate>
-            {actualModel}
-          </Text>
+          {actualModel !== null && (
+            <>
+              <Text component="span" size="sm" c="gray.5" aria-hidden="true">
+                ·
+              </Text>
+              <Text size="sm" c="white" truncate>
+                {actualModel}
+              </Text>
+            </>
+          )}
           <Text component="span" size="sm" c="gray.5" aria-hidden="true">
             ·
           </Text>
@@ -275,6 +290,28 @@ export function MessageMetadataSurface({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!isTouchPrimary || activeOverlay === null) {
+      return;
+    }
+
+    function dismissOverlay(event: PointerEvent): void {
+      if (
+        event.target instanceof Element &&
+        event.target.closest(
+          `[data-message-metadata-trigger="${activeOverlay}"], [data-message-metadata-popover]`,
+        )
+      ) {
+        return;
+      }
+      setActiveOverlay(null);
+    }
+
+    document.addEventListener("pointerdown", dismissOverlay, true);
+    return () =>
+      document.removeEventListener("pointerdown", dismissOverlay, true);
+  }, [activeOverlay, isTouchPrimary]);
 
   const showForTouch = useCallback((): void => {
     if (!isTouchPrimary) {

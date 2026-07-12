@@ -14,6 +14,11 @@ const appliedProfile = {
   reasoning_effort: "high",
 } satisfies AppliedInferenceProfile;
 
+const unresolvedProfile = {
+  model_target_label: "Quality",
+  reasoning_effort: "high",
+} satisfies AppliedInferenceProfile;
+
 const meta = {
   component: MessageMetadataFooter,
   decorators: [
@@ -40,6 +45,28 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const TimestampOnly: Story = {};
+
+export const UnresolvedModel: Story = {
+  args: {
+    profile: unresolvedProfile,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await fireEvent.click(
+      canvas.getByRole("button", { name: /open inference details/i }),
+    );
+    const popover = canvasElement.ownerDocument.querySelector<HTMLElement>(
+      "[data-message-metadata-popover]",
+    );
+    if (popover === null) {
+      throw new Error("Expected model metadata popover");
+    }
+    const details = within(popover);
+    await expect(details.getByText("Quality")).toBeVisible();
+    await expect(details.getByText("high")).toBeVisible();
+    await expect(details.queryByText("—")).not.toBeInTheDocument();
+  },
+};
 
 export const ResolvedModel: Story = {
   args: {
