@@ -777,6 +777,7 @@ class InputBufferService:
         elif requested_profile is not None:
             applied_profile = AppliedInferenceProfile(
                 model_target_label=requested_profile.model_target_label,
+                model_display_name=None,
                 reasoning_effort=requested_profile.reasoning_effort,
             )
         else:

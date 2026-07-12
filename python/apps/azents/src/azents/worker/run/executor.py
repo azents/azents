@@ -27,7 +27,6 @@ from azents.core.enums import (
     EventKind,
 )
 from azents.core.inference_profile import (
-    AppliedInferenceProfile,
     InferenceProfileFailureCode,
     InferenceProfileSource,
     RequestedInferenceProfile,
@@ -1833,11 +1832,10 @@ class RunExecutor:
                 )
                 if (
                     current_inference_state is None
-                    or current_inference_state.applied_profile
-                    != AppliedInferenceProfile(
-                        model_target_label=requested_profile.model_target_label,
-                        reasoning_effort=requested_profile.reasoning_effort,
-                    )
+                    or current_inference_state.model_target_label
+                    != requested_profile.model_target_label
+                    or current_inference_state.reasoning_effort
+                    != requested_profile.reasoning_effort
                 ):
                     resolved = await resolve_invoke_input_with_profile(
                         InvokeInput(

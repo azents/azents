@@ -618,6 +618,7 @@ class TestInputBufferService:
         assert isinstance(event_payload, UserMessagePayload)
         assert event_payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
+            model_display_name=None,
             reasoning_effort=None,
         )
         promoted = result.user_messages[0]
@@ -625,6 +626,7 @@ class TestInputBufferService:
         assert promoted.payload.content == "buffered message"
         assert promoted.payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
+            model_display_name=None,
             reasoning_effort=None,
         )
         async with rdb_session_manager() as session:

@@ -10348,6 +10348,19 @@
             "title": "Model Target Label",
             "description": "Agent-owned model target label applied by the message"
           },
+          "model_display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Display Name",
+            "description": "Resolved model display name, or null before preparation"
+          },
           "reasoning_effort": {
             "anyOf": [
               {
@@ -10364,6 +10377,7 @@
         "type": "object",
         "required": [
           "model_target_label",
+          "model_display_name",
           "reasoning_effort"
         ],
         "title": "AppliedInferenceProfile",

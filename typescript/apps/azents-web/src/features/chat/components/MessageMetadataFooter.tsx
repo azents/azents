@@ -21,7 +21,10 @@ import {
   useState,
 } from "react";
 import classes from "./MessageMetadataFooter.module.css";
-import type { RequestedInferenceProfile } from "@azents/public-client";
+import type {
+  AppliedInferenceProfile,
+  RequestedInferenceProfile,
+} from "@azents/public-client";
 
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
 
@@ -33,9 +36,13 @@ interface MessageMetadataVisibilityContextValue {
   showForTouch: () => void;
 }
 
+type MessageInferenceProfile =
+  | RequestedInferenceProfile
+  | AppliedInferenceProfile;
+
 interface MessageMetadataFooterProps {
   createdAt: string;
-  profile?: RequestedInferenceProfile | null;
+  profile?: MessageInferenceProfile | null;
 }
 
 const MessageMetadataVisibilityContext =
@@ -166,7 +173,7 @@ function MessageTimestamp({
 function ModelMetadata({
   profile,
 }: {
-  profile: RequestedInferenceProfile;
+  profile: MessageInferenceProfile;
 }): React.ReactElement {
   const t = useTranslations("chat.inferenceProvenance");
   const visibility = useContext(MessageMetadataVisibilityContext);
@@ -175,6 +182,8 @@ function ModelMetadata({
   const opened = isTouchPrimary
     ? visibility?.activeOverlay === "model"
     : desktopOpened;
+  const actualModel =
+    "model_display_name" in profile ? (profile.model_display_name ?? "—") : "—";
   const effort = profile.reasoning_effort ?? t("defaultEffort");
 
   function setOpened(nextOpened: boolean): void {
@@ -227,6 +236,12 @@ function ModelMetadata({
         <Group gap={rem(4)} wrap="nowrap">
           <Text size="sm" c="white" truncate>
             {profile.model_target_label}
+          </Text>
+          <Text component="span" size="sm" c="gray.5" aria-hidden="true">
+            ·
+          </Text>
+          <Text size="sm" c="white" truncate>
+            {actualModel}
           </Text>
           <Text component="span" size="sm" c="gray.5" aria-hidden="true">
             ·

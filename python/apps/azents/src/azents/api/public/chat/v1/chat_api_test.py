@@ -707,6 +707,7 @@ class _EventService:
         )
         self.inference_profile = AppliedInferenceProfile(
             model_target_label="reasoning",
+            model_display_name="Reasoning Model",
             reasoning_effort=ModelReasoningEffort.HIGH,
         )
 
@@ -1433,6 +1434,7 @@ class TestEventRoutes:
             "status": "running",
             "inference_profile": {
                 "model_target_label": "reasoning",
+                "model_display_name": "Reasoning Model",
                 "reasoning_effort": "high",
             },
         }

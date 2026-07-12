@@ -65,6 +65,7 @@ def test_session_state_projects_only_applied_public_settings() -> None:
 
     assert state.applied_profile.model_dump(mode="json") == {
         "model_target_label": "Quality",
+        "model_display_name": "GPT-5.4",
         "reasoning_effort": "high",
     }
     assert "llm_provider_integration_id" not in state.applied_profile.model_dump()

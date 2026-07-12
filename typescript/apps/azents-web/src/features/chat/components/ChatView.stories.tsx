@@ -274,6 +274,7 @@ export const WithLiveRunRetry = {
       status: "running",
       inferenceProfile: {
         model_target_label: "default",
+        model_display_name: "GPT 5.5",
         reasoning_effort: null,
       },
       retry: {

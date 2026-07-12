@@ -51,6 +51,10 @@ class AppliedInferenceProfile(BaseModel):
         min_length=1,
         description="Agent-owned model target label applied by the message",
     )
+    model_display_name: str | None = Field(
+        min_length=1,
+        description="Resolved model display name, or null before preparation",
+    )
     reasoning_effort: ModelReasoningEffort | None = Field(
         description="Applied explicit effort, or null for model Default",
     )
@@ -73,5 +77,6 @@ class SessionInferenceState(BaseModel):
         """Return the user-visible settings represented by this state."""
         return AppliedInferenceProfile(
             model_target_label=self.model_target_label,
+            model_display_name=self.model_selection.model_display_name,
             reasoning_effort=self.reasoning_effort,
         )
