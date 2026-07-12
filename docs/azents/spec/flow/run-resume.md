@@ -166,7 +166,7 @@ The takeover path must preserve single-session execution:
 - A live owner heartbeat prevents non-owner processing.
 - A stale heartbeat permits lease stealing even if the 30-minute sticky key remains.
 - Wake-up signals remain in the per-session Redis list until a worker with valid ownership drains
-  them. Model input payloads, operation action inputs, and control state remain durable in Postgres. Before an operation input buffer is deleted, its pending `ActionExecution` and typed action payload are committed under the source `input_buffer_id`; takeover resumes nonterminal execution from that durable claim.
+  them. Model input payloads, operation action inputs, and control state remain durable in Postgres. Before an operation input buffer is deleted, its pending `ActionExecution` and typed action payload are committed under the source `input_buffer_id`; takeover recovers the nonterminal execution from that durable claim and its worktree allocation state.
 - Durable transcript and `agent_runs` remain the execution source of truth after takeover.
 
 ## Operation Action Recovery
@@ -174,8 +174,11 @@ The takeover path must preserve single-session execution:
 Operation TurnActions enter through durable `action_message` InputBuffers, but they do not append an
 `action_message` transcript event. Preparation claims a worktree action by committing an
 `ActionExecution` keyed by `input_buffer_id` with its typed action payload, then deletes the source
-buffer in the same transaction. Takeover resumes any nonterminal execution from this durable claim;
-a completed action is not duplicated. A failed action is terminal, is not retried or discarded, and
+buffer in the same transaction. Takeover resumes pending work and continues a running execution from
+its durable allocation. A `ready` allocation skips duplicate Git creation and resumes remaining
+Project/catalog steps. A `creating` allocation whose Runner result was not durably recorded is
+finalized as an interrupted terminal failure rather than creating a second suffixed worktree. A
+completed action is not duplicated. A failed action is terminal, is not retried or discarded, and
 FIFO processing may continue to later pending input. Running workers process TurnActions at model-call
 turn boundaries instead of waiting for run completion. If a Project-mutating action completes, the
 same active run rebuilds model/tool context before its next model call. Completed and failed worktree
