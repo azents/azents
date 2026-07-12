@@ -1,11 +1,11 @@
 """Requested and user-safe inference profile contracts."""
 
+import datetime
 import enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.agent import AgentModelSelection
-from azents.core.enums import AgentRunStatus, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelReasoningEffort
 
 
@@ -42,61 +42,36 @@ class RequestedInferenceProfile(BaseModel):
     )
 
 
-class ResolvedInferenceProfileSummary(BaseModel):
-    """Allowlisted resolved model identity safe for public projection."""
+class AppliedInferenceProfile(BaseModel):
+    """Resolved user-visible inference settings applied by one message."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    provider: LLMProvider = Field(description="Resolved hosting provider")
-    model_identifier: str = Field(description="Resolved provider model identifier")
-    model_display_name: str = Field(description="Resolved model display name")
-    model_developer: LLMModelDeveloper = Field(description="Resolved model developer")
+    model_target_label: str = Field(
+        min_length=1,
+        description="Agent-owned model target label applied by the message",
+    )
+    reasoning_effort: ModelReasoningEffort | None = Field(
+        description="Applied explicit effort, or null for model Default",
+    )
 
-    @classmethod
-    def from_model_selection(
-        cls,
-        selection: AgentModelSelection,
-    ) -> "ResolvedInferenceProfileSummary":
-        """Build a safe summary without integration or catalog snapshot data."""
-        return cls(
-            provider=selection.provider,
-            model_identifier=selection.model_identifier,
-            model_display_name=selection.model_display_name,
-            model_developer=selection.model_developer,
+
+class SessionInferenceState(BaseModel):
+    """Complete resolved inference configuration prepared for the next turn."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model_target_label: str = Field(min_length=1)
+    model_selection: AgentModelSelection
+    reasoning_effort: ModelReasoningEffort | None
+    effective_context_window_tokens: int = Field(gt=0)
+    effective_auto_compaction_threshold_tokens: int = Field(gt=0)
+    resolved_at: datetime.datetime
+
+    @property
+    def applied_profile(self) -> AppliedInferenceProfile:
+        """Return the user-visible settings represented by this state."""
+        return AppliedInferenceProfile(
+            model_target_label=self.model_target_label,
+            reasoning_effort=self.reasoning_effort,
         )
-
-
-class InferenceRunSummary(BaseModel):
-    """Compact allowlisted inference provenance for a user message."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    run_id: str = Field(description="Associated AgentRun ID")
-    run_index: int = Field(ge=1, description="Session-local AgentRun index")
-    status: AgentRunStatus = Field(description="Latest associated run status")
-    requested_profile: RequestedInferenceProfile | None = Field(
-        description="Requested inference intent when available",
-    )
-    source: InferenceProfileSource | None = Field(
-        description="Requested inference profile source when available",
-    )
-    resolved_profile: ResolvedInferenceProfileSummary | None = Field(
-        description="Safe resolved model summary when resolution succeeded",
-    )
-    resolved_reasoning_effort: ModelReasoningEffort | None = Field(
-        description="Effective explicit effort, or null for model Default",
-    )
-    effective_context_window_tokens: int | None = Field(
-        ge=1,
-        description="Context window limit fixed for the run",
-    )
-    effective_auto_compaction_threshold_tokens: int | None = Field(
-        ge=1,
-        description="Auto-compaction threshold fixed for the run",
-    )
-    failure_code: InferenceProfileFailureCode | None = Field(
-        description="Safe profile resolution failure code",
-    )
-    failure_message: str | None = Field(
-        description="User-safe profile resolution failure message",
-    )

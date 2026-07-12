@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
     AgentSessionEndReason,
     AgentSessionKind,
@@ -22,7 +23,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     SessionAgentKind,
 )
-from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.inference_profile import SessionInferenceState
 from azents.core.session_handle import generate_session_handle
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -843,21 +844,30 @@ class AgentSessionRepository:
         )
         await session.flush()
 
-    async def set_last_inference_profile(
+    async def set_inference_state(
         self,
         session: AsyncSession,
         *,
         session_id: str,
-        model_target_label: str,
-        reasoning_effort: ModelReasoningEffort | None,
+        inference_state: SessionInferenceState,
     ) -> AgentSession:
-        """Persist the most recently activated inference profile."""
+        """Persist the resolved inference configuration for the next turn."""
         result = await session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
             .values(
-                last_model_target_label=model_target_label,
-                last_reasoning_effort=reasoning_effort,
+                current_model_target_label=inference_state.model_target_label,
+                current_model_selection=inference_state.model_selection.model_dump(
+                    mode="json"
+                ),
+                current_reasoning_effort=inference_state.reasoning_effort,
+                current_effective_context_window_tokens=(
+                    inference_state.effective_context_window_tokens
+                ),
+                current_effective_auto_compaction_threshold_tokens=(
+                    inference_state.effective_auto_compaction_threshold_tokens
+                ),
+                current_inference_resolved_at=inference_state.resolved_at,
             )
             .returning(RDBAgentSession)
         )
@@ -1193,13 +1203,35 @@ class AgentSessionRepository:
 
     def _build(self, rdb: RDBAgentSession) -> AgentSession:
         """Convert RDB model to domain model."""
+        inference_state: SessionInferenceState | None = None
+        if rdb.current_model_target_label is not None:
+            if (
+                rdb.current_model_selection is None
+                or rdb.current_effective_context_window_tokens is None
+                or rdb.current_effective_auto_compaction_threshold_tokens is None
+                or rdb.current_inference_resolved_at is None
+            ):
+                raise ValueError("AgentSession has incomplete inference state")
+            inference_state = SessionInferenceState(
+                model_target_label=rdb.current_model_target_label,
+                model_selection=AgentModelSelection.model_validate(
+                    rdb.current_model_selection
+                ),
+                reasoning_effort=rdb.current_reasoning_effort,
+                effective_context_window_tokens=(
+                    rdb.current_effective_context_window_tokens
+                ),
+                effective_auto_compaction_threshold_tokens=(
+                    rdb.current_effective_auto_compaction_threshold_tokens
+                ),
+                resolved_at=rdb.current_inference_resolved_at,
+            )
         return AgentSession(
             id=rdb.id,
             workspace_id=rdb.workspace_id,
             agent_id=rdb.agent_id,
             handle=rdb.handle,
-            last_model_target_label=rdb.last_model_target_label,
-            last_reasoning_effort=rdb.last_reasoning_effort,
+            inference_state=inference_state,
             session_kind=rdb.session_kind,
             status=rdb.status,
             primary_kind=rdb.primary_kind,

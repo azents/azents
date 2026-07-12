@@ -19,12 +19,16 @@ from azents.core.enums import (
     LLMProvider,
     SessionAgentKind,
 )
+from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_selection_dict,
+)
 
 from . import AgentSessionRepository
 from .data import AgentSessionCreate
@@ -94,25 +98,33 @@ class TestAgentSessionRepository:
             ),
         )
 
-        assert created.last_model_target_label is None
-        assert created.last_reasoning_effort is None
+        assert created.inference_state is None
 
-        default_profile = await repo.set_last_inference_profile(
-            rdb_session,
-            session_id=created.id,
+        resolved_at = datetime.datetime.now(datetime.UTC)
+        default_state = SessionInferenceState(
             model_target_label="Quality",
+            model_selection=make_test_model_selection(),
             reasoning_effort=None,
+            effective_context_window_tokens=100_000,
+            effective_auto_compaction_threshold_tokens=80_000,
+            resolved_at=resolved_at,
         )
-        assert default_profile.last_model_target_label == "Quality"
-        assert default_profile.last_reasoning_effort is None
-
-        explicit_profile = await repo.set_last_inference_profile(
+        default_profile = await repo.set_inference_state(
             rdb_session,
             session_id=created.id,
-            model_target_label="Quality",
-            reasoning_effort=ModelReasoningEffort.HIGH,
+            inference_state=default_state,
         )
-        assert explicit_profile.last_reasoning_effort == ModelReasoningEffort.HIGH
+        assert default_profile.inference_state == default_state
+
+        explicit_state = default_state.model_copy(
+            update={"reasoning_effort": ModelReasoningEffort.HIGH}
+        )
+        explicit_profile = await repo.set_inference_state(
+            rdb_session,
+            session_id=created.id,
+            inference_state=explicit_state,
+        )
+        assert explicit_profile.inference_state == explicit_state
 
     async def test_ensure_active_creates_one_active_session(
         self, rdb_session: AsyncSession

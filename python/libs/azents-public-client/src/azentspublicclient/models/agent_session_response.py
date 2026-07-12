@@ -34,8 +34,8 @@ class AgentSessionResponse(BaseModel):
     """ # noqa: E501
     id: StrictStr = Field(description="Session ID")
     agent_id: StrictStr = Field(description="Agent ID")
-    last_model_target_label: Optional[StrictStr]
-    last_reasoning_effort: Optional[ModelReasoningEffort]
+    current_model_target_label: Optional[StrictStr]
+    current_reasoning_effort: Optional[ModelReasoningEffort]
     title: Optional[StrictStr]
     title_source: Optional[AgentSessionTitleSource]
     status: AgentSessionStatus = Field(description="Session status")
@@ -44,7 +44,7 @@ class AgentSessionResponse(BaseModel):
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "last_model_target_label", "last_reasoning_effort", "title", "title_source", "status", "primary_kind", "run_state", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "run_state", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -92,15 +92,15 @@ class AgentSessionResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if last_model_target_label (nullable) is None
+        # set to None if current_model_target_label (nullable) is None
         # and model_fields_set contains the field
-        if self.last_model_target_label is None and "last_model_target_label" in self.model_fields_set:
-            _dict['last_model_target_label'] = None
+        if self.current_model_target_label is None and "current_model_target_label" in self.model_fields_set:
+            _dict['current_model_target_label'] = None
 
-        # set to None if last_reasoning_effort (nullable) is None
+        # set to None if current_reasoning_effort (nullable) is None
         # and model_fields_set contains the field
-        if self.last_reasoning_effort is None and "last_reasoning_effort" in self.model_fields_set:
-            _dict['last_reasoning_effort'] = None
+        if self.current_reasoning_effort is None and "current_reasoning_effort" in self.model_fields_set:
+            _dict['current_reasoning_effort'] = None
 
         # set to None if title (nullable) is None
         # and model_fields_set contains the field
@@ -131,8 +131,8 @@ class AgentSessionResponse(BaseModel):
         _obj = cls.model_validate({
             "id": obj.get("id"),
             "agent_id": obj.get("agent_id"),
-            "last_model_target_label": obj.get("last_model_target_label"),
-            "last_reasoning_effort": obj.get("last_reasoning_effort"),
+            "current_model_target_label": obj.get("current_model_target_label"),
+            "current_reasoning_effort": obj.get("current_reasoning_effort"),
             "title": obj.get("title"),
             "title_source": obj.get("title_source"),
             "status": obj.get("status"),

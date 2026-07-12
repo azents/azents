@@ -63,8 +63,7 @@ from azents.core.enums import (
     InputBufferKind,
 )
 from azents.core.inference_profile import (
-    InferenceProfileSource,
-    InferenceRunSummary,
+    AppliedInferenceProfile,
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
@@ -255,12 +254,11 @@ class _BufferedInputService:
             CreatedAgentSessionInputResult(
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_session=AgentSession(
+                    inference_state=None,
                     id=session_id,
                     workspace_id="workspace-1",
                     agent_id=str(kwargs["agent_id"]),
                     handle="test-session-handle",
-                    last_model_target_label=None,
-                    last_reasoning_effort=None,
                     session_kind=AgentSessionKind.ROOT,
                     status=AgentSessionStatus.ACTIVE,
                     start_reason=AgentSessionStartReason.INITIAL,
@@ -354,12 +352,11 @@ class _RestWriteChatService:
         self.get_agent_session_calls.append((agent_id, session_id, user_id))
         return Success(
             AgentSession(
+                inference_state=None,
                 id=self.session_id,
                 workspace_id="workspace-1",
                 agent_id=agent_id,
                 handle="test-session-handle",
-                last_model_target_label=None,
-                last_reasoning_effort=None,
                 session_kind=self.session_kind,
                 status=AgentSessionStatus.ACTIVE,
                 start_reason=AgentSessionStartReason.INITIAL,
@@ -400,12 +397,11 @@ class _StopChatService:
         self.session_ids: list[str] = []
         self.result: Success[AgentSession] | Failure[SessionAccessDenied] = Success(
             AgentSession(
+                inference_state=None,
                 id="1123456789abcdef0123456789abcdef",
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 handle="test-session-handle",
-                last_model_target_label=None,
-                last_reasoning_effort=None,
                 session_kind=AgentSessionKind.ROOT,
                 status=AgentSessionStatus.ACTIVE,
                 start_reason=AgentSessionStartReason.INITIAL,
@@ -709,21 +705,9 @@ class _EventService:
             schema_version="1",
             created_at=datetime.datetime(2026, 6, 4, tzinfo=datetime.UTC),
         )
-        self.inference_run_summary = InferenceRunSummary(
-            run_id="2123456789abcdef0123456789abcdef",
-            run_index=2,
-            status=AgentRunStatus.RUNNING,
-            requested_profile=RequestedInferenceProfile(
-                model_target_label="reasoning",
-                reasoning_effort=ModelReasoningEffort.HIGH,
-            ),
-            source=InferenceProfileSource.EXPLICIT_INPUT,
-            resolved_profile=None,
-            resolved_reasoning_effort=ModelReasoningEffort.HIGH,
-            effective_context_window_tokens=128_000,
-            effective_auto_compaction_threshold_tokens=115_200,
-            failure_code=None,
-            failure_message=None,
+        self.inference_profile = AppliedInferenceProfile(
+            model_target_label="reasoning",
+            reasoning_effort=ModelReasoningEffort.HIGH,
         )
 
     async def get_session(
@@ -736,12 +720,11 @@ class _EventService:
         del user_id
         return Success(
             AgentSession(
+                inference_state=None,
                 id=session_id,
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 handle="test-session-handle",
-                last_model_target_label=None,
-                last_reasoning_effort=None,
                 session_kind=AgentSessionKind.ROOT,
                 status=AgentSessionStatus.ACTIVE,
                 start_reason=AgentSessionStartReason.INITIAL,
@@ -792,7 +775,7 @@ class _EventService:
                     run_id="2123456789abcdef0123456789abcdef",
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                     status=AgentRunStatus.RUNNING,
-                    inference_run_summary=self.inference_run_summary,
+                    inference_profile=self.inference_profile,
                 ),
                 session_run_state=AgentSessionRunState.RUNNING,
             )
@@ -808,12 +791,11 @@ class _AgentSessionRouteChatService:
         self.existing_project_paths: list[str] | None = None
         self.setup_actions: list[CreateGitWorktreeAction] | None = None
         self.primary_session = AgentSession(
+            inference_state=None,
             id="1123456789abcdef0123456789abcdef",
             workspace_id="workspace-1",
             agent_id="agent-1",
             handle="test-session-handle",
-            last_model_target_label=None,
-            last_reasoning_effort=None,
             session_kind=AgentSessionKind.ROOT,
             status=AgentSessionStatus.ACTIVE,
             primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
@@ -828,12 +810,11 @@ class _AgentSessionRouteChatService:
             updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
         )
         self.secondary_session = AgentSession(
+            inference_state=None,
             id="2123456789abcdef0123456789abcdef",
             workspace_id="workspace-1",
             agent_id="agent-1",
             handle="test-session-handle",
-            last_model_target_label=None,
-            last_reasoning_effort=None,
             session_kind=AgentSessionKind.ROOT,
             status=AgentSessionStatus.ACTIVE,
             primary_kind=None,
@@ -1450,21 +1431,9 @@ class TestEventRoutes:
             "run_id": "2123456789abcdef0123456789abcdef",
             "phase": "waiting_for_model",
             "status": "running",
-            "inference_run_summary": {
-                "run_id": "2123456789abcdef0123456789abcdef",
-                "run_index": 2,
-                "status": "running",
-                "requested_profile": {
-                    "model_target_label": "reasoning",
-                    "reasoning_effort": "high",
-                },
-                "source": "explicit_input",
-                "resolved_profile": None,
-                "resolved_reasoning_effort": "high",
-                "effective_context_window_tokens": 128000,
-                "effective_auto_compaction_threshold_tokens": 115200,
-                "failure_code": None,
-                "failure_message": None,
+            "inference_profile": {
+                "model_target_label": "reasoning",
+                "reasoning_effort": "high",
             },
         }
         assert dump["session_run_state"] == "running"

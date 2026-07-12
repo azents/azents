@@ -26,7 +26,7 @@ from azents.core.enums import (
     InputBufferKind,
     SessionAgentKind,
 )
-from azents.core.inference_profile import InferenceProfileSource
+from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
@@ -149,12 +149,18 @@ def _agent_session(
 ) -> AgentSession:
     """Create AgentSession fixture."""
     return AgentSession(
+        inference_state=SessionInferenceState(
+            model_target_label="Quality",
+            model_selection=_agent().model_selection,
+            reasoning_effort=ModelReasoningEffort.HIGH,
+            effective_context_window_tokens=64_000,
+            effective_auto_compaction_threshold_tokens=51_200,
+            resolved_at=_NOW,
+        ),
         id=id,
         workspace_id="workspace-1",
         agent_id="agent-1",
         handle="session-handle",
-        last_model_target_label=None,
-        last_reasoning_effort=None,
         session_kind=AgentSessionKind.SUBAGENT,
         status=AgentSessionStatus.ACTIVE,
         primary_kind=None,
@@ -213,7 +219,7 @@ class _AgentSessionRepository:
         self.created_children: list[SessionAgent] = []
         self.locked_session_agents: list[str] = []
         self.marked_running: list[str] = []
-        self.last_profiles: list[tuple[str, str, ModelReasoningEffort | None]] = []
+        self.inference_states: list[tuple[str, SessionInferenceState]] = []
         self.last_task_updates: list[tuple[str, str | None]] = []
         self.message_sent_updates: list[str] = []
         self.observation_updates: list[tuple[str, int | None, str | None]] = []
@@ -387,18 +393,21 @@ class _AgentSessionRepository:
         self.target.parent_observed_event_id = parent_observed_event_id
         return self.target
 
-    async def set_last_inference_profile(
+    async def set_inference_state(
         self,
         session: AsyncSession,
         *,
         session_id: str,
-        model_target_label: str,
-        reasoning_effort: ModelReasoningEffort | None,
+        inference_state: SessionInferenceState,
     ) -> AgentSession:
-        """Record the inherited child session profile."""
+        """Record the inherited child session inference state."""
         del session
-        self.last_profiles.append((session_id, model_target_label, reasoning_effort))
-        return self.sessions[session_id]
+        self.inference_states.append((session_id, inference_state))
+        updated = self.sessions[session_id].model_copy(
+            update={"inference_state": inference_state}
+        )
+        self.sessions[session_id] = updated
+        return updated
 
     async def mark_running_for_input_wakeup(
         self,
@@ -430,16 +439,6 @@ class _AgentRunRepository:
             run_index=1,
             phase=AgentRunPhase.EXECUTING_TOOLS,
             status=AgentRunStatus.RUNNING,
-            requested_model_target_label="Quality",
-            requested_reasoning_effort=ModelReasoningEffort.HIGH,
-            inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
-            resolved_model_selection=make_test_model_selection(),
-            resolved_reasoning_effort=ModelReasoningEffort.HIGH,
-            resolved_at=_NOW,
-            effective_context_window_tokens=64_000,
-            effective_auto_compaction_threshold_tokens=51_200,
-            inference_profile_failure_code=None,
-            inference_profile_failure_message=None,
             parent_agent_run_id=None,
             terminal_result_event_id=None,
             terminal_result_message=None,
@@ -457,16 +456,6 @@ class _AgentRunRepository:
                 run_index=1,
                 phase=AgentRunPhase.IDLE,
                 status=AgentRunStatus.COMPLETED,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
-                inference_profile_source=None,
-                resolved_model_selection=None,
-                resolved_reasoning_effort=None,
-                resolved_at=None,
-                effective_context_window_tokens=None,
-                effective_auto_compaction_threshold_tokens=None,
-                inference_profile_failure_code=None,
-                inference_profile_failure_message=None,
                 parent_agent_run_id=None,
                 terminal_result_event_id="event".rjust(32, "0"),
                 terminal_result_message="child result",
@@ -1246,19 +1235,11 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     assert run_repo.pending_creates == [
         {
             "session_id": child.agent_session_id,
-            "requested_model_target_label": "Quality",
-            "requested_reasoning_effort": ModelReasoningEffort.HIGH,
-            "inference_profile_source": InferenceProfileSource.PARENT_RUN,
             "parent_agent_run_id": _PARENT_RUN_ID,
-            "resolved_model_selection": run_repo.parent_run.resolved_model_selection,
-            "resolved_reasoning_effort": ModelReasoningEffort.HIGH,
-            "resolved_at": _NOW,
-            "effective_context_window_tokens": 64_000,
-            "effective_auto_compaction_threshold_tokens": 51_200,
         }
     ]
-    assert repo.last_profiles == [
-        (child.agent_session_id, "Quality", ModelReasoningEffort.HIGH)
+    assert repo.inference_states == [
+        (child.agent_session_id, repo.sessions["root-session"].inference_state)
     ]
     assert input_service.enqueued[0].metadata["message_kind"] == "spawn_agent"
     assert input_service.enqueued[0].content == "Review it"
@@ -1305,17 +1286,17 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
         )
     )
 
-    created = run_repo.pending_creates[0]
-    assert created["requested_model_target_label"] == "Research"
-    assert created["requested_reasoning_effort"] == ModelReasoningEffort.MEDIUM
-    assert created["inference_profile_source"] == InferenceProfileSource.SPAWN_OVERRIDE
-    assert created["resolved_model_selection"] == selection
-    assert created["resolved_reasoning_effort"] == ModelReasoningEffort.MEDIUM
-    assert created["effective_context_window_tokens"] == 32_000
-    assert created["effective_auto_compaction_threshold_tokens"] == 28_800
-    assert repo.last_profiles == [
-        ("researcher-session", "Research", ModelReasoningEffort.MEDIUM)
-    ]
+    assert run_repo.pending_creates[0] == {
+        "session_id": "researcher-session",
+        "parent_agent_run_id": _PARENT_RUN_ID,
+    }
+    child_state = repo.inference_states[0]
+    assert child_state[0] == "researcher-session"
+    assert child_state[1].model_target_label == "Research"
+    assert child_state[1].model_selection == selection
+    assert child_state[1].reasoning_effort == ModelReasoningEffort.MEDIUM
+    assert child_state[1].effective_context_window_tokens == 32_000
+    assert child_state[1].effective_auto_compaction_threshold_tokens == 28_800
 
 
 @pytest.mark.parametrize(
@@ -1360,7 +1341,7 @@ async def test_spawn_agent_rejects_invalid_override_without_child_residue(
 
     assert repo.created_children == []
     assert run_repo.pending_creates == []
-    assert repo.last_profiles == []
+    assert repo.inference_states == []
     assert input_service.enqueued == []
     assert broker.messages == []
     assert events == []
@@ -1379,11 +1360,6 @@ async def test_spawn_agent_rejects_invalid_override_without_child_residue(
             _PARENT_RUN_ID,
             {"status": AgentRunStatus.COMPLETED},
             "Current AgentRun is not running",
-        ),
-        (
-            _PARENT_RUN_ID,
-            {"resolved_model_selection": None},
-            "Current AgentRun has incomplete inference profile provenance",
         ),
     ],
 )
@@ -1419,7 +1395,7 @@ async def test_spawn_agent_rejects_invalid_parent_run(
 
     assert repo.created_children == []
     assert run_repo.pending_creates == []
-    assert repo.last_profiles == []
+    assert repo.inference_states == []
     assert input_service.enqueued == []
     assert broker.messages == []
 
@@ -1553,16 +1529,6 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
         run_index=2,
         phase=AgentRunPhase.EXECUTING_TOOLS,
         status=AgentRunStatus.RUNNING,
-        requested_model_target_label=None,
-        requested_reasoning_effort=None,
-        inference_profile_source=None,
-        resolved_model_selection=None,
-        resolved_reasoning_effort=None,
-        resolved_at=None,
-        effective_context_window_tokens=None,
-        effective_auto_compaction_threshold_tokens=None,
-        inference_profile_failure_code=None,
-        inference_profile_failure_message=None,
         parent_agent_run_id=None,
         terminal_result_event_id=None,
         terminal_result_message=None,

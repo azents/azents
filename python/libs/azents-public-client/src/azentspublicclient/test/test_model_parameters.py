@@ -43,7 +43,7 @@ class TestModelParameters(unittest.TestCase):
                 stop_sequences = [
                     ''
                     ],
-                reasoning_effort = 'low',
+                reasoning_effort = 'none',
                 builtin_tools = [
                     azentspublicclient.models.builtin_tool_config.BuiltinToolConfig(
                         name = '', 

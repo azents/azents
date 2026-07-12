@@ -4,6 +4,7 @@
 
 import asyncio
 import dataclasses
+import datetime
 import json
 import time
 from textwrap import dedent
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
-from azents.core.agent import AgentModelSelection, SubagentSettings
+from azents.core.agent import SubagentSettings
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
@@ -21,7 +22,7 @@ from azents.core.enums import (
     InputBufferKind,
     SessionAgentKind,
 )
-from azents.core.inference_profile import InferenceProfileSource
+from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.llm_mapping import to_runtime_model
 from azents.core.tools import (
@@ -206,13 +207,7 @@ class _TargetResolution:
 
 @dataclasses.dataclass(frozen=True)
 class _SpawnInferenceProfile:
-    requested_model_target_label: str
-    requested_reasoning_effort: ModelReasoningEffort | None
-    source: InferenceProfileSource
-    resolved_model_selection: AgentModelSelection
-    resolved_reasoning_effort: ModelReasoningEffort | None
-    effective_context_window_tokens: int
-    effective_auto_compaction_threshold_tokens: int
+    state: SessionInferenceState
 
 
 class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
@@ -333,8 +328,15 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     current=current,
                     parent_run_id=parent_run_id,
                 )
+                parent_session = await self._session_or_error(
+                    session, current.agent_session_id
+                )
+                if parent_session.inference_state is None:
+                    raise FunctionToolError(
+                        "Current Session has no prepared inference state"
+                    )
                 profile = self._derive_spawn_inference_profile(
-                    parent_run=parent_run,
+                    parent_state=parent_session.inference_state,
                     fork_selection=fork_selection,
                     model_target_label=input.model_target_label,
                     reasoning_effort=input.reasoning_effort,
@@ -358,32 +360,17 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 await self.agent_run_repository.create_pending(
                     session,
                     session_id=child.agent_session_id,
-                    requested_model_target_label=(profile.requested_model_target_label),
-                    requested_reasoning_effort=profile.requested_reasoning_effort,
-                    inference_profile_source=profile.source,
                     parent_agent_run_id=parent_run.id,
-                    resolved_model_selection=profile.resolved_model_selection,
-                    resolved_reasoning_effort=profile.resolved_reasoning_effort,
-                    resolved_at=parent_run.resolved_at,
-                    effective_context_window_tokens=(
-                        profile.effective_context_window_tokens
-                    ),
-                    effective_auto_compaction_threshold_tokens=(
-                        profile.effective_auto_compaction_threshold_tokens
-                    ),
                 )
-                await self.agent_session_repository.set_last_inference_profile(
+                await self.agent_session_repository.set_inference_state(
                     session,
                     session_id=child.agent_session_id,
-                    model_target_label=profile.requested_model_target_label,
-                    reasoning_effort=profile.requested_reasoning_effort,
+                    inference_state=profile.state,
                 )
                 forked = await self._fork_events(
                     session,
                     parent_session_id=current.agent_session_id,
-                    head_event_id=(
-                        await self._session_or_error(session, current.agent_session_id)
-                    ).model_input_head_event_id,
+                    head_event_id=parent_session.model_input_head_event_id,
                     selection=fork_selection,
                 )
                 for event in forked:
@@ -429,12 +416,12 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     def _derive_spawn_inference_profile(
         self,
         *,
-        parent_run: AgentRunState,
+        parent_state: SessionInferenceState,
         fork_selection: ForkTurnsSelection,
         model_target_label: str | None,
         reasoning_effort: ModelReasoningEffort | None,
     ) -> _SpawnInferenceProfile:
-        """Validate and derive a pre-resolved first child Run profile."""
+        """Validate and derive the child Session inference state."""
         override_requested = (
             model_target_label is not None or reasoning_effort is not None
         )
@@ -442,40 +429,14 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             raise FunctionToolError(
                 "Inference profile overrides require fork_turns='none' or a "
                 "positive bounded count; full-history forks inherit the parent "
-                "Run profile"
-            )
-        if (
-            parent_run.requested_model_target_label is None
-            or parent_run.resolved_model_selection is None
-            or parent_run.resolved_at is None
-            or parent_run.effective_context_window_tokens is None
-            or parent_run.effective_auto_compaction_threshold_tokens is None
-        ):
-            raise FunctionToolError(
-                "Current AgentRun has incomplete inference profile provenance"
+                "Session inference state"
             )
         if not override_requested:
-            return _SpawnInferenceProfile(
-                requested_model_target_label=(parent_run.requested_model_target_label),
-                requested_reasoning_effort=parent_run.requested_reasoning_effort,
-                source=InferenceProfileSource.PARENT_RUN,
-                resolved_model_selection=parent_run.resolved_model_selection,
-                resolved_reasoning_effort=parent_run.resolved_reasoning_effort,
-                effective_context_window_tokens=(
-                    parent_run.effective_context_window_tokens
-                ),
-                effective_auto_compaction_threshold_tokens=(
-                    parent_run.effective_auto_compaction_threshold_tokens
-                ),
-            )
+            return _SpawnInferenceProfile(state=parent_state)
 
-        requested_label = (
-            model_target_label
-            if model_target_label is not None
-            else parent_run.requested_model_target_label
-        )
+        requested_label = model_target_label or parent_state.model_target_label
         if model_target_label is None:
-            selection = parent_run.resolved_model_selection
+            selection = parent_state.model_selection
         else:
             option = next(
                 (
@@ -501,16 +462,18 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             resolved_effort = reasoning_effort
         elif model_target_label is not None:
             resolved_effort = normalize_spawn_reasoning_effort(
-                parent_run.resolved_reasoning_effort,
+                parent_state.reasoning_effort,
                 supported_efforts,
             )
         else:
-            resolved_effort = parent_run.resolved_reasoning_effort
+            resolved_effort = parent_state.reasoning_effort
 
         if model_target_label is None:
-            effective_context_window_tokens = parent_run.effective_context_window_tokens
+            effective_context_window_tokens = (
+                parent_state.effective_context_window_tokens
+            )
             effective_auto_compaction_threshold_tokens = (
-                parent_run.effective_auto_compaction_threshold_tokens
+                parent_state.effective_auto_compaction_threshold_tokens
             )
         else:
             main_model = to_runtime_model(
@@ -545,15 +508,16 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             )
 
         return _SpawnInferenceProfile(
-            requested_model_target_label=requested_label,
-            requested_reasoning_effort=resolved_effort,
-            source=InferenceProfileSource.SPAWN_OVERRIDE,
-            resolved_model_selection=selection,
-            resolved_reasoning_effort=resolved_effort,
-            effective_context_window_tokens=effective_context_window_tokens,
-            effective_auto_compaction_threshold_tokens=(
-                effective_auto_compaction_threshold_tokens
-            ),
+            state=SessionInferenceState(
+                model_target_label=requested_label,
+                model_selection=selection,
+                reasoning_effort=resolved_effort,
+                effective_context_window_tokens=effective_context_window_tokens,
+                effective_auto_compaction_threshold_tokens=(
+                    effective_auto_compaction_threshold_tokens
+                ),
+                resolved_at=datetime.datetime.now(datetime.UTC),
+            )
         )
 
     def _send_message_tool(self) -> FunctionTool:
@@ -822,16 +786,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             raise FunctionToolError("Current AgentRun was not found")
         if parent_run.status != AgentRunStatus.RUNNING:
             raise FunctionToolError("Current AgentRun is not running")
-        if (
-            parent_run.requested_model_target_label is None
-            or parent_run.resolved_model_selection is None
-            or parent_run.resolved_at is None
-            or parent_run.effective_context_window_tokens is None
-            or parent_run.effective_auto_compaction_threshold_tokens is None
-        ):
-            raise FunctionToolError(
-                "Current AgentRun has incomplete inference profile provenance"
-            )
         return parent_run
 
     async def _resolve_target(

@@ -108,6 +108,7 @@ __all__ = [
     "AgentWorkspaceStatResponse",
     "AgentWorkspaceUnavailableAccessResponse",
     "ApiKeySecrets",
+    "AppliedInferenceProfile",
     "AuthMethod",
     "AvatarFinalizeRequest",
     "AvatarUploadRequest",
@@ -169,9 +170,6 @@ __all__ = [
     "HealthStatus",
     "ImageFile",
     "ImageThumbnails",
-    "InferenceProfileFailureCode",
-    "InferenceProfileSource",
-    "InferenceRunSummary",
     "InputActionAttachmentPolicyResponse",
     "InputActionAvailabilityHintResponse",
     "InputActionDefinitionResponse",
@@ -247,7 +245,6 @@ __all__ = [
     "RequestSignupEmailResponse",
     "RequestedInferenceProfile",
     "ResetAgentRuntimeRequest",
-    "ResolvedInferenceProfileSummary",
     "ResponseChatV1ReadAgentWorkspacePath",
     "RuntimeDesiredState",
     "RuntimeLifecycleCommandType",
@@ -411,6 +408,7 @@ from azentspublicclient.models.agent_workspace_runtime_response import AgentWork
 from azentspublicclient.models.agent_workspace_stat_response import AgentWorkspaceStatResponse as AgentWorkspaceStatResponse
 from azentspublicclient.models.agent_workspace_unavailable_access_response import AgentWorkspaceUnavailableAccessResponse as AgentWorkspaceUnavailableAccessResponse
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets as ApiKeySecrets
+from azentspublicclient.models.applied_inference_profile import AppliedInferenceProfile as AppliedInferenceProfile
 from azentspublicclient.models.auth_method import AuthMethod as AuthMethod
 from azentspublicclient.models.avatar_finalize_request import AvatarFinalizeRequest as AvatarFinalizeRequest
 from azentspublicclient.models.avatar_upload_request import AvatarUploadRequest as AvatarUploadRequest
@@ -472,9 +470,6 @@ from azentspublicclient.models.http_validation_error import HTTPValidationError 
 from azentspublicclient.models.health_status import HealthStatus as HealthStatus
 from azentspublicclient.models.image_file import ImageFile as ImageFile
 from azentspublicclient.models.image_thumbnails import ImageThumbnails as ImageThumbnails
-from azentspublicclient.models.inference_profile_failure_code import InferenceProfileFailureCode as InferenceProfileFailureCode
-from azentspublicclient.models.inference_profile_source import InferenceProfileSource as InferenceProfileSource
-from azentspublicclient.models.inference_run_summary import InferenceRunSummary as InferenceRunSummary
 from azentspublicclient.models.input_action_attachment_policy_response import InputActionAttachmentPolicyResponse as InputActionAttachmentPolicyResponse
 from azentspublicclient.models.input_action_availability_hint_response import InputActionAvailabilityHintResponse as InputActionAvailabilityHintResponse
 from azentspublicclient.models.input_action_definition_response import InputActionDefinitionResponse as InputActionDefinitionResponse
@@ -550,7 +545,6 @@ from azentspublicclient.models.request_signup_email_request import RequestSignup
 from azentspublicclient.models.request_signup_email_response import RequestSignupEmailResponse as RequestSignupEmailResponse
 from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile as RequestedInferenceProfile
 from azentspublicclient.models.reset_agent_runtime_request import ResetAgentRuntimeRequest as ResetAgentRuntimeRequest
-from azentspublicclient.models.resolved_inference_profile_summary import ResolvedInferenceProfileSummary as ResolvedInferenceProfileSummary
 from azentspublicclient.models.response_chat_v1_read_agent_workspace_path import ResponseChatV1ReadAgentWorkspacePath as ResponseChatV1ReadAgentWorkspacePath
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState as RuntimeDesiredState
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType as RuntimeLifecycleCommandType

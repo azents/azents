@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **top_p** | **float** |  | [optional] 
 **top_k** | **int** |  | [optional] 
 **stop_sequences** | **List[str]** |  | [optional] 
-**reasoning_effort** | **str** |  | [optional] 
+**reasoning_effort** | [**ModelReasoningEffort**](ModelReasoningEffort.md) |  | [optional] 
 **builtin_tools** | [**List[BuiltinToolConfig]**](BuiltinToolConfig.md) | Built-in tool list to enable | [optional] 
 
 ## Example

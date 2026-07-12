@@ -153,7 +153,7 @@ def chat_live_run_updated_dump(
             "run_id": run.run_id,
             "phase": run.phase.value,
             "status": run.status.value,
-            "inference_run_summary": run.inference_run_summary.model_dump(mode="json"),
+            "inference_profile": run.inference_profile.model_dump(mode="json"),
             "retry": retry,
         },
     }

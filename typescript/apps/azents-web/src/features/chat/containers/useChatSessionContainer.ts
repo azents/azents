@@ -46,9 +46,9 @@ import type {
 } from "../types";
 import type {
   AgentResponse,
+  AppliedInferenceProfile,
   ChatEventResponse,
   ChatWriteResponse,
-  InferenceRunSummary,
   LiveEventListResponse,
   ModelReasoningEffort,
   RequestedInferenceProfile,
@@ -247,131 +247,15 @@ function eventRequestedInferenceProfile(
   );
 }
 
-function isRequestedInferenceProfile(
+function isAppliedInferenceProfile(
   value: unknown,
-): value is RequestedInferenceProfile {
-  if (!isRecord(value)) {
-    return false;
-  }
+): value is AppliedInferenceProfile {
   return (
+    isRecord(value) &&
     typeof value.model_target_label === "string" &&
     value.model_target_label.length > 0 &&
     (value.reasoning_effort === null ||
       modelReasoningEffortFromValue(value.reasoning_effort) !== null)
-  );
-}
-
-function isInferenceRunSummaryStatus(
-  value: unknown,
-): value is InferenceRunSummary["status"] {
-  switch (value) {
-    case "pending":
-    case "running":
-    case "completed":
-    case "stopped":
-    case "failed":
-    case "cancelled":
-    case "interrupted":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isInferenceProfileSource(
-  value: unknown,
-): value is InferenceRunSummary["source"] {
-  switch (value) {
-    case null:
-    case "explicit_input":
-    case "session_last_used":
-    case "agent_default":
-    case "parent_run":
-    case "retry_original":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isInferenceProfileFailureCode(
-  value: unknown,
-): value is InferenceRunSummary["failure_code"] {
-  switch (value) {
-    case null:
-    case "model_target_not_found":
-    case "model_target_resolution_failed":
-    case "reasoning_effort_unsupported":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isLlmProvider(value: unknown): boolean {
-  switch (value) {
-    case "openai":
-    case "chatgpt_oauth":
-    case "xai_oauth":
-    case "anthropic":
-    case "google_gemini":
-    case "aws_bedrock":
-    case "google_vertex_ai":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isLlmModelDeveloper(value: unknown): boolean {
-  switch (value) {
-    case "openai":
-    case "anthropic":
-    case "google":
-    case "xai":
-    case "meta":
-    case "mistral":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isResolvedInferenceProfileSummary(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    isLlmProvider(value.provider) &&
-    typeof value.model_identifier === "string" &&
-    typeof value.model_display_name === "string" &&
-    isLlmModelDeveloper(value.model_developer)
-  );
-}
-
-function isNullableNumber(value: unknown): boolean {
-  return value === null || typeof value === "number";
-}
-
-function isInferenceRunSummary(value: unknown): value is InferenceRunSummary {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return (
-    typeof value.run_id === "string" &&
-    typeof value.run_index === "number" &&
-    isInferenceRunSummaryStatus(value.status) &&
-    (value.requested_profile === null ||
-      isRequestedInferenceProfile(value.requested_profile)) &&
-    isInferenceProfileSource(value.source) &&
-    (value.resolved_profile === null ||
-      isResolvedInferenceProfileSummary(value.resolved_profile)) &&
-    (value.resolved_reasoning_effort === null ||
-      modelReasoningEffortFromValue(value.resolved_reasoning_effort) !==
-        null) &&
-    isNullableNumber(value.effective_context_window_tokens) &&
-    isNullableNumber(value.effective_auto_compaction_threshold_tokens) &&
-    isInferenceProfileFailureCode(value.failure_code) &&
-    (value.failure_message === null ||
-      typeof value.failure_message === "string")
   );
 }
 
@@ -650,13 +534,12 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
   const runId = stringField(value, "run_id");
   const phase = agentRunPhaseFromValue(value.phase);
   const status = agentRunStatusFromValue(value.status);
-  const inferenceRunSummaryValue =
-    value.inference_run_summary ?? value.inferenceRunSummary;
+  const inferenceProfile = value.inference_profile;
   if (
     runId === null ||
     phase === null ||
     status === null ||
-    !isInferenceRunSummary(inferenceRunSummaryValue)
+    !isAppliedInferenceProfile(inferenceProfile)
   ) {
     return null;
   }
@@ -667,7 +550,7 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
     run_id: runId,
     phase,
     status,
-    inferenceRunSummary: inferenceRunSummaryValue,
+    inferenceProfile,
     retry,
   };
 }
@@ -1870,15 +1753,15 @@ export function useChatSessionContainer(
     }),
     [agent.main_model_label, agent.model_parameters?.reasoning_effort],
   );
-  const sessionLastUsedInferenceProfile =
+  const sessionCurrentInferenceProfile =
     useMemo((): RequestedInferenceProfile | null => {
       const session = agentSessionQuery.data;
-      if (session?.last_model_target_label == null) {
+      if (session?.current_model_target_label == null) {
         return null;
       }
       return {
-        model_target_label: session.last_model_target_label,
-        reasoning_effort: session.last_reasoning_effort,
+        model_target_label: session.current_model_target_label,
+        reasoning_effort: session.current_reasoning_effort,
       };
     }, [agentSessionQuery.data]);
 
@@ -1929,7 +1812,7 @@ export function useChatSessionContainer(
   );
   const defaultInferenceProfile =
     latestHumanInferenceProfile ??
-    sessionLastUsedInferenceProfile ??
+    sessionCurrentInferenceProfile ??
     agentDefaultInferenceProfile;
   const pendingInputBuffers = managedLiveState.pendingInputBuffers;
   const liveRun = managedLiveState.liveRun;

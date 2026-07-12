@@ -17,13 +17,18 @@ import azents.worker.run.executor as run_executor_module
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
 from azents.core.agent import AgentModelSelection
-from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.enums import (
+    AgentRunPhase,
+    AgentRunStatus,
+    AgentSessionKind,
+    EventKind,
+)
 from azents.core.inference_profile import (
+    AppliedInferenceProfile,
     InferenceProfileFailureCode,
     InferenceProfileSource,
-    InferenceRunSummary,
     RequestedInferenceProfile,
-    ResolvedInferenceProfileSummary,
+    SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import ToolkitProvider
@@ -92,12 +97,19 @@ from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 
+class _DBSession:
+    """Minimal DB session test double."""
+
+    async def commit(self) -> None:
+        """Accept transaction commits."""
+
+
 class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
     """DB session scope test double."""
 
     async def __aenter__(self) -> AsyncSession:
         """Return a dummy DB session."""
-        return cast(AsyncSession, object())
+        return cast(AsyncSession, _DBSession())
 
     async def __aexit__(self, *exc_info: object) -> None:
         """No resources to clean up."""
@@ -264,7 +276,9 @@ class _SessionLifecycle:
         """Accept activation before provider invocation."""
         del session_id, kwargs
         self.activation_calls += 1
-        return _PendingRun()
+        if self.order is not None:
+            self.order.append("activate_pending")
+        return _PendingRun(status=AgentRunStatus.RUNNING)
 
     async def activate_inherited_pending_agent_run(
         self,
@@ -277,32 +291,6 @@ class _SessionLifecycle:
         if self.order is not None:
             self.order.append("activate_inherited")
         return _PendingRun(status=AgentRunStatus.RUNNING)
-
-    async def get_inference_run_summary(
-        self,
-        *,
-        run_id: str,
-    ) -> InferenceRunSummary:
-        """Return safe resolved provenance for live-run projection tests."""
-        selection = make_test_model_selection()
-        return InferenceRunSummary(
-            run_id=run_id,
-            run_index=1,
-            status=AgentRunStatus.RUNNING,
-            requested_profile=RequestedInferenceProfile(
-                model_target_label="default",
-                reasoning_effort=None,
-            ),
-            source=InferenceProfileSource.AGENT_DEFAULT,
-            resolved_profile=ResolvedInferenceProfileSummary.from_model_selection(
-                selection
-            ),
-            resolved_reasoning_effort=None,
-            effective_context_window_tokens=64_000,
-            effective_auto_compaction_threshold_tokens=51_200,
-            failure_code=None,
-            failure_message=None,
-        )
 
     async def fail_pending_agent_run_profile(
         self,
@@ -353,9 +341,11 @@ class _AgentSessionRepository:
     def __init__(
         self,
         *,
+        inference_state: SessionInferenceState | None = None,
         current_session_agent: object | None = None,
         tree_session_agents: list[object] | None = None,
     ) -> None:
+        self.inference_state = inference_state
         self.cleared_commands: list[tuple[str, str]] = []
         self.current_session_agent = current_session_agent
         self.tree_session_agents = tree_session_agents or []
@@ -365,9 +355,24 @@ class _AgentSessionRepository:
         session: AsyncSession,
         agent_session_id: str,
     ) -> object | None:
-        """Return no persisted AgentSession settings."""
+        """Return the configured Session inference state."""
         del session, agent_session_id
-        return None
+        return SimpleNamespace(
+            inference_state=self.inference_state,
+            session_kind=AgentSessionKind.ROOT,
+        )
+
+    async def set_inference_state(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        inference_state: SessionInferenceState,
+    ) -> object:
+        """Record a newly prepared Session inference state."""
+        del session, session_id
+        self.inference_state = inference_state
+        return SimpleNamespace(inference_state=inference_state)
 
     async def list_session_agent_tree(
         self,
@@ -686,7 +691,31 @@ def _executor(
     if command_registry is None:
         command_registry = {}
     if agent_session_repository is None:
-        agent_session_repository = _AgentSessionRepository()
+        inference_state = None
+        recoverable = session_lifecycle.recoverable_run
+        if (
+            recoverable is not None
+            and recoverable.resolved_model_selection is not None
+            and recoverable.effective_context_window_tokens is not None
+            and recoverable.effective_auto_compaction_threshold_tokens is not None
+        ):
+            inference_state = SessionInferenceState(
+                model_target_label=recoverable.requested_model_target_label
+                or "default",
+                model_selection=recoverable.resolved_model_selection,
+                reasoning_effort=recoverable.resolved_reasoning_effort,
+                effective_context_window_tokens=(
+                    recoverable.effective_context_window_tokens
+                ),
+                effective_auto_compaction_threshold_tokens=(
+                    recoverable.effective_auto_compaction_threshold_tokens
+                ),
+                resolved_at=recoverable.resolved_at
+                or datetime.datetime.now(datetime.UTC),
+            )
+        agent_session_repository = _AgentSessionRepository(
+            inference_state=inference_state
+        )
     if live_event_projector is None:
         live_event_projector = _LiveEventProjector()
     return RunExecutor(
@@ -780,6 +809,24 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
     )
 
 
+async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
+    """Return a minimal run request for an existing Session inference state."""
+    del args, kwargs
+    return Success(
+        RunRequest(
+            session_id="session-001",
+            user_messages=[],
+            agent_prompt=None,
+            toolkits=[],
+            model="gpt-test",
+            credential_kwargs={},
+            workspace_id="workspace-001",
+            agent_id="agent-001",
+            auto_compaction_threshold_tokens=None,
+        )
+    )
+
+
 async def _resolve_no_tools(*args: object, **kwargs: object) -> list[object]:
     """Return no dynamic tools."""
     del args, kwargs
@@ -793,6 +840,11 @@ def _patch_successful_resolution(
     monkeypatch.setattr(
         run_executor_module, "resolve_invoke_input_with_profile", _resolve_success
     )
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        _resolve_existing_success,
+    )
     monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
 
 
@@ -800,7 +852,7 @@ def _patch_successful_resolution(
 async def test_execute_reports_resolve_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Resolve failures end with a system error and RunComplete."""
+    """Preparation failures cancel the pending run and publish a typed error."""
     dispatched: list[PublishedEvent] = []
     executor = _executor()
 
@@ -852,7 +904,7 @@ async def test_execute_reports_resolve_failure(
     assert result.toolkits == []
     assert result.terminal_event_observed is True
     assert result.run_id is not None
-    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert result.terminal_run_status == AgentRunStatus.CANCELLED
     error_event = dispatched[0]
     assert isinstance(error_event, Event)
     assert error_event.kind == EventKind.SYSTEM_ERROR
@@ -1008,13 +1060,7 @@ async def test_execute_persists_recovered_profile_resolution_failure(
         dispatch_event=dispatch_event,
     )
 
-    assert lifecycle.profile_resolution_failures == [
-        (
-            recoverable.id,
-            InferenceProfileFailureCode.MODEL_TARGET_RESOLUTION_FAILED,
-            "The selected model could not be prepared for this run.",
-        )
-    ]
+    assert lifecycle.terminal_runs == [(recoverable.id, AgentRunStatus.FAILED)]
     assert result.terminal_run_status == AgentRunStatus.FAILED
     assert len(dispatched) == 2
     assert isinstance(dispatched[0], Event)
@@ -1186,7 +1232,18 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
         inference_profile_source=InferenceProfileSource.RETRY_ORIGINAL,
     )
     lifecycle = _SessionLifecycle(recoverable_run=recoverable)
-    executor = _executor(session_lifecycle=lifecycle)
+    retry_state = SessionInferenceState(
+        model_target_label="Fast",
+        model_selection=make_test_model_selection(),
+        reasoning_effort=ModelReasoningEffort.LOW,
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        agent_session_repository=_AgentSessionRepository(inference_state=retry_state),
+    )
     poll_calls: list[dict[str, object]] = []
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
@@ -1225,35 +1282,30 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "source",
-    [
-        InferenceProfileSource.PARENT_RUN,
-        InferenceProfileSource.SPAWN_OVERRIDE,
-    ],
-)
-async def test_execute_activates_inherited_pending_run_without_target_routing(
+async def test_execute_activates_pending_child_from_session_snapshot(
     monkeypatch: pytest.MonkeyPatch,
-    source: InferenceProfileSource,
 ) -> None:
-    """A pre-resolved child first run activates its exact snapshot before use."""
-    now = datetime.datetime.now(datetime.UTC)
+    """A child first run activates the exact Session snapshot before use."""
     selection = make_test_model_selection()
-    recoverable = _PendingRun(
-        requested_model_target_label="Parent model",
-        requested_reasoning_effort=ModelReasoningEffort.HIGH,
-        inference_profile_source=source,
-        resolved_model_selection=selection,
-        resolved_reasoning_effort=ModelReasoningEffort.HIGH,
-        resolved_at=now,
+    recoverable = _PendingRun(parent_agent_run_id="parent-run-001")
+    inference_state = SessionInferenceState(
+        model_target_label="Parent model",
+        model_selection=selection,
+        reasoning_effort=ModelReasoningEffort.HIGH,
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
-        parent_agent_run_id="parent-run-001",
+        resolved_at=datetime.datetime.now(datetime.UTC),
     )
     order: list[str] = []
     lifecycle = _SessionLifecycle(order, recoverable_run=recoverable)
     engine = _RecordingEngine(order)
-    executor = _executor(session_lifecycle=lifecycle, engine=engine)
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        engine=engine,
+        agent_session_repository=_AgentSessionRepository(
+            inference_state=inference_state
+        ),
+    )
     resolved_snapshots: list[AgentModelSelection] = []
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
@@ -1265,35 +1317,23 @@ async def test_execute_activates_inherited_pending_run_without_target_routing(
             has_actionable_work=True,
         )
 
-    async def resolve_inherited(*args: object, **kwargs: object) -> object:
+    async def resolve_existing(*args: object, **kwargs: object) -> object:
         del args
         resolved_snapshots.append(
             cast(AgentModelSelection, kwargs["resolved_model_selection"])
         )
         assert kwargs["resolved_reasoning_effort"] == ModelReasoningEffort.HIGH
-        return Success(
-            RunRequest(
-                session_id="session-001",
-                user_messages=[],
-                agent_prompt=None,
-                toolkits=[],
-                model="gpt-parent-snapshot",
-                credential_kwargs={},
-                workspace_id="workspace-001",
-                agent_id="agent-001",
-                auto_compaction_threshold_tokens=None,
-            )
-        )
+        return await _resolve_existing_success()
 
     async def resolve_target(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        raise AssertionError("Inherited first run must not route its target label")
+        raise AssertionError("Prepared Session state must not route its label again")
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_resolved_profile",
-        resolve_inherited,
+        resolve_existing,
     )
     monkeypatch.setattr(
         run_executor_module,
@@ -1316,86 +1356,13 @@ async def test_execute_activates_inherited_pending_run_without_target_routing(
 
     assert result.run_id == recoverable.id
     assert resolved_snapshots == [selection]
-    assert lifecycle.activation_calls == 0
-    assert lifecycle.inherited_activation_calls == 1
-    assert order[:2] == ["activate_inherited", "provider"]
-    assert len(engine.requests) == 1
+    assert lifecycle.activation_calls == 1
+    assert order[:2] == ["activate_pending", "provider"]
     request = engine.requests[0]
     assert request.effective_max_input_tokens == 64_000
     assert request.context_window_tokens == 64_000
     assert request.compaction_max_input_tokens == 64_000
     assert request.auto_compaction_threshold_tokens == 51_200
-
-
-@pytest.mark.asyncio
-async def test_execute_fails_incomplete_inherited_pending_run(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Incomplete inherited provenance fails terminally before any resolution."""
-    recoverable = _PendingRun(
-        requested_model_target_label="Parent model",
-        inference_profile_source=InferenceProfileSource.PARENT_RUN,
-        resolved_model_selection=make_test_model_selection(),
-        resolved_at=datetime.datetime.now(datetime.UTC),
-        effective_context_window_tokens=64_000,
-        effective_auto_compaction_threshold_tokens=51_200,
-        parent_agent_run_id=None,
-    )
-    lifecycle = _SessionLifecycle(recoverable_run=recoverable)
-    executor = _executor(session_lifecycle=lifecycle)
-
-    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
-        del args, kwargs
-        return RunInputPollResult(
-            requested_inference_profile=None,
-            promoted_event_ids=["event-001"],
-            user_messages=[],
-            has_actionable_work=True,
-        )
-
-    async def unexpected_resolution(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        raise AssertionError("Incomplete inherited provenance must not be resolved")
-
-    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
-    monkeypatch.setattr(
-        run_executor_module,
-        "resolve_invoke_input_with_resolved_profile",
-        unexpected_resolution,
-    )
-    monkeypatch.setattr(
-        run_executor_module,
-        "resolve_invoke_input_with_profile",
-        unexpected_resolution,
-    )
-
-    dispatched: list[PublishedEvent] = []
-
-    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
-        del session_id
-        dispatched.append(event)
-
-    result = await executor.execute(
-        _message(),
-        poll_fn=None,
-        check_stop=None,
-        prepare_toolkits=None,
-        shutdown_event=asyncio.Event(),
-        dispatch_event=dispatch_event,
-    )
-
-    assert result.terminal_run_status == AgentRunStatus.FAILED
-    assert lifecycle.inherited_activation_calls == 0
-    assert lifecycle.pending_profile_failures == [
-        (
-            recoverable.id,
-            InferenceProfileFailureCode.MODEL_TARGET_RESOLUTION_FAILED,
-            "The selected model could not be prepared for this run.",
-        )
-    ]
-    assert len(dispatched) == 2
-    assert isinstance(dispatched[0], Event)
-    assert isinstance(dispatched[1], RunComplete)
 
 
 @pytest.mark.asyncio
@@ -1945,7 +1912,7 @@ async def test_execute_clears_activity_after_run_complete(
         event.changed_session_agent_id == "child-session-agent"
         for _, event in tree_changes
     )
-    assert order == ["clear_session_activity"]
+    assert order == ["activate_pending", "clear_session_activity"]
     assert live_event_projector.live_run_cleared_session_ids == ["session-001"]
 
 
@@ -2157,8 +2124,11 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
     assert retry_updates[0].last_error_message == "An internal error occurred."
     assert retry_updates[0].attempts[0].error_type == "RuntimeError"
     assert all(
-        run.inference_run_summary.run_id == result.run_id
-        and run.inference_run_summary.resolved_profile is not None
+        run.inference_profile
+        == AppliedInferenceProfile(
+            model_target_label="default",
+            reasoning_effort=None,
+        )
         for _, run in live_event_projector.live_run_updates
     )
     latest_live_run = live_event_projector.live_run_updates[-1][1]
@@ -2166,7 +2136,10 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
     wire_event = chat_live_run_updated_dump("session-001", latest_live_run)
     wire_run = wire_event["run"]
     assert isinstance(wire_run, dict)
-    assert wire_run["inference_run_summary"]["run_id"] == result.run_id
+    assert wire_run["inference_profile"] == {
+        "model_target_label": "default",
+        "reasoning_effort": None,
+    }
 
 
 @pytest.mark.asyncio

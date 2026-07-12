@@ -1,30 +1,19 @@
 import { rem } from "@mantine/core";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
-import type { InferenceRunSummary } from "@azents/public-client";
+import type { ChatLiveRunState } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-const activeRunSummary = {
+const activeRun = {
   run_id: "run-active",
-  run_index: 2,
+  phase: "streaming_model",
   status: "running",
-  requested_profile: {
+  inferenceProfile: {
     model_target_label: "quality",
     reasoning_effort: "high",
   },
-  source: "explicit_input",
-  resolved_profile: {
-    provider: "openai",
-    model_identifier: "gpt-5.5",
-    model_display_name: "GPT 5.5",
-    model_developer: "openai",
-  },
-  resolved_reasoning_effort: "high",
-  effective_context_window_tokens: 128_000,
-  effective_auto_compaction_threshold_tokens: 115_200,
-  failure_code: null,
-  failure_message: null,
-} satisfies InferenceRunSummary;
+  retry: null,
+} satisfies ChatLiveRunState;
 
 const meta = {
   component: TokenUsageIndicator,
@@ -36,7 +25,7 @@ const meta = {
     ),
   ],
   args: {
-    activeRunSummary,
+    activeRun,
     usage: {
       runId: "run-active",
       promptTokens: 47_043,
@@ -57,7 +46,7 @@ export const ActiveRun = {} satisfies Story;
 
 export const HistoricalRunUnavailable = {
   args: {
-    activeRunSummary: null,
+    activeRun: null,
     usage: {
       runId: "run-terminal",
       promptTokens: 58_000,
@@ -70,24 +59,9 @@ export const HistoricalRunUnavailable = {
   },
 } satisfies Story;
 
-export const UnknownProvenance = {
-  args: {
-    activeRunSummary: null,
-    usage: {
-      runId: "run-unknown",
-      promptTokens: 12_000,
-      completionTokens: 800,
-      totalTokens: 12_800,
-      cachedTokens: null,
-      cacheCreationTokens: null,
-      reasoningTokens: null,
-    },
-  },
-} satisfies Story;
-
 export const NoUsageYet = {
   args: {
     usage: null,
-    activeRunSummary: null,
+    activeRun: null,
   },
 } satisfies Story;

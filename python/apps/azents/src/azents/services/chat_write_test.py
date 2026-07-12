@@ -19,10 +19,7 @@ from azents.core.enums import (
     InputBufferKind,
     LLMProvider,
 )
-from azents.core.inference_profile import (
-    InferenceProfileSource,
-    RequestedInferenceProfile,
-)
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import (
     RunMarkerPayload,
@@ -60,7 +57,6 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import (
-    make_test_model_selection,
     make_test_model_selection_dict,
 )
 
@@ -88,12 +84,11 @@ class _SubagentLockRepository(AgentSessionRepository):
         self.calls.append("lock_by_id")
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
+            inference_state=None,
             id=agent_session_id,
             workspace_id="workspace-1",
             agent_id="agent-1",
             handle="subagent-session",
-            last_model_target_label=None,
-            last_reasoning_effort=None,
             session_kind=AgentSessionKind.SUBAGENT,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,
@@ -534,16 +529,6 @@ class TestChatWriteService:
                 session,
                 AgentRunCreate(
                     session_id=agent_session.id,
-                    requested_model_target_label="Quality",
-                    requested_reasoning_effort=ModelReasoningEffort.HIGH,
-                    inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
-                    resolved_model_selection=make_test_model_selection(),
-                    resolved_reasoning_effort=ModelReasoningEffort.HIGH,
-                    resolved_at=datetime.datetime.now(datetime.UTC),
-                    effective_context_window_tokens=64_000,
-                    effective_auto_compaction_threshold_tokens=51_200,
-                    inference_profile_failure_code=None,
-                    inference_profile_failure_message=None,
                     parent_agent_run_id=None,
                 ),
             )
@@ -594,24 +579,14 @@ class TestChatWriteService:
             assert associated_runs[0].id == original_run.id
             retry_run = associated_runs[1]
             assert retry_run.status == AgentRunStatus.PENDING
-            assert (
-                retry_run.inference_profile_source
-                == InferenceProfileSource.RETRY_ORIGINAL
-            )
-            assert retry_run.requested_model_target_label == "Quality"
-            assert retry_run.requested_reasoning_effort == ModelReasoningEffort.HIGH
-            assert retry_run.resolved_model_selection is None
-            assert retry_run.resolved_reasoning_effort is None
-            assert retry_run.effective_context_window_tokens is None
-            assert retry_run.effective_auto_compaction_threshold_tokens is None
+            assert retry_run.parent_agent_run_id == original_run.parent_agent_run_id
             session_after = await AgentSessionRepository().get_by_id(
                 session,
                 agent_session.id,
             )
             assert session_after is not None
             assert session_after.run_state == AgentSessionRunState.RUNNING
-            assert session_after.last_model_target_label is None
-            assert session_after.last_reasoning_effort is None
+            assert session_after.inference_state is None
 
         repeated = await _service(
             rdb_session_manager

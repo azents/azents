@@ -11,7 +11,6 @@ from azents.core.enums import (
     LLMProvider,
     ModelFileStatus,
 )
-from azents.core.inference_profile import InferenceProfileSource
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -238,16 +237,6 @@ async def test_release_terminal_run_pins_preserves_pending(
         rdb_session,
         AgentRunCreate(
             session_id=session_id,
-            requested_model_target_label=None,
-            requested_reasoning_effort=None,
-            inference_profile_source=None,
-            resolved_model_selection=None,
-            resolved_reasoning_effort=None,
-            resolved_at=None,
-            effective_context_window_tokens=None,
-            effective_auto_compaction_threshold_tokens=None,
-            inference_profile_failure_code=None,
-            inference_profile_failure_message=None,
             parent_agent_run_id=None,
         ),
     )
@@ -260,15 +249,7 @@ async def test_release_terminal_run_pins_preserves_pending(
     pending = await run_repo.create_pending(
         rdb_session,
         session_id=session_id,
-        requested_model_target_label="Quality",
-        requested_reasoning_effort=None,
-        inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
         parent_agent_run_id=None,
-        resolved_model_selection=None,
-        resolved_reasoning_effort=None,
-        resolved_at=None,
-        effective_context_window_tokens=None,
-        effective_auto_compaction_threshold_tokens=None,
     )
     pin_repo = ModelFilePinRepository()
     await pin_repo.pin_many(

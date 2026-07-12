@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile
+from azentspublicclient.models.applied_inference_profile import AppliedInferenceProfile
 
-class TestRequestedInferenceProfile(unittest.TestCase):
-    """RequestedInferenceProfile unit test stubs"""
+class TestAppliedInferenceProfile(unittest.TestCase):
+    """AppliedInferenceProfile unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,28 +25,28 @@ class TestRequestedInferenceProfile(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> RequestedInferenceProfile:
-        """Test RequestedInferenceProfile
+    def make_instance(self, include_optional) -> AppliedInferenceProfile:
+        """Test AppliedInferenceProfile
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `RequestedInferenceProfile`
+        # uncomment below to create an instance of `AppliedInferenceProfile`
         """
-        model = RequestedInferenceProfile()
+        model = AppliedInferenceProfile()
         if include_optional:
-            return RequestedInferenceProfile(
+            return AppliedInferenceProfile(
                 model_target_label = '0',
                 reasoning_effort = 'none'
             )
         else:
-            return RequestedInferenceProfile(
+            return AppliedInferenceProfile(
                 model_target_label = '0',
                 reasoning_effort = 'none',
         )
         """
 
-    def testRequestedInferenceProfile(self):
-        """Test RequestedInferenceProfile"""
+    def testAppliedInferenceProfile(self):
+        """Test AppliedInferenceProfile"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

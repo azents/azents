@@ -265,8 +265,8 @@ def _wait_for_session_profile(
         )
         payload = _response_object(response)
         last_profile = (
-            payload.get("last_model_target_label"),
-            payload.get("last_reasoning_effort"),
+            payload.get("current_model_target_label"),
+            payload.get("current_reasoning_effort"),
         )
         if last_profile == (target, effort):
             return payload
@@ -517,8 +517,8 @@ class TestPerPromptInferenceProfile:
             agent_id=agent_id,
             session_id=session_id,
         )
-        assert session["last_model_target_label"] == "Fast"
-        assert session["last_reasoning_effort"] is None
+        assert session["current_model_target_label"] == "Fast"
+        assert session["current_reasoning_effort"] is None
 
     def test_subagent_spawn_override_continuation(
         self,

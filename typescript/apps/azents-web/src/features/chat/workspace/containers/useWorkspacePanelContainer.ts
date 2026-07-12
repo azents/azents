@@ -149,19 +149,19 @@ export function useWorkspacePanelContainer({
   const inferenceProfile = useMemo(
     () => ({
       model_target_label:
-        agentSessionQuery.data?.last_model_target_label ??
+        agentSessionQuery.data?.current_model_target_label ??
         agentQuery.data?.main_model_label ??
         "",
       reasoning_effort:
-        agentSessionQuery.data?.last_model_target_label != null
-          ? agentSessionQuery.data.last_reasoning_effort
+        agentSessionQuery.data?.current_model_target_label != null
+          ? agentSessionQuery.data.current_reasoning_effort
           : (agentQuery.data?.model_parameters?.reasoning_effort ?? null),
     }),
     [
       agentQuery.data?.main_model_label,
       agentQuery.data?.model_parameters?.reasoning_effort,
-      agentSessionQuery.data?.last_model_target_label,
-      agentSessionQuery.data?.last_reasoning_effort,
+      agentSessionQuery.data?.current_model_target_label,
+      agentSessionQuery.data?.current_reasoning_effort,
     ],
   );
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);

@@ -165,7 +165,7 @@ export function ChatSessionView({
           <Group gap="xs" wrap="nowrap">
             <TokenUsageIndicator
               usage={output.tokenUsage}
-              activeRunSummary={output.liveRun?.inferenceRunSummary ?? null}
+              activeRun={output.liveRun}
             />
             <ActionIcon
               variant="subtle"

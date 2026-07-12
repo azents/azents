@@ -82,12 +82,12 @@ class _AgentRunRepository:
         self,
         running_run: AgentRunState | None,
         *,
-        inherited_run: AgentRunState | None = None,
+        activated_run: AgentRunState | None = None,
     ) -> None:
         self.running_run = running_run
-        self.inherited_run = inherited_run
+        self.activated_run = activated_run
         self.terminal_session_ids: list[str] = []
-        self.inherited_activation_run_ids: list[str] = []
+        self.activation_run_ids: list[str] = []
 
     async def get_active_by_session_id(
         self,
@@ -99,7 +99,7 @@ class _AgentRunRepository:
         del session, session_id
         return self.running_run
 
-    async def activate_inherited_pending(
+    async def activate_pending(
         self,
         session: AsyncSession,
         *,
@@ -108,10 +108,10 @@ class _AgentRunRepository:
     ) -> AgentRunState:
         """Return the test inherited run selected for activation."""
         del session, activated_at
-        self.inherited_activation_run_ids.append(run_id)
-        if self.inherited_run is None:
-            raise AssertionError("Inherited test run was not configured")
-        return self.inherited_run
+        self.activation_run_ids.append(run_id)
+        if self.activated_run is None:
+            raise AssertionError("Activation test run was not configured")
+        return self.activated_run
 
     async def mark_session_running_terminal(
         self,
@@ -135,16 +135,6 @@ def _running_run() -> AgentRunState:
         run_index=1,
         phase=AgentRunPhase.EXECUTING_TOOLS,
         status=AgentRunStatus.RUNNING,
-        requested_model_target_label=None,
-        requested_reasoning_effort=None,
-        inference_profile_source=None,
-        resolved_model_selection=None,
-        resolved_reasoning_effort=None,
-        resolved_at=None,
-        effective_context_window_tokens=None,
-        effective_auto_compaction_threshold_tokens=None,
-        inference_profile_failure_code=None,
-        inference_profile_failure_message=None,
         parent_agent_run_id=None,
         active_tool_calls=[],
         created_at=now,
@@ -205,12 +195,12 @@ async def test_mark_session_idle_allows_terminal_run_boundary() -> None:
 
 
 @pytest.mark.asyncio
-async def test_activate_inherited_pending_rejects_session_mismatch() -> None:
-    """Inherited activation cannot cross the requested session boundary."""
-    inherited_run = _running_run().model_copy(update={"session_id": "session-002"})
+async def test_activate_pending_rejects_session_mismatch() -> None:
+    """Pending activation cannot cross the requested session boundary."""
+    activated_run = _running_run().model_copy(update={"session_id": "session-002"})
     agent_run_repository = _AgentRunRepository(
         None,
-        inherited_run=inherited_run,
+        activated_run=activated_run,
     )
     service = _service(
         agent_run_repository=agent_run_repository,
@@ -218,9 +208,9 @@ async def test_activate_inherited_pending_rejects_session_mismatch() -> None:
     )
 
     with pytest.raises(ValueError, match="AgentRun session mismatch"):
-        await service.activate_inherited_pending_agent_run(
+        await service.activate_pending_agent_run(
             "session-001",
-            run_id=inherited_run.id,
+            run_id=activated_run.id,
         )
 
-    assert agent_run_repository.inherited_activation_run_ids == [inherited_run.id]
+    assert agent_run_repository.activation_run_ids == [activated_run.id]

@@ -9,7 +9,7 @@ from azents.core.agent import AgentModelSelection
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
-    ResolvedInferenceProfileSummary,
+    SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
 
@@ -53,16 +53,18 @@ def test_requested_profile_accepts_normalized_effort() -> None:
     }
 
 
-def test_resolved_summary_excludes_internal_snapshot_data() -> None:
-    summary = ResolvedInferenceProfileSummary.from_model_selection(_selection())
-    dumped = summary.model_dump(mode="json")
+def test_session_state_projects_only_applied_public_settings() -> None:
+    state = SessionInferenceState(
+        model_target_label="Quality",
+        model_selection=_selection(),
+        reasoning_effort=ModelReasoningEffort.HIGH,
+        effective_context_window_tokens=100_000,
+        effective_auto_compaction_threshold_tokens=80_000,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
 
-    assert dumped == {
-        "provider": "openai",
-        "model_identifier": "gpt-5.4",
-        "model_display_name": "GPT-5.4",
-        "model_developer": "openai",
+    assert state.applied_profile.model_dump(mode="json") == {
+        "model_target_label": "Quality",
+        "reasoning_effort": "high",
     }
-    assert "llm_provider_integration_id" not in dumped
-    assert "model_snapshot" not in dumped
-    assert "source_metadata" not in dumped
+    assert "llm_provider_integration_id" not in state.applied_profile.model_dump()

@@ -1,6 +1,6 @@
 "use client";
 
-/** Chat header token usage bound to immutable run provenance. */
+/** Chat header token usage with the active turn's applied inference profile. */
 
 import {
   ActionIcon,
@@ -13,86 +13,39 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { memo, useMemo, useState } from "react";
-import type { TokenUsageSummary } from "../types";
-import type { InferenceRunSummary } from "@azents/public-client";
+import type { ChatLiveRunState, TokenUsageSummary } from "../types";
+import type { AppliedInferenceProfile } from "@azents/public-client";
 
 interface TokenUsageIndicatorProps {
   usage: TokenUsageSummary | null;
-  activeRunSummary: InferenceRunSummary | null;
+  activeRun: ChatLiveRunState | null;
 }
 
 function formatNumber(value: number | null): string {
   return value === null ? "—" : value.toLocaleString();
 }
 
-function percentUsed(
-  totalTokens: number | null,
-  thresholdTokens: number | null,
-): number | null {
-  if (
-    totalTokens === null ||
-    thresholdTokens === null ||
-    thresholdTokens <= 0
-  ) {
-    return null;
-  }
-  return Math.min(100, Math.max(0, (totalTokens / thresholdTokens) * 100));
-}
-
-function progressColor(percent: number | null): string {
-  if (percent === null) {
-    return "var(--mantine-color-gray-5)";
-  }
-  if (percent >= 90) {
-    return "var(--mantine-color-red-6)";
-  }
-  if (percent >= 70) {
-    return "var(--mantine-color-yellow-6)";
-  }
-  return "var(--mantine-color-teal-6)";
-}
-
-function resolveUsageSummary(
+function resolveUsageProfile(
   usage: TokenUsageSummary | null,
-  activeRunSummary: InferenceRunSummary | null,
-): InferenceRunSummary | null {
+  activeRun: ChatLiveRunState | null,
+): AppliedInferenceProfile | null {
   const runId = usage?.runId ?? null;
-  if (runId === null) {
+  if (runId === null || activeRun?.run_id !== runId) {
     return null;
   }
-  return activeRunSummary?.run_id === runId ? activeRunSummary : null;
+  return activeRun.inferenceProfile;
 }
 
 export const TokenUsageIndicator = memo(function TokenUsageIndicator({
   usage,
-  activeRunSummary,
+  activeRun,
 }: TokenUsageIndicatorProps): React.ReactElement {
   const t = useTranslations("chat.tokenUsage");
   const [opened, setOpened] = useState(false);
-  const runSummary = useMemo(
-    () => resolveUsageSummary(usage, activeRunSummary),
-    [activeRunSummary, usage],
+  const inferenceProfile = useMemo(
+    () => resolveUsageProfile(usage, activeRun),
+    [activeRun, usage],
   );
-  const resolvedProfile = runSummary?.resolved_profile ?? null;
-  const contextWindow = runSummary?.effective_context_window_tokens ?? null;
-  const compactionThreshold =
-    runSummary?.effective_auto_compaction_threshold_tokens ?? null;
-  const percent = useMemo(
-    () => percentUsed(usage?.totalTokens ?? null, compactionThreshold),
-    [compactionThreshold, usage?.totalTokens],
-  );
-  const color = progressColor(percent);
-  const ringPercent = percent ?? 0;
-  const ringRadius = 7;
-  const ringCircumference = 2 * Math.PI * ringRadius;
-  const ringDashOffset = ringCircumference * (1 - ringPercent / 100);
-  const modelName =
-    resolvedProfile === null
-      ? t("unknownModel")
-      : t("modelIdentity", {
-          model: resolvedProfile.model_display_name,
-          provider: resolvedProfile.provider,
-        });
 
   return (
     <Popover
@@ -123,28 +76,11 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
             <circle
               cx="9"
               cy="9"
-              r={ringRadius}
+              r="7"
               fill="none"
               stroke="var(--mantine-color-default-border)"
               strokeWidth="4"
             />
-            {ringPercent > 0 && (
-              <circle
-                cx="9"
-                cy="9"
-                r={ringRadius}
-                fill="none"
-                stroke={color}
-                strokeDasharray={ringCircumference}
-                strokeDashoffset={ringDashOffset}
-                strokeLinecap="round"
-                strokeWidth="4"
-                style={{
-                  transform: "rotate(-90deg)",
-                  transformOrigin: "50% 50%",
-                }}
-              />
-            )}
           </Box>
         </ActionIcon>
       </Popover.Target>
@@ -155,31 +91,19 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
               {t("title")}
             </Text>
             <Text size="xs" c="dimmed">
-              {modelName}
+              {inferenceProfile?.model_target_label ?? t("unknownModel")}
             </Text>
-            {usage !== null && usage.runId !== null && runSummary === null && (
-              <Text size="xs" c="dimmed">
-                {t("unknownProvenance")}
-              </Text>
-            )}
+            {usage !== null &&
+              usage.runId !== null &&
+              inferenceProfile === null && (
+                <Text size="xs" c="dimmed">
+                  {t("unknownProvenance")}
+                </Text>
+              )}
           </Box>
-          <UsageRow
-            label={t("usedPercent")}
-            value={
-              percent === null ? "—" : t("percent", { value: percent / 100 })
-            }
-          />
           <UsageRow
             label={t("total")}
             value={formatNumber(usage?.totalTokens ?? null)}
-          />
-          <UsageRow
-            label={t("effectiveContextWindow")}
-            value={formatNumber(contextWindow)}
-          />
-          <UsageRow
-            label={t("autoCompactionThreshold")}
-            value={formatNumber(compactionThreshold)}
           />
           <UsageRow
             label={t("prompt")}

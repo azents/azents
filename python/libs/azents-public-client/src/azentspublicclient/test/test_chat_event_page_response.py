@@ -48,8 +48,7 @@ class TestChatEventPageResponse(unittest.TestCase):
                         model = '', 
                         native_format = '', 
                         schema_version = '', 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        inference_run_summary = { }, )
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 has_more = True,
                 has_newer = True,
@@ -71,8 +70,7 @@ class TestChatEventPageResponse(unittest.TestCase):
                         model = '', 
                         native_format = '', 
                         schema_version = '', 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        inference_run_summary = { }, )
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 has_more = True,
         )

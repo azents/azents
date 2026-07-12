@@ -11,7 +11,10 @@ from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, InputBufferKind
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    AppliedInferenceProfile,
+    RequestedInferenceProfile,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
@@ -429,7 +432,10 @@ class InputBufferService:
                     )
                 )
             elif buffer.kind == InputBufferKind.AGENT_MESSAGE:
-                user_message = await self._buffer_to_user_message(buffer)
+                user_message = await self._buffer_to_user_message(
+                    buffer,
+                    fallback_profile=required_inference_profile,
+                )
                 promoted.append(
                     _PromotedInputBuffer(
                         buffer=buffer,
@@ -442,7 +448,10 @@ class InputBufferService:
                     )
                 )
             else:
-                user_message = await self._buffer_to_user_message(buffer)
+                user_message = await self._buffer_to_user_message(
+                    buffer,
+                    fallback_profile=required_inference_profile,
+                )
                 promoted.append(
                     _PromotedInputBuffer(
                         buffer=buffer,
@@ -593,6 +602,7 @@ class InputBufferService:
             user_message = await self._buffer_to_user_message(
                 buffer,
                 external_id=f"{buffer.id}:user_message",
+                fallback_profile=_requested_inference_profile(buffer),
             )
             promoted.append(
                 _PromotedInputBuffer(
@@ -610,6 +620,7 @@ class InputBufferService:
         buffer: InputBuffer,
         *,
         external_id: str | None = None,
+        fallback_profile: RequestedInferenceProfile | None,
     ) -> RunUserMessage:
         """Convert InputBuffer domain row to event run user message."""
         attachments = []
@@ -643,6 +654,23 @@ class InputBufferService:
                 if not file_parts:
                     file_parts = materialized.file_parts
 
+        requested_profile = _requested_inference_profile(buffer) or fallback_profile
+        if requested_profile is not None:
+            applied_profile = AppliedInferenceProfile(
+                model_target_label=requested_profile.model_target_label,
+                reasoning_effort=requested_profile.reasoning_effort,
+            )
+        else:
+            async with self.session_manager() as session:
+                agent_session = await self.agent_session_repository.get_by_id(
+                    session, buffer.session_id
+                )
+            applied_profile = (
+                agent_session.inference_state.applied_profile
+                if agent_session is not None
+                and agent_session.inference_state is not None
+                else None
+            )
         user_message = make_run_user_message(
             content=buffer.content,
             metadata=buffer.metadata,
@@ -654,9 +682,7 @@ class InputBufferService:
         return dataclasses.replace(
             user_message,
             payload=user_message.payload.model_copy(
-                update={
-                    "requested_inference_profile": _requested_inference_profile(buffer)
-                }
+                update={"applied_inference_profile": applied_profile}
             ),
         )
 
@@ -748,10 +774,10 @@ def _user_message_payload_json(
     payload = _JSON_OBJECT_ADAPTER.validate_python(
         user_message.payload.model_dump(mode="json", exclude_none=True)
     )
-    requested_profile = user_message.payload.requested_inference_profile
-    if requested_profile is not None:
-        payload["requested_inference_profile"] = _JSON_OBJECT_ADAPTER.validate_python(
-            requested_profile.model_dump(mode="json")
+    applied_profile = user_message.payload.applied_inference_profile
+    if applied_profile is not None:
+        payload["applied_inference_profile"] = _JSON_OBJECT_ADAPTER.validate_python(
+            applied_profile.model_dump(mode="json")
         )
     return payload
 

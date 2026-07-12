@@ -11,16 +11,8 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.agent import AgentModelSelection
 from azents.core.enums import AgentRunPhase, AgentRunStatus
-from azents.core.inference_profile import (
-    InferenceProfileFailureCode,
-    InferenceProfileSource,
-    InferenceRunSummary,
-    RequestedInferenceProfile,
-)
-from azents.core.llm_catalog import ModelReasoningEffort
-from azents.engine.events.types import ActiveToolCall, AgentRunState, Event
+from azents.engine.events.types import ActiveToolCall, AgentRunState
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -30,14 +22,6 @@ from azents.worker.deps import get_worker_broker
 
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
-
-
-@dataclasses.dataclass(frozen=True)
-class InferenceRunEventProjection:
-    """Durable input event paired with its latest safe run summary."""
-
-    event: Event
-    inference_run_summary: InferenceRunSummary
 
 
 @dataclasses.dataclass(frozen=True)
@@ -139,21 +123,6 @@ class SessionLifecycleService:
         )
         return bool(active)
 
-    async def get_inference_run_summary(
-        self,
-        *,
-        run_id: str,
-    ) -> InferenceRunSummary:
-        """Load the current safe run summary for live projection."""
-        async with self.session_manager() as db_session:
-            summary = await self.agent_run_repository.get_inference_run_summary_by_id(
-                db_session,
-                run_id=run_id,
-            )
-            if summary is None:
-                raise ValueError("AgentRun not found")
-            return summary
-
     async def heartbeat_session(self, session_id: str) -> None:
         """Refresh DB heartbeat and Redis owner heartbeat of RUNNING session."""
         await self.run_short_db(
@@ -194,39 +163,20 @@ class SessionLifecycleService:
         self,
         session_id: str,
         *,
-        requested_profile: RequestedInferenceProfile,
-        source: InferenceProfileSource,
         input_event_ids: Sequence[str],
     ) -> AgentRunState:
-        """Claim a recoverable pending run or create one for requested input."""
+        """Claim a recoverable pending run or create a model-independent run."""
         async with self.session_manager() as db_session:
             pending = await self.agent_run_repository.claim_pending_by_session_id(
                 db_session,
                 session_id=session_id,
             )
-            created = pending is None
             if pending is None:
                 pending = await self.agent_run_repository.create_pending(
                     db_session,
                     session_id=session_id,
-                    requested_model_target_label=(requested_profile.model_target_label),
-                    requested_reasoning_effort=requested_profile.reasoning_effort,
-                    inference_profile_source=source,
                     parent_agent_run_id=None,
-                    resolved_model_selection=None,
-                    resolved_reasoning_effort=None,
-                    resolved_at=None,
-                    effective_context_window_tokens=None,
-                    effective_auto_compaction_threshold_tokens=None,
                 )
-            pending_profile_matches = (
-                pending.requested_model_target_label
-                == requested_profile.model_target_label
-                and pending.requested_reasoning_effort
-                == requested_profile.reasoning_effort
-            )
-            if not created and not pending_profile_matches:
-                raise ValueError("Pending AgentRun inference profile mismatch")
             await self.agent_run_repository.associate_input_events(
                 db_session,
                 run_id=pending.id,
@@ -264,63 +214,13 @@ class SessionLifecycleService:
         session_id: str,
         *,
         run_id: str,
-        resolved_model_selection: AgentModelSelection,
-        resolved_reasoning_effort: ModelReasoningEffort | None,
-        effective_context_window_tokens: int,
-        effective_auto_compaction_threshold_tokens: int,
     ) -> AgentRunState:
-        """Commit resolved provenance and session profile before invocation."""
+        """Activate a model-independent pending AgentRun."""
         async with self.session_manager() as db_session:
             run = await self.agent_run_repository.activate_pending(
                 db_session,
                 run_id=run_id,
-                resolved_model_selection=resolved_model_selection,
-                resolved_reasoning_effort=resolved_reasoning_effort,
-                resolved_at=datetime.datetime.now(datetime.UTC),
-                effective_context_window_tokens=effective_context_window_tokens,
-                effective_auto_compaction_threshold_tokens=(
-                    effective_auto_compaction_threshold_tokens
-                ),
-            )
-            if run.session_id != session_id:
-                raise ValueError("AgentRun session mismatch")
-            await db_session.commit()
-            return run
-
-    async def activate_inherited_pending_agent_run(
-        self,
-        session_id: str,
-        *,
-        run_id: str,
-    ) -> AgentRunState:
-        """Activate a pre-resolved child run without replacing its provenance."""
-        async with self.session_manager() as db_session:
-            run = await self.agent_run_repository.activate_inherited_pending(
-                db_session,
-                run_id=run_id,
                 activated_at=datetime.datetime.now(datetime.UTC),
-            )
-            if run.session_id != session_id:
-                raise ValueError("AgentRun session mismatch")
-            await db_session.commit()
-            return run
-
-    async def fail_pending_agent_run_profile(
-        self,
-        session_id: str,
-        *,
-        run_id: str,
-        failure_code: InferenceProfileFailureCode,
-        failure_message: str,
-    ) -> AgentRunState:
-        """Finalize a profile resolution failure without changing session intent."""
-        async with self.session_manager() as db_session:
-            run = await self.agent_run_repository.fail_pending_profile_resolution(
-                db_session,
-                run_id=run_id,
-                failure_code=failure_code,
-                failure_message=failure_message,
-                ended_at=datetime.datetime.now(datetime.UTC),
             )
             if run.session_id != session_id:
                 raise ValueError("AgentRun session mismatch")
@@ -361,27 +261,6 @@ class SessionLifecycleService:
                 ended_at=datetime.datetime.now(datetime.UTC),
             ),
             error_log="Failed to mark session agent runs terminal",
-            session_id=session_id,
-        )
-
-    async def fail_agent_run_profile_resolution_if_running(
-        self,
-        session_id: str,
-        *,
-        run_id: str,
-        failure_code: InferenceProfileFailureCode,
-        failure_message: str,
-    ) -> None:
-        """Fail a running AgentRun with safe profile-resolution details."""
-        await self.run_short_db(
-            lambda db: self.agent_run_repository.fail_profile_resolution_if_running(
-                db,
-                run_id=run_id,
-                failure_code=failure_code,
-                failure_message=failure_message,
-                ended_at=datetime.datetime.now(datetime.UTC),
-            ),
-            error_log="Failed to mark agent run profile resolution failed",
             session_id=session_id,
         )
 

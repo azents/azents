@@ -13,6 +13,7 @@ from azents.core.enums import (
     LLMProvider,
     WorkspaceUserRole,
 )
+from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import UserMessagePayload
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
@@ -41,7 +42,10 @@ from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_selection_dict,
+)
 
 from . import ChatSessionService
 from .data import SessionAccessDenied
@@ -218,9 +222,9 @@ class TestChatSessionInputBuffer:
         assert [event.id for event in result.value.input_buffer_events] == [buffer_id]
         payload = result.value.input_buffer_events[0].payload
         assert isinstance(payload, UserMessagePayload)
-        assert payload.requested_inference_profile is not None
-        assert payload.requested_inference_profile.model_target_label == "main"
-        assert payload.requested_inference_profile.reasoning_effort == (
+        assert payload.applied_inference_profile is not None
+        assert payload.applied_inference_profile.model_target_label == "main"
+        assert payload.applied_inference_profile.reasoning_effort == (
             ModelReasoningEffort.HIGH
         )
         assert result.value.partial_history_events == []
@@ -237,26 +241,28 @@ class TestChatSessionInputBuffer:
                 handle="chat-live-running-run",
                 slug="chat-live-running-run",
             )
+            now = datetime.datetime.now(datetime.UTC)
+            await AgentSessionRepository().set_inference_state(
+                session,
+                session_id=session_id,
+                inference_state=SessionInferenceState(
+                    model_target_label="main",
+                    model_selection=make_test_model_selection(),
+                    reasoning_effort=ModelReasoningEffort.HIGH,
+                    effective_context_window_tokens=100_000,
+                    effective_auto_compaction_threshold_tokens=80_000,
+                    resolved_at=now,
+                ),
+            )
             await AgentSessionRepository().mark_running(session, session_id)
             run = await AgentRunRepository().create(
                 session,
                 AgentRunCreate(
                     session_id=session_id,
-                    requested_model_target_label=None,
-                    requested_reasoning_effort=None,
-                    inference_profile_source=None,
-                    resolved_model_selection=None,
-                    resolved_reasoning_effort=None,
-                    resolved_at=None,
-                    effective_context_window_tokens=None,
-                    effective_auto_compaction_threshold_tokens=None,
-                    inference_profile_failure_code=None,
-                    inference_profile_failure_message=None,
                     parent_agent_run_id=None,
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                 ),
             )
-            now = datetime.datetime.now(datetime.UTC)
             retry_state = FailedRunRetryState.from_attempt(
                 FailedRunAttempt(
                     user_message="temporary failure",
@@ -287,6 +293,11 @@ class TestChatSessionInputBuffer:
         assert result.value.run.run_id == run.id
         assert result.value.run.phase == AgentRunPhase.WAITING_FOR_MODEL
         assert result.value.run.status == AgentRunStatus.RUNNING
+        assert result.value.run.inference_profile.model_target_label == "main"
+        assert (
+            result.value.run.inference_profile.reasoning_effort
+            == ModelReasoningEffort.HIGH
+        )
         assert result.value.run.retry is not None
         assert result.value.run.retry.status == "waiting"
         assert result.value.run.retry.last_error_message == "temporary failure"

@@ -120,9 +120,29 @@ class RDBAgentSession(RDBModel):
 
     __tablename__ = "agent_sessions"
 
-    CK_LAST_PROFILE = sa.CheckConstraint(
-        "last_reasoning_effort IS NULL OR last_model_target_label IS NOT NULL",
-        name="ck_agent_sessions_last_profile",
+    CK_CURRENT_INFERENCE_STATE = sa.CheckConstraint(
+        "(current_model_target_label IS NULL "
+        "AND current_model_selection IS NULL "
+        "AND current_reasoning_effort IS NULL "
+        "AND current_effective_context_window_tokens IS NULL "
+        "AND current_effective_auto_compaction_threshold_tokens IS NULL "
+        "AND current_inference_resolved_at IS NULL) OR "
+        "(current_model_target_label IS NOT NULL "
+        "AND current_model_selection IS NOT NULL "
+        "AND current_effective_context_window_tokens IS NOT NULL "
+        "AND current_effective_auto_compaction_threshold_tokens IS NOT NULL "
+        "AND current_inference_resolved_at IS NOT NULL)",
+        name="ck_agent_sessions_current_inference_state",
+    )
+    CK_CURRENT_CONTEXT_WINDOW = sa.CheckConstraint(
+        "current_effective_context_window_tokens IS NULL "
+        "OR current_effective_context_window_tokens > 0",
+        name="ck_agent_sessions_current_context_window",
+    )
+    CK_CURRENT_COMPACTION_THRESHOLD = sa.CheckConstraint(
+        "current_effective_auto_compaction_threshold_tokens IS NULL "
+        "OR current_effective_auto_compaction_threshold_tokens > 0",
+        name="ck_agent_sessions_current_compaction_threshold",
     )
     UQ_HANDLE = sa.UniqueConstraint("handle", name="uq_agent_sessions_handle")
     IX_WORKSPACE_ID = sa.Index("ix_agent_sessions_workspace_id", "workspace_id")
@@ -183,12 +203,30 @@ class RDBAgentSession(RDBModel):
         nullable=False,
     )
     handle: Mapped[str] = mapped_column(sa.String(120), nullable=False)
-    last_model_target_label: Mapped[str | None] = mapped_column(
+    current_model_target_label: Mapped[str | None] = mapped_column(
         sa.String(80),
         nullable=True,
     )
-    last_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
+    current_model_selection: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    current_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
         model_reasoning_effort_enum,
+        nullable=True,
+    )
+    current_effective_context_window_tokens: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+    )
+    current_effective_auto_compaction_threshold_tokens: Mapped[int | None] = (
+        mapped_column(
+            sa.Integer,
+            nullable=True,
+        )
+    )
+    current_inference_resolved_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
         nullable=True,
     )
     session_kind: Mapped[AgentSessionKind] = mapped_column(
@@ -363,7 +401,9 @@ class RDBAgentSession(RDBModel):
     )
 
     __table_args__ = (
-        CK_LAST_PROFILE,
+        CK_CURRENT_INFERENCE_STATE,
+        CK_CURRENT_CONTEXT_WINDOW,
+        CK_CURRENT_COMPACTION_THRESHOLD,
         UQ_HANDLE,
         IX_WORKSPACE_ID,
         IX_AGENT_ID,

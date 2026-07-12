@@ -116,12 +116,11 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         self.calls.append("get_by_id")
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
+            inference_state=None,
             id=agent_session_id,
             workspace_id="workspace-1",
             agent_id="agent-1",
             handle="test-session-handle",
-            last_model_target_label=None,
-            last_reasoning_effort=None,
             session_kind=self.session_kind,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,

@@ -3,8 +3,8 @@
 import type {
   ActionExecutionProjectionResponse,
   AgentResponse,
+  AppliedInferenceProfile,
   ChatEventResponse,
-  InferenceRunSummary,
   InputActionDefinitionResponse,
   RequestedInferenceProfile,
 } from "@azents/public-client";
@@ -594,7 +594,7 @@ export interface ChatLiveRunState {
   run_id: string;
   phase: AgentRunPhase;
   status: AgentRunStatus;
-  inferenceRunSummary: InferenceRunSummary;
+  inferenceProfile: AppliedInferenceProfile;
   retry?: ChatLiveRunRetryState | null;
 }
 

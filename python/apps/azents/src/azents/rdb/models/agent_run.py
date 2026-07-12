@@ -9,17 +9,7 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus
-from azents.core.inference_profile import (
-    InferenceProfileFailureCode,
-    InferenceProfileSource,
-)
-from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.base import RDBModel
-from azents.rdb.models.inference_profile_types import (
-    inference_profile_failure_code_enum,
-    inference_profile_source_enum,
-    model_reasoning_effort_enum,
-)
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 type JSONScalar = str | int | float | bool | None
@@ -50,25 +40,6 @@ class RDBAgentRun(RDBModel):
 
     __tablename__ = "agent_runs"
 
-    CK_REQUESTED_PROFILE = sa.CheckConstraint(
-        "requested_reasoning_effort IS NULL "
-        "OR requested_model_target_label IS NOT NULL",
-        name="ck_agent_runs_requested_profile",
-    )
-    CK_RESOLVED_PROFILE = sa.CheckConstraint(
-        "resolved_reasoning_effort IS NULL OR resolved_model_selection IS NOT NULL",
-        name="ck_agent_runs_resolved_profile",
-    )
-    CK_EFFECTIVE_CONTEXT_WINDOW = sa.CheckConstraint(
-        "effective_context_window_tokens IS NULL "
-        "OR effective_context_window_tokens > 0",
-        name="ck_agent_runs_effective_context_window",
-    )
-    CK_EFFECTIVE_COMPACTION_THRESHOLD = sa.CheckConstraint(
-        "effective_auto_compaction_threshold_tokens IS NULL "
-        "OR effective_auto_compaction_threshold_tokens > 0",
-        name="ck_agent_runs_effective_compaction_threshold",
-    )
     IX_SESSION_ID = sa.Index("ix_agent_runs_session_id", "session_id")
     UQ_SESSION_RUN_INDEX = sa.UniqueConstraint(
         "session_id",
@@ -105,48 +76,6 @@ class RDBAgentRun(RDBModel):
         nullable=False,
     )
     run_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    requested_model_target_label: Mapped[str | None] = mapped_column(
-        sa.String(80),
-        nullable=True,
-    )
-    requested_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
-        model_reasoning_effort_enum,
-        nullable=True,
-    )
-    inference_profile_source: Mapped[InferenceProfileSource | None] = mapped_column(
-        inference_profile_source_enum,
-        nullable=True,
-    )
-    resolved_model_selection: Mapped[dict[str, JSONValue] | None] = mapped_column(
-        JSONB,
-        nullable=True,
-    )
-    resolved_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
-        model_reasoning_effort_enum,
-        nullable=True,
-    )
-    resolved_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-    )
-    effective_context_window_tokens: Mapped[int | None] = mapped_column(
-        sa.Integer,
-        nullable=True,
-    )
-    effective_auto_compaction_threshold_tokens: Mapped[int | None] = mapped_column(
-        sa.Integer,
-        nullable=True,
-    )
-    inference_profile_failure_code: Mapped[InferenceProfileFailureCode | None] = (
-        mapped_column(
-            inference_profile_failure_code_enum,
-            nullable=True,
-        )
-    )
-    inference_profile_failure_message: Mapped[str | None] = mapped_column(
-        sa.Text,
-        nullable=True,
-    )
     parent_agent_run_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("agent_runs.id", ondelete="SET NULL"),
@@ -222,10 +151,6 @@ class RDBAgentRun(RDBModel):
     )
 
     __table_args__ = (
-        CK_REQUESTED_PROFILE,
-        CK_RESOLVED_PROFILE,
-        CK_EFFECTIVE_CONTEXT_WINDOW,
-        CK_EFFECTIVE_COMPACTION_THRESHOLD,
         IX_SESSION_ID,
         UQ_SESSION_RUN_INDEX,
         IX_SESSION_STATUS,

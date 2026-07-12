@@ -9,16 +9,7 @@ from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import AgentModelSelection
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
-from azents.core.inference_profile import (
-    InferenceProfileFailureCode,
-    InferenceProfileSource,
-    InferenceRunSummary,
-    RequestedInferenceProfile,
-    ResolvedInferenceProfileSummary,
-)
-from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -58,7 +49,14 @@ def _serialize_payload(payload: EventPayload) -> dict[str, JSONValue]:
         payload.model_dump(mode="json", exclude_none=True)
     )
     if (
-        isinstance(payload, (UserMessagePayload, ActionMessagePayload))
+        isinstance(payload, UserMessagePayload)
+        and payload.applied_inference_profile is not None
+    ):
+        serialized["applied_inference_profile"] = _JSON_OBJECT_ADAPTER.validate_python(
+            payload.applied_inference_profile.model_dump(mode="json")
+        )
+    if (
+        isinstance(payload, ActionMessagePayload)
         and payload.requested_inference_profile is not None
     ):
         serialized["requested_inference_profile"] = (
@@ -432,22 +430,6 @@ class AgentRunRepository:
         rdb = RDBAgentRun(
             session_id=create.session_id,
             run_index=run_index,
-            requested_model_target_label=create.requested_model_target_label,
-            requested_reasoning_effort=create.requested_reasoning_effort,
-            inference_profile_source=create.inference_profile_source,
-            resolved_model_selection=(
-                create.resolved_model_selection.model_dump(mode="json")
-                if create.resolved_model_selection is not None
-                else None
-            ),
-            resolved_reasoning_effort=create.resolved_reasoning_effort,
-            resolved_at=create.resolved_at,
-            effective_context_window_tokens=create.effective_context_window_tokens,
-            effective_auto_compaction_threshold_tokens=(
-                create.effective_auto_compaction_threshold_tokens
-            ),
-            inference_profile_failure_code=create.inference_profile_failure_code,
-            inference_profile_failure_message=create.inference_profile_failure_message,
             parent_agent_run_id=create.parent_agent_run_id,
             phase=create.phase,
             status=create.status,
@@ -465,17 +447,9 @@ class AgentRunRepository:
         session: AsyncSession,
         *,
         session_id: str,
-        requested_model_target_label: str | None,
-        requested_reasoning_effort: ModelReasoningEffort | None,
-        inference_profile_source: InferenceProfileSource,
         parent_agent_run_id: str | None,
-        resolved_model_selection: AgentModelSelection | None,
-        resolved_reasoning_effort: ModelReasoningEffort | None,
-        resolved_at: datetime.datetime | None,
-        effective_context_window_tokens: int | None,
-        effective_auto_compaction_threshold_tokens: int | None,
     ) -> AgentRunState:
-        """Create a pending run without cancelling an active run."""
+        """Create a model-independent pending run without cancelling an active run."""
         locked_session_id = await session.scalar(
             sa.select(RDBAgentSession.id)
             .where(RDBAgentSession.id == session_id)
@@ -487,22 +461,6 @@ class AgentRunRepository:
         rdb = RDBAgentRun(
             session_id=session_id,
             run_index=run_index,
-            requested_model_target_label=requested_model_target_label,
-            requested_reasoning_effort=requested_reasoning_effort,
-            inference_profile_source=inference_profile_source,
-            resolved_model_selection=(
-                resolved_model_selection.model_dump(mode="json")
-                if resolved_model_selection is not None
-                else None
-            ),
-            resolved_reasoning_effort=resolved_reasoning_effort,
-            resolved_at=resolved_at,
-            effective_context_window_tokens=effective_context_window_tokens,
-            effective_auto_compaction_threshold_tokens=(
-                effective_auto_compaction_threshold_tokens
-            ),
-            inference_profile_failure_code=None,
-            inference_profile_failure_message=None,
             parent_agent_run_id=parent_agent_run_id,
             phase=AgentRunPhase.IDLE,
             status=AgentRunStatus.PENDING,
@@ -557,55 +515,9 @@ class AgentRunRepository:
         session: AsyncSession,
         *,
         run_id: str,
-        resolved_model_selection: AgentModelSelection,
-        resolved_reasoning_effort: ModelReasoningEffort | None,
-        resolved_at: datetime.datetime,
-        effective_context_window_tokens: int,
-        effective_auto_compaction_threshold_tokens: int,
-    ) -> AgentRunState:
-        """Atomically activate one resolved pending run and its session profile."""
-        rdb = await session.scalar(
-            sa.select(RDBAgentRun)
-            .where(
-                RDBAgentRun.id == run_id,
-                RDBAgentRun.status == AgentRunStatus.PENDING,
-            )
-            .with_for_update()
-        )
-        if rdb is None:
-            raise ValueError("Pending AgentRun not found")
-        if rdb.requested_model_target_label is None:
-            raise ValueError("Pending AgentRun has no requested model target")
-
-        rdb.resolved_model_selection = resolved_model_selection.model_dump(mode="json")
-        rdb.resolved_reasoning_effort = resolved_reasoning_effort
-        rdb.resolved_at = resolved_at
-        rdb.effective_context_window_tokens = effective_context_window_tokens
-        rdb.effective_auto_compaction_threshold_tokens = (
-            effective_auto_compaction_threshold_tokens
-        )
-        rdb.status = AgentRunStatus.RUNNING
-        rdb.started_at = resolved_at
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == rdb.session_id)
-            .values(
-                last_model_target_label=rdb.requested_model_target_label,
-                last_reasoning_effort=rdb.requested_reasoning_effort,
-            )
-        )
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
-
-    async def activate_inherited_pending(
-        self,
-        session: AsyncSession,
-        *,
-        run_id: str,
         activated_at: datetime.datetime,
     ) -> AgentRunState:
-        """Activate a pre-resolved child run without replacing its provenance."""
+        """Activate one model-independent pending run."""
         rdb = await session.scalar(
             sa.select(RDBAgentRun)
             .where(
@@ -616,89 +528,8 @@ class AgentRunRepository:
         )
         if rdb is None:
             raise ValueError("Pending AgentRun not found")
-        if rdb.inference_profile_source not in {
-            InferenceProfileSource.PARENT_RUN,
-            InferenceProfileSource.SPAWN_OVERRIDE,
-        }:
-            raise ValueError("Pending AgentRun is not pre-resolved from a parent run")
-        if rdb.parent_agent_run_id is None:
-            raise ValueError("Inherited AgentRun has no parent run")
-        if rdb.requested_model_target_label is None:
-            raise ValueError("Inherited AgentRun has no requested model target")
-        if rdb.resolved_model_selection is None or rdb.resolved_at is None:
-            raise ValueError("Inherited AgentRun has incomplete resolved provenance")
-        if (
-            rdb.effective_context_window_tokens is None
-            or rdb.effective_auto_compaction_threshold_tokens is None
-        ):
-            raise ValueError("Inherited AgentRun has incomplete effective limits")
-
         rdb.status = AgentRunStatus.RUNNING
         rdb.started_at = activated_at
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == rdb.session_id)
-            .values(
-                last_model_target_label=rdb.requested_model_target_label,
-                last_reasoning_effort=rdb.requested_reasoning_effort,
-            )
-        )
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
-
-    async def fail_pending_profile_resolution(
-        self,
-        session: AsyncSession,
-        *,
-        run_id: str,
-        failure_code: InferenceProfileFailureCode,
-        failure_message: str,
-        ended_at: datetime.datetime,
-    ) -> AgentRunState:
-        """Finalize a pending run with safe typed profile failure data."""
-        rdb = await session.scalar(
-            sa.select(RDBAgentRun)
-            .where(
-                RDBAgentRun.id == run_id,
-                RDBAgentRun.status == AgentRunStatus.PENDING,
-            )
-            .with_for_update()
-        )
-        if rdb is None:
-            raise ValueError("Pending AgentRun not found")
-        rdb.status = AgentRunStatus.FAILED
-        rdb.inference_profile_failure_code = failure_code
-        rdb.inference_profile_failure_message = failure_message
-        rdb.ended_at = ended_at
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
-
-    async def fail_profile_resolution_if_running(
-        self,
-        session: AsyncSession,
-        *,
-        run_id: str,
-        failure_code: InferenceProfileFailureCode,
-        failure_message: str,
-        ended_at: datetime.datetime,
-    ) -> AgentRunState | None:
-        """Finalize a running run with safe typed profile failure data."""
-        rdb = await session.scalar(
-            sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
-        )
-        if rdb is None:
-            return None
-        if rdb.status != AgentRunStatus.RUNNING:
-            return self._build(rdb)
-        rdb.status = AgentRunStatus.FAILED
-        rdb.phase = AgentRunPhase.IDLE
-        rdb.active_tool_calls = []
-        rdb.retry_state = None
-        rdb.inference_profile_failure_code = failure_code
-        rdb.inference_profile_failure_message = failure_message
-        rdb.ended_at = ended_at
         await session.flush()
         await session.refresh(rdb)
         return self._build(rdb)
@@ -799,40 +630,6 @@ class AgentRunRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
-    @staticmethod
-    def build_inference_run_summary(run: AgentRunState) -> InferenceRunSummary:
-        """Build the safe public summary for one run."""
-        requested_profile = (
-            RequestedInferenceProfile(
-                model_target_label=run.requested_model_target_label,
-                reasoning_effort=run.requested_reasoning_effort,
-            )
-            if run.requested_model_target_label is not None
-            else None
-        )
-        resolved_profile = (
-            ResolvedInferenceProfileSummary.from_model_selection(
-                run.resolved_model_selection
-            )
-            if run.resolved_model_selection is not None
-            else None
-        )
-        return InferenceRunSummary(
-            run_id=run.id,
-            run_index=run.run_index,
-            status=run.status,
-            requested_profile=requested_profile,
-            source=run.inference_profile_source,
-            resolved_profile=resolved_profile,
-            resolved_reasoning_effort=run.resolved_reasoning_effort,
-            effective_context_window_tokens=run.effective_context_window_tokens,
-            effective_auto_compaction_threshold_tokens=(
-                run.effective_auto_compaction_threshold_tokens
-            ),
-            failure_code=run.inference_profile_failure_code,
-            failure_message=run.inference_profile_failure_message,
-        )
-
     async def mark_session_running_terminal(
         self,
         session: AsyncSession,
@@ -882,18 +679,6 @@ class AgentRunRepository:
         if rdb is None:
             return None
         return self._build(rdb)
-
-    async def get_inference_run_summary_by_id(
-        self,
-        session: AsyncSession,
-        *,
-        run_id: str,
-    ) -> InferenceRunSummary | None:
-        """Fetch one allowlisted run summary by AgentRun ID."""
-        run = await self.get_by_id(session, run_id)
-        if run is None:
-            return None
-        return self.build_inference_run_summary(run)
 
     async def get_failed_by_terminal_result_event_id(
         self,
@@ -1001,12 +786,6 @@ class AgentRunRepository:
                 if patch.retry_state is not None
                 else None
             )
-        if "resolved_model_selection" in values:
-            values["resolved_model_selection"] = (
-                patch.resolved_model_selection.model_dump(mode="json")
-                if patch.resolved_model_selection is not None
-                else None
-            )
         if values:
             for key, value in values.items():
                 setattr(rdb, key, value)
@@ -1109,22 +888,6 @@ class AgentRunRepository:
             run_index=rdb.run_index,
             phase=rdb.phase,
             status=rdb.status,
-            requested_model_target_label=rdb.requested_model_target_label,
-            requested_reasoning_effort=rdb.requested_reasoning_effort,
-            inference_profile_source=rdb.inference_profile_source,
-            resolved_model_selection=(
-                AgentModelSelection.model_validate(rdb.resolved_model_selection)
-                if rdb.resolved_model_selection is not None
-                else None
-            ),
-            resolved_reasoning_effort=rdb.resolved_reasoning_effort,
-            resolved_at=rdb.resolved_at,
-            effective_context_window_tokens=rdb.effective_context_window_tokens,
-            effective_auto_compaction_threshold_tokens=(
-                rdb.effective_auto_compaction_threshold_tokens
-            ),
-            inference_profile_failure_code=rdb.inference_profile_failure_code,
-            inference_profile_failure_message=rdb.inference_profile_failure_message,
             parent_agent_run_id=rdb.parent_agent_run_id,
             active_tool_calls=active_tool_calls,
             retry_state=FailedRunRetryState.model_validate(rdb.retry_state)

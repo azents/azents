@@ -19,7 +19,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.inference_profile import (
-    InferenceProfileSource,
+    AppliedInferenceProfile,
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
@@ -575,19 +575,16 @@ class TestInputBufferService:
         assert result.events[0].external_id == buffer_id
         event_payload = result.events[0].payload
         assert isinstance(event_payload, UserMessagePayload)
-        assert event_payload.requested_inference_profile == RequestedInferenceProfile(
+        assert event_payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
             reasoning_effort=None,
         )
         promoted = result.user_messages[0]
         assert promoted.external_id == buffer_id
         assert promoted.payload.content == "buffered message"
-        assert (
-            promoted.payload.requested_inference_profile
-            == RequestedInferenceProfile(
-                model_target_label="Quality",
-                reasoning_effort=None,
-            )
+        assert promoted.payload.applied_inference_profile == AppliedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=None,
         )
         async with rdb_session_manager() as session:
             remaining = await session.scalar(
@@ -619,15 +616,7 @@ class TestInputBufferService:
             run = await run_repository.create_pending(
                 session,
                 session_id=session_id,
-                requested_model_target_label="Quality",
-                requested_reasoning_effort=ModelReasoningEffort.HIGH,
-                inference_profile_source=InferenceProfileSource.EXPLICIT_INPUT,
                 parent_agent_run_id=None,
-                resolved_model_selection=None,
-                resolved_reasoning_effort=None,
-                resolved_at=None,
-                effective_context_window_tokens=None,
-                effective_auto_compaction_threshold_tokens=None,
             )
 
         result = await _input_buffer_service(
