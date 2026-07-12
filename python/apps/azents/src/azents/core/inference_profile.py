@@ -52,6 +52,7 @@ class AppliedInferenceProfile(BaseModel):
         description="Agent-owned model target label applied by the message",
     )
     model_display_name: str | None = Field(
+        default=None,
         min_length=1,
         description="Resolved model display name, or null before preparation",
     )

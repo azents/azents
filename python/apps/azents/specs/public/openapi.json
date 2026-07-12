@@ -10377,7 +10377,6 @@
         "type": "object",
         "required": [
           "model_target_label",
-          "model_display_name",
           "reasoning_effort"
         ],
         "title": "AppliedInferenceProfile",
