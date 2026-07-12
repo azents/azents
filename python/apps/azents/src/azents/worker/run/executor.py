@@ -213,6 +213,20 @@ class ProfileResolutionFailure:
     message: str
 
 
+def matching_session_inference_state(
+    current: SessionInferenceState | None,
+    requested: RequestedInferenceProfile,
+) -> SessionInferenceState | None:
+    """Return the prepared Session snapshot matching one requested profile."""
+    if (
+        current is not None
+        and current.model_target_label == requested.model_target_label
+        and current.reasoning_effort == requested.reasoning_effort
+    ):
+        return current
+    return None
+
+
 @dataclasses.dataclass(frozen=True)
 class OperationActionProcessResult:
     """Result of processing promoted operation actions."""
@@ -1830,13 +1844,11 @@ class RunExecutor:
                 current_inference_state = (
                     session_state.inference_state if session_state is not None else None
                 )
-                if (
-                    current_inference_state is None
-                    or current_inference_state.model_target_label
-                    != requested_profile.model_target_label
-                    or current_inference_state.reasoning_effort
-                    != requested_profile.reasoning_effort
-                ):
+                prepared_inference_state = matching_session_inference_state(
+                    current_inference_state,
+                    requested_profile,
+                )
+                if prepared_inference_state is None:
                     resolved = await resolve_invoke_input_with_profile(
                         InvokeInput(
                             agent_id=agent_id,

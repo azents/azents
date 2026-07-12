@@ -763,6 +763,30 @@ def _executor(
     )
 
 
+def test_matching_session_inference_state_preserves_resolved_model() -> None:
+    """A matching Session snapshot remains the durable message provenance."""
+    state = SessionInferenceState(
+        model_target_label="Quality",
+        model_selection=make_test_model_selection(model_identifier="gpt-5.5"),
+        reasoning_effort=ModelReasoningEffort.HIGH,
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    matched = run_executor_module.matching_session_inference_state(
+        state,
+        RequestedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=ModelReasoningEffort.HIGH,
+        ),
+    )
+
+    assert matched is not None
+    assert matched is state
+    assert matched.applied_profile.model_display_name == "gpt-5.5"
+
+
 def _message() -> SessionWakeUp:
     """Create a standard session wake-up for executor tests."""
     return SessionWakeUp(

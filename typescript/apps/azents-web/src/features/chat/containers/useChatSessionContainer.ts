@@ -244,27 +244,43 @@ function eventRequestedInferenceProfile(
   );
 }
 
-function isAppliedInferenceProfile(
+function appliedInferenceProfileFromValue(
   value: unknown,
-): value is AppliedInferenceProfile {
-  return (
-    isRecord(value) &&
-    typeof value.model_target_label === "string" &&
-    value.model_target_label.length > 0 &&
-    "model_display_name" in value &&
-    (value.model_display_name === null ||
-      (typeof value.model_display_name === "string" &&
-        value.model_display_name.length > 0)) &&
-    (value.reasoning_effort === null ||
-      modelReasoningEffortFromValue(value.reasoning_effort) !== null)
-  );
+): AppliedInferenceProfile | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const modelTargetLabel = stringField(value, "model_target_label");
+  const hasModelDisplayName = "model_display_name" in value;
+  const modelDisplayName = value.model_display_name;
+  const hasReasoningEffort = "reasoning_effort" in value;
+  const effortValue = value.reasoning_effort;
+  const reasoningEffort = modelReasoningEffortFromValue(effortValue);
+  if (
+    modelTargetLabel === null ||
+    modelTargetLabel.length === 0 ||
+    (hasModelDisplayName &&
+      modelDisplayName !== null &&
+      (typeof modelDisplayName !== "string" ||
+        modelDisplayName.length === 0)) ||
+    (hasReasoningEffort && effortValue !== null && reasoningEffort === null)
+  ) {
+    return null;
+  }
+  return {
+    model_target_label: modelTargetLabel,
+    model_display_name:
+      typeof modelDisplayName === "string" ? modelDisplayName : null,
+    reasoning_effort: reasoningEffort,
+  };
 }
 
 function eventAppliedInferenceProfile(
   event: ChatEventResponse,
 ): AppliedInferenceProfile | null {
-  const value = event.payload.applied_inference_profile;
-  return isAppliedInferenceProfile(value) ? value : null;
+  return appliedInferenceProfileFromValue(
+    event.payload.applied_inference_profile,
+  );
 }
 
 function chatActionFromValue(value: unknown): ChatAction | null {
@@ -542,12 +558,14 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
   const runId = stringField(value, "run_id");
   const phase = agentRunPhaseFromValue(value.phase);
   const status = agentRunStatusFromValue(value.status);
-  const inferenceProfile = value.inference_profile;
+  const inferenceProfile = appliedInferenceProfileFromValue(
+    value.inference_profile,
+  );
   if (
     runId === null ||
     phase === null ||
     status === null ||
-    !isAppliedInferenceProfile(inferenceProfile)
+    inferenceProfile === null
   ) {
     return null;
   }
