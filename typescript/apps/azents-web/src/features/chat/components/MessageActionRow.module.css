@@ -1,0 +1,11 @@
+.actionRow {
+  min-height: rem(28px);
+}
+
+.actionRowAssistant {
+  justify-content: flex-start;
+}
+
+.actionRowUser {
+  justify-content: flex-end;
+}
