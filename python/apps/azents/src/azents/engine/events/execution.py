@@ -763,31 +763,35 @@ class AgentRunExecution:
         """Append turn marker."""
         if usage is None:
             return None
+        applied_profile = (
+            inference_state.applied_profile if inference_state is not None else None
+        )
+        payload = TurnMarkerPayload(
+            run_id=run_id,
+            usage=usage,
+            applied_inference_profile=applied_profile,
+            effective_context_window_tokens=(
+                inference_state.effective_context_window_tokens
+                if inference_state is not None
+                else None
+            ),
+            effective_auto_compaction_threshold_tokens=(
+                inference_state.effective_auto_compaction_threshold_tokens
+                if inference_state is not None
+                else None
+            ),
+            system_prompt=system_prompt,
+        ).model_dump(mode="json", exclude_none=True)
+        if applied_profile is not None:
+            payload["applied_inference_profile"] = applied_profile.model_dump(
+                mode="json"
+            )
         return await self._transcript_repo.append(
             session,
             EventCreate(
                 session_id=session_id,
                 kind=EventKind.TURN_MARKER,
-                payload=TurnMarkerPayload(
-                    run_id=run_id,
-                    usage=usage,
-                    applied_inference_profile=(
-                        inference_state.applied_profile
-                        if inference_state is not None
-                        else None
-                    ),
-                    effective_context_window_tokens=(
-                        inference_state.effective_context_window_tokens
-                        if inference_state is not None
-                        else None
-                    ),
-                    effective_auto_compaction_threshold_tokens=(
-                        inference_state.effective_auto_compaction_threshold_tokens
-                        if inference_state is not None
-                        else None
-                    ),
-                    system_prompt=system_prompt,
-                ).model_dump(mode="json", exclude_none=True),
+                payload=payload,
             ),
         )
 

@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.inference_profile import SessionInferenceState
-from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.execution import (
     AgentRunExecution,
     AgentRunExecutionRequest,
@@ -712,7 +711,7 @@ async def test_model_usage_is_appended_as_turn_marker(
     inference_state = SessionInferenceState(
         model_target_label="planning",
         model_selection=make_test_model_selection(model_identifier="gpt-5.1"),
-        reasoning_effort=ModelReasoningEffort.XHIGH,
+        reasoning_effort=None,
         effective_context_window_tokens=128_000,
         effective_auto_compaction_threshold_tokens=102_400,
         resolved_at=datetime.datetime.now(datetime.UTC),
@@ -766,6 +765,7 @@ async def test_model_usage_is_appended_as_turn_marker(
     assert payload.effective_auto_compaction_threshold_tokens == 102_400
     assert payload.system_prompt == system_prompt
     serialized_payload = turn_markers[0].payload.model_dump(mode="json")
+    assert serialized_payload["applied_inference_profile"]["reasoning_effort"] is None
     assert "provider" not in serialized_payload
     assert "model_selection" not in serialized_payload
     assert "credential_kwargs" not in serialized_payload
