@@ -299,8 +299,6 @@ async def test_operation_metadata_heartbeat_status_and_delete(
         last_event_at=None,
         cancel_requested_at=None,
         final_event_cursor=None,
-        background=False,
-        background_context=None,
     )
 
     await store.put_operation(metadata, ttl_seconds=60)
@@ -345,8 +343,6 @@ async def test_try_start_operation_is_atomic(
         last_event_at=None,
         cancel_requested_at=None,
         final_event_cursor=None,
-        background=False,
-        background_context=None,
     )
     await store.put_operation(metadata, ttl_seconds=60)
 
@@ -399,8 +395,6 @@ async def test_append_reply_for_operation_rejects_late_final(
         last_event_at=None,
         cancel_requested_at=None,
         final_event_cursor=None,
-        background=False,
-        background_context=None,
     )
     await store.put_operation(metadata, ttl_seconds=60)
     canceled = await store.append_reply_for_operation(

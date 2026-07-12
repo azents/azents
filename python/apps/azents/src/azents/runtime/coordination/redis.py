@@ -12,7 +12,6 @@ from redis.exceptions import ResponseError
 
 from azents.runtime.coordination.data import (
     JsonValue,
-    RuntimeBackgroundOperationContext,
     RuntimeBodyChunk,
     RuntimeBodyChunkRecord,
     RuntimeConnectionKind,
@@ -800,12 +799,6 @@ def _operation_to_json(metadata: RuntimeOperationMetadata) -> str:
             "last_event_at": _datetime_to_json(metadata.last_event_at),
             "cancel_requested_at": _datetime_to_json(metadata.cancel_requested_at),
             "final_event_cursor": metadata.final_event_cursor,
-            "background": metadata.background,
-            "background_context": (
-                _background_context_to_payload(metadata.background_context)
-                if metadata.background_context is not None
-                else None
-            ),
         }
     )
 
@@ -827,38 +820,6 @@ def _operation_from_json(raw: str) -> RuntimeOperationMetadata:
         last_event_at=_datetime_from_json(payload.get("last_event_at")),
         cancel_requested_at=_datetime_from_json(payload.get("cancel_requested_at")),
         final_event_cursor=_optional_str(payload.get("final_event_cursor")),
-        background=bool(payload.get("background", False)),
-        background_context=_background_context_from_payload(
-            payload.get("background_context")
-        ),
-    )
-
-
-def _background_context_to_payload(
-    context: RuntimeBackgroundOperationContext,
-) -> dict[str, str]:
-    return {
-        "task_id": context.task_id,
-        "agent_id": context.agent_id,
-        "parent_session_id": context.parent_session_id,
-        "workspace_id": context.workspace_id,
-        "tool_name": context.tool_name,
-        "idempotency_key": context.idempotency_key,
-    }
-
-
-def _background_context_from_payload(
-    payload: object,
-) -> RuntimeBackgroundOperationContext | None:
-    if not isinstance(payload, Mapping):
-        return None
-    return RuntimeBackgroundOperationContext(
-        task_id=str(payload["task_id"]),
-        agent_id=str(payload["agent_id"]),
-        parent_session_id=str(payload["parent_session_id"]),
-        workspace_id=str(payload["workspace_id"]),
-        tool_name=str(payload["tool_name"]),
-        idempotency_key=str(payload["idempotency_key"]),
     )
 
 

@@ -456,7 +456,6 @@ class RuntimeRunnerControlGrpcServicer(
             operation_type=envelope.operation_type,
             reply_stream_id=envelope.reply_stream_id,
             body_stream_id=envelope.body_stream_id or "",
-            background=bool(envelope.payload.get("background")),
         )
         owner_session_id = envelope.payload.get("owner_session_id")
         if isinstance(owner_session_id, str):

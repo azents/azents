@@ -384,7 +384,6 @@ def _operation(
             )
             for chunk in operation.body_chunks
         ),
-        background=operation.background,
         deadline_at=_optional_datetime(operation, "deadline_at"),
     )
 

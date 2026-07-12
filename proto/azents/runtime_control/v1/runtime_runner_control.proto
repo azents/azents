@@ -92,7 +92,7 @@ message RunnerOperationRequest {
   optional string owner_session_id = 4;
   string reply_stream_id = 5;
   string body_stream_id = 6;
-  bool background = 7;
+  reserved 7;
   google.protobuf.Timestamp deadline_at = 8;
   repeated RunnerBodyChunk body_chunks = 9;
 

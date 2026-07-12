@@ -879,7 +879,6 @@ def _operation(
         reply_stream_id="reply:request-1",
         body_stream_id=None,
         body_chunks=body_chunks,
-        background=False,
         deadline_at=deadline_at,
     )
 

@@ -9,7 +9,6 @@ import pytest
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeReplyAppendResult,
-    RuntimeRunnerOperation,
     RuntimeRunnerRegistration,
 )
 from azents.runtime.control_protocol.runner_operations import (
@@ -27,7 +26,6 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationCanceledError,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
-    RuntimeRunnerOperationGenerationError,
     encode_file_chunk,
     runner_reply_target,
 )
@@ -987,55 +985,6 @@ async def test_list_git_refs_returns_final_refs() -> None:
     assert result.head_commit == "abc123"
     assert result.refs[0].name == "main"
     assert result.refs[0].default is True
-
-
-@pytest.mark.asyncio
-async def test_background_operation_preserves_session_ownership() -> None:
-    """Background dispatch keeps the durable parent Session owner."""
-    harness = await _make_harness()
-
-    await harness.client.start_background_operation(
-        RuntimeRunnerOperation(
-            runtime_id="runtime-1",
-            runner_generation=harness.runner_generation,
-            operation_type="bash",
-            owner_session_id="session-parent",
-            payload={"command": "sleep 1"},
-            deadline_at=_now() + timedelta(seconds=30),
-            body_stream_id=None,
-            background=False,
-        )
-    )
-    request = await harness.control.claim_next_runner_request(
-        runtime_id="runtime-1",
-        generation=harness.runner_generation,
-        consumer_id="runner-a",
-        block_ms=0,
-    )
-
-    assert request is not None
-    assert request.payload["background"] is True
-    assert request.payload["owner_session_id"] == "session-parent"
-
-
-@pytest.mark.asyncio
-async def test_stale_runner_generation_raises_before_dispatch() -> None:
-    """Stale Runner generation is surfaced before request stream append."""
-    harness = await _make_harness()
-
-    with pytest.raises(RuntimeRunnerOperationGenerationError):
-        await harness.client.start_background_operation(
-            RuntimeRunnerOperation(
-                runtime_id="runtime-1",
-                runner_generation=harness.runner_generation - 1,
-                operation_type="bash",
-                owner_session_id=None,
-                payload={"command": "pwd"},
-                deadline_at=_now() + timedelta(seconds=30),
-                body_stream_id=None,
-                background=True,
-            )
-        )
 
 
 @dataclasses.dataclass(frozen=True)

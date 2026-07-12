@@ -150,7 +150,6 @@ def _tool_call_live_event(
     name: str,
     arguments: str,
     source: str,
-    background: bool,
     created_at: datetime.datetime,
 ) -> Event:
     return Event(
@@ -164,7 +163,7 @@ def _tool_call_live_event(
             native_artifact=_live_native_artifact(
                 projection="client_tool_call",
                 source=source,
-                item={"background": background},
+                item={},
             ),
         ),
         model_order=0,
@@ -190,7 +189,6 @@ def active_tool_call_to_live_event(
         name=active_tool_call.name,
         arguments=active_tool_call.arguments or "",
         source="active_tool_call",
-        background=False,
         created_at=active_tool_call.started_at,
     )
 

@@ -177,7 +177,6 @@ async def test_runner_grpc_revoke_current_connection_on_close() -> None:
             payload={"command": "echo ok"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
-            background=False,
         ),
         created_at=datetime.now(UTC),
     )
@@ -332,7 +331,6 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
-            background=False,
         ),
         created_at=_now(),
     )
@@ -426,7 +424,6 @@ async def test_runner_grpc_expires_operation_before_relay() -> None:
             },
             deadline_at=_now() - timedelta(seconds=1),
             body_stream_id=None,
-            background=False,
         ),
         created_at=_now() - timedelta(seconds=2),
     )
@@ -477,7 +474,6 @@ async def test_runner_grpc_rejects_start_for_canceled_operation() -> None:
             payload={"path": "/workspace/agent"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
-            background=False,
         ),
         created_at=_now(),
     )
@@ -583,7 +579,6 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
             },
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
-            background=False,
         ),
         created_at=_now(),
     )
@@ -680,7 +675,6 @@ async def test_runner_grpc_start_claim_is_atomic() -> None:
             payload={"path": "/workspace/agent"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
-            background=False,
         ),
         created_at=_now(),
     )
@@ -739,7 +733,6 @@ async def test_runner_grpc_rejects_late_final_after_cancel() -> None:
             payload={"path": "/workspace/agent"},
             deadline_at=datetime.now(UTC) + timedelta(seconds=30),
             body_stream_id=None,
-            background=False,
         ),
         created_at=_now(),
     )
