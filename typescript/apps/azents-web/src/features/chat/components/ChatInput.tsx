@@ -21,7 +21,7 @@ import {
   Textarea,
   UnstyledButton,
 } from "@mantine/core";
-import { useLocalStorage } from "@mantine/hooks";
+import { readLocalStorageValue, useLocalStorage } from "@mantine/hooks";
 import {
   IconCheck,
   IconChevronDown,
@@ -53,15 +53,18 @@ import type {
 } from "@azents/public-client";
 
 const DRAFT_STORAGE_KEY_PREFIX = "azents.chat.inputDraft";
+const LAST_SELECTED_PROFILE_STORAGE_KEY_PREFIX =
+  "azents.chat.lastSelectedInferenceProfile";
 
-function getDraftStorageKey(
+function getScopedStorageKey(
+  prefix: string,
   agentId: string | null,
   sessionId: string | null,
 ): string | null {
   if (!agentId) {
     return null;
   }
-  return `${DRAFT_STORAGE_KEY_PREFIX}.${agentId}.${sessionId ?? "new"}`;
+  return `${prefix}.${agentId}.${sessionId ?? "new"}`;
 }
 
 interface ChatInputProps {
@@ -282,13 +285,32 @@ function parseComposerDraft(raw: string): ComposerDraft {
 function serializeComposerDraft(
   message: string,
   action: ChatAction | null,
-  inferenceProfile: RequestedInferenceProfile,
+  inferenceProfile: RequestedInferenceProfile | null,
 ): string {
   return JSON.stringify({
     message,
     action,
     inference_profile: inferenceProfile,
   });
+}
+
+function parseStoredInferenceProfile(
+  raw: string,
+): RequestedInferenceProfile | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    return normalizeStoredInferenceProfile(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function serializeInferenceProfile(
+  inferenceProfile: RequestedInferenceProfile,
+): string {
+  return JSON.stringify(inferenceProfile);
 }
 
 function actionKey(action: ChatAction | null): string {
@@ -329,6 +351,31 @@ function normalizeProfileForOptions(
     model_target_label: modelTargetLabel,
     reasoning_effort: requestedEffort,
   };
+}
+
+function profileTargetExists(
+  profile: RequestedInferenceProfile | null,
+  options: AgentResponse["selectable_model_options"],
+): profile is RequestedInferenceProfile {
+  return (
+    profile !== null &&
+    options.some((option) => option.label === profile.model_target_label)
+  );
+}
+
+function restoreInferenceProfile(
+  draftProfile: RequestedInferenceProfile | null,
+  lastSelectedProfile: RequestedInferenceProfile | null,
+  options: AgentResponse["selectable_model_options"],
+  fallback: RequestedInferenceProfile,
+): RequestedInferenceProfile {
+  if (profileTargetExists(draftProfile, options)) {
+    return draftProfile;
+  }
+  if (profileTargetExists(lastSelectedProfile, options)) {
+    return lastSelectedProfile;
+  }
+  return normalizeProfileForOptions(null, options, fallback);
 }
 
 function fallbackActionDefinition(action: ChatAction): InputActionDefinition {
@@ -498,20 +545,44 @@ export const ChatInput = memo(function ChatInput({
 }: ChatInputProps): React.ReactElement {
   const t = useTranslations("chat");
   const draftStorageKey = useMemo(
-    () => getDraftStorageKey(agentId, sessionId),
+    () => getScopedStorageKey(DRAFT_STORAGE_KEY_PREFIX, agentId, sessionId),
+    [agentId, sessionId],
+  );
+  const lastSelectedProfileStorageKey = useMemo(
+    () =>
+      getScopedStorageKey(
+        LAST_SELECTED_PROFILE_STORAGE_KEY_PREFIX,
+        agentId,
+        sessionId,
+      ),
     [agentId, sessionId],
   );
   const storageKey =
     draftStorageKey ?? `${DRAFT_STORAGE_KEY_PREFIX}.__disabled`;
+  const lastSelectedStorageKey =
+    lastSelectedProfileStorageKey ??
+    `${LAST_SELECTED_PROFILE_STORAGE_KEY_PREFIX}.__disabled`;
   const [draftValue, setDraftValue, clearStoredDraft] = useLocalStorage<string>(
     {
       key: storageKey,
       defaultValue: "",
     },
   );
+  const [
+    lastSelectedProfileValue,
+    setLastSelectedProfileValue,
+    clearLastSelectedProfile,
+  ] = useLocalStorage<string>({
+    key: lastSelectedStorageKey,
+    defaultValue: "",
+  });
   const parsedDraft = useMemo(
     () => parseComposerDraft(draftValue),
     [draftValue],
+  );
+  const storedLastSelectedProfile = useMemo(
+    () => parseStoredInferenceProfile(lastSelectedProfileValue),
+    [lastSelectedProfileValue],
   );
   const normalizedDefaultProfile = useMemo(
     () =>
@@ -522,10 +593,11 @@ export const ChatInput = memo(function ChatInput({
       ),
     [defaultInferenceProfile, selectableModelOptions],
   );
-  const normalizedDraftProfile = useMemo(
+  const restoredInferenceProfile = useMemo(
     () =>
-      normalizeProfileForOptions(
+      restoreInferenceProfile(
         parsedDraft.inferenceProfile,
+        storedLastSelectedProfile,
         selectableModelOptions,
         normalizedDefaultProfile,
       ),
@@ -533,13 +605,14 @@ export const ChatInput = memo(function ChatInput({
       normalizedDefaultProfile,
       parsedDraft.inferenceProfile,
       selectableModelOptions,
+      storedLastSelectedProfile,
     ],
   );
   const [inputValue, setInputValue] = useState(
     initialInputValue ?? parsedDraft.message,
   );
   const [inferenceProfile, setInferenceProfile] = useState(
-    normalizedDraftProfile,
+    restoredInferenceProfile,
   );
   const [profilePickerOpened, setProfilePickerOpened] = useState(false);
   const [desktopProfileSection, setDesktopProfileSection] = useState<
@@ -592,6 +665,55 @@ export const ChatInput = memo(function ChatInput({
       todo.items.some((item) => item.status !== "completed"));
 
   useEffect(() => {
+    if (selectableModelOptions.length === 0) {
+      return;
+    }
+    if (draftStorageKey) {
+      const currentDraft = parseComposerDraft(
+        readLocalStorageValue<string>({
+          key: draftStorageKey,
+          defaultValue: "",
+        }),
+      );
+      if (
+        currentDraft.inferenceProfile !== null &&
+        !profileTargetExists(
+          currentDraft.inferenceProfile,
+          selectableModelOptions,
+        )
+      ) {
+        setDraftValue(
+          serializeComposerDraft(
+            currentDraft.message,
+            currentDraft.action,
+            null,
+          ),
+        );
+      }
+    }
+    if (lastSelectedProfileStorageKey) {
+      const currentLastSelectedProfile = parseStoredInferenceProfile(
+        readLocalStorageValue<string>({
+          key: lastSelectedProfileStorageKey,
+          defaultValue: "",
+        }),
+      );
+      if (
+        currentLastSelectedProfile !== null &&
+        !profileTargetExists(currentLastSelectedProfile, selectableModelOptions)
+      ) {
+        clearLastSelectedProfile();
+      }
+    }
+  }, [
+    clearLastSelectedProfile,
+    draftStorageKey,
+    lastSelectedProfileStorageKey,
+    selectableModelOptions,
+    setDraftValue,
+  ]);
+
+  useEffect(() => {
     if (editingMessageId !== null) {
       return;
     }
@@ -605,14 +727,14 @@ export const ChatInput = memo(function ChatInput({
     setSelectedAction(
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
-    setInferenceProfile(normalizedDraftProfile);
+    setInferenceProfile(restoredInferenceProfile);
   }, [
     editingMessageId,
     initialInputValue,
     inputActions,
     normalizedDefaultProfile,
-    normalizedDraftProfile,
     parsedDraft,
+    restoredInferenceProfile,
   ]);
 
   useEffect(() => {
@@ -650,6 +772,20 @@ export const ChatInput = memo(function ChatInput({
       setDraftValue(serializeComposerDraft(message, action, profile));
     },
     [draftStorageKey, editingMessageId, setDraftValue],
+  );
+
+  const persistLastSelectedProfile = useCallback(
+    (profile: RequestedInferenceProfile): void => {
+      if (editingMessageId !== null || !lastSelectedProfileStorageKey) {
+        return;
+      }
+      setLastSelectedProfileValue(serializeInferenceProfile(profile));
+    },
+    [
+      editingMessageId,
+      lastSelectedProfileStorageKey,
+      setLastSelectedProfileValue,
+    ],
   );
 
   const updateInputValue = useCallback(
@@ -694,8 +830,8 @@ export const ChatInput = memo(function ChatInput({
     setSelectedAction(
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
-    setInferenceProfile(normalizedDraftProfile);
-  }, [inputActions, normalizedDraftProfile, parsedDraft]);
+    setInferenceProfile(restoredInferenceProfile);
+  }, [inputActions, parsedDraft, restoredInferenceProfile]);
 
   const handleCancelEdit = useCallback((): void => {
     restorePersistedDraft();
@@ -708,9 +844,9 @@ export const ChatInput = memo(function ChatInput({
     if (editingMessageId !== null) {
       restorePersistedDraft();
     } else {
+      persistLastSelectedProfile(inferenceProfile);
       setSelectedAction(null);
       setInputValue("");
-      setInferenceProfile(normalizedDefaultProfile);
       clearDraft();
     }
     clearFiles();
@@ -719,8 +855,9 @@ export const ChatInput = memo(function ChatInput({
     clearDraft,
     clearFiles,
     editingMessageId,
-    normalizedDefaultProfile,
+    inferenceProfile,
     onAfterSend,
+    persistLastSelectedProfile,
     restorePersistedDraft,
   ]);
 
@@ -873,8 +1010,9 @@ export const ChatInput = memo(function ChatInput({
         selectedAction === null ? null : normalizeAction(selectedAction.action),
         nextProfile,
       );
+      persistLastSelectedProfile(nextProfile);
     },
-    [inputValue, persistDraft, selectedAction],
+    [inputValue, persistDraft, persistLastSelectedProfile, selectedAction],
   );
 
   const handleModelChange = useCallback(
