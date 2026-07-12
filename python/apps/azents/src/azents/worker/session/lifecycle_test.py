@@ -1,6 +1,5 @@
 """SessionLifecycleService tests."""
 
-from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from typing import cast
@@ -10,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker
 from azents.core.enums import AgentRunPhase, AgentRunStatus
-from azents.engine.events.types import ActiveToolCall, AgentRunState
+from azents.engine.events.types import AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -55,10 +54,9 @@ class _Broker:
         *,
         run_id: str,
         phase: AgentRunPhase | None = None,
-        active_tool_calls: Sequence[ActiveToolCall] = (),
     ) -> None:
         """This test does not set broker activity."""
-        del session_id, run_id, phase, active_tool_calls
+        del session_id, run_id, phase
 
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:
         """This test does not renew owner heartbeat."""

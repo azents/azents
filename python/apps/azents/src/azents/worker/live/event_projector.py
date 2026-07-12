@@ -16,7 +16,10 @@ from azents.engine.events.engine_events import (
 )
 from azents.engine.events.types import ActiveToolCall, Event
 from azents.services.chat.data import ChatLiveRunState
-from azents.services.chat.live_events import RedisLiveEventStore
+from azents.services.chat.live_events import (
+    RedisLiveEventStore,
+    active_tool_call_to_live_event,
+)
 from azents.transport.chat import (
     chat_live_event_removed_dump,
     chat_live_event_upserted_dump,
@@ -42,6 +45,7 @@ class LiveEventProjector:
         self._broadcast = broadcast
         self._partial_batcher = LivePartialBatcher(self._flush_partial_batch)
         self._active_run_ids: dict[str, str] = {}
+        self._active_tool_events: dict[str, dict[str, Event]] = {}
 
     async def flush_session(self, session_id: str) -> None:
         """Reflect pending live partial batch of session to store and WebSocket."""
@@ -102,36 +106,39 @@ class LiveEventProjector:
         session_id: str,
         active_tool_calls: list[ActiveToolCall],
     ) -> None:
-        """Reflect Active tool call list to live event store best-effort."""
+        """Broadcast the PostgreSQL-backed active-call projection best-effort."""
         try:
-            before = await self._live_event_store.list_by_session_id(session_id)
-            await self._live_event_store.replace_active_tool_calls(
-                session_id,
-                list(active_tool_calls),
-            )
-            after = await self._live_event_store.list_by_session_id(session_id)
-            await self._publish_removed_events(
-                session_id,
-                before=before,
-                after=after,
-            )
-            after_by_id = {event.id: event for event in after}
-            for event_id, event in after_by_id.items():
-                previous = next((item for item in before if item.id == event_id), None)
-                if previous != event:
+            before = self._active_tool_events.get(session_id, {})
+            after = {
+                event.id: event
+                for event in (
+                    active_tool_call_to_live_event(session_id, active)
+                    for active in active_tool_calls
+                )
+            }
+            for event_id in before.keys() - after.keys():
+                await self._publish_event_removed(session_id, event_id)
+            for event_id, event in after.items():
+                if before.get(event_id) != event:
                     await self._publish_event_upserted(event)
+            if after:
+                self._active_tool_events[session_id] = after
+            else:
+                self._active_tool_events.pop(session_id, None)
         except Exception:
             logger.exception(
-                "Failed to replace live active tool calls",
+                "Failed to broadcast live active tool calls",
                 extra={"session_id": session_id},
             )
 
     async def clear_session(self, session_id: str) -> None:
-        """Clear Live event store and broadcast removal action."""
+        """Clear streaming and active live projections and broadcast removals."""
         events = await self._live_event_store.list_by_session_id(session_id)
+        active_events = self._active_tool_events.pop(session_id, {})
         await self._live_event_store.clear_session(session_id)
-        for event in events:
-            await self._publish_event_removed(session_id, event.id)
+        event_ids = {event.id for event in events} | set(active_events)
+        for event_id in event_ids:
+            await self._publish_event_removed(session_id, event_id)
 
     async def publish_live_run_updated(
         self,
@@ -161,8 +168,13 @@ class LiveEventProjector:
         )
 
     async def remove_event(self, session_id: str, event_id: str) -> None:
-        """Remove event from Live event store and broadcast removal action."""
+        """Remove event from streaming or active projection and broadcast removal."""
         await self._live_event_store.remove(session_id, event_id)
+        active = self._active_tool_events.get(session_id)
+        if active is not None:
+            active.pop(event_id, None)
+            if not active:
+                self._active_tool_events.pop(session_id, None)
         await self._publish_event_removed(session_id, event_id)
 
     async def _flush_partial_batch(self, batch: LivePartialFlush) -> None:

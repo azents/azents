@@ -66,13 +66,14 @@ class UserStopFinalizer:
         active_tool_calls: Sequence[ActiveToolCall],
     ) -> None:
         """Immediately clean run observation state as terminal after User stop."""
+        del active_tool_calls
         running_run = await self._get_running_agent_run(session_id)
         effective_run_id = run_id or (
             running_run.id if running_run is not None else None
         )
-        effective_tool_calls = list(active_tool_calls)
-        if running_run is not None and not effective_tool_calls:
-            effective_tool_calls = list(running_run.active_tool_calls)
+        effective_tool_calls = (
+            list(running_run.active_tool_calls) if running_run is not None else []
+        )
         await self.live_event_projector.flush_session(session_id)
         await self._persist_live_events_for_user_stop(
             session_id,
@@ -143,7 +144,6 @@ class UserStopFinalizer:
             session_id,
             run_id=run_id,
             active_tool_calls=active_tool_calls,
-            live_events=live_events,
         )
         await self._remove_persisted_stop_live_events(session_id, live_events)
 
@@ -275,15 +275,9 @@ class UserStopFinalizer:
         *,
         run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
-        live_events: Sequence[Event],
     ) -> None:
         """Record cancelled result for Active tool call to durable history."""
-        calls_by_id: dict[str, ActiveToolCall | ClientToolCallPayload] = {
-            call.call_id: call for call in active_tool_calls
-        }
-        for event in live_events:
-            if isinstance(event.payload, ClientToolCallPayload):
-                calls_by_id.setdefault(event.payload.call_id, event.payload)
+        calls_by_id = {call.call_id: call for call in active_tool_calls}
         if not calls_by_id:
             return
         if run_id is None:

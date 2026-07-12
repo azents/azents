@@ -180,10 +180,8 @@ class _SessionLifecycle:
         *,
         run_id: str,
         phase: object,
-        active_tool_calls: object = None,
     ) -> None:
         """Record session activity updates."""
-        del active_tool_calls
         self.activities.append((session_id, run_id, phase))
 
     async def clear_session_activity(self, session_id: str) -> None:

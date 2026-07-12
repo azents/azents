@@ -16,7 +16,11 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.engine.events.types import UserMessagePayload
+from azents.engine.events.types import (
+    ActiveToolCall,
+    ClientToolCallPayload,
+    UserMessagePayload,
+)
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -257,13 +261,29 @@ class TestChatSessionInputBuffer:
                     resolved_at=now,
                 ),
             )
-            run = await AgentRunRepository().create(
+            run_repository = AgentRunRepository()
+            run = await run_repository.create(
                 session,
                 AgentRunCreate(
                     session_id=session_id,
                     parent_agent_run_id=None,
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                 ),
+            )
+            active_call_started_at = now + datetime.timedelta(seconds=1)
+            run = await run_repository.update_phase(
+                session,
+                run.id,
+                AgentRunPhase.EXECUTING_TOOLS,
+                active_tool_calls=[
+                    ActiveToolCall(
+                        call_id="call-1",
+                        name="bash",
+                        arguments='{"cmd":"sleep"}',
+                        started_at=active_call_started_at,
+                        owner_generation=1,
+                    )
+                ],
             )
             retry_state = FailedRunRetryState.from_attempt(
                 FailedRunAttempt(
@@ -294,8 +314,21 @@ class TestChatSessionInputBuffer:
         assert isinstance(result, Success)
         assert result.value.run is not None
         assert result.value.run.run_id == run.id
-        assert result.value.run.phase == AgentRunPhase.WAITING_FOR_MODEL
+        assert result.value.run.phase == AgentRunPhase.EXECUTING_TOOLS
         assert result.value.run.status == AgentRunStatus.RUNNING
+        tool_events = {
+            event.payload.call_id: event
+            for event in result.value.partial_history_events
+            if isinstance(event.payload, ClientToolCallPayload)
+        }
+        assert set(tool_events) == {"call-1"}
+        active_event = tool_events["call-1"]
+        assert isinstance(active_event.payload, ClientToolCallPayload)
+        assert active_event.created_at == active_call_started_at
+        assert active_event.payload.arguments == '{"cmd":"sleep"}'
+        active_artifact = active_event.payload.native_artifact
+        assert active_artifact is not None
+        assert active_artifact.item["source"] == "active_tool_call"
         assert result.value.run.inference_profile.model_target_label == "main"
         assert (
             result.value.run.inference_profile.reasoning_effort

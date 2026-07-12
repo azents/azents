@@ -22,7 +22,6 @@ from azents.engine.events.types import (
     AgentMessagePayload,
     AssistantMessagePayload,
     ClientToolCallPayload,
-    ClientToolResultPayload,
     Event,
     InputTextPart,
     NativeArtifact,
@@ -179,14 +178,20 @@ def _tool_call_live_event(
     )
 
 
-def _is_live_projection(event: Event, projection: str) -> bool:
-    payload = event.payload
-    artifact = getattr(payload, "native_artifact", None)
-    if artifact is None:
-        return False
-    return (
-        artifact.adapter == "azents-live"
-        and artifact.item.get("live_projection") == projection
+def active_tool_call_to_live_event(
+    session_id: str,
+    active_tool_call: ActiveToolCall,
+) -> Event:
+    """Project one PostgreSQL active call into the stable live event shape."""
+    return _tool_call_live_event(
+        session_id=session_id,
+        event_id=_stable_live_id(session_id, "tool", active_tool_call.call_id),
+        call_id=active_tool_call.call_id,
+        name=active_tool_call.name,
+        arguments=active_tool_call.arguments or "",
+        source="active_tool_call",
+        background=False,
+        created_at=active_tool_call.started_at,
     )
 
 
@@ -323,27 +328,6 @@ class LiveEventStore(Protocol):
         """Merge streaming reasoning delta into live reasoning projection."""
         ...
 
-    async def append_client_tool_call_delta(
-        self,
-        session_id: str,
-        *,
-        call_id: str | None,
-        name: str | None,
-        arguments_delta: str,
-        index: int,
-        now: datetime.datetime | None = None,
-    ) -> Event:
-        """Merge streaming function-call delta into live tool projection."""
-        ...
-
-    async def replace_active_tool_calls(
-        self,
-        session_id: str,
-        active_tool_calls: list[ActiveToolCall],
-    ) -> None:
-        """Replace current active tool call list with live tool projection."""
-        ...
-
     async def remove_live_counterpart(self, event: Event) -> None:
         """Remove corresponding live projection after durable event append."""
         ...
@@ -426,80 +410,6 @@ class BaseLiveEventStore:
         await self.upsert(event)
         return event
 
-    async def append_client_tool_call_delta(
-        self,
-        session_id: str,
-        *,
-        call_id: str | None,
-        name: str | None,
-        arguments_delta: str,
-        index: int,
-        now: datetime.datetime | None = None,
-    ) -> Event:
-        """Merge streaming function-call delta into live tool projection."""
-        stable_call_id = call_id or _stable_live_id(session_id, "tool", index)
-        event_id = _stable_live_id(session_id, "tool", stable_call_id)
-        current = await self._get(session_id, event_id)
-        current_args = (
-            current.payload.arguments
-            if current is not None
-            and isinstance(current.payload, ClientToolCallPayload)
-            else ""
-        )
-        current_name = (
-            current.payload.name
-            if current is not None
-            and isinstance(current.payload, ClientToolCallPayload)
-            else None
-        )
-        event = _tool_call_live_event(
-            session_id=session_id,
-            event_id=event_id,
-            call_id=stable_call_id,
-            name=name or current_name or "tool",
-            arguments=f"{current_args}{arguments_delta}",
-            source="function_call_delta",
-            background=False,
-            created_at=current.created_at
-            if current is not None
-            else (now or datetime.datetime.now(datetime.UTC)),
-        )
-        await self.upsert(event)
-        return event
-
-    async def replace_active_tool_calls(
-        self,
-        session_id: str,
-        active_tool_calls: list[ActiveToolCall],
-    ) -> None:
-        """Replace current active tool call list with live tool projection."""
-        existing = await self.list_by_session_id(session_id)
-        active_ids = {
-            _stable_live_id(session_id, "tool", active_tool_call.call_id)
-            for active_tool_call in active_tool_calls
-        }
-        for event in existing:
-            if (
-                event.kind == EventKind.CLIENT_TOOL_CALL
-                and _is_live_projection(event, "client_tool_call")
-                and event.id not in active_ids
-            ):
-                await self.remove(session_id, event.id)
-        for active_tool_call in active_tool_calls:
-            event_id = _stable_live_id(session_id, "tool", active_tool_call.call_id)
-            await self.upsert(
-                _tool_call_live_event(
-                    session_id=session_id,
-                    event_id=event_id,
-                    call_id=active_tool_call.call_id,
-                    name=active_tool_call.name,
-                    arguments=active_tool_call.arguments or "",
-                    source="active_tool_call",
-                    background=False,
-                    created_at=active_tool_call.started_at,
-                )
-            )
-
     async def remove_live_counterpart(self, event: Event) -> None:
         """Remove corresponding live projection after durable event append."""
         if event.kind == EventKind.ASSISTANT_MESSAGE:
@@ -512,13 +422,6 @@ class BaseLiveEventStore:
                 event.session_id,
                 _stable_live_id(event.session_id, "reasoning"),
             )
-        elif event.kind == EventKind.CLIENT_TOOL_RESULT:
-            payload = event.payload
-            if isinstance(payload, ClientToolResultPayload):
-                await self.remove(
-                    event.session_id,
-                    _stable_live_id(event.session_id, "tool", payload.call_id),
-                )
 
 
 class RedisLiveEventStore(BaseLiveEventStore):

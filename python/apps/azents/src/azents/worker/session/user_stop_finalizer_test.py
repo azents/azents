@@ -427,3 +427,29 @@ async def test_record_interrupted_run_only_records_marker_and_stopped_event() ->
         ("22222222222222222222222222222222", AgentRunStatus.STOPPED)
     ]
     assert run_repository.terminal_sessions == []
+
+
+@pytest.mark.asyncio
+async def test_finalize_ignores_redis_tool_call_without_durable_ownership() -> None:
+    """A Redis tool projection is not a user-stop cancellation candidate."""
+    session_id = "session-001"
+    stale_call = _running_run(session_id).active_tool_calls[0]
+    running_run = _running_run(session_id).model_copy(update={"active_tool_calls": []})
+    finalizer, _, _, transcripts, projector, _, _ = _finalizer(
+        running_run=running_run,
+        live_events=[_tool_call_event(session_id)],
+    )
+
+    await finalizer.finalize(
+        session_id,
+        run_id=None,
+        active_tool_calls=[stale_call],
+    )
+
+    assert [event.external_id for event in transcripts.appended] == [
+        "interrupted:11111111111111111111111111111111:user_requested",
+        "run-marker:11111111111111111111111111111111:interrupted",
+    ]
+    assert projector.removed_events == [
+        (session_id, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    ]
