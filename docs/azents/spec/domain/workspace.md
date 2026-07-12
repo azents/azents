@@ -47,8 +47,6 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}
-  - /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry
-  - /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup
   - /chat/v1/agents/{agent_id}/project-presets
   - /chat/v1/agents/{agent_id}/session-project-defaults
@@ -56,8 +54,8 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-08
-spec_version: 36
+last_verified_at: 2026-07-12
+spec_version: 37
 ---
 
 # Workspace & Membership
@@ -399,8 +397,6 @@ stateDiagram-v2
 | `chat_v1_list_agent_projects` | GET `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects` | agent/session workspace membership |
 | `chat_v1_register_agent_project` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` | `[project-existing-directory]` |
 | `chat_v1_delete_agent_project` | DELETE `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` | `[project-registry-only-delete]` |
-| `chat_v1_retry_action_execution` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry` | failed operation TurnAction only |
-| `chat_v1_discard_action_execution` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard` | failed operation TurnAction only |
 | `chat_v1_cleanup_session_git_worktree` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` | `[worktree-cleanup-authority]`, `[worktree-cleanup-non-force]` |
 
 ### Admin API
@@ -438,6 +434,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-12** — v37. Removed failed operation action retry/discard endpoints; operation failures are terminal and durable history preserves the result.
 - **2026-07-08** — v36. Clarified worktree TurnAction context-boundary and failed-action FIFO continuation behavior.
 - **2026-07-06** — v33. Clarified that existing-session Register Project uses an Agent Workspace folder picker, shows Git repository folders, and opens the registration mode dialog from Git folder selection.
 - **2026-07-06** — v32. Promoted existing-session Register Project Git worktree action behavior, Project manifest repository/cleanup capabilities, action retry/discard APIs, and non-force worktree cleanup semantics.

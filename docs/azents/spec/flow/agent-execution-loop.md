@@ -38,8 +38,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-11
-spec_version: 70
+last_verified_at: 2026-07-12
+spec_version: 71
 ---
 
 # Agent Execution Loop
@@ -56,9 +56,9 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker selects the next requested inference profile, precreates or claims one pending `AgentRun`, and promotes only the matching FIFO input prefix to ordered durable run input.
-2. Worker executes operation TurnActions such as `create_git_worktree` before the next model dispatch; a failed operation is marked failed and FIFO processing continues to later pending input.
-3. `AgentEngineAdapter` appends event `user_message` to the durable transcript while deduping by `RunUserMessage.external_id`.
+1. Worker reads exactly one FIFO InputBuffer head, resolves the requested profile when that input requires inference, and then locks the same head for atomic preparation.
+2. Preparation atomically updates the Session inference snapshot, applies Goal/Skill side effects, appends canonical events, associates run input, and deletes the source buffer. A changed FIFO head restarts preparation instead of applying a stale resolution.
+3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch; the execution claim is durable before buffer deletion, and failed operations are terminal while FIFO processing may continue to later pending input.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
 5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
 6. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
@@ -93,9 +93,21 @@ Phase enum:
 and `background`. The UI LLM running indicator uses `waiting_for_model` / `streaming_model`, and
 tool activity uses `executing_tools` and `active_tool_calls`.
 
-A newly selected run begins as `pending`. The worker promotes and associates the matching input events, resolves the Agent-owned target label, validates optional effort, and atomically activates the run with its physical model snapshot and effective limits before provider execution. Resolution failure marks the pending run failed and emits only a user-safe error. A `running` run always resumes from its stored resolution; no turn or automatic retry re-resolves current Agent routing.
+A newly selected run begins as `pending`. For normal buffered input, the worker resolves the
+Agent-owned target label and optional effort before transactionally preparing the FIFO head. Successful
+preparation stores the complete Session inference snapshot and uses it to activate or continue the
+run. Resolution failure is a handled preparation failure: it consumes that head, appends a
+user-safe `system_error`, preserves the previous Session snapshot, completes the active run, and is
+not retried.
 
-Requested profile selection precedence for implicit execution is session-last-used then Agent `main_model_label`; explicit human input wins over both. Session-last-used is updated only after successful normal activation. Commands use the implicit selection but have no client-submitted profile. Background/control inputs may join only when they do not cross a requested-profile or action boundary.
+Requested profile selection precedence for implicit execution is the Session current requested
+profile then Agent `main_model_label`; explicit human input wins over both. The complete Session
+snapshot contains requested label, resolved physical selection, resolved effort, effective limits,
+and resolution time. Inputs accepted during a model/tool turn are applied only at the next turn
+boundary. If that input changes the profile, the same `AgentRun` rebuilds the next model request from
+the newly prepared Session snapshot. It does not restore an older run-owned model selection or cancel
+the run merely to change profiles. Commands use the implicit selection but have no client-submitted
+profile.
 
 `terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. Subagent parent observation and Subagent Tree unread/result previews read this projection instead of scanning child transcript history.
 
@@ -151,7 +163,6 @@ internal messages, stack traces, raw provider responses, or any observability-on
 Durable event kinds:
 
 - `user_message`
-- `background_completion`
 - `assistant_message`
 - `reasoning`
 - `client_tool_call`
@@ -166,7 +177,6 @@ Durable event kinds:
 - `system_reminder`
 - `goal_continuation`
 - `goal_updated`
-- `action_message`
 - `skill_loaded`
 - `goal_briefing`
 - `system_error`
@@ -256,8 +266,8 @@ render these reminders as user-authored bubbles.
 The `skill_loaded` payload stores the exact Skill path, full body, content hash, source hints, and the
 original user action message. The Responses lowerer injects it as a user-role instruction that says
 the Skill has been loaded, requires the model to read and follow the embedded body, and points to the
-following normal user message for the request. The durable Skill `action_message` is audit data and is
-not actionable model input.
+following normal user message for the request. The source Skill `action_message` InputBuffer is consumed without creating a duplicate transcript
+event.
 
 ## 4.1 Subagent Scheduling and Mailbox Input
 
@@ -301,8 +311,7 @@ normal session-last-used precedence and re-resolve the saved Agent-owned label a
 Agent snapshot rather than pinning the first run's physical snapshot. Broker wake-ups remain
 payload-free; recovery is based on persisted input buffers and `agent_sessions.run_state`.
 
-Human-authored direct writes are root-session only. REST message/edit/command/failed-run retry paths
-and operation retry/discard paths reject `session_kind = subagent` before creating input buffers,
+Human-authored direct writes are root-session only. REST message/edit/command/failed-run retry paths reject `session_kind = subagent` before creating input buffers,
 chat write requests, pending commands, operation mutations, live projections, or broker wake-ups.
 Subagent mailbox input must be written by another SessionAgent through collaboration tools as
 `agent_message` buffers.
@@ -419,7 +428,7 @@ Web chat user writes enter through REST commit endpoints. Message writes create 
 also enqueue ordered setup action inputs, such as `create_git_worktree`, before the first user message
 so operation setup runs before the first model run. Existing-session writes may also enqueue ordered
 operation action inputs for user-requested workspace mutations, such as Register Project → New
-worktree. Those action inputs are durable `action_message` events in the turn order, not
+worktree. Those actions are FIFO `action_message` InputBuffers, not transcript events or
 session-initialization setup rows. Edit writes are
 idle-only: the REST transaction rewrites durable history state, clears pending input buffers,
 creates an `edited_user_message` input buffer, marks the session running, and sends a wake-up.
@@ -435,24 +444,19 @@ user message. `SessionRunner` reads the pending
 command from the session and passes it into `RunExecutor`, which prepares the same `RunRequest` and
 `RunContext` used by normal runs before invoking the registered command handler. Running sessions,
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
-Operation TurnActions are processed after input-buffer promotion and before model dispatch at both
+Operation TurnActions are processed after input-buffer preparation and before model dispatch at both
 wake-up entry and model-call turn boundaries inside an already-running run. `create_git_worktree`
-action execution is keyed by its durable `action_message` event, records durable progress in
-`action_executions`, publishes action execution projection updates while status or log entries
-change, creates the worktree through typed Runner Git operations, registers the created path as a
-session Project, refreshes catalog/Skill projection, and then invalidates the prepared context
-boundary. This same operation-action path covers new-session setup actions and existing-session
-Register Project worktree actions. If later pending input remains after a Project-mutating action
-succeeds at a turn boundary, the runner marks the current agent run cancelled without appending a
-completed run marker, sends a follow-up wake-up, and stops the current processing boundary so the next
-pass rebuilds model/tool context from the updated Project registry. If an action fails at a turn
-boundary, the action execution is marked failed and FIFO processing continues to later pending input
-without waiting for retry/discard. Retry and discard mutations remain scoped to failed operation
-action executions, return the updated action execution projection, and enqueue a normal broker
-wake-up when more runner work is needed. Terminal completed worktree actions also append an
-`action_execution_result` durable event containing the final action execution projection, then live
-state excludes terminal action executions so completed logs survive history reload without persisting
-as live-only fallback.
+action execution is keyed by the source `input_buffer_id`; the transaction stores the typed action
+payload and pending execution before deleting the source buffer. Execution publishes projection
+updates while status or log entries change, creates the worktree through typed Runner Git operations,
+registers the created path as a session Project, refreshes catalog/Skill projection, and then
+invalidates the prepared context boundary. This same path covers new-session setup actions and
+existing-session Register Project worktree actions. After successful Project mutation, the same
+active `AgentRun` rebuilds model/tool context and the next physical model request from the current
+Session inference snapshot. If an action fails, it is terminal and FIFO processing may continue to
+later pending input without a retry/discard mutation. Terminal completed and failed worktree actions
+append an `action_execution_result` durable event containing the final projection; live state excludes
+terminal executions so logs survive history reload without a live-only fallback.
 
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
@@ -498,7 +502,7 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/execution_test.py src/azents/engine/events/filters_test.py src/azents/engine/events/engine_adapter_test.py`
 - `cd python/apps/azents && uv run pyright`
 - deterministic azents E2E CI for text/tool/UI projection behavior
-- deterministic action-based Git worktree lifecycle E2E coverage, including existing-session Register Project worktree actions and action retry/discard recovery
+- deterministic action-based Git worktree lifecycle E2E coverage, including existing-session Register Project actions, durable buffer-keyed execution recovery, and terminal success/failure history
 - `cd testenv/azents/e2e && uv run pyright src/tests/azents/public/test_chat_input_buffer.py`
 - Failed-run retry recovery E2E: `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_agent_execution_persistence.py -q -k failed_run`
 - Per-prompt target, effort, provenance, and resolution-failure E2E: `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_per_prompt_inference_profile.py -q`
@@ -510,6 +514,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-12** — v71. Promoted sequential single-head preparation, Session-owned per-turn inference snapshots, buffer-only action transport, buffer-keyed operation execution, handled preparation failures, and same-run profile changes.
 - **2026-07-11** — v70. Added bounded-fork subagent inference overrides, label-only schema guidance, atomic validation, and session-last-used continuation semantics.
 - **2026-07-10** — v69. Added profile-aware FIFO promotion, atomic run activation, immutable resolved provenance, and exact parent-run profile inheritance.
 - **2026-07-10** — v68. Documented shared xAI API-key/OAuth transport lowering while preserving OAuth-only credential refresh.
