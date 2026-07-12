@@ -25,11 +25,11 @@ from pydantic import StrictStr, Field
 from typing import Union, List, Set, Optional, Dict
 from typing_extensions import Literal, Self
 
-ACTION_ONE_OF_SCHEMAS = ["CommandAction", "CreateGitWorktreeAction", "GoalAction", "SkillAction"]
+ACTION1_ONE_OF_SCHEMAS = ["CommandAction", "CreateGitWorktreeAction", "GoalAction", "SkillAction"]
 
-class Action(BaseModel):
+class Action1(BaseModel):
     """
-    Durable action payload
+    Action payload
     """
     # data type: CommandAction
     oneof_schema_1_validator: Optional[CommandAction] = None
@@ -63,7 +63,7 @@ class Action(BaseModel):
 
     @field_validator('actual_instance')
     def actual_instance_must_validate_oneof(cls, v):
-        instance = Action.model_construct()
+        instance = Action1.model_construct()
         error_messages = []
         match = 0
         # validate data type: CommandAction
@@ -88,10 +88,10 @@ class Action(BaseModel):
             match += 1
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when setting `actual_instance` in Action with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when setting `actual_instance` in Action1 with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when setting `actual_instance` in Action with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting `actual_instance` in Action1 with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -133,10 +133,10 @@ class Action(BaseModel):
 
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when deserializing the JSON string into Action with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when deserializing the JSON string into Action1 with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into Action with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into Action1 with oneOf schemas: CommandAction, CreateGitWorktreeAction, GoalAction, SkillAction. Details: " + ", ".join(error_messages))
         else:
             return instance
 

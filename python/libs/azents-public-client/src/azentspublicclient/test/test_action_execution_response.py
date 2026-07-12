@@ -36,8 +36,9 @@ class TestActionExecutionResponse(unittest.TestCase):
         if include_optional:
             return ActionExecutionResponse(
                 id = '',
-                action_event_id = '',
+                input_buffer_id = '',
                 action_type = '',
+                action = None,
                 status = '',
                 failure_summary = '',
                 started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
@@ -48,8 +49,9 @@ class TestActionExecutionResponse(unittest.TestCase):
         else:
             return ActionExecutionResponse(
                 id = '',
-                action_event_id = '',
+                input_buffer_id = '',
                 action_type = '',
+                action = None,
                 status = '',
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )

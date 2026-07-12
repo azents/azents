@@ -340,6 +340,27 @@ def _wait_for_input_event(
     raise TimeoutError(f"Input event was not observed: {message!r}")
 
 
+def _wait_for_system_error(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    content: str,
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Wait for a durable handled preparation failure."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for event in _history(server_url, token, session_id):
+            if event.get("kind") != "system_error":
+                continue
+            payload = _object(event.get("payload"), label="system error payload")
+            if payload.get("content") == content:
+                return event
+        time.sleep(0.5)
+    raise TimeoutError(f"System error was not observed: {content!r}")
+
+
 def _wait_for_mock_models(mock_openai_url: str, *model_ids: str) -> str:
     """Wait until the mock provider journal contains every expected model."""
 
@@ -505,11 +526,18 @@ class TestPerPromptInferenceProfile:
             target="Fast",
             effort="high",
         )
-        _wait_for_input_event(
+        _wait_for_system_error(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
-            message=unsupported_message,
+            content="The selected reasoning effort is not supported by this model.",
+        )
+        assert (
+            _input_event(
+                _history(azents_public_server_url, token, session_id),
+                unsupported_message,
+            )
+            is None
         )
         session = _wait_for_session_idle(
             server_url=azents_public_server_url,

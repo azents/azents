@@ -23,7 +23,10 @@ from azents.core.enums import (
     AgentRunStatus,
     EventKind,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    SessionInferenceState,
+)
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_events import (
@@ -116,6 +119,8 @@ class _InputBufferService:
         """Project the configured result until it has been consumed."""
         del session_id
         return PendingInputInferenceProfile(
+            input_buffer_id=None if self.consumed else "buffer-1",
+            requires_inference=False,
             exists=not self.consumed,
             requested_inference_profile=(
                 self.promoted.requested_inference_profile if not self.consumed else None
@@ -128,15 +133,27 @@ class _InputBufferService:
         session_id: str,
         model: str | None,
         required_inference_profile: RequestedInferenceProfile | None,
+        expected_buffer_id: str | None,
+        prepared_inference_state: SessionInferenceState | None,
+        profile_resolution_failure: str | None,
         active_run_id: str | None,
         limit: int | None = None,
         include_action_messages: bool = True,
     ) -> PromotedInputBuffers:
         """Store flush call arguments and return specified result."""
-        del required_inference_profile, active_run_id, limit, include_action_messages
+        del (
+            required_inference_profile,
+            expected_buffer_id,
+            prepared_inference_state,
+            profile_resolution_failure,
+            active_run_id,
+            limit,
+            include_action_messages,
+        )
         self.calls.append((session_id, model))
         if self.consumed:
             return PromotedInputBuffers(
+                worktree_action=None,
                 turn_effect=TurnEffect.NEUTRAL,
                 requested_inference_profile=None,
                 user_messages=[],
@@ -1148,6 +1165,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
     )
     promotion = _InputBufferService(
         PromotedInputBuffers(
+            worktree_action=None,
             turn_effect=TurnEffect.ELIGIBLE,
             requested_inference_profile=RequestedInferenceProfile(
                 model_target_label="default",

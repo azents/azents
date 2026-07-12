@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
 from azents.rdb.deps import get_session_manager
+from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.action_execution.data import (
@@ -35,37 +36,39 @@ class ActionExecutionService:
         self.session_manager = session_manager
         self.action_execution_repository = action_execution_repository
 
-    async def create_for_action_event(
+    async def create_for_input_buffer(
         self,
         *,
         session_id: str,
-        action_event_id: str,
+        input_buffer_id: str,
         action_type: str,
+        action: dict[str, JSONValue],
     ) -> ActionExecution:
-        """Create or return execution state for one action_message event."""
+        """Create or return execution state for one source input buffer."""
         async with self.session_manager() as session:
             return await self.action_execution_repository.create(
                 session,
                 ActionExecutionCreate(
                     id=None,
                     session_id=session_id,
-                    action_event_id=action_event_id,
+                    input_buffer_id=input_buffer_id,
                     action_type=action_type,
+                    action=action,
                     status=ActionExecutionStatus.PENDING,
                 ),
             )
 
-    async def get_projection_by_action_event_id(
+    async def get_projection_by_input_buffer_id(
         self,
         *,
-        action_event_id: str,
+        input_buffer_id: str,
     ) -> ActionExecutionProjection | None:
-        """Fetch execution projection by action event identity."""
+        """Fetch execution projection by input buffer identity."""
         async with self.session_manager() as session:
             repository = self.action_execution_repository
-            return await repository.get_projection_by_action_event_id(
+            return await repository.get_projection_by_input_buffer_id(
                 session,
-                action_event_id=action_event_id,
+                input_buffer_id=input_buffer_id,
             )
 
     async def list_by_session_id(

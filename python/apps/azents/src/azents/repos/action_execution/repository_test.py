@@ -2,7 +2,6 @@
 
 import datetime
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -24,8 +23,6 @@ from azents.repos.action_execution.data import (
     ActionExecutionCreate,
     ActionExecutionEventCreate,
 )
-from azents.repos.agent_execution import EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -113,22 +110,11 @@ class TestActionExecutionRepository:
     ) -> None:
         """Execution state and progress events are keyed by action_message event."""
         session_id = await _create_agent_session(rdb_session, "action-exec-create")
-        action_payload = ActionMessagePayload(
-            action=CreateGitWorktreeAction(
-                source_project_path="/workspace/agent/repo",
-                starting_ref="main",
-            ),
-            message="",
-        )
-        action_event = await EventTranscriptRepository().append(
-            rdb_session,
-            EventCreate(
-                session_id=session_id,
-                kind=EventKind.ACTION_MESSAGE,
-                payload=action_payload.model_dump(mode="json"),
-                external_id="action-buffer-001",
-            ),
-        )
+        input_buffer_id = "01900000000070008000000000000001"
+        action = CreateGitWorktreeAction(
+            source_project_path="/workspace/agent/repo",
+            starting_ref="main",
+        ).model_dump(mode="json")
         repo = ActionExecutionRepository()
 
         execution = await repo.create(
@@ -136,8 +122,9 @@ class TestActionExecutionRepository:
             ActionExecutionCreate(
                 id=None,
                 session_id=session_id,
-                action_event_id=action_event.id,
+                input_buffer_id=input_buffer_id,
                 action_type="create_git_worktree",
+                action=action,
                 status=ActionExecutionStatus.PENDING,
             ),
         )
@@ -146,8 +133,9 @@ class TestActionExecutionRepository:
             ActionExecutionCreate(
                 id=None,
                 session_id=session_id,
-                action_event_id=action_event.id,
+                input_buffer_id=input_buffer_id,
                 action_type="create_git_worktree",
+                action=action,
                 status=ActionExecutionStatus.PENDING,
             ),
         )
@@ -182,41 +170,14 @@ class TestActionExecutionRepository:
         )
 
         assert same_execution.id == execution.id
-        assert execution.action_event_id == action_event.id
+        assert execution.input_buffer_id == input_buffer_id
         assert marked.status is ActionExecutionStatus.COMPLETED
         assert started.sequence == 1
         assert completed.sequence == 2
-        projection = await repo.get_projection_by_action_event_id(
+        projection = await repo.get_projection_by_input_buffer_id(
             rdb_session,
-            action_event_id=action_event.id,
+            input_buffer_id=input_buffer_id,
         )
         assert projection is not None
         assert projection.execution.id == execution.id
         assert [event.id for event in projection.events] == [started.id, completed.id]
-
-    async def test_create_requires_action_message_event(
-        self,
-        rdb_session: AsyncSession,
-    ) -> None:
-        """Execution rows cannot point at non-action transcript events."""
-        session_id = await _create_agent_session(rdb_session, "action-exec-invalid")
-        event = await EventTranscriptRepository().append(
-            rdb_session,
-            EventCreate(
-                session_id=session_id,
-                kind=EventKind.USER_MESSAGE,
-                payload={"content": "not an action"},
-            ),
-        )
-
-        with pytest.raises(ValueError, match="action_message"):
-            await ActionExecutionRepository().create(
-                rdb_session,
-                ActionExecutionCreate(
-                    id=None,
-                    session_id=session_id,
-                    action_event_id=event.id,
-                    action_type="create_git_worktree",
-                    status=ActionExecutionStatus.PENDING,
-                ),
-            )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 from typing import Literal, Self, assert_never
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 from azents.core.enums import (
     AgentRunPhase,
@@ -91,6 +91,8 @@ from azents.services.project_browser_manifest import (
 from azents.services.session_git_worktree import (
     GitRefPreview,
 )
+
+_CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
 
 
 class UploadResponse(BaseModel):
@@ -477,8 +479,9 @@ class ActionExecutionResponse(BaseModel):
     """Action execution live projection response."""
 
     id: str = Field(description="Action execution ID")
-    action_event_id: str = Field(description="Durable action_message event ID")
+    input_buffer_id: str = Field(description="Durable source input buffer ID")
     action_type: str = Field(description="Action discriminator")
+    action: ChatAction = Field(description="Durable action payload")
     status: str = Field(description="Execution status")
     failure_summary: str | None = Field(default=None, description="Failure summary")
     started_at: datetime.datetime | None = Field(default=None, description="Start time")
@@ -496,8 +499,9 @@ class ActionExecutionResponse(BaseModel):
         """Convert from domain model."""
         return cls(
             id=execution.id,
-            action_event_id=execution.action_event_id,
+            input_buffer_id=execution.input_buffer_id,
             action_type=execution.action_type,
+            action=_CHAT_ACTION_ADAPTER.validate_python(execution.action),
             status=execution.status.value,
             failure_summary=execution.failure_summary,
             started_at=execution.started_at,

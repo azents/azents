@@ -10,6 +10,7 @@ from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
     AgentSessionRunState,
     EventKind,
@@ -21,15 +22,17 @@ from azents.core.enums import (
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
+    SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.engine.events.action_messages import SkillAction
+from azents.engine.events.action_messages import GoalAction, SkillAction
 from azents.engine.events.types import (
     AgentMessagePayload,
     FileOutputPart,
     SkillLoadedPayload,
     UserMessagePayload,
 )
+from azents.engine.tools.goal import GoalStateStore
 from azents.engine.tools.skill import (
     SkillProjectionItem,
     SkillProjectionSnapshot,
@@ -40,6 +43,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -68,6 +72,7 @@ from azents.testing.model_selection import make_test_model_selection_dict
 
 from .input_buffer import (
     InputBufferEnqueue,
+    InputBufferPreparationStaleError,
     InputBufferService,
     TurnEffect,
     fold_turn_eligibility,
@@ -201,7 +206,7 @@ async def _create_action_buffer(
     session_id: str,
     user_id: str,
     content: str,
-    action: SkillAction,
+    action: GoalAction | SkillAction,
 ) -> str:
     """Create action InputBuffer for tests."""
     async with rdb_session_manager() as session:
@@ -395,6 +400,7 @@ def _input_buffer_service(
     *,
     exchange_file_service: ExchangeFileService | None = None,
     model_file_service: _ModelFileService | None = None,
+    event_transcript_repository: EventTranscriptRepository | None = None,
 ) -> InputBufferService:
     """Create InputBufferService for tests."""
     return InputBufferService(
@@ -403,8 +409,11 @@ def _input_buffer_service(
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
+        event_transcript_repository=(
+            event_transcript_repository or EventTranscriptRepository()
+        ),
         agent_run_repository=AgentRunRepository(),
+        action_execution_repository=ActionExecutionRepository(),
     )
 
 
@@ -543,6 +552,7 @@ class TestInputBufferService:
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
+            action_execution_repository=ActionExecutionRepository(),
         )
         enqueue = InputBufferEnqueue(
             session_id="session-001",
@@ -587,6 +597,9 @@ class TestInputBufferService:
             session_id=session_id,
             model="gpt-5.4",
             required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=None,
         )
 
@@ -622,6 +635,113 @@ class TestInputBufferService:
             )
         assert remaining == 0
 
+    async def test_flush_rejects_stale_preparation_snapshot(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A changed FIFO head is not consumed with another input's preparation."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-stale-preparation",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="keep pending",
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
+        service = _input_buffer_service(rdb_session_manager)
+
+        with pytest.raises(InputBufferPreparationStaleError):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id="another-buffer",
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+        assert remaining is not None
+
+    async def test_flush_rolls_back_inference_state_and_buffer_on_event_failure(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Session inference update, event append, and buffer deletion are atomic."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-atomic-preparation",
+        )
+        buffer_id = await _create_action_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="Prepare the release",
+            action=GoalAction(),
+        )
+        agent_id = await _agent_id_for_session(rdb_session_manager, session_id)
+        prepared_state = SessionInferenceState(
+            model_target_label="Fast",
+            model_selection=AgentModelSelection.model_validate(
+                make_test_model_selection_dict(
+                    integration_id="1234567890abcdef1234567890abcdef",
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier="prepared-model",
+                )
+            ),
+            reasoning_effort=ModelReasoningEffort.HIGH,
+            effective_context_window_tokens=100_000,
+            effective_auto_compaction_threshold_tokens=80_000,
+            resolved_at=datetime.datetime.now(datetime.UTC),
+        )
+        event_repository = EventTranscriptRepository()
+        monkeypatch.setattr(
+            event_repository,
+            "append",
+            AsyncMock(side_effect=RuntimeError("event append failed")),
+        )
+        service = _input_buffer_service(
+            rdb_session_manager,
+            event_transcript_repository=event_repository,
+        )
+
+        with pytest.raises(RuntimeError, match="event append failed"):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="prepared-model",
+                required_inference_profile=RequestedInferenceProfile(
+                    model_target_label="Fast",
+                    reasoning_effort=ModelReasoningEffort.HIGH,
+                ),
+                expected_buffer_id=buffer_id,
+                prepared_inference_state=prepared_state,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        async with rdb_session_manager() as session:
+            agent_session = await AgentSessionRepository().get_by_id(
+                session,
+                session_id,
+            )
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+        assert agent_session is not None
+        goal = await GoalStateStore(session_manager=rdb_session_manager).load(
+            agent_id,
+            session_id,
+        )
+        assert agent_session.inference_state is None
+        assert remaining is not None
+        assert goal.objective is None
+        assert goal.status is None
+
     async def test_flush_associates_events_with_run_before_buffer_delete(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -656,6 +776,9 @@ class TestInputBufferService:
                 model_target_label="Quality",
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=run.id,
         )
 
@@ -708,6 +831,9 @@ class TestInputBufferService:
             session_id=session_id,
             model="gpt-5.4",
             required_inference_profile=None,
+            expected_buffer_id=first_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=None,
         )
 
@@ -756,6 +882,9 @@ class TestInputBufferService:
                 model_target_label="Fast",
                 reasoning_effort=None,
             ),
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=None,
         )
 
@@ -793,6 +922,9 @@ class TestInputBufferService:
                 model_target_label="Fast",
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=None,
         )
 
@@ -845,6 +977,9 @@ class TestInputBufferService:
                 model_target_label="Fast",
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=None,
         )
 
@@ -880,7 +1015,7 @@ class TestInputBufferService:
         thumbnail_file_id = "abcdef1234567890abcdef1234567890"
         attachment_uri = "exchange://exchange/workspace-001/session/report.txt"
         thumbnail_uri = "exchange://exchange/workspace-001/previews/report-thumb.jpg"
-        await _create_buffer(
+        attachment_buffer_id = await _create_buffer(
             rdb_session_manager,
             session_id=session_id,
             user_id=user_id,
@@ -907,6 +1042,9 @@ class TestInputBufferService:
             session_id=session_id,
             model="gpt-5.4",
             required_inference_profile=None,
+            expected_buffer_id=attachment_buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=None,
         )
 
@@ -948,7 +1086,7 @@ class TestInputBufferService:
             kind="image",
             metadata={"source_kind": "user_upload"},
         )
-        await _create_buffer(
+        image_buffer_id = await _create_buffer(
             rdb_session_manager,
             session_id=session_id,
             user_id=user_id,
@@ -976,6 +1114,9 @@ class TestInputBufferService:
             session_id=session_id,
             model="gpt-5.4",
             required_inference_profile=None,
+            expected_buffer_id=image_buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=None,
         )
 
@@ -1012,6 +1153,9 @@ class TestInputBufferService:
             session_id=session_id,
             model="gpt-5.4",
             required_inference_profile=None,
+            expected_buffer_id=None,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=None,
         )
 

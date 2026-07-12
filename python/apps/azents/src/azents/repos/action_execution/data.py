@@ -5,6 +5,7 @@ import datetime
 from pydantic import BaseModel, Field
 
 from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
+from azents.rdb.models.event import JSONValue
 
 
 class ActionExecution(BaseModel):
@@ -12,8 +13,9 @@ class ActionExecution(BaseModel):
 
     id: str = Field(description="Action execution ID")
     session_id: str = Field(description="AgentSession ID")
-    action_event_id: str = Field(description="Durable action_message event ID")
+    input_buffer_id: str = Field(description="Durable source input buffer ID")
     action_type: str = Field(description="Action discriminator")
+    action: dict[str, JSONValue] = Field(description="Durable action payload")
     status: ActionExecutionStatus = Field(description="Execution status")
     failure_summary: str | None = Field(description="User-safe failure summary")
     started_at: datetime.datetime | None = Field(description="Start time")
@@ -28,8 +30,9 @@ class ActionExecutionCreate(BaseModel):
 
     id: str | None = Field(description="Optional action execution ID")
     session_id: str = Field(description="AgentSession ID")
-    action_event_id: str = Field(description="Durable action_message event ID")
+    input_buffer_id: str = Field(description="Durable source input buffer ID")
     action_type: str = Field(description="Action discriminator")
+    action: dict[str, JSONValue] = Field(description="Durable action payload")
     status: ActionExecutionStatus = Field(description="Initial execution status")
 
 

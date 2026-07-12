@@ -215,7 +215,8 @@ class PollMessagesResult:
     """Input polled at a model-call turn boundary."""
 
     user_messages: list[RunUserMessage]
-    context_invalidated: bool = False
+    context_invalidated: bool
+    complete_run: bool
 
 
 PollMessages: TypeAlias = Callable[[], Awaitable[PollMessagesResult]]

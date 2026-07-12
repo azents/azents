@@ -1236,7 +1236,7 @@ function isActionExecutionProjectionValue(
   }
   return (
     typeof value.execution.id === "string" &&
-    typeof value.execution.action_event_id === "string" &&
+    typeof value.execution.input_buffer_id === "string" &&
     typeof value.execution.status === "string" &&
     Array.isArray(value.events)
   );

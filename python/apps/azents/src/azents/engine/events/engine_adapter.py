@@ -533,7 +533,7 @@ class AgentEngineAdapter:
 
         if status in {AgentRunStatus.COMPLETED, AgentRunStatus.FAILED}:
             yield ephemeral(RunComplete())
-        elif status is AgentRunStatus.CANCELLED:
+        elif status in {AgentRunStatus.RUNNING, AgentRunStatus.CANCELLED}:
             return
         else:
             yield ephemeral(RunStopped())
@@ -712,6 +712,7 @@ def _make_input_poller(
             return InputPollResult(
                 events=[],
                 context_invalidated=result.context_invalidated,
+                complete_run=result.complete_run,
             )
         events = await _append_run_user_messages(
             session,
@@ -722,6 +723,7 @@ def _make_input_poller(
         return InputPollResult(
             events=events,
             context_invalidated=result.context_invalidated,
+            complete_run=result.complete_run,
         )
 
     return poll

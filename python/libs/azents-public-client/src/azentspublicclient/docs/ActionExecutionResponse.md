@@ -7,8 +7,9 @@ Action execution live projection response.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **str** | Action execution ID | 
-**action_event_id** | **str** | Durable action_message event ID | 
+**input_buffer_id** | **str** | Durable source input buffer ID | 
 **action_type** | **str** | Action discriminator | 
+**action** | [**Action**](Action.md) |  | 
 **status** | **str** | Execution status | 
 **failure_summary** | **str** |  | [optional] 
 **started_at** | **datetime** |  | [optional] 

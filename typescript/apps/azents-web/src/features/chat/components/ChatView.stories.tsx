@@ -306,25 +306,18 @@ export const WithLiveRunRetry = {
 export const WithActionExecutionFailure = {
   args: {
     ...baseArgs,
-    messages: [
-      createChatMessage({
-        id: "event-action-1",
-        role: "user",
-        content: "Create a feature worktree.",
-        action: {
-          type: "create_git_worktree",
-          source_project_path: "/workspace/agent/project",
-          starting_ref: "main",
-        },
-        createdAt: "2026-05-19T00:00:00Z",
-      }),
-    ],
+    messages: [],
     actionExecutions: [
       {
         execution: {
           id: "action-execution-1",
-          action_event_id: "event-action-1",
+          input_buffer_id: "buffer-action-1",
           action_type: "create_git_worktree",
+          action: {
+            type: "create_git_worktree",
+            source_project_path: "/workspace/agent/project",
+            starting_ref: "main",
+          },
           status: "failed",
           failure_summary:
             "Git worktree creation failed because the branch already exists.",

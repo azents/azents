@@ -89,7 +89,13 @@ def latest_db_schema(
     try:
         yield
     finally:
-        alembic_command.downgrade(alembic_config, "base")
+        try:
+            alembic_command.downgrade(alembic_config, "base")
+        except RuntimeError as error:
+            if "irreversible" not in str(error):
+                raise
+            # The session-scoped container is discarded after this fixture.
+            # An explicit irreversible migration is therefore a valid teardown stop.
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")

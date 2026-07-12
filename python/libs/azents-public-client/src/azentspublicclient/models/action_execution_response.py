@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.action import Action
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,8 +29,9 @@ class ActionExecutionResponse(BaseModel):
     Action execution live projection response.
     """ # noqa: E501
     id: StrictStr = Field(description="Action execution ID")
-    action_event_id: StrictStr = Field(description="Durable action_message event ID")
+    input_buffer_id: StrictStr = Field(description="Durable source input buffer ID")
     action_type: StrictStr = Field(description="Action discriminator")
+    action: Action
     status: StrictStr = Field(description="Execution status")
     failure_summary: Optional[StrictStr] = None
     started_at: Optional[datetime] = None
@@ -37,7 +39,7 @@ class ActionExecutionResponse(BaseModel):
     failed_at: Optional[datetime] = None
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "action_event_id", "action_type", "status", "failure_summary", "started_at", "completed_at", "failed_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "input_buffer_id", "action_type", "action", "status", "failure_summary", "started_at", "completed_at", "failed_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,6 +82,9 @@ class ActionExecutionResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of action
+        if self.action:
+            _dict['action'] = self.action.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -118,8 +123,9 @@ class ActionExecutionResponse(BaseModel):
 
         _obj = cls.model_validate({
             "id": obj.get("id"),
-            "action_event_id": obj.get("action_event_id"),
+            "input_buffer_id": obj.get("input_buffer_id"),
             "action_type": obj.get("action_type"),
+            "action": Action.from_dict(obj["action"]) if obj.get("action") is not None else None,
             "status": obj.get("status"),
             "failure_summary": obj.get("failure_summary"),
             "started_at": obj.get("started_at"),

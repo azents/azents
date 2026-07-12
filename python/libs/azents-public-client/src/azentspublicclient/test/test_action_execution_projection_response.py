@@ -37,8 +37,9 @@ class TestActionExecutionProjectionResponse(unittest.TestCase):
             return ActionExecutionProjectionResponse(
                 execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
                     id = '', 
-                    action_event_id = '', 
+                    input_buffer_id = '', 
                     action_type = '', 
+                    action = null, 
                     status = '', 
                     failure_summary = '', 
                     started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -64,8 +65,9 @@ class TestActionExecutionProjectionResponse(unittest.TestCase):
             return ActionExecutionProjectionResponse(
                 execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
                     id = '', 
-                    action_event_id = '', 
+                    input_buffer_id = '', 
                     action_type = '', 
+                    action = null, 
                     status = '', 
                     failure_summary = '', 
                     started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 

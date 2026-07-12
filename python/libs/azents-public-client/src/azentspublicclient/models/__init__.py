@@ -15,6 +15,7 @@
 # import models into model package
 from azentspublicclient.models.accept_decline_response import AcceptDeclineResponse
 from azentspublicclient.models.action import Action
+from azentspublicclient.models.action1 import Action1
 from azentspublicclient.models.action_execution_event_response import ActionExecutionEventResponse
 from azentspublicclient.models.action_execution_projection_response import ActionExecutionProjectionResponse
 from azentspublicclient.models.action_execution_response import ActionExecutionResponse

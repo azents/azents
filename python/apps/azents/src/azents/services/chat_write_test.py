@@ -37,6 +37,7 @@ from azents.rdb.models.event import JSONValue, RDBEvent
 from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -161,6 +162,7 @@ def _service(
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
+        action_execution_repository=ActionExecutionRepository(),
     )
     return ChatWriteService(
         agent_session_repository=AgentSessionRepository(),
@@ -297,6 +299,7 @@ class TestChatWriteService:
                 agent_session_repository=AgentSessionRepository(),
                 event_transcript_repository=EventTranscriptRepository(),
                 agent_run_repository=AgentRunRepository(),
+                action_execution_repository=ActionExecutionRepository(),
             ),
             session_manager=rdb_session_manager,
         )
