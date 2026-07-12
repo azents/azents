@@ -14,14 +14,12 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/chatgpt_oauth_session.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/services/model_listing/**
-  - python/apps/azents/src/azents/services/llm_catalog/__init__.py
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/engine/events/**
-  - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-12
-spec_version: 7
+last_verified_at: 2026-06-16
+spec_version: 6
 ---
 
 # ChatGPT OAuth Flow
@@ -136,20 +134,6 @@ Rules:
 - When terminal status (`connected`, `cancelled`, `expired`, `failed`) is reached, frontend stops polling.
 - `device_auth_id` is stored only in server-side session payload and is not exposed in public response.
 
-## Account-scoped model catalog
-
-After a device connection succeeds, Azents queues an initial integration catalog sync. Integration updates and explicit picker sync use the same catalog service. The sync path refreshes the OAuth token when necessary, then requests:
-
-```text
-GET https://chatgpt.com/backend-api/codex/models?client_version=0.144.0
-```
-
-The request includes the connected account id and Azents client identity. Models are selectable only when backend metadata marks them API-supported and picker-visible. The backend model payload supplies the normalized `use_responses_lite` capability plus reasoning, modality, context-window, and tool metadata. A backend model remains selectable without a matching LiteLLM metadata key.
-
-Picker reads use the stored integration catalog and do not call ChatGPT. Before the first integration snapshot exists, the existing ChatGPT system catalog is the fallback. Failed sync attempts preserve the last successful snapshot.
-
-Catalog refresh does not mutate Agent or Workspace model selection snapshots. Runtime transport selection uses the compatibility capability copied into the saved model selection when the user selects the model.
-
 ## Runtime Refresh and Execution
 
 ```mermaid
@@ -187,12 +171,8 @@ Rules:
 - Transient provider failure is treated as retryable provider unavailable, and permanent rejection is stored as `refresh_required`.
 - Concurrent refresh race rereads latest integration and does not overwrite with failure if token is already refreshed.
 - `access_token` used in runtime request is passed only as OpenAI SDK `api_key`. It is not exposed in logs/API responses.
-- ChatGPT Codex backend does not allow Responses API server-side persistence, so runtime calls set `store=false` and request encrypted reasoning content for stateless replay.
-- Immediately before a `store=false` runtime call, mask top-level Responses input item `id` values. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references.
-- Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
-- A saved model capability with `responses_lite=false` uses the standard Responses contract regardless of model name.
-- A saved model capability with `responses_lite=true` moves tools and instructions into developer input items, strips image detail fields, disables parallel tool calls, sets reasoning context to `all_turns`, uses the Azents session id as prompt cache key and affinity id, and sends the fixed Responses Lite compatibility version and header.
-- Responses Lite failures follow the normal model-call error path. Runtime does not retry with the standard Responses contract.
+- ChatGPT Codex backend does not allow Responses API server-side persistence, so runtime call explicitly sets SDK `ModelSettings.store=False`.
+- Immediately before `store=False` runtime call, remove top-level `id` from Responses input item. Azents events/external_id remain preserved in DB, but Codex backend interprets request payload `input[*].id` as provider item id and requires `msg` prefix, so do not send internal UUID.
 
 ## API Surface
 
@@ -229,7 +209,6 @@ Rules:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
-| 2026-07-12 | 7 | Added account-scoped model discovery and saved-capability-driven Responses Lite lowering | [`design/chatgpt-responses-lite-catalog.md`](../../design/chatgpt-responses-lite-catalog.md) |
 | 2026-06-16 | 5 | Updated runtime refresh sequence from Agent model selection snapshot → Integration resolve | [`adr/0063-agent-model-selection-snapshot.md`](../../adr/0063-agent-model-selection-snapshot.md) |
 | 2026-05-17 | 4 | Updated runtime refresh sequence from Agent static provider model resolve to ModelConfig → Integration resolve | [`design/dynamic-llm-model-configs.md`](../../design/dynamic-llm-model-configs.md) |
 | 2026-05-09 | 3 | Reflected that current public API implements only device flow and removed callback flow descriptions | `python/apps/azents/src/azents/api/public/chatgpt_oauth/v1/__init__.py` |

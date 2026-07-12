@@ -15,19 +15,7 @@ from google.auth.exceptions import GoogleAuthError
 from google.oauth2 import service_account
 from pydantic import TypeAdapter
 
-from azents.core.chatgpt_oauth import (
-    CHATGPT_OAUTH_BACKEND_BASE_URL,
-    CHATGPT_OAUTH_PROTOCOL_VERSION,
-    build_chatgpt_oauth_headers,
-)
-from azents.core.credentials import (
-    AwsConfig,
-    AwsSecrets,
-    ChatGPTOAuthConfig,
-    ChatGPTOAuthSecrets,
-    GcpConfig,
-    GcpSecrets,
-)
+from azents.core.credentials import AwsConfig, AwsSecrets, GcpConfig, GcpSecrets
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import (
     ModelCapabilities,
@@ -35,8 +23,6 @@ from azents.core.llm_catalog import (
     ModelContextWindow,
     ModelModalities,
     ModelModality,
-    ModelReasoningCapabilities,
-    ModelReasoningEffort,
     ModelToolCallingCapabilities,
 )
 from azents.repos.llm_provider_integration.data import (
@@ -56,7 +42,6 @@ VERTEX_PUBLISHERS: dict[str, LLMModelDeveloper] = {
 }
 
 _BEDROCK_MODEL_SUMMARY_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
-_CHATGPT_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 _VERTEX_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 
 
@@ -82,16 +67,6 @@ async def list_vertex_models_for_integration(
         return await _list_vertex_models(integration)
     except (GoogleAuthError, httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError("Google Vertex AI model listing failed.") from exc
-
-
-async def list_chatgpt_models_for_integration(
-    integration: LLMProviderIntegrationWithSecrets,
-) -> ModelListingOutput:
-    """Fetch account-visible models from the ChatGPT Codex backend."""
-    try:
-        return await _list_chatgpt_models(integration)
-    except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
-        raise ListingProviderError("ChatGPT model listing failed.") from exc
 
 
 async def _list_bedrock_models(
@@ -191,144 +166,6 @@ def _candidate_from_bedrock_summary(
         source_metadata=summary,
         last_refreshed_at=fetched_at,
     )
-
-
-async def _list_chatgpt_models(
-    integration: LLMProviderIntegrationWithSecrets,
-) -> ModelListingOutput:
-    """Fetch candidates from the ChatGPT Codex models endpoint."""
-    config = _require_chatgpt_config(integration.config)
-    secrets = _require_chatgpt_secrets(integration.secrets)
-    fetched_at = datetime.now(timezone.utc)
-    headers = build_chatgpt_oauth_headers(account_id=config.account_id)
-    headers.update(
-        {
-            "Authorization": f"Bearer {secrets.access_token}",
-            "version": CHATGPT_OAUTH_PROTOCOL_VERSION,
-        }
-    )
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.get(
-            f"{CHATGPT_OAUTH_BACKEND_BASE_URL}/models",
-            params={"client_version": CHATGPT_OAUTH_PROTOCOL_VERSION},
-            headers=headers,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    raw_models = payload.get("models") if isinstance(payload, dict) else None
-    if not isinstance(raw_models, list):
-        raise ValueError("ChatGPT model listing response must contain models.")
-    models: list[NormalizedModelCandidate] = []
-    skipped = 0
-    for raw_model in raw_models:
-        model = _CHATGPT_MODEL_ADAPTER.validate_python(raw_model)
-        candidate = _candidate_from_chatgpt_model(model, fetched_at=fetched_at)
-        if candidate is None:
-            skipped += 1
-            continue
-        models.append(candidate)
-    return _output(
-        source="chatgpt:codex_models",
-        fetched_at=fetched_at,
-        models=models,
-        skips=_skip_summary("unsupported_chatgpt_model", skipped),
-    )
-
-
-def _candidate_from_chatgpt_model(
-    model: dict[str, object],
-    *,
-    fetched_at: datetime,
-) -> NormalizedModelCandidate | None:
-    """Normalize ChatGPT Codex model metadata."""
-    model_id = _str_value(model, "slug")
-    if (
-        model_id is None
-        or model.get("supported_in_api") is not True
-        or model.get("visibility") != "list"
-    ):
-        return None
-    display_name = _str_value(model, "display_name") or model_id
-    reasoning_efforts = _chatgpt_reasoning_efforts(
-        model.get("supported_reasoning_levels")
-    )
-    input_modalities = _chatgpt_modalities(model)
-    context_window = _chatgpt_context_window(model)
-    responses_lite = model.get("use_responses_lite") is True
-    parallel_tool_calls_value = model.get("supports_parallel_tool_calls")
-    parallel_tool_calls = (
-        parallel_tool_calls_value
-        if isinstance(parallel_tool_calls_value, bool)
-        else None
-    )
-    reasoning_summaries_value = model.get("supports_reasoning_summaries")
-    reasoning_summaries = (
-        reasoning_summaries_value
-        if isinstance(reasoning_summaries_value, bool)
-        else None
-    )
-    capabilities = ModelCapabilities(
-        context_window=ModelContextWindow(max_input_tokens=context_window),
-        modalities=ModelModalities(
-            input=input_modalities,
-            output=[ModelModality.TEXT],
-        ),
-        tool_calling=ModelToolCallingCapabilities(
-            supported=True,
-            parallel_tool_calls=parallel_tool_calls,
-        ),
-        reasoning=ModelReasoningCapabilities(
-            supported=bool(reasoning_efforts),
-            effort_levels=reasoning_efforts,
-            summaries=reasoning_summaries,
-        ),
-        compatibility=ModelCompatibilityCapabilities(
-            provider_family="chatgpt",
-            responses_api=True,
-            responses_lite=responses_lite,
-        ),
-    )
-    return NormalizedModelCandidate(
-        provider=LLMProvider.CHATGPT_OAUTH,
-        model_identifier=model_id,
-        model_display_name=display_name,
-        model_developer=LLMModelDeveloper.OPENAI,
-        model_family=_chatgpt_family(model_id),
-        normalized_capabilities=capabilities,
-        model_snapshot={
-            "source": "chatgpt:codex_models",
-            "provider": LLMProvider.CHATGPT_OAUTH.value,
-            "model_identifier": model_id,
-            "model_display_name": display_name,
-            "model_developer": LLMModelDeveloper.OPENAI.value,
-            "use_responses_lite": responses_lite,
-        },
-        source_metadata=_chatgpt_source_metadata(model),
-        last_refreshed_at=fetched_at,
-    )
-
-
-def _chatgpt_source_metadata(model: dict[str, object]) -> dict[str, object]:
-    """Keep catalog-relevant ChatGPT metadata without storing model instructions."""
-    keys = (
-        "auto_compact_token_limit",
-        "context_window",
-        "default_reasoning_level",
-        "effective_context_window_percent",
-        "experimental_supported_tools",
-        "input_modalities",
-        "max_context_window",
-        "minimal_client_version",
-        "priority",
-        "supported_in_api",
-        "supported_reasoning_levels",
-        "supports_parallel_tool_calls",
-        "supports_reasoning_summaries",
-        "tool_mode",
-        "use_responses_lite",
-        "visibility",
-    )
-    return {key: model[key] for key in keys if key in model}
 
 
 async def _list_vertex_models(
@@ -475,20 +312,6 @@ def _require_aws_secrets(secrets: object) -> AwsSecrets:
     return secrets
 
 
-def _require_chatgpt_config(config: object) -> ChatGPTOAuthConfig:
-    """Validate ChatGPT OAuth config type."""
-    if not isinstance(config, ChatGPTOAuthConfig):
-        raise ValueError("ChatGPT OAuth integration config is required.")
-    return config
-
-
-def _require_chatgpt_secrets(secrets: object) -> ChatGPTOAuthSecrets:
-    """Validate ChatGPT OAuth secrets type."""
-    if not isinstance(secrets, ChatGPTOAuthSecrets):
-        raise ValueError("ChatGPT OAuth integration secrets are required.")
-    return secrets
-
-
 def _require_gcp_config(config: object) -> GcpConfig:
     """Validate GCP config type."""
     if not isinstance(config, GcpConfig):
@@ -532,63 +355,6 @@ def _developer_from_bedrock_provider(
     if "mistral" in normalized:
         return LLMModelDeveloper.MISTRAL
     return None
-
-
-def _chatgpt_reasoning_efforts(value: object) -> list[ModelReasoningEffort]:
-    """Normalize ChatGPT reasoning effort presets in provider order."""
-    if not isinstance(value, list):
-        return []
-    efforts: list[ModelReasoningEffort] = []
-    for preset in value:
-        if not isinstance(preset, dict):
-            continue
-        effort = preset.get("effort")
-        if not isinstance(effort, str):
-            continue
-        try:
-            normalized = ModelReasoningEffort(effort)
-        except ValueError:
-            continue
-        if normalized not in efforts:
-            efforts.append(normalized)
-    return efforts
-
-
-def _chatgpt_context_window(model: dict[str, object]) -> int | None:
-    """Resolve the effective ChatGPT context window from backend metadata."""
-    for key in ("context_window", "max_context_window"):
-        value = model.get(key)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-    return None
-
-
-def _chatgpt_modalities(model: dict[str, object]) -> list[ModelModality]:
-    """Normalize ChatGPT input modalities with the backend legacy default."""
-    if "input_modalities" not in model:
-        return [ModelModality.TEXT, ModelModality.IMAGE]
-    value = model.get("input_modalities")
-    if not isinstance(value, list):
-        return []
-    modalities: list[ModelModality] = []
-    for raw in value:
-        if not isinstance(raw, str):
-            continue
-        try:
-            modality = ModelModality(raw)
-        except ValueError:
-            continue
-        if modality not in modalities:
-            modalities.append(modality)
-    return modalities
-
-
-def _chatgpt_family(model_id: str) -> str:
-    """Extract the ChatGPT model family identifier."""
-    parts = model_id.split("-")
-    if len(parts) >= 2 and parts[0] == "gpt":
-        return "-".join(parts[:2])
-    return parts[0]
 
 
 def _bedrock_family(model_id: str) -> str:

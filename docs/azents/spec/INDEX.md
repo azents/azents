@@ -16,7 +16,7 @@ Details of all living specs. Synchronized from frontmatter.
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-12 | 96 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-01 | 8 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-09 | 4 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-12 | 5 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-10 | 4 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-10 | 54 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-08 | 6 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-12 | 38 |
@@ -29,7 +29,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-12 | 16 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-12 | 25 |
-| [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-12 | 7 |
+| [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-06-16 | 6 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-12 | 20 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-11 | 13 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |

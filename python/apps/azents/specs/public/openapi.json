@@ -13967,11 +13967,6 @@
             ],
             "title": "Responses Api"
           },
-          "responses_lite": {
-            "type": "boolean",
-            "title": "Responses Lite",
-            "default": false
-          },
           "unsupported_media_policy": {
             "anyOf": [
               {

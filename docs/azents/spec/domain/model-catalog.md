@@ -18,8 +18,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-12
-spec_version: 5
+last_verified_at: 2026-07-10
+spec_version: 4
 ---
 
 # Model Catalog Domain Spec
@@ -32,8 +32,8 @@ The model catalog stores projected model choices for Agent and Workspace model s
 
 Catalogs have two ownership scopes.
 
-- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, ChatGPT OAuth fallback, xAI API key, xAI OAuth, Anthropic, and Google Gemini using the active lowerer target projection source.
-- Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock, ChatGPT OAuth, and Google Vertex AI.
+- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, ChatGPT OAuth, xAI API key, xAI OAuth, Anthropic, and Google Gemini using the active lowerer target projection source.
+- Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock and Google Vertex AI.
 
 A public model picker starts from an enabled LLM provider integration. Reads first try the integration catalog. If an integration catalog does not exist, the read path falls back to the provider system catalog.
 
@@ -61,8 +61,6 @@ Only entries with selectable visibility are returned by the public picker list A
 
 LiteLLM is the current lowerer target projection source. The source sync service records LiteLLM source snapshots before projection. System and integration projections use the stored LiteLLM source snapshot rather than fetching external model metadata from the picker read path.
 
-ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, Responses Lite compatibility, reasoning efforts, modalities, context window, and tool capabilities. ChatGPT entries do not require a matching LiteLLM model metadata key; the LiteLLM source snapshot remains attached to the catalog snapshot because the existing lowerer-target catalog lifecycle requires one.
-
 Reasoning capabilities are projected from LiteLLM's canonical provider model metadata schema. Explicit effort levels are reconstructed in the deterministic order `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The optional `none`, `minimal`, `xhigh`, and `max` levels follow their corresponding LiteLLM support flags. Every model marked as reasoning-capable receives the baseline `low`, `medium`, and `high` levels, except that an explicit `supports_low_reasoning_effort: false` removes `low`. A model with no projected effort levels allows no explicit effort override; an empty list is not interpreted as unrestricted support.
 
 Each catalog sync records an attempt with status, counts, failure metadata, action hint, and diagnostics. Failed syncs keep the last successful snapshot available when one exists.
@@ -89,7 +87,7 @@ The read path must not call provider listing APIs, models.dev, or remote LiteLLM
 
 The integration catalog sync endpoint refreshes the stored catalog for one integration.
 
-For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. Provider credential and permission failures are recorded as sync failure state instead of surfacing as unhandled server errors. User catalog failure diagnostics include a retry policy marker: automatic user-catalog retry is blocked, and retry occurs only through explicit user sync or integration create/update. Successful ChatGPT OAuth connection also queues an initial best-effort catalog sync.
+For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. Provider credential and permission failures are recorded as sync failure state instead of surfacing as unhandled server errors. User catalog failure diagnostics include a retry policy marker: automatic user-catalog retry is blocked, and retry occurs only through explicit user sync or integration create/update.
 
 Starting sync while the latest attempt for the catalog is still running returns a conflict instead of creating a duplicate running attempt.
 
@@ -121,7 +119,6 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
-| 2026-07-12 | 5 | Added account-scoped ChatGPT OAuth integration catalogs and backend-authoritative Responses Lite capability projection |
 | 2026-07-10 | 4 | Documented canonical LiteLLM reasoning-effort capability projection and strict empty-list semantics |
 | 2026-07-10 | 3 | Added the separate xAI API-key system catalog projected from the shared LiteLLM xAI family |
 | 2026-07-09 | 2 | Documented selectable model option submit normalization through stored catalog projection |
@@ -129,4 +126,4 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 ## Current implementation notes
 
-The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use LiteLLM projection source data for the active lowerer target. ChatGPT OAuth uses its system catalog only before an account-scoped integration catalog exists. The separate `xai` and `xai_oauth` system catalogs are both projected from LiteLLM provider family `xai`; provider-facing identifiers remove the `xai/` prefix, and runtime invocation reconstructs the LiteLLM `xai/` route prefix.
+The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use LiteLLM projection source data for the active lowerer target. The separate `xai` and `xai_oauth` system catalogs are both projected from LiteLLM provider family `xai`; provider-facing identifiers remove the `xai/` prefix, and runtime invocation reconstructs the LiteLLM `xai/` route prefix.

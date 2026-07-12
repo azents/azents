@@ -3,12 +3,9 @@
 import datetime
 
 from azents.core.enums import LLMCatalogEntryVisibility, LLMModelDeveloper, LLMProvider
-from azents.core.llm_catalog import ModelCapabilities, ModelCompatibilityCapabilities
+from azents.core.llm_catalog import ModelCapabilities
 from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
-from azents.services.llm_catalog import (
-    project_chatgpt_integration_entries,
-    project_integration_entries,
-)
+from azents.services.llm_catalog import project_integration_entries
 from azents.services.model_listing.data import (
     ModelListingOutput,
     ModelListingSummary,
@@ -83,52 +80,3 @@ def test_project_integration_entries_requires_exact_target_projection() -> None:
     )
     assert entries[1].visibility_status == LLMCatalogEntryVisibility.HIDDEN
     assert entries[1].hidden_reason == "missing_target_projection"
-
-
-def test_project_chatgpt_entries_does_not_require_litellm_metadata() -> None:
-    """ChatGPT backend models remain selectable without LiteLLM projection keys."""
-    fetched_at = datetime.datetime.now(datetime.UTC)
-    listing = ModelListingOutput(
-        models=[
-            NormalizedModelCandidate(
-                provider=LLMProvider.CHATGPT_OAUTH,
-                model_identifier="gpt-5.6-luna",
-                model_display_name="GPT-5.6 Luna",
-                model_developer=LLMModelDeveloper.OPENAI,
-                model_family="gpt-5.6",
-                normalized_capabilities=ModelCapabilities(
-                    compatibility=ModelCompatibilityCapabilities(
-                        provider_family="chatgpt",
-                        responses_api=True,
-                        responses_lite=True,
-                    )
-                ),
-                model_snapshot={},
-                source_metadata={"use_responses_lite": True},
-                last_refreshed_at=fetched_at,
-            )
-        ],
-        summary=ModelListingSummary(
-            source="chatgpt:codex_models",
-            fetched_at=fetched_at,
-            returned_count=1,
-            skipped_count=0,
-        ),
-        skips=[],
-    )
-
-    entries = project_chatgpt_integration_entries(
-        integration_id="integration-id",
-        listing=listing,
-        source_hash="source-hash",
-    )
-
-    [entry] = entries
-    assert entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
-    assert entry.runtime_model_identifier == "gpt-5.6-luna"
-    assert entry.normalized_capabilities["compatibility"]["responses_lite"] is True
-    assert entry.projection_metadata == {
-        "lowerer_target": "litellm",
-        "freshness_rank": 5060,
-        "responses_lite": True,
-    }
