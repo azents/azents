@@ -39,7 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-12
-spec_version: 73
+spec_version: 74
 ---
 
 # Agent Execution Loop
@@ -90,7 +90,7 @@ Phase enum:
 - `stopping`
 
 `active_tool_calls` contains `call_id`, `name`, redacted/summarized `arguments`, `started_at`,
-and `background`. The UI LLM running indicator uses `waiting_for_model` / `streaming_model`, and
+and the admitting `owner_generation`. PostgreSQL is the execution and live-state authority for this set. The UI LLM running indicator uses `waiting_for_model` / `streaming_model`, and
 tool activity uses `executing_tools` and `active_tool_calls`.
 
 A newly selected run begins as `pending`. For normal buffered input, the worker resolves the
@@ -385,14 +385,13 @@ actor `user_id`, model, and optional stop checker. Session-scoped toolkit instan
 must create run-sensitive handlers from this current turn context instead of retaining
 stale constructor state. Schedule and background task tool handlers follow this rule.
 
-If the run is stopped while tools are active, the loop records interrupted results for calls that
+If the run is stopped while tools are active, the loop records deterministic cancelled results for calls that
 did not produce a result. User-requested stop also appends an `interrupted` durable event before the
 terminal `run_marker(status=interrupted)` so the next model input can receive the interruption
 reminder and the UI can show a non-chat timeline divider. After user stop, the session runner starts
 another turn only when pending input buffers remain. If no pending input buffer exists, queued wake-up
 messages for the same session are discarded so reconnect or duplicate wake-up signals do not resume
-model execution by themselves. Background tools return an initial result path without blocking the
-foreground model loop.
+model execution by themselves.
 
 ## 6. Compaction
 
@@ -601,6 +600,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-12** (spec_version 74) — Added atomic tool-call admission/completion, deterministic cancellation and result identity, ownership-generation recovery, and PostgreSQL-backed active-call state.
 - **2026-07-12** (spec_version 72) — Restored durable sent-message model label, resolved display name, and reasoning effort metadata from the prepared Session snapshot.
 - **2026-07-10** (spec_version 67) — Added explicit child identity to forked-history boundaries and rejected self-targeted `wait_agent` calls.
 - **2026-07-09** (spec_version 65) — Clarified that retry live state is cleared before the next retry attempt starts so stale retry errors do not remain visible during successful progress.

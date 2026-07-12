@@ -92,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-12
-spec_version: 97
+spec_version: 98
 ---
 
 # Conversation & Events
@@ -336,7 +336,7 @@ before destructive cleanup can remove a path or branch.
 | `run_index` | int | Session-scoped monotonic run index |
 | `phase` | enum | UI activity source |
 | `status` | enum | `pending`, `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled` |
-| `active_tool_calls` | JSONB array | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, `background` |
+| `active_tool_calls` | JSONB array | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, and `owner_generation` |
 | `retry_state` | JSONB \| null | Durable failed-run retry state while the run remains `running`; cleared on terminal transition |
 | `parent_agent_run_id` | FK `agent_runs` \| null | Parent run lineage for a subagent's first run |
 | `last_completed_event_id` | `str(32)` \| null | Terminal run boundary event id when available |
@@ -441,8 +441,9 @@ event-list APIs:
   are mutually exclusive. Responses include `has_more` for older pages and `has_newer` for newer
   pages.
 - `GET /chat/v1/sessions/{session_id}/live` returns current non-durable live state such as
-  streaming assistant text, streaming reasoning, active tool calls, pending input buffers, run state,
-  session todo snapshot, and action execution projections.
+  streaming assistant text, streaming reasoning, PostgreSQL-backed active tool calls, pending input buffers, run state,
+  session todo snapshot, and action execution projections. Redis stores only streaming assistant/reasoning
+  partials; active tool-call events are reconstructed from the running `AgentRun`.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree` returns the durable
   Subagent Tree projection for the root tree containing the selected root or child session. The
   projection includes nested nodes, canonical paths, linked child `agent_session_id` values for
@@ -682,6 +683,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-12** — v98. Made PostgreSQL active tool ownership authoritative for execution and live reconstruction, and removed the Background flag from active calls.
 - **2026-07-12** — v97. Added exact terminal Run correlation, durable per-turn inference provenance, and historical-marker compatibility.
 - **2026-07-12** — v96. Aligned invariants and verification with Session-owned turn snapshots and terminal buffer-keyed action execution.
 - **2026-07-12** — v95. Promoted sequential single-head preparation, Session inference ownership, buffer-only action transport, and terminal action result history.

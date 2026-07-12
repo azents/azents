@@ -1,6 +1,8 @@
 ---
 title: "Deterministic Tool Call Handling and Worker Handover"
 created: 2026-07-12
+updated: 2026-07-12
+implemented: 2026-07-12
 tags: [architecture, backend, engine, worker, runtime, reliability]
 ---
 
