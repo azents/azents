@@ -29,9 +29,10 @@ class ModelCompatibilityCapabilities(BaseModel):
     """ # noqa: E501
     provider_family: Optional[StrictStr] = None
     responses_api: Optional[StrictBool] = None
+    responses_lite: Optional[StrictBool] = False
     unsupported_media_policy: Optional[UnsupportedMediaPolicy] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["provider_family", "responses_api", "unsupported_media_policy"]
+    __properties: ClassVar[List[str]] = ["provider_family", "responses_api", "responses_lite", "unsupported_media_policy"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -108,6 +109,7 @@ class ModelCompatibilityCapabilities(BaseModel):
         _obj = cls.model_validate({
             "provider_family": obj.get("provider_family"),
             "responses_api": obj.get("responses_api"),
+            "responses_lite": obj.get("responses_lite") if obj.get("responses_lite") is not None else False,
             "unsupported_media_policy": obj.get("unsupported_media_policy")
         })
         # store additional fields in additional_properties

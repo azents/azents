@@ -53,6 +53,7 @@ def test_model_capabilities_serializes_required_top_level_keys() -> None:
     assert data["compatibility"] == {
         "provider_family": None,
         "responses_api": None,
+        "responses_lite": False,
         "unsupported_media_policy": None,
     }
 

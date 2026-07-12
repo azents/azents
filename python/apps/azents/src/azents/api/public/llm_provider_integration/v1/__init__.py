@@ -398,7 +398,11 @@ def _enqueue_initial_catalog_sync(
     deterministic_variant = parse_deterministic_fixture_variant(name)
     if deterministic_variant is not None:
         return
-    if provider not in (LLMProvider.AWS_BEDROCK, LLMProvider.GOOGLE_VERTEX_AI):
+    if provider not in (
+        LLMProvider.AWS_BEDROCK,
+        LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.GOOGLE_VERTEX_AI,
+    ):
         return
     background_tasks.add_task(
         _run_initial_catalog_sync,
