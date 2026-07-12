@@ -27,6 +27,10 @@ from azents.engine.events.protocols import (
     SessionHeadRepository,
     TranscriptRepository,
 )
+from azents.engine.events.tool_calls import (
+    finalize_tool_result,
+    tool_call_external_id,
+)
 from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
@@ -43,6 +47,7 @@ from azents.engine.events.types import (
     TurnMarkerPayload,
     UnknownAdapterOutputPayload,
 )
+from azents.engine.run.contracts import ToolAdmissionBarrier
 from azents.engine.run.errors import (
     ModelCallError,
     UserVisibleRuntimeError,
@@ -137,6 +142,8 @@ class AgentRunExecutionRequest:
     run_id: str
     session_id: str
     model: str
+    owner_generation: int
+    tool_admission_barrier: ToolAdmissionBarrier
     run_index: int = 1
     max_turns: int | None = None
 
@@ -151,6 +158,14 @@ class _ModelStreamUserInterrupted(Exception):
 
 class _ToolExecutionUserInterrupted(Exception):
     """Indicates tool execution was interrupted by user stop."""
+
+
+@dataclass(frozen=True)
+class _ToolExecutionOutcome:
+    """One foreground tool execution outcome."""
+
+    call: ClientToolCallPayload
+    result: ClientToolResultPayload
 
 
 class AgentRunExecution:
@@ -198,6 +213,9 @@ class AgentRunExecution:
         try:
             for _model_call_index in _turn_range(request.max_turns):
                 if await _stopped(check_stop):
+                    if request.tool_admission_barrier.closed:
+                        await session.rollback()
+                        return AgentRunStatus.RUNNING
                     await self._mark_terminal(
                         session,
                         request.run_id,
@@ -338,15 +356,60 @@ class AgentRunExecution:
                         raise ModelCallError(
                             "Model completed without assistant output."
                         )
-                    appended = await self._append_events(session, normalized.events)
-                    turn_marker = await self._append_turn_marker(
-                        session,
-                        request.session_id,
-                        request.run_id,
-                        normalized.usage,
-                        inference_state=prepared.inference_state,
-                        system_prompt=prepared.system_prompt_analysis,
-                    )
+                    normalized_tool_calls = [
+                        event.payload
+                        for event in normalized.events
+                        if isinstance(event.payload, ClientToolCallPayload)
+                    ]
+                    appended: list[Event] = []
+                    turn_marker: Event | None = None
+
+                    async def append_model_output(
+                        normalized_output: NormalizedAdapterOutput = normalized,
+                        prepared_call: PreparedModelCall = prepared,
+                        tool_calls: list[ClientToolCallPayload] = normalized_tool_calls,
+                    ) -> None:
+                        """Append output and admit its complete foreground call set."""
+                        nonlocal appended, turn_marker
+                        appended = await self._append_events(
+                            session,
+                            normalized_output.events,
+                            tool_call_run_id=request.run_id,
+                        )
+                        turn_marker = await self._append_turn_marker(
+                            session,
+                            request.session_id,
+                            request.run_id,
+                            normalized_output.usage,
+                            inference_state=prepared_call.inference_state,
+                            system_prompt=prepared_call.system_prompt_analysis,
+                        )
+                        if tool_calls:
+                            await self._update_phase(
+                                session,
+                                request.run_id,
+                                AgentRunPhase.EXECUTING_TOOLS,
+                                active_tool_calls=[
+                                    _active_tool_call(
+                                        call,
+                                        owner_generation=request.owner_generation,
+                                    )
+                                    for call in tool_calls
+                                ],
+                            )
+                        await session.commit()
+
+                    if normalized_tool_calls:
+                        admitted = await request.tool_admission_barrier.run_if_open(
+                            append_model_output
+                        )
+                        if not admitted:
+                            await session.rollback()
+                            await finish_turn("cancelled")
+                            return AgentRunStatus.RUNNING
+                    else:
+                        await append_model_output()
+
                     turn_events = [turn_marker] if turn_marker is not None else []
                     client_tool_calls = [
                         event.payload
@@ -379,7 +442,6 @@ class AgentRunExecution:
                         await finish_turn("completed")
                         return AgentRunStatus.COMPLETED
 
-                    await session.commit()
                     if self._output_sink is not None:
                         await self._output_sink(normalized, [*appended, *turn_events])
                     try:
@@ -391,23 +453,31 @@ class AgentRunExecution:
                             tool_executor=prepared.tool_executor,
                         )
                     except _ToolExecutionUserInterrupted:
-                        run_marker = await self._append_run_marker(
-                            session,
-                            request.session_id,
-                            request.run_id,
-                            "interrupted",
-                        )
-                        await self._mark_terminal(
+                        current_run = await self._run_repo.get_by_id(
                             session,
                             request.run_id,
-                            AgentRunStatus.INTERRUPTED,
                         )
-                        await session.commit()
-                        if self._output_sink is not None:
-                            await self._output_sink(
-                                NormalizedAdapterOutput(events=[]),
-                                [run_marker],
+                        if (
+                            current_run is not None
+                            and current_run.status == AgentRunStatus.RUNNING
+                        ):
+                            run_marker = await self._append_run_marker(
+                                session,
+                                request.session_id,
+                                request.run_id,
+                                "interrupted",
                             )
+                            await self._mark_terminal(
+                                session,
+                                request.run_id,
+                                AgentRunStatus.INTERRUPTED,
+                            )
+                            await session.commit()
+                            if self._output_sink is not None:
+                                await self._output_sink(
+                                    NormalizedAdapterOutput(events=[]),
+                                    [run_marker],
+                                )
                         await finish_turn("cancelled")
                         return AgentRunStatus.INTERRUPTED
                     await finish_turn("completed")
@@ -514,10 +584,20 @@ class AgentRunExecution:
         self,
         session: AsyncSession,
         events: Sequence[Event],
+        *,
+        tool_call_run_id: str | None = None,
     ) -> list[Event]:
         """Append events to durable transcript."""
         appended: list[Event] = []
         for event in events:
+            external_id = event.external_id
+            if tool_call_run_id is not None and isinstance(
+                event.payload, ClientToolCallPayload
+            ):
+                external_id = tool_call_external_id(
+                    tool_call_run_id,
+                    event.payload.call_id,
+                )
             appended.append(
                 await self._transcript_repo.append(
                     session,
@@ -528,7 +608,7 @@ class AgentRunExecution:
                             mode="json",
                             exclude_none=True,
                         ),
-                        external_id=event.external_id,
+                        external_id=external_id,
                         adapter=event.adapter,
                         provider=event.provider,
                         model=event.model,
@@ -548,63 +628,87 @@ class AgentRunExecution:
         *,
         tool_executor: ClientToolExecutor,
     ) -> None:
-        """Run foreground client tool calls in parallel and append results."""
-        active_calls = [
-            _active_tool_call(call, background=False) for call in tool_calls
-        ]
-        await self._update_phase(
-            session,
-            run_id,
-            AgentRunPhase.EXECUTING_TOOLS,
-            active_tool_calls=active_calls,
-        )
-        await session.commit()
-        try:
-            results = await asyncio.gather(
-                *(
-                    self._execute_tool_safely(call, tool_executor=tool_executor)
-                    for call in tool_calls
-                )
+        """Run foreground calls in parallel and durably complete each one."""
+        completed_call_ids: set[str] = set()
+        tasks = [
+            asyncio.create_task(
+                self._execute_tool_with_call(call, tool_executor=tool_executor)
             )
+            for call in tool_calls
+        ]
+        try:
+            for completed in asyncio.as_completed(tasks):
+                outcome = await completed
+                await self._finalize_tool_result(
+                    session,
+                    run_id=run_id,
+                    session_id=session_id,
+                    call=outcome.call,
+                    result=outcome.result,
+                )
+                completed_call_ids.add(outcome.call.call_id)
         except asyncio.CancelledError as exc:
-            if not _is_user_stop_cancellation(exc):
-                raise
-            for call in tool_calls:
+            unresolved = [
+                call for call in tool_calls if call.call_id not in completed_call_ids
+            ]
+            for call in unresolved:
                 tool_executor.request_cancel(call)
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             await self._append_cancelled_tool_results(
                 session,
                 session_id,
-                tool_calls,
+                unresolved,
+                run_id=run_id,
             )
-            await self._update_phase(
-                session,
-                run_id,
-                AgentRunPhase.STOPPING,
-                active_tool_calls=[],
-            )
-            await session.commit()
-            raise _ToolExecutionUserInterrupted from exc
-        appended: list[Event] = []
-        for result in results:
-            appended.append(
-                await self._transcript_repo.append(
-                    session,
-                    EventCreate(
-                        session_id=session_id,
-                        kind=EventKind.CLIENT_TOOL_RESULT,
-                        payload=result.model_dump(mode="json", exclude_none=True),
-                    ),
-                )
-            )
-        await self._update_phase(
+            if _is_user_stop_cancellation(exc):
+                run_state = await self._run_repo.get_by_id(session, run_id)
+                if run_state is not None and run_state.status == AgentRunStatus.RUNNING:
+                    await self._update_phase(
+                        session,
+                        run_id,
+                        AgentRunPhase.STOPPING,
+                        active_tool_calls=[],
+                    )
+                    await session.commit()
+                raise _ToolExecutionUserInterrupted from exc
+            raise
+
+    async def _execute_tool_with_call(
+        self,
+        call: ClientToolCallPayload,
+        *,
+        tool_executor: ClientToolExecutor,
+    ) -> _ToolExecutionOutcome:
+        """Execute one call while preserving its identity with the result."""
+        result = await self._execute_tool_safely(call, tool_executor=tool_executor)
+        return _ToolExecutionOutcome(call=call, result=result)
+
+    async def _finalize_tool_result(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        session_id: str,
+        call: ClientToolCallPayload,
+        result: ClientToolResultPayload,
+    ) -> Event:
+        """Append one terminal result and remove only its active ownership entry."""
+        event = await finalize_tool_result(
             session,
-            run_id,
-            AgentRunPhase.APPENDING_EVENTS,
-            active_tool_calls=[],
+            run_repo=self._run_repo,
+            transcript_repo=self._transcript_repo,
+            run_id=run_id,
+            session_id=session_id,
+            call=call,
+            result=result,
         )
         await session.commit()
         if self._output_sink is not None:
-            await self._output_sink(NormalizedAdapterOutput(events=[]), appended)
+            await self._output_sink(NormalizedAdapterOutput(events=[]), [event])
+        return event
 
     async def _append_missing_tool_results(
         self,
@@ -612,33 +716,73 @@ class AgentRunExecution:
         request: AgentRunExecutionRequest,
         transcript: Sequence[Event],
     ) -> list[Event]:
-        """Repair orphan tool calls absent from state with cancelled results."""
-        unresolved_calls = _unresolved_client_tool_calls(transcript)
-        if not unresolved_calls:
-            return []
-
+        """Reconcile durable tool calls before any resumed model dispatch."""
         run_state = await self._run_repo.get_by_id(session, request.run_id)
-        active_call_ids = (
-            {active.call_id for active in run_state.active_tool_calls}
-            if run_state is not None
-            else set()
-        )
-        orphan_calls = [
-            call for call in unresolved_calls if call.call_id not in active_call_ids
+        if run_state is None:
+            raise ValueError("Agent run not found")
+
+        calls_by_id = {
+            payload.call_id: payload
+            for event in transcript
+            if isinstance((payload := event.payload), ClientToolCallPayload)
+        }
+        result_call_ids = {
+            payload.call_id
+            for event in transcript
+            if isinstance((payload := event.payload), ClientToolResultPayload)
+        }
+        for active in run_state.active_tool_calls:
+            if active.call_id not in calls_by_id:
+                raise RuntimeError("Active tool call has no durable call event")
+            if active.owner_generation > request.owner_generation:
+                raise RuntimeError("Active tool call owner generation is in the future")
+
+        unresolved_calls = [
+            call
+            for call_id, call in calls_by_id.items()
+            if call_id not in result_call_ids
         ]
-        return await self._append_cancelled_tool_results(
+        appended = await self._append_cancelled_tool_results(
             session,
             request.session_id,
-            orphan_calls,
+            unresolved_calls,
+            run_id=request.run_id,
         )
+
+        stale_resolved_ids = {
+            active.call_id
+            for active in run_state.active_tool_calls
+            if active.call_id in result_call_ids
+        }
+        if stale_resolved_ids:
+            refreshed = await self._run_repo.get_by_id(session, request.run_id)
+            if refreshed is None:
+                raise ValueError("Agent run not found")
+            remaining = [
+                active
+                for active in refreshed.active_tool_calls
+                if active.call_id not in stale_resolved_ids
+            ]
+            await self._update_phase(
+                session,
+                request.run_id,
+                AgentRunPhase.EXECUTING_TOOLS
+                if remaining
+                else AgentRunPhase.APPENDING_EVENTS,
+                active_tool_calls=remaining,
+            )
+            await session.commit()
+        return appended
 
     async def _append_cancelled_tool_results(
         self,
         session: AsyncSession,
         session_id: str,
         tool_calls: Sequence[ClientToolCallPayload],
+        *,
+        run_id: str,
     ) -> list[Event]:
-        """Append tool call as cancelled event result."""
+        """Idempotently cancel calls and remove their active ownership entries."""
         appended: list[Event] = []
         for call in tool_calls:
             payload = ClientToolResultPayload(
@@ -653,28 +797,15 @@ class AgentRunExecution:
                     )
                 ],
             )
-            external_id = f"tool-result:{call.call_id}:cancelled"
-            existing = await self._transcript_repo.get_by_external_id(
-                session,
-                session_id,
-                external_id,
-            )
-            if existing is not None:
-                appended.append(existing)
-                continue
             appended.append(
-                await self._transcript_repo.append(
+                await self._finalize_tool_result(
                     session,
-                    EventCreate(
-                        session_id=session_id,
-                        kind=EventKind.CLIENT_TOOL_RESULT,
-                        payload=payload.model_dump(mode="json", exclude_none=True),
-                        external_id=external_id,
-                    ),
+                    run_id=run_id,
+                    session_id=session_id,
+                    call=call,
+                    result=payload,
                 )
             )
-        if appended and self._output_sink is not None:
-            await self._output_sink(NormalizedAdapterOutput(events=[]), appended)
         return appended
 
     async def _model_input_head_event_id(
@@ -963,7 +1094,7 @@ def _assistant_content_is_non_empty(content: object) -> bool:
 def _active_tool_call(
     call: ClientToolCallPayload,
     *,
-    background: bool,
+    owner_generation: int,
 ) -> ActiveToolCall:
     """Create active tool call projection."""
     return ActiveToolCall(
@@ -971,7 +1102,7 @@ def _active_tool_call(
         name=call.name,
         arguments=call.arguments,
         started_at=datetime.datetime.now(datetime.UTC),
-        background=background,
+        owner_generation=owner_generation,
     )
 
 
@@ -989,17 +1120,3 @@ def _without_existing_terminal_run_markers(
     return [
         event for event in transcript if not isinstance(event.payload, RunMarkerPayload)
     ]
-
-
-def _unresolved_client_tool_calls(
-    transcript: Sequence[Event],
-) -> list[ClientToolCallPayload]:
-    """Return client tool calls that do not yet have results in transcript."""
-    pending: dict[str, ClientToolCallPayload] = {}
-    for event in transcript:
-        payload = event.payload
-        if isinstance(payload, ClientToolCallPayload):
-            pending[payload.call_id] = payload
-        elif isinstance(payload, ClientToolResultPayload):
-            pending.pop(payload.call_id, None)
-    return list(pending.values())

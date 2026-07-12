@@ -587,7 +587,7 @@ class ActiveToolCall(BaseModel):
     name: str = Field(min_length=1)
     arguments: str | None = Field(default=None)
     started_at: datetime.datetime
-    background: bool = Field(default=False)
+    owner_generation: int = Field(ge=1)
 
 
 class AgentRunState(BaseModel):

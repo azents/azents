@@ -705,7 +705,7 @@ class TestEventExecutionRepositories:
             name="read_text",
             arguments='{"path":"README.md"}',
             started_at=datetime.datetime.now(datetime.UTC),
-            background=False,
+            owner_generation=1,
         )
         executing = await repo.update_phase(
             rdb_session,

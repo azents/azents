@@ -71,6 +71,31 @@ class _AgentRunRepository:
         self.terminal_sessions: list[tuple[str, AgentRunStatus]] = []
         self.terminal_runs: list[tuple[str, AgentRunStatus]] = []
 
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Return the running Run as a locked projection."""
+        del session, run_id
+        return self.running_run
+
+    async def update_phase(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        phase: AgentRunPhase,
+        *,
+        active_tool_calls: list[ActiveToolCall] | None = None,
+    ) -> object:
+        """Apply active-call cleanup to the test projection."""
+        del session, run_id, phase
+        if self.running_run is not None and active_tool_calls is not None:
+            self.running_run = self.running_run.model_copy(
+                update={"active_tool_calls": list(active_tool_calls)}
+            )
+        return object()
+
     async def get_running_by_session_id(
         self,
         session: AsyncSession,
@@ -251,7 +276,7 @@ def _running_run(session_id: str) -> AgentRunState:
                 name="bash",
                 arguments="{}",
                 started_at=now,
-                background=False,
+                owner_generation=1,
             )
         ],
         last_completed_event_id=None,
@@ -330,7 +355,7 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     appended_external_ids = [event.external_id for event in transcripts.appended]
     assert appended_external_ids == [
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "tool-result:call-1:cancelled",
+        "tool-result:11111111111111111111111111111111:call-1",
         "interrupted:11111111111111111111111111111111:user_requested",
         "run-marker:11111111111111111111111111111111:interrupted",
     ]
@@ -352,6 +377,8 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
         ("11111111111111111111111111111111", AgentRunStatus.STOPPED)
     ]
     assert run_repository.terminal_sessions == []
+    assert run_repository.running_run is not None
+    assert run_repository.running_run.active_tool_calls == []
     assert session_repository.cleared_stop_request_session_ids == [session_id]
     assert broker.cleared_session_ids == [session_id]
     assert len(event_publisher.dispatched) == 1

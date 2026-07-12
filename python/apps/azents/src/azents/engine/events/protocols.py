@@ -185,6 +185,14 @@ class AgentRunCreateRepository(Protocol):
 class RunStateRepository(Protocol):
     """Agent run state repository protocol."""
 
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Fetch run state with a row lock."""
+        ...
+
     async def get_by_id(
         self,
         session: AsyncSession,

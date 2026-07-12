@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from azents.broker.types import SessionWakeUp
 from azents.engine.run.types import (
@@ -26,6 +26,32 @@ _SHUTDOWN_TIMEOUT = 5.0  # seconds — graceful completion window before handove
 _EXPLICIT_STOP_POLL_INTERVAL = 0.5  # seconds — user stop detection interval
 
 
+class ToolAdmissionBarrier:
+    """Order foreground tool admission against TERM shutdown observation."""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        """Return whether shutdown has closed foreground admission."""
+        return self._closed
+
+    async def run_if_open(self, action: Callable[[], Awaitable[None]]) -> bool:
+        """Run an admission transaction while holding the shutdown barrier."""
+        async with self._lock:
+            if self._closed:
+                return False
+            await action()
+            return True
+
+    async def close(self) -> None:
+        """Close admission after any transaction already inside the barrier."""
+        async with self._lock:
+            self._closed = True
+
+
 class RunStopController:
     """Manage current run stop lifecycle."""
 
@@ -33,11 +59,13 @@ class RunStopController:
         self.active_task: asyncio.Task[RunExecutionResult] | None = None
         self.user_stop_requested_event = asyncio.Event()
         self.handover_stop_requested_event = asyncio.Event()
+        self.tool_admission_barrier = ToolAdmissionBarrier()
 
     def clear_for_next_run(self) -> None:
         """Reset in-memory stop state before next run starts."""
         self.user_stop_requested_event.clear()
         self.handover_stop_requested_event.clear()
+        self.tool_admission_barrier = ToolAdmissionBarrier()
 
     def register_active_task(
         self,
@@ -103,6 +131,7 @@ class RunTaskSupervisor:
         check_stop: CheckStop,
         prepare_toolkits: PrepareToolkits,
         drain_stop_signals: Callable[[], None],
+        owner_generation: int,
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Create engine execution task and apply stop/shutdown policy."""
@@ -114,6 +143,8 @@ class RunTaskSupervisor:
                 prepare_toolkits=prepare_toolkits,
                 shutdown_event=self.shutdown_event,
                 dispatch_event=self.event_publisher.dispatch_event,
+                owner_generation=owner_generation,
+                tool_admission_barrier=self.stop_controller.tool_admission_barrier,
                 command=command,
             )
         )
@@ -121,6 +152,7 @@ class RunTaskSupervisor:
 
         if self.shutdown_event.is_set():
             self.stop_controller.request_handover_stop()
+            await self.stop_controller.tool_admission_barrier.close()
             try:
                 return await self._wait_for_shutdown_completion(
                     engine_task,
@@ -168,6 +200,7 @@ class RunTaskSupervisor:
                 return await self._cancel_now(engine_task)
 
             self.stop_controller.request_handover_stop()
+            await self.stop_controller.tool_admission_barrier.close()
             logger.info(
                 "Shutdown detected during engine run, applying timeout",
                 extra={

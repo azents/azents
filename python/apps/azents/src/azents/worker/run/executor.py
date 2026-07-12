@@ -67,6 +67,7 @@ from azents.engine.run.contracts import (
     AgentEngineProtocol,
     RunContext,
     RunRequest,
+    ToolAdmissionBarrier,
     ToolkitBinding,
 )
 from azents.engine.run.emit import Emit, handle_engine_event
@@ -399,6 +400,8 @@ class RunExecutor:
         prepare_toolkits: PrepareToolkits | None,
         shutdown_event: asyncio.Event,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+        owner_generation: int,
+        tool_admission_barrier: ToolAdmissionBarrier,
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Handle one session wake-up.
@@ -796,6 +799,8 @@ class RunExecutor:
         run_context = RunContext(
             user_id=message.user_id,
             run_id=run_id,
+            owner_generation=owner_generation,
+            tool_admission_barrier=tool_admission_barrier,
             publish_event=publish_event,
         )
         context = ToolkitContext(
@@ -1108,7 +1113,9 @@ class RunExecutor:
                 case _:
                     pass
             updated_tool_calls = apply_active_tool_call_event(
-                active_tool_calls, item.event
+                active_tool_calls,
+                item.event,
+                owner_generation=owner_generation,
             )
             if updated_tool_calls != active_tool_calls:
                 active_tool_calls[:] = updated_tool_calls

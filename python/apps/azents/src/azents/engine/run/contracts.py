@@ -7,7 +7,7 @@ and a streaming interface is provided.
 
 import dataclasses
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, NamedTuple, Protocol, TypeVar
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
@@ -151,6 +151,19 @@ class RunRequest:
         return self.agent_id
 
 
+class ToolAdmissionBarrier(Protocol):
+    """Serialize foreground tool admission against worker shutdown."""
+
+    @property
+    def closed(self) -> bool:
+        """Return whether TERM has closed foreground admission."""
+        ...
+
+    async def run_if_open(self, action: Callable[[], Awaitable[None]]) -> bool:
+        """Run one admission action unless shutdown already closed the barrier."""
+        ...
+
+
 @dataclasses.dataclass(frozen=True)
 class RunContext:
     """Runtime context.
@@ -166,6 +179,8 @@ class RunContext:
 
     user_id: str | None
     run_id: str
+    owner_generation: int
+    tool_admission_barrier: ToolAdmissionBarrier
     publish_event: PublishEventFn
 
 

@@ -492,6 +492,23 @@ class AgentSessionRepository:
             return None
         return self._build(rdb)
 
+    async def claim_owner_generation(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> int:
+        """Increment and return the durable ownership generation."""
+        generation = await session.scalar(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == agent_session_id)
+            .values(owner_generation=RDBAgentSession.owner_generation + 1)
+            .returning(RDBAgentSession.owner_generation)
+        )
+        if generation is None:
+            raise ValueError("AgentSession not found")
+        await session.flush()
+        return generation
+
     async def list_session_agent_subtree_session_ids(
         self,
         session: AsyncSession,
@@ -1250,6 +1267,7 @@ class AgentSessionRepository:
             lifecycle_started_at=rdb.lifecycle_started_at,
             run_state=rdb.run_state,
             run_heartbeat_at=rdb.run_heartbeat_at,
+            owner_generation=rdb.owner_generation,
             pending_command_id=rdb.pending_command_id,
             pending_command_name=rdb.pending_command_name,
             pending_command_payload=rdb.pending_command_payload,

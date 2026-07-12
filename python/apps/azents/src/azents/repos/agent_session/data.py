@@ -78,6 +78,10 @@ class AgentSession(BaseModel):
         default_factory=lambda: datetime.datetime.now(datetime.UTC),
         description="Run heartbeat time",
     )
+    owner_generation: int = Field(
+        ge=0,
+        description="Durable session ownership generation",
+    )
     pending_command_id: str | None = Field(
         default=None, description="Pending command ID"
     )

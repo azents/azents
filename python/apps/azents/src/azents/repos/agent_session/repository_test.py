@@ -81,6 +81,30 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
 class TestAgentSessionRepository:
     """AgentSessionRepository tests."""
 
+    async def test_claim_owner_generation_is_monotonic(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Increment the durable ownership evidence once per claim."""
+        workspace_id = await _create_workspace(rdb_session, "owner-generation-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "owner-generation")
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+
+        assert created.owner_generation == 0
+        assert await repo.claim_owner_generation(rdb_session, created.id) == 1
+        assert await repo.claim_owner_generation(rdb_session, created.id) == 2
+        refreshed = await repo.get_by_id(rdb_session, created.id)
+        assert refreshed is not None
+        assert refreshed.owner_generation == 2
+
     async def test_last_inference_profile_round_trip(
         self,
         rdb_session: AsyncSession,

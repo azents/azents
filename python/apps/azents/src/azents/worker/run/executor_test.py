@@ -93,6 +93,7 @@ from azents.worker.run.executor import (
 from azents.worker.run.finalizer import FailedRunFinalizationInput
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.lifecycle import SessionLifecycleService
+from azents.worker.session.supervisor import ToolAdmissionBarrier
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 
@@ -1012,6 +1013,8 @@ async def test_execute_reports_resolve_failure(
         prepare_toolkits=None,
         shutdown_event=cast(asyncio.Event, object()),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert len(dispatched) == 2
@@ -1112,6 +1115,8 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert result.run_id == recoverable.id
@@ -1177,6 +1182,8 @@ async def test_execute_persists_recovered_profile_resolution_failure(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert lifecycle.terminal_runs == [(recoverable.id, AgentRunStatus.FAILED)]
@@ -1248,6 +1255,8 @@ async def test_execute_recovers_activated_command_run(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
         command=_pending_command(),
     )
 
@@ -1337,6 +1346,8 @@ async def test_execute_recovers_durable_retry_budget(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert result.terminal_run_status == AgentRunStatus.FAILED
@@ -1394,6 +1405,8 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert result.run_id == recoverable.id
@@ -1479,6 +1492,8 @@ async def test_execute_activates_pending_child_from_session_snapshot(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert result.run_id == recoverable.id
@@ -1561,6 +1576,8 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
@@ -1613,6 +1630,8 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
         prepare_toolkits=None,
         shutdown_event=cast(asyncio.Event, object()),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert result.no_actionable_work is True
@@ -1939,6 +1958,8 @@ async def test_execute_cancels_pending_run_after_terminal_preparation_failure(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert lifecycle.cancelled_pending_run_ids == [result.run_id]
@@ -1999,6 +2020,8 @@ async def test_execute_ignores_wake_up_without_runtime_input(
         prepare_toolkits=None,
         shutdown_event=cast(asyncio.Event, object()),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert result == RunExecutionResult(
@@ -2046,6 +2069,8 @@ async def test_execute_runs_pending_command_inside_run_boundary(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
         command=_pending_command(),
     )
 
@@ -2094,6 +2119,8 @@ async def test_execute_ignores_unknown_command_without_run_boundary() -> None:
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
         command=_pending_command("unknown"),
     )
 
@@ -2138,6 +2165,8 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
         command=_pending_command(),
     )
 
@@ -2232,6 +2261,8 @@ async def test_execute_clears_activity_after_run_complete(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert result.toolkits == []
@@ -2382,6 +2413,8 @@ async def test_execute_retries_failed_run_without_durable_error(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert engine.calls == 2
@@ -2459,6 +2492,8 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert engine.calls == 2
@@ -2555,6 +2590,8 @@ async def test_execute_finalizes_when_failed_run_retry_is_stopped(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert engine.calls == 1
@@ -2624,6 +2661,8 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert engine.calls == 1
@@ -2673,6 +2712,8 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert engine.calls == 2
@@ -2749,6 +2790,8 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
         prepare_toolkits=None,
         shutdown_event=asyncio.Event(),
         dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
     assert engine.calls == 1

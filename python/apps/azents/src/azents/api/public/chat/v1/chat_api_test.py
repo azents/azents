@@ -254,6 +254,7 @@ class _BufferedInputService:
             CreatedAgentSessionInputResult(
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_session=AgentSession(
+                    owner_generation=0,
                     inference_state=None,
                     id=session_id,
                     workspace_id="workspace-1",
@@ -352,6 +353,7 @@ class _RestWriteChatService:
         self.get_agent_session_calls.append((agent_id, session_id, user_id))
         return Success(
             AgentSession(
+                owner_generation=0,
                 inference_state=None,
                 id=self.session_id,
                 workspace_id="workspace-1",
@@ -397,6 +399,7 @@ class _StopChatService:
         self.session_ids: list[str] = []
         self.result: Success[AgentSession] | Failure[SessionAccessDenied] = Success(
             AgentSession(
+                owner_generation=0,
                 inference_state=None,
                 id="1123456789abcdef0123456789abcdef",
                 workspace_id="workspace-1",
@@ -721,6 +724,7 @@ class _EventService:
         del user_id
         return Success(
             AgentSession(
+                owner_generation=0,
                 inference_state=None,
                 id=session_id,
                 workspace_id="workspace-1",
@@ -792,6 +796,7 @@ class _AgentSessionRouteChatService:
         self.existing_project_paths: list[str] | None = None
         self.setup_actions: list[CreateGitWorktreeAction] | None = None
         self.primary_session = AgentSession(
+            owner_generation=0,
             inference_state=None,
             id="1123456789abcdef0123456789abcdef",
             workspace_id="workspace-1",
@@ -811,6 +816,7 @@ class _AgentSessionRouteChatService:
             updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
         )
         self.secondary_session = AgentSession(
+            owner_generation=0,
             inference_state=None,
             id="2123456789abcdef0123456789abcdef",
             workspace_id="workspace-1",

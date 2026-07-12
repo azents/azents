@@ -149,6 +149,7 @@ def _agent_session(
 ) -> AgentSession:
     """Create AgentSession fixture."""
     return AgentSession(
+        owner_generation=0,
         inference_state=SessionInferenceState(
             model_target_label="Quality",
             model_selection=_agent().model_selection,

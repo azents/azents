@@ -744,6 +744,17 @@ class AgentRunRepository:
             return None
         return self._build(rdb)
 
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Fetch one AgentRun with a row lock."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
+        )
+        return self._build(rdb) if rdb is not None else None
+
     async def get_running_by_session_id(
         self,
         session: AsyncSession,
