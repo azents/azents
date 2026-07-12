@@ -139,6 +139,7 @@ def _service(
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
+            action_execution_repository=ActionExecutionRepository(),
         ),
         session_manager=rdb_session_manager,
     )

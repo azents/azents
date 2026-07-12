@@ -4,15 +4,16 @@ import datetime
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
+from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ActionExecutionStatus, EventKind
+from azents.core.enums import ActionExecutionStatus
 from azents.rdb.models.action_execution import (
     RDBActionExecution,
     RDBActionExecutionEvent,
 )
-from azents.rdb.models.event import RDBEvent
+from azents.rdb.models.event import JSONValue
 
 from .data import (
     ActionExecution,
@@ -21,6 +22,8 @@ from .data import (
     ActionExecutionEventCreate,
     ActionExecutionProjection,
 )
+
+_JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 
 
 class ActionExecutionRepository:
@@ -31,32 +34,28 @@ class ActionExecutionRepository:
         session: AsyncSession,
         create: ActionExecutionCreate,
     ) -> ActionExecution:
-        """Create execution state for an action_message event."""
-        await self._validate_action_event(
-            session,
-            session_id=create.session_id,
-            action_event_id=create.action_event_id,
-        )
+        """Create execution state for one source input buffer."""
         action_execution_id = create.id or uuid7().hex
         result = await session.execute(
             pg_insert(RDBActionExecution)
             .values(
                 id=action_execution_id,
                 session_id=create.session_id,
-                action_event_id=create.action_event_id,
+                input_buffer_id=create.input_buffer_id,
                 action_type=create.action_type,
+                action=create.action,
                 status=create.status,
             )
             .on_conflict_do_nothing(
-                constraint="uq_action_executions_action_event_id",
+                constraint="uq_action_executions_input_buffer_id",
             )
             .returning(RDBActionExecution)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
-            existing = await self.get_by_action_event_id(
+            existing = await self.get_by_input_buffer_id(
                 session,
-                action_event_id=create.action_event_id,
+                input_buffer_id=create.input_buffer_id,
             )
             if existing is None:
                 raise RuntimeError("ActionExecution conflict target not found")
@@ -76,16 +75,16 @@ class ActionExecutionRepository:
             return None
         return self._build_execution(rdb)
 
-    async def get_by_action_event_id(
+    async def get_by_input_buffer_id(
         self,
         session: AsyncSession,
         *,
-        action_event_id: str,
+        input_buffer_id: str,
     ) -> ActionExecution | None:
-        """Fetch action execution by durable action_message event ID."""
+        """Fetch action execution by durable source input buffer ID."""
         result = await session.execute(
             sa.select(RDBActionExecution).where(
-                RDBActionExecution.action_event_id == action_event_id
+                RDBActionExecution.input_buffer_id == input_buffer_id
             )
         )
         rdb = result.scalar_one_or_none()
@@ -174,16 +173,16 @@ class ActionExecutionRepository:
         )
         return [self._build_event(rdb) for rdb in result.scalars()]
 
-    async def get_projection_by_action_event_id(
+    async def get_projection_by_input_buffer_id(
         self,
         session: AsyncSession,
         *,
-        action_event_id: str,
+        input_buffer_id: str,
     ) -> ActionExecutionProjection | None:
-        """Fetch execution state plus ordered events by action event identity."""
-        execution = await self.get_by_action_event_id(
+        """Fetch execution state plus ordered events by input buffer identity."""
+        execution = await self.get_by_input_buffer_id(
             session,
-            action_event_id=action_event_id,
+            input_buffer_id=input_buffer_id,
         )
         if execution is None:
             return None
@@ -263,22 +262,6 @@ class ActionExecutionRepository:
         await session.refresh(rdb)
         return self._build_execution(rdb)
 
-    async def _validate_action_event(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        action_event_id: str,
-    ) -> None:
-        """Validate that the execution references a session action_message event."""
-        event = await session.get(RDBEvent, action_event_id)
-        if event is None:
-            raise ValueError("Action event not found")
-        if event.session_id != session_id:
-            raise ValueError("Action event belongs to another session")
-        if event.kind is not EventKind.ACTION_MESSAGE:
-            raise ValueError("Action event must be an action_message event")
-
     async def _lock_action_execution(
         self,
         session: AsyncSession,
@@ -314,8 +297,9 @@ class ActionExecutionRepository:
         return ActionExecution(
             id=rdb.id,
             session_id=rdb.session_id,
-            action_event_id=rdb.action_event_id,
+            input_buffer_id=rdb.input_buffer_id,
             action_type=rdb.action_type,
+            action=_JSON_OBJECT_ADAPTER.validate_python(rdb.action),
             status=rdb.status,
             failure_summary=rdb.failure_summary,
             started_at=rdb.started_at,

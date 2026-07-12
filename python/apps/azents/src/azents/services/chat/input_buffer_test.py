@@ -132,6 +132,7 @@ def _service(
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
+        action_execution_repository=ActionExecutionRepository(),
     )
     return ChatSessionService(
         message_repository=MessageRepository(),
@@ -332,11 +333,15 @@ class TestChatSessionInputBuffer:
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
+            action_execution_repository=ActionExecutionRepository(),
         )
         promoted = await input_buffer_service.flush_session_input_buffers(
             session_id=session_id,
             model="test-model",
             required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
             active_run_id=None,
         )
         assert promoted.inserted_count == 1

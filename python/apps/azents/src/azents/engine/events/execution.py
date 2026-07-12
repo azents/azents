@@ -65,7 +65,8 @@ class InputPollResult:
     """Input events polled at a model-call turn boundary."""
 
     events: list[Event]
-    context_invalidated: bool = False
+    context_invalidated: bool
+    complete_run: bool
 
 
 InputPoller = Callable[[AsyncSession, str], Awaitable[InputPollResult]]
@@ -208,14 +209,17 @@ class AgentRunExecution:
                         session,
                         request.session_id,
                     )
-                    if poll_result.context_invalidated:
+                    if poll_result.complete_run:
                         await self._mark_terminal(
                             session,
                             request.run_id,
-                            AgentRunStatus.CANCELLED,
+                            AgentRunStatus.COMPLETED,
                         )
                         await session.commit()
-                        return AgentRunStatus.CANCELLED
+                        return AgentRunStatus.COMPLETED
+                    if poll_result.context_invalidated:
+                        await session.commit()
+                        return AgentRunStatus.RUNNING
                     if poll_result.events:
                         await session.commit()
 

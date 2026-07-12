@@ -32,7 +32,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.action_execution.data import (
     ActionExecution,
-    ActionExecutionCreate,
     ActionExecutionEvent,
     ActionExecutionEventCreate,
     ActionExecutionProjection,
@@ -344,23 +343,14 @@ class SessionGitWorktreeService:
         *,
         agent_id: str,
         session_id: str,
-        action_event_id: str,
+        execution: ActionExecution,
         action: CreateGitWorktreeAction,
         on_projection_updated: ActionExecutionProjectionCallback | None = None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
     ) -> GitWorktreeActionExecutionResult:
-        """Execute one create_git_worktree TurnAction by action event identity."""
-        async with self.session_manager() as session:
-            execution = await self.action_execution_repository.create(
-                session,
-                ActionExecutionCreate(
-                    id=None,
-                    session_id=session_id,
-                    action_event_id=action_event_id,
-                    action_type=action.type,
-                    status=ActionExecutionStatus.PENDING,
-                ),
-            )
+        """Execute one durably claimed create_git_worktree TurnAction."""
+        if execution.session_id != session_id:
+            raise ValueError("ActionExecution belongs to another session")
         projection = await self._publish_action_execution_projection(
             execution=execution,
             on_projection_updated=on_projection_updated,
@@ -914,9 +904,9 @@ class SessionGitWorktreeService:
         """Publish the current action execution projection when requested."""
         async with self.session_manager() as session:
             repository = self.action_execution_repository
-            projection = await repository.get_projection_by_action_event_id(
+            projection = await repository.get_projection_by_input_buffer_id(
                 session,
-                action_event_id=execution.action_event_id,
+                input_buffer_id=execution.input_buffer_id,
             )
             if projection is None:
                 raise RuntimeError("ActionExecution projection is missing")

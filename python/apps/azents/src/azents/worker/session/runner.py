@@ -167,7 +167,11 @@ class SessionRunner:
 
         async def poll() -> PollMessagesResult:
             self._drain_stop_signals()
-            return PollMessagesResult(user_messages=[])
+            return PollMessagesResult(
+                user_messages=[],
+                context_invalidated=False,
+                complete_run=False,
+            )
 
         return poll
 

@@ -22,6 +22,7 @@ from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -217,6 +218,7 @@ def _input_buffer_service(
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
+        action_execution_repository=ActionExecutionRepository(),
     )
 
 

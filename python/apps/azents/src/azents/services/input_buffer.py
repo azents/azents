@@ -11,14 +11,14 @@ from fastapi import Depends
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import EventKind, InputBufferKind
+from azents.core.enums import ActionExecutionStatus, EventKind, InputBufferKind
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
+    SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
-    ActionMessagePayload,
     ChatAction,
     CreateGitWorktreeAction,
     GoalAction,
@@ -43,6 +43,8 @@ from azents.engine.tools.skill import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
+from azents.repos.action_execution import ActionExecutionRepository
+from azents.repos.action_execution.data import ActionExecution, ActionExecutionCreate
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -85,10 +87,16 @@ class InputBufferEnqueueResult:
 
 @dataclasses.dataclass(frozen=True)
 class PendingInputInferenceProfile:
-    """Requested profile projected from the next pending input."""
+    """Inference requirements projected from the next pending input."""
 
+    input_buffer_id: str | None
     exists: bool
+    requires_inference: bool
     requested_inference_profile: RequestedInferenceProfile | None
+
+
+class InputBufferPreparationStaleError(RuntimeError):
+    """The FIFO head changed after its preparation snapshot was read."""
 
 
 class TurnEffect(enum.StrEnum):
@@ -113,10 +121,20 @@ def fold_turn_eligibility(eligible: bool, effect: TurnEffect) -> bool:
 
 
 @dataclasses.dataclass(frozen=True)
+class WorktreeActionInput:
+    """Durably claimed buffer-only worktree action awaiting external execution."""
+
+    buffer: InputBuffer
+    action: CreateGitWorktreeAction
+    execution: ActionExecution | None
+
+
+@dataclasses.dataclass(frozen=True)
 class PromotedInputBuffers:
     """Result of preparing one FIFO InputBuffer."""
 
     turn_effect: TurnEffect
+    worktree_action: WorktreeActionInput | None
     requested_inference_profile: RequestedInferenceProfile | None
     user_messages: list[RunUserMessage]
     events: list[Event]
@@ -145,6 +163,7 @@ class InputBufferPreparationContext:
     session: AsyncSession
     session_id: str
     required_inference_profile: RequestedInferenceProfile | None
+    prepared_inference_state: SessionInferenceState | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -153,6 +172,7 @@ class InputBufferPreparationOutcome:
 
     promoted: list[_PromotedInputBuffer]
     turn_effect: TurnEffect
+    worktree_action: WorktreeActionInput | None
 
 
 class InputBufferProcessor(Protocol):
@@ -186,6 +206,9 @@ class InputBufferService:
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    action_execution_repository: Annotated[
+        ActionExecutionRepository, Depends(ActionExecutionRepository)
+    ]
 
     async def enqueue(
         self,
@@ -320,7 +343,11 @@ class InputBufferService:
                 limit=1,
             )
         return PendingInputInferenceProfile(
+            input_buffer_id=pending[0].id if pending else None,
             exists=bool(pending),
+            requires_inference=(
+                _buffer_requires_inference(pending[0]) if pending else False
+            ),
             requested_inference_profile=(
                 _requested_inference_profile(pending[0]) if pending else None
             ),
@@ -342,6 +369,9 @@ class InputBufferService:
         session_id: str,
         model: str | None,
         required_inference_profile: RequestedInferenceProfile | None,
+        expected_buffer_id: str | None,
+        prepared_inference_state: SessionInferenceState | None,
+        profile_resolution_failure: str | None,
         active_run_id: str | None,
         limit: int | None = None,
         include_action_messages: bool = True,
@@ -360,10 +390,16 @@ class InputBufferService:
                 session,
                 session_id,
             )
+            actual_buffer_id = oldest.id if oldest is not None else None
+            if actual_buffer_id != expected_buffer_id:
+                raise InputBufferPreparationStaleError(
+                    "Input buffer FIFO head changed during preparation"
+                )
             claimed = [oldest] if oldest is not None else []
             if not claimed:
                 return PromotedInputBuffers(
                     turn_effect=TurnEffect.NEUTRAL,
+                    worktree_action=None,
                     requested_inference_profile=None,
                     user_messages=[],
                     events=[],
@@ -379,9 +415,40 @@ class InputBufferService:
                 session_id=session_id,
                 claimed=claimed,
                 required_inference_profile=required_inference_profile,
+                prepared_inference_state=prepared_inference_state,
+                profile_resolution_failure=profile_resolution_failure,
                 include_action_messages=include_action_messages,
             )
             promoted = outcome.promoted
+            if (
+                prepared_inference_state is not None
+                and outcome.turn_effect is not TurnEffect.FAILED
+                and _buffer_requires_inference(claimed[0])
+            ):
+                await self.agent_session_repository.set_inference_state(
+                    session,
+                    session_id=session_id,
+                    inference_state=prepared_inference_state,
+                )
+            worktree_action = outcome.worktree_action
+            if worktree_action is not None:
+                execution = await self.action_execution_repository.create(
+                    session,
+                    ActionExecutionCreate(
+                        id=None,
+                        session_id=session_id,
+                        input_buffer_id=worktree_action.buffer.id,
+                        action_type=worktree_action.action.type,
+                        action=_JSON_OBJECT_ADAPTER.validate_python(
+                            worktree_action.action.model_dump(mode="json")
+                        ),
+                        status=ActionExecutionStatus.PENDING,
+                    ),
+                )
+                worktree_action = dataclasses.replace(
+                    worktree_action,
+                    execution=execution,
+                )
             event_inserted = await self._append_input_buffer_events(
                 session,
                 session_id,
@@ -432,6 +499,8 @@ class InputBufferService:
                     event_ids=promoted_event_ids,
                 )
             buffer_ids = list(dict.fromkeys(item.buffer.id for item in promoted))
+            if worktree_action is not None:
+                buffer_ids.append(worktree_action.buffer.id)
             deleted_count = await self.input_buffer_repository.delete_claimed_by_ids(
                 session,
                 session_id,
@@ -449,6 +518,7 @@ class InputBufferService:
 
         return PromotedInputBuffers(
             turn_effect=outcome.turn_effect,
+            worktree_action=worktree_action,
             requested_inference_profile=(
                 _requested_inference_profile(promoted[0].buffer) if promoted else None
             ),
@@ -470,6 +540,8 @@ class InputBufferService:
         session_id: str,
         claimed: list[InputBuffer],
         required_inference_profile: RequestedInferenceProfile | None,
+        prepared_inference_state: SessionInferenceState | None,
+        profile_resolution_failure: str | None,
         include_action_messages: bool,
     ) -> InputBufferPreparationOutcome:
         """Dispatch exactly one FIFO head to the closed processor registry."""
@@ -477,6 +549,7 @@ class InputBufferService:
             return InputBufferPreparationOutcome(
                 promoted=[],
                 turn_effect=TurnEffect.NEUTRAL,
+                worktree_action=None,
             )
         buffer = claimed[0]
         if (
@@ -486,11 +559,21 @@ class InputBufferService:
             return InputBufferPreparationOutcome(
                 promoted=[],
                 turn_effect=TurnEffect.NEUTRAL,
+                worktree_action=None,
+            )
+        if (
+            _buffer_requires_inference(buffer)
+            and profile_resolution_failure is not None
+        ):
+            return _preparation_outcome(
+                [_system_error_promoted_buffer(buffer, profile_resolution_failure)],
+                TurnEffect.FAILED,
             )
         context = InputBufferPreparationContext(
             session=session,
             session_id=session_id,
             required_inference_profile=required_inference_profile,
+            prepared_inference_state=prepared_inference_state,
         )
         processor = self._processor_for(buffer)
         return await processor.process(context, buffer)
@@ -528,6 +611,7 @@ class InputBufferService:
         *,
         session_id: str,
         buffer: InputBuffer,
+        prepared_inference_state: SessionInferenceState | None,
     ) -> list[_PromotedInputBuffer]:
         """Apply Goal create side effect for one action_message buffer."""
         objective = buffer.content.strip()
@@ -568,6 +652,7 @@ class InputBufferService:
             buffer,
             external_id=f"{buffer.id}:user_message",
             fallback_profile=_requested_inference_profile(buffer),
+            prepared_inference_state=prepared_inference_state,
         )
         return [
             _PromotedInputBuffer(
@@ -593,6 +678,7 @@ class InputBufferService:
         session_id: str,
         buffer: InputBuffer,
         action: SkillAction,
+        prepared_inference_state: SessionInferenceState | None,
     ) -> list[_PromotedInputBuffer]:
         """Create durable reminder for one Skill action_message buffer."""
         agent_session = await self.agent_session_repository.get_by_id(
@@ -602,7 +688,11 @@ class InputBufferService:
         if agent_session is None:
             return [_system_error_promoted_buffer(buffer, "Session not found.")]
         store = SkillStateStore(session_manager=self.session_manager)
-        state = await store.load(agent_session.agent_id, session_id)
+        state = await store.load_in_session(
+            session,
+            agent_session.agent_id,
+            session_id,
+        )
         item = resolve_active_skill(state, skill_path=action.skill_path)
         if item is None:
             return [
@@ -628,6 +718,7 @@ class InputBufferService:
                 buffer,
                 external_id=f"{buffer.id}:user_message",
                 fallback_profile=_requested_inference_profile(buffer),
+                prepared_inference_state=prepared_inference_state,
             )
             promoted.append(
                 _PromotedInputBuffer(
@@ -646,6 +737,7 @@ class InputBufferService:
         *,
         external_id: str | None = None,
         fallback_profile: RequestedInferenceProfile | None,
+        prepared_inference_state: SessionInferenceState | None,
     ) -> RunUserMessage:
         """Convert InputBuffer domain row to event run user message."""
         attachments = []
@@ -680,22 +772,15 @@ class InputBufferService:
                     file_parts = materialized.file_parts
 
         requested_profile = _requested_inference_profile(buffer) or fallback_profile
-        if requested_profile is not None:
+        if prepared_inference_state is not None:
+            applied_profile = prepared_inference_state.applied_profile
+        elif requested_profile is not None:
             applied_profile = AppliedInferenceProfile(
                 model_target_label=requested_profile.model_target_label,
                 reasoning_effort=requested_profile.reasoning_effort,
             )
         else:
-            async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
-                    session, buffer.session_id
-                )
-            applied_profile = (
-                agent_session.inference_state.applied_profile
-                if agent_session is not None
-                and agent_session.inference_state is not None
-                else None
-            )
+            applied_profile = None
         user_message = make_run_user_message(
             content=buffer.content,
             metadata=buffer.metadata,
@@ -756,6 +841,7 @@ class _UserMessageInputBufferProcessor:
             buffer,
             external_id=f"{buffer.id}:user_message",
             fallback_profile=context.required_inference_profile,
+            prepared_inference_state=context.prepared_inference_state,
         )
         return _preparation_outcome(
             [
@@ -786,6 +872,7 @@ class _GoalContinuationInputBufferProcessor:
             buffer,
             external_id=f"{buffer.id}:goal_continuation",
             fallback_profile=context.required_inference_profile,
+            prepared_inference_state=context.prepared_inference_state,
         )
         return _preparation_outcome(
             [
@@ -816,6 +903,7 @@ class _AgentMessageInputBufferProcessor:
             buffer,
             external_id=f"{buffer.id}:agent_message",
             fallback_profile=context.required_inference_profile,
+            prepared_inference_state=context.prepared_inference_state,
         )
         return _preparation_outcome(
             [
@@ -848,6 +936,7 @@ class _GoalActionInputBufferProcessor:
             context.session,
             session_id=context.session_id,
             buffer=buffer,
+            prepared_inference_state=context.prepared_inference_state,
         )
         return _preparation_outcome(promoted, _turn_effect_for_promoted(promoted))
 
@@ -869,6 +958,7 @@ class _SkillActionInputBufferProcessor:
             session_id=context.session_id,
             buffer=buffer,
             action=self.action,
+            prepared_inference_state=context.prepared_inference_state,
         )
         return _preparation_outcome(promoted, _turn_effect_for_promoted(promoted))
 
@@ -885,24 +975,14 @@ class _CreateGitWorktreeActionInputBufferProcessor:
         buffer: InputBuffer,
     ) -> InputBufferPreparationOutcome:
         del context
-        action_payload = ActionMessagePayload(
-            action=self.action,
-            message=buffer.content,
-            requested_inference_profile=_requested_inference_profile(buffer),
-        )
-        return _preparation_outcome(
-            [
-                _PromotedInputBuffer(
-                    buffer=buffer,
-                    user_message=None,
-                    event_kind=EventKind.ACTION_MESSAGE,
-                    payload=_JSON_OBJECT_ADAPTER.validate_python(
-                        action_payload.model_dump(mode="json")
-                    ),
-                    external_id=buffer.id,
-                )
-            ],
-            TurnEffect.NEUTRAL,
+        return InputBufferPreparationOutcome(
+            promoted=[],
+            turn_effect=TurnEffect.NEUTRAL,
+            worktree_action=WorktreeActionInput(
+                buffer=buffer,
+                action=self.action,
+                execution=None,
+            ),
         )
 
 
@@ -914,6 +994,7 @@ def _preparation_outcome(
     return InputBufferPreparationOutcome(
         promoted=promoted,
         turn_effect=turn_effect,
+        worktree_action=None,
     )
 
 
@@ -932,11 +1013,27 @@ def _turn_effect_for_promoted(
     """Derive the fold effect from one processor result."""
     if any(item.event_kind is EventKind.SYSTEM_ERROR for item in promoted):
         return TurnEffect.FAILED
-    if any(item.event_kind is EventKind.ACTION_MESSAGE for item in promoted):
-        return TurnEffect.NEUTRAL
     if promoted:
         return TurnEffect.ELIGIBLE
     return TurnEffect.NEUTRAL
+
+
+def _buffer_requires_inference(buffer: InputBuffer) -> bool:
+    """Return whether preparing the buffer needs a resolved inference state."""
+    match buffer.kind:
+        case (
+            InputBufferKind.USER_MESSAGE
+            | InputBufferKind.GOAL_CONTINUATION
+            | InputBufferKind.AGENT_MESSAGE
+        ):
+            return True
+        case InputBufferKind.ACTION_MESSAGE:
+            if buffer.action is None:
+                raise ValueError("Action message input buffer requires action payload")
+            action = _CHAT_ACTION_ADAPTER.validate_python(buffer.action)
+            return isinstance(action, GoalAction | SkillAction)
+        case _:
+            assert_never(buffer.kind)
 
 
 def _requested_inference_profile(
@@ -986,7 +1083,7 @@ def _system_error_promoted_buffer(
     buffer: InputBuffer,
     content: str,
 ) -> _PromotedInputBuffer:
-    """Create a promoted system_error for an action-message failure."""
+    """Create a promoted system_error for one handled preparation failure."""
     payload = SystemErrorPayload(
         content=content,
         severity="error",

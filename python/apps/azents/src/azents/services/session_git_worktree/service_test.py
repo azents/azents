@@ -22,7 +22,6 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import (
-    ActionMessagePayload,
     CreateGitWorktreeAction,
 )
 from azents.engine.events.types import ActionExecutionResultPayload
@@ -32,10 +31,12 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent_context import RDBSessionAgentContextGitWorktree
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import ActionExecutionProjection
+from azents.repos.action_execution.data import (
+    ActionExecutionCreate,
+    ActionExecutionProjection,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogEntry
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
@@ -527,6 +528,7 @@ def _input_service(
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
+            action_execution_repository=ActionExecutionRepository(),
         ),
         session_manager=session_manager,
     )
@@ -540,6 +542,13 @@ async def _execute_first_setup_action(
     session_id: str,
 ) -> str:
     """Promote and execute the first pending setup action."""
+    async with rdb_session_manager() as session:
+        pending = await InputBufferRepository().list_for_flush(
+            session,
+            session_id,
+            limit=1,
+        )
+    expected_buffer_id = pending[0].id
     promoted = await InputBufferService(
         session_manager=rdb_session_manager,
         input_buffer_repository=InputBufferRepository(),
@@ -548,28 +557,29 @@ async def _execute_first_setup_action(
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
+        action_execution_repository=ActionExecutionRepository(),
     ).flush_session_input_buffers(
         session_id=session_id,
         model=None,
         required_inference_profile=None,
+        expected_buffer_id=expected_buffer_id,
+        prepared_inference_state=None,
+        profile_resolution_failure=None,
         active_run_id=None,
         limit=1,
         include_action_messages=True,
     )
-    assert len(promoted.events) == 1
-    event = promoted.events[0]
-    assert event.kind is EventKind.ACTION_MESSAGE
-    payload = event.payload
-    assert isinstance(payload, ActionMessagePayload)
-    action = payload.action
-    assert isinstance(action, CreateGitWorktreeAction)
+    assert promoted.events == []
+    worktree_action = promoted.worktree_action
+    assert worktree_action is not None
+    assert worktree_action.execution is not None
     await worktree_service.run_git_worktree_action(
         agent_id=agent_id,
         session_id=session_id,
-        action_event_id=event.id,
-        action=action,
+        execution=worktree_action.execution,
+        action=worktree_action.action,
     )
-    return event.id
+    return worktree_action.buffer.id
 
 
 async def _create_ready_worktree_session(
@@ -646,20 +656,19 @@ class TestSessionGitWorktreeService:
                     title=None,
                 ),
             )
-            action_payload = ActionMessagePayload(
-                action=CreateGitWorktreeAction(
-                    source_project_path="/workspace/agent/repo",
-                    starting_ref="main",
-                ),
-                message="",
+            action = CreateGitWorktreeAction(
+                source_project_path="/workspace/agent/repo",
+                starting_ref="main",
             )
-            action_event = await EventTranscriptRepository().append(
+            execution = await ActionExecutionRepository().create(
                 session,
-                EventCreate(
+                ActionExecutionCreate(
+                    id=None,
                     session_id=agent_session.id,
-                    kind=EventKind.ACTION_MESSAGE,
-                    payload=action_payload.model_dump(mode="json"),
-                    external_id="action-worktree-buffer",
+                    input_buffer_id="01900000000070008000000000000002",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
                 ),
             )
         runner = _RunnerOperations()
@@ -671,12 +680,11 @@ class TestSessionGitWorktreeService:
         ) -> None:
             published_statuses.append(projection.execution.status)
 
-        assert isinstance(action_payload.action, CreateGitWorktreeAction)
         result = await service.run_git_worktree_action(
             agent_id=agent_id,
             session_id=agent_session.id,
-            action_event_id=action_event.id,
-            action=action_payload.action,
+            execution=execution,
+            action=action,
             on_projection_updated=publish_projection,
         )
 
@@ -693,9 +701,9 @@ class TestSessionGitWorktreeService:
                 session_id=agent_session.id,
             )
             projection = (
-                await ActionExecutionRepository().get_projection_by_action_event_id(
+                await ActionExecutionRepository().get_projection_by_input_buffer_id(
                     session,
-                    action_event_id=action_event.id,
+                    input_buffer_id=execution.input_buffer_id,
                 )
             )
         assert len(allocations) == 1
@@ -841,7 +849,7 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
-        action_event_id = await _execute_first_setup_action(
+        input_buffer_id = await _execute_first_setup_action(
             rdb_session_manager,
             worktree_service,
             agent_id=agent_id,
@@ -849,9 +857,9 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             projection = (
-                await ActionExecutionRepository().get_projection_by_action_event_id(
+                await ActionExecutionRepository().get_projection_by_input_buffer_id(
                     session,
-                    action_event_id=action_event_id,
+                    input_buffer_id=input_buffer_id,
                 )
             )
             buffers = await InputBufferRepository().list_by_session_id(
@@ -1006,7 +1014,7 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
-        action_event_id = await _execute_first_setup_action(
+        input_buffer_id = await _execute_first_setup_action(
             rdb_session_manager,
             worktree_service,
             agent_id=agent_id,
@@ -1014,9 +1022,9 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             projection = (
-                await ActionExecutionRepository().get_projection_by_action_event_id(
+                await ActionExecutionRepository().get_projection_by_input_buffer_id(
                     session,
-                    action_event_id=action_event_id,
+                    input_buffer_id=input_buffer_id,
                 )
             )
         assert projection is not None
@@ -1059,7 +1067,7 @@ class TestSessionGitWorktreeService:
         )
 
         assert isinstance(result, Success)
-        action_event_id = await _execute_first_setup_action(
+        input_buffer_id = await _execute_first_setup_action(
             rdb_session_manager,
             worktree_service,
             agent_id=agent_id,
@@ -1067,9 +1075,9 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             projection = (
-                await ActionExecutionRepository().get_projection_by_action_event_id(
+                await ActionExecutionRepository().get_projection_by_input_buffer_id(
                     session,
-                    action_event_id=action_event_id,
+                    input_buffer_id=input_buffer_id,
                 )
             )
         assert projection is not None

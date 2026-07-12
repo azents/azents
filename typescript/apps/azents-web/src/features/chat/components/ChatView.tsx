@@ -221,11 +221,7 @@ function actionExecutionTimelineItemId(
 function shouldRenderUnanchoredActionExecution(
   actionExecution: ActionExecutionProjection,
 ): boolean {
-  return (
-    shouldRenderActionExecution(actionExecution) &&
-    actionExecution.execution.status !== "completed" &&
-    actionExecution.execution.status !== "failed"
-  );
+  return shouldRenderActionExecution(actionExecution);
 }
 
 function groupActionExecutionsByAnchor(
@@ -235,7 +231,7 @@ function groupActionExecutionsByAnchor(
   for (const actionExecution of actionExecutions.filter(
     shouldRenderActionExecution,
   )) {
-    const anchorId = actionExecution.execution.action_event_id;
+    const anchorId = actionExecution.execution.input_buffer_id;
     const existing = grouped.get(anchorId) ?? [];
     grouped.set(anchorId, [...existing, actionExecution]);
   }
@@ -262,7 +258,7 @@ function unanchoredActionExecutions(
     .filter(shouldRenderUnanchoredActionExecution)
     .filter(
       (actionExecution) =>
-        !anchorIds.has(actionExecution.execution.action_event_id),
+        !anchorIds.has(actionExecution.execution.input_buffer_id),
     )
     .sort((left, right) => {
       const byTime = actionExecutionSortTime(left).localeCompare(

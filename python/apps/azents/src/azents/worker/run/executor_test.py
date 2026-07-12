@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import Any, cast
@@ -32,7 +32,6 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import ToolkitProvider
-from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.engine_events import (
     RunComplete,
     RunPhaseChanged,
@@ -426,6 +425,8 @@ class _InputBufferService:
         """Return one implicit pending input by default."""
         del session_id
         return PendingInputInferenceProfile(
+            input_buffer_id="buffer-1",
+            requires_inference=False,
             exists=True,
             requested_inference_profile=None,
         )
@@ -858,6 +859,8 @@ async def test_execute_reports_resolve_failure(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -940,6 +943,8 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         del args
         poll_calls.append(kwargs)
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1024,6 +1029,8 @@ async def test_execute_persists_recovered_profile_resolution_failure(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1173,6 +1180,8 @@ async def test_execute_recovers_durable_retry_budget(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1249,6 +1258,8 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
         del args
         poll_calls.append(kwargs)
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=["event-001"],
             user_messages=[],
@@ -1310,6 +1321,8 @@ async def test_execute_activates_pending_child_from_session_snapshot(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=["event-001"],
             user_messages=[],
@@ -1376,6 +1389,7 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1423,6 +1437,8 @@ async def test_boundary_poll_processes_turn_actions(
         del args
         process_actions_values.append(cast(bool, kwargs["process_actions"]))
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1443,7 +1459,11 @@ async def test_boundary_poll_processes_turn_actions(
         mark_context_invalidated=lambda: None,
     )
 
-    assert await poll() == PollMessagesResult(user_messages=[])
+    assert await poll() == PollMessagesResult(
+        user_messages=[],
+        context_invalidated=False,
+        complete_run=False,
+    )
     assert process_actions_values == [True]
 
 
@@ -1467,6 +1487,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1500,6 +1521,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
     )
 
     assert await poll() == PollMessagesResult(
+        complete_run=False,
         user_messages=[],
         context_invalidated=True,
     )
@@ -1522,25 +1544,19 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     )
     promoted_batches = [
         PromotedInputBuffers(
+            worktree_action=None,
             turn_effect=TurnEffect.FAILED,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
-            events=[
-                Event(
-                    id="1123456789abcdef0123456789abcdf0",
-                    session_id="session-1",
-                    kind=EventKind.ACTION_MESSAGE,
-                    payload=ActionMessagePayload(action=GoalAction(), message=""),
-                    created_at=run_executor_module.tznow(),
-                )
-            ],
+            events=[],
             deleted_buffer_ids=["buffer-action"],
             claimed_count=1,
-            inserted_count=1,
+            inserted_count=0,
             deduped_count=0,
         ),
         PromotedInputBuffers(
+            worktree_action=None,
             turn_effect=TurnEffect.ELIGIBLE,
             requested_inference_profile=None,
             promoted_event_ids=[],
@@ -1560,6 +1576,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             deduped_count=0,
         ),
         PromotedInputBuffers(
+            worktree_action=None,
             turn_effect=TurnEffect.NEUTRAL,
             requested_inference_profile=None,
             promoted_event_ids=[],
@@ -1571,7 +1588,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             deduped_count=0,
         ),
     ]
-    processed_event_kinds: list[EventKind] = []
+    processed_worktree_actions: list[object | None] = []
 
     async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
         del args, kwargs
@@ -1582,8 +1599,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         **kwargs: object,
     ) -> OperationActionProcessResult:
         del args
-        events = cast(Sequence[Event], kwargs["events"])
-        processed_event_kinds.extend(event.kind for event in events)
+        processed_worktree_actions.append(kwargs["worktree_action"])
         return OperationActionProcessResult(context_invalidated=False)
 
     async def has_actionable_model_input(session_id: str) -> bool:
@@ -1616,7 +1632,73 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     assert result.user_messages == [user_message]
     assert result.has_actionable_work is True
     assert result.context_invalidated is False
-    assert processed_event_kinds == [EventKind.ACTION_MESSAGE, EventKind.USER_MESSAGE]
+    assert result.complete_run is False
+    assert processed_worktree_actions == [None, None]
+    assert promoted_batches == []
+
+
+@pytest.mark.asyncio
+async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A handled preparation failure completes the active run without retry."""
+    executor = _executor()
+    promoted_batches = [
+        PromotedInputBuffers(
+            worktree_action=None,
+            turn_effect=TurnEffect.FAILED,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=["buffer-failed"],
+            claimed_count=1,
+            inserted_count=1,
+            deduped_count=0,
+        ),
+        PromotedInputBuffers(
+            worktree_action=None,
+            turn_effect=TurnEffect.NEUTRAL,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=[],
+            claimed_count=0,
+            inserted_count=0,
+            deduped_count=0,
+        ),
+    ]
+
+    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+        del args, kwargs
+        return promoted_batches.pop(0)
+
+    async def has_actionable_model_input(session_id: str) -> bool:
+        del session_id
+        return False
+
+    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+
+    result = await executor.poll_run_inputs(
+        agent_id="agent-1",
+        session_id="session-1",
+        model="gpt-test",
+        required_inference_profile=None,
+        active_run_id="run-1",
+        initial_turn_eligible=False,
+        poll_fn=None,
+        process_actions=False,
+    )
+
+    assert result.complete_run is True
+    assert result.has_actionable_work is False
+    assert result.context_invalidated is False
     assert promoted_batches == []
 
 
@@ -1631,6 +1713,8 @@ async def test_execute_ignores_wake_up_without_runtime_input(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1862,6 +1946,8 @@ async def test_execute_clears_activity_after_run_complete(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2008,6 +2094,8 @@ async def test_execute_retries_failed_run_without_durable_error(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2092,6 +2180,8 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2173,6 +2263,8 @@ async def test_execute_finalizes_when_failed_run_retry_is_stopped(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2243,6 +2335,8 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2312,6 +2406,8 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2364,6 +2460,8 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
         return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],

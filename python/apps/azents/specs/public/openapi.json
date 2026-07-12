@@ -7963,15 +7963,42 @@
             "title": "Id",
             "description": "Action execution ID"
           },
-          "action_event_id": {
+          "input_buffer_id": {
             "type": "string",
-            "title": "Action Event Id",
-            "description": "Durable action_message event ID"
+            "title": "Input Buffer Id",
+            "description": "Durable source input buffer ID"
           },
           "action_type": {
             "type": "string",
             "title": "Action Type",
             "description": "Action discriminator"
+          },
+          "action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CommandAction"
+              },
+              {
+                "$ref": "#/components/schemas/GoalAction"
+              },
+              {
+                "$ref": "#/components/schemas/SkillAction"
+              },
+              {
+                "$ref": "#/components/schemas/CreateGitWorktreeAction"
+              }
+            ],
+            "title": "Action",
+            "description": "Durable action payload",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "command": "#/components/schemas/CommandAction",
+                "create_git_worktree": "#/components/schemas/CreateGitWorktreeAction",
+                "goal": "#/components/schemas/GoalAction",
+                "skill": "#/components/schemas/SkillAction"
+              }
+            }
           },
           "status": {
             "type": "string",
@@ -8039,8 +8066,9 @@
         "type": "object",
         "required": [
           "id",
-          "action_event_id",
+          "input_buffer_id",
           "action_type",
+          "action",
           "status",
           "updated_at"
         ],

@@ -159,10 +159,19 @@ class SkillStateStore:
     async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
         """Fetch Skill projection state."""
         async with self._session_manager() as session:
-            handle = await self._make_handle(session, agent_id, session_id)
-            if handle is None:
-                return SkillProjectionState()
-            return await handle.load(default_factory=SkillProjectionState)
+            return await self.load_in_session(session, agent_id, session_id)
+
+    async def load_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+    ) -> SkillProjectionState:
+        """Fetch Skill projection state inside the caller transaction."""
+        handle = await self._make_handle(session, agent_id, session_id)
+        if handle is None:
+            return SkillProjectionState()
+        return await handle.load(default_factory=SkillProjectionState)
 
     async def replace_latest(
         self,

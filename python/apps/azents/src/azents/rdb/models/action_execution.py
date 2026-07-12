@@ -5,7 +5,7 @@ import enum
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from sqlalchemy.dialects.postgresql import ENUM
+from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
@@ -38,19 +38,19 @@ class RDBActionExecution(RDBModel):
     __tablename__ = "action_executions"
 
     IX_SESSION_ID = sa.Index("ix_action_executions_session_id", "session_id")
-    UQ_ACTION_EVENT_ID = sa.UniqueConstraint(
-        "action_event_id",
-        name="uq_action_executions_action_event_id",
+    UQ_INPUT_BUFFER_ID = sa.UniqueConstraint(
+        "input_buffer_id",
+        name="uq_action_executions_input_buffer_id",
     )
     IX_SESSION_STATUS = sa.Index(
         "ix_action_executions_session_id_status",
         "session_id",
         "status",
     )
-    IX_SESSION_ACTION_EVENT = sa.Index(
-        "ix_action_executions_session_id_action_event_id",
+    IX_SESSION_INPUT_BUFFER = sa.Index(
+        "ix_action_executions_session_id_input_buffer_id",
         "session_id",
-        "action_event_id",
+        "input_buffer_id",
     )
 
     id: Mapped[str] = mapped_column(
@@ -64,12 +64,12 @@ class RDBActionExecution(RDBModel):
         sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
-    action_event_id: Mapped[str] = mapped_column(
+    input_buffer_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("events.id", ondelete="CASCADE"),
         nullable=False,
     )
     action_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    action: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     status: Mapped[ActionExecutionStatus] = mapped_column(
         action_execution_status_enum,
         nullable=False,
@@ -110,9 +110,9 @@ class RDBActionExecution(RDBModel):
 
     __table_args__ = (
         IX_SESSION_ID,
-        UQ_ACTION_EVENT_ID,
+        UQ_INPUT_BUFFER_ID,
         IX_SESSION_STATUS,
-        IX_SESSION_ACTION_EVENT,
+        IX_SESSION_INPUT_BUFFER,
     )
 
 

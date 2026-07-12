@@ -1110,8 +1110,14 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
         nonlocal poll_count
         poll_count += 1
         if poll_count != 2:
-            return InputPollResult(events=[])
+            return InputPollResult(
+                events=[],
+                context_invalidated=False,
+                complete_run=False,
+            )
         return InputPollResult(
+            context_invalidated=False,
+            complete_run=False,
             events=[
                 await transcript_repo.append(
                     session,
@@ -1123,7 +1129,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
                         ).model_dump(mode="json", exclude_none=True),
                     ),
                 )
-            ]
+            ],
         )
 
     execution = AgentRunExecution(
@@ -1166,8 +1172,8 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
     )
 
 
-async def test_context_invalidation_exits_before_next_model_call() -> None:
-    """Context invalidation exits the run before stale model lowering."""
+async def test_context_invalidation_yields_for_request_refresh() -> None:
+    """Context invalidation yields without terminating the active AgentRun."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     lowerer = _RecordingLowerer()
@@ -1181,7 +1187,11 @@ async def test_context_invalidation_exits_before_next_model_call() -> None:
         del session, session_id
         nonlocal poll_count
         poll_count += 1
-        return InputPollResult(events=[], context_invalidated=poll_count == 2)
+        return InputPollResult(
+            events=[],
+            context_invalidated=poll_count == 2,
+            complete_run=False,
+        )
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
@@ -1211,10 +1221,10 @@ async def test_context_invalidation_exits_before_next_model_call() -> None:
         poll_input_events=poll_input_events,
     )
 
-    assert status == AgentRunStatus.CANCELLED
+    assert status == AgentRunStatus.RUNNING
     assert poll_count == 2
     assert len(lowerer.transcripts) == 1
-    assert run_repo.terminal == AgentRunStatus.CANCELLED
+    assert run_repo.terminal is None
     assert all(
         event.kind is not EventKind.RUN_MARKER for event in transcript_repo.events
     )

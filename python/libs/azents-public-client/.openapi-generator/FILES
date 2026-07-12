@@ -22,6 +22,7 @@ azentspublicclient/api_response.py
 azentspublicclient/configuration.py
 azentspublicclient/docs/AcceptDeclineResponse.md
 azentspublicclient/docs/Action.md
+azentspublicclient/docs/Action1.md
 azentspublicclient/docs/ActionExecutionEventResponse.md
 azentspublicclient/docs/ActionExecutionProjectionResponse.md
 azentspublicclient/docs/ActionExecutionResponse.md
@@ -307,6 +308,7 @@ azentspublicclient/exceptions.py
 azentspublicclient/models/__init__.py
 azentspublicclient/models/accept_decline_response.py
 azentspublicclient/models/action.py
+azentspublicclient/models/action1.py
 azentspublicclient/models/action_execution_event_response.py
 azentspublicclient/models/action_execution_projection_response.py
 azentspublicclient/models/action_execution_response.py
@@ -575,6 +577,7 @@ azentspublicclient/rest.py
 azentspublicclient/test/__init__.py
 azentspublicclient/test/test_accept_decline_response.py
 azentspublicclient/test/test_action.py
+azentspublicclient/test/test_action1.py
 azentspublicclient/test/test_action_execution_event_response.py
 azentspublicclient/test/test_action_execution_projection_response.py
 azentspublicclient/test/test_action_execution_response.py
