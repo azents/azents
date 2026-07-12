@@ -9,6 +9,7 @@ from azents.core.credentials import (
     ApiKeySecrets,
     AwsConfig,
     AwsSecrets,
+    ChatGPTOAuthConfig,
     ChatGPTOAuthSecrets,
     GcpConfig,
     GcpSecrets,
@@ -229,6 +230,11 @@ class TestBuildCredentialKwargs:
                 expires_at=datetime.datetime.now(datetime.UTC)
                 + datetime.timedelta(hours=1),
             ),
+            config=ChatGPTOAuthConfig(
+                account_id="account-id",
+                connection_method="device",
+                status="connected",
+            ),
         )
 
         result = build_credential_kwargs(integration)
@@ -237,6 +243,11 @@ class TestBuildCredentialKwargs:
             "api_key": "access-token",
             "base_url": CHATGPT_OAUTH_BACKEND_BASE_URL,
             "api_base": CHATGPT_OAUTH_BACKEND_BASE_URL,
+            "extra_headers": {
+                "originator": "azents",
+                "user-agent": "azents/0.1.0",
+                "ChatGPT-Account-Id": "account-id",
+            },
         }
 
     def test_xai_oauth_secrets(self) -> None:

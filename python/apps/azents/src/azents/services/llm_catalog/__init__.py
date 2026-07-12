@@ -5,7 +5,7 @@ import datetime
 import hashlib
 import json
 import re
-from typing import Annotated, Any
+from typing import Annotated, Any, assert_never
 
 import litellm
 from azcommon.result import Failure, Result, Success
@@ -51,10 +51,13 @@ from azents.repos.llm_catalog.data import (
 )
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
+from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
 from azents.services.model_listing.data import ModelListingOutput
 from azents.services.model_listing.providers import (
     ListingProviderError,
     list_bedrock_models_for_integration,
+    list_chatgpt_models_for_integration,
     list_vertex_models_for_integration,
 )
 from azents.testing.deterministic_model_listing import (
@@ -601,6 +604,7 @@ class IntegrationCatalogProjectionService:
             and integration.provider
             not in (
                 LLMProvider.AWS_BEDROCK,
+                LLMProvider.CHATGPT_OAUTH,
                 LLMProvider.GOOGLE_VERTEX_AI,
             )
         ):
@@ -635,6 +639,24 @@ class IntegrationCatalogProjectionService:
         try:
             if deterministic_failure:
                 raise ListingProviderError("Deterministic user catalog listing failed.")
+            if integration.provider == LLMProvider.CHATGPT_OAUTH:
+                token_result = await ensure_runtime_tokens(
+                    integration=integration,
+                    integration_repository=self.integration_repository,
+                    session_manager=self.session_manager,
+                )
+                match token_result:
+                    case Success(refreshed_integration):
+                        integration = refreshed_integration
+                    case Failure(error):
+                        match error:
+                            case (
+                                ProviderRejected(reason=reason)
+                                | ProviderUnavailable(reason=reason)
+                            ):
+                                raise ListingProviderError(reason)
+                            case _:
+                                assert_never(error)
             listing = deterministic_listing or await _list_provider_visible_models(
                 integration
             )
@@ -643,6 +665,12 @@ class IntegrationCatalogProjectionService:
                     integration_id=integration.id,
                     provider=integration.provider,
                     listing=deterministic_listing,
+                    source_hash=source_snapshot.source_hash,
+                )
+            elif integration.provider == LLMProvider.CHATGPT_OAUTH:
+                entries = project_chatgpt_integration_entries(
+                    integration_id=integration.id,
+                    listing=listing,
                     source_hash=source_snapshot.source_hash,
                 )
             else:
@@ -767,6 +795,8 @@ async def _list_provider_visible_models(
 ) -> ModelListingOutput:
     if integration.provider == LLMProvider.AWS_BEDROCK:
         return await list_bedrock_models_for_integration(integration)
+    if integration.provider == LLMProvider.CHATGPT_OAUTH:
+        return await list_chatgpt_models_for_integration(integration)
     if integration.provider == LLMProvider.GOOGLE_VERTEX_AI:
         return await list_vertex_models_for_integration(integration)
     raise RuntimeError("Unsupported integration catalog provider")
@@ -805,6 +835,45 @@ def project_deterministic_integration_entries(
                     "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
                     "testenv_fixture": True,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
+                },
+                hidden_reason=None,
+            )
+        )
+    return entries
+
+
+def project_chatgpt_integration_entries(
+    *,
+    integration_id: str,
+    listing: ModelListingOutput,
+    source_hash: str,
+) -> list[LLMCatalogEntryCreate]:
+    """Project ChatGPT backend models without requiring LiteLLM metadata."""
+    entries: list[LLMCatalogEntryCreate] = []
+    for candidate in listing.models:
+        capabilities = candidate.normalized_capabilities
+        entries.append(
+            LLMCatalogEntryCreate(
+                provider=LLMProvider.CHATGPT_OAUTH,
+                provider_model_identifier=candidate.model_identifier,
+                lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                runtime_model_identifier=candidate.model_identifier,
+                display_name=candidate.model_display_name,
+                normalized_capabilities=capabilities.model_dump(mode="json"),
+                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
+                provider_integration_id=integration_id,
+                publisher=candidate.model_developer.value,
+                family=candidate.model_family,
+                source_metadata={
+                    "provider_listing_source": listing.summary.source,
+                    "provider_metadata": candidate.source_metadata,
+                    "source_hash": source_hash,
+                },
+                projection_metadata={
+                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
+                    "freshness_rank": model_freshness_rank(candidate.model_identifier),
+                    "responses_lite": capabilities.compatibility.responses_lite,
                 },
                 hidden_reason=None,
             )
