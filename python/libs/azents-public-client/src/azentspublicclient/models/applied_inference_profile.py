@@ -17,10 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
-from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -30,7 +29,7 @@ class AppliedInferenceProfile(BaseModel):
     """ # noqa: E501
     model_target_label: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Agent-owned model target label applied by the message")
     model_display_name: Optional[Annotated[str, Field(min_length=1, strict=True)]] = None
-    reasoning_effort: Optional[ModelReasoningEffort]
+    reasoning_effort: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["model_target_label", "model_display_name", "reasoning_effort"]
 

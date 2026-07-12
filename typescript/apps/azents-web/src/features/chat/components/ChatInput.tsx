@@ -211,7 +211,13 @@ function normalizeStoredAction(value: unknown): ChatAction | null {
   return null;
 }
 
-function storedReasoningEffort(value: unknown): ModelReasoningEffort | null {
+function storedReasoningEffort(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function knownReasoningEffort(
+  value: string | null,
+): ModelReasoningEffort | null {
   switch (value) {
     case "none":
     case "minimal":
@@ -313,7 +319,6 @@ function normalizeProfileForOptions(
           (candidate) => candidate.label === profile.model_target_label,
         ) ?? fallbackOption);
   const modelTargetLabel = option?.label ?? fallback.model_target_label;
-  const effortLevels = effortLevelsForTarget(options, modelTargetLabel);
   const requestedEffort =
     profile?.model_target_label === modelTargetLabel
       ? profile.reasoning_effort
@@ -322,7 +327,7 @@ function normalizeProfileForOptions(
         : null;
   return {
     model_target_label: modelTargetLabel,
-    reasoning_effort: normalizeReasoningEffort(requestedEffort, effortLevels),
+    reasoning_effort: requestedEffort,
   };
 }
 
@@ -884,7 +889,7 @@ export const ChatInput = memo(function ChatInput({
       updateInferenceProfile({
         model_target_label: modelTargetLabel,
         reasoning_effort: normalizeReasoningEffort(
-          inferenceProfile.reasoning_effort,
+          knownReasoningEffort(inferenceProfile.reasoning_effort),
           nextEfforts,
         ),
       });
@@ -898,8 +903,8 @@ export const ChatInput = memo(function ChatInput({
 
   const handleEffortChange = useCallback(
     (value: string | null): void => {
-      const effort = storedReasoningEffort(value);
-      if (effort === null || !selectableEfforts.includes(effort)) {
+      const effort = selectableEfforts.find((candidate) => candidate === value);
+      if (!effort) {
         return;
       }
       updateInferenceProfile({

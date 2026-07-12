@@ -10364,7 +10364,7 @@
           "reasoning_effort": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ModelReasoningEffort"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -15114,7 +15114,7 @@
           "reasoning_effort": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ModelReasoningEffort"
+                "type": "string"
               },
               {
                 "type": "null"
