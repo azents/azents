@@ -75,8 +75,6 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/archive
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup
-  - /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry
-  - /chat/v1/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard
   - /chat/v1/agents/{agent_id}/git-refs
   - /chat/v1/sessions/{session_id}/title
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/context
@@ -93,8 +91,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-11
-spec_version: 94
+last_verified_at: 2026-07-12
+spec_version: 96
 ---
 
 # Conversation & Events
@@ -148,8 +146,10 @@ ModelFiles, artifacts, and exchange files.
 | `id` | `str(32)` | UUID7 hex |
 | `handle` | string | Human-readable, BIP-39-derived session handle used for user-facing allocation names such as owned Git worktree paths. |
 | `workspace_id` / `agent_id` | FK | Workspace and agent boundary |
-| `last_model_target_label` | string \| null | Most recently activated normal-run target label for implicit profile selection |
-| `last_reasoning_effort` | enum \| null | Most recently activated normal-run effort; null represents model Default |
+| `current_model_target_label` / `current_reasoning_effort` | string / enum \| null | Session-owned requested profile for the next turn; null effort represents model Default. |
+| `current_model_selection` | JSONB \| null | Session-owned resolved physical model snapshot used by the next turn. |
+| `current_effective_context_window_tokens` / `current_effective_auto_compaction_threshold_tokens` | int \| null | Effective limits resolved with the current model snapshot. |
+| `current_inference_resolved_at` | timestamptz \| null | Resolution time for the complete current inference snapshot. |
 | `session_kind` | enum | `root` or `subagent`; ordinary session lists include only `root` sessions |
 | `status` | enum | `active` or `archived` |
 | `primary_kind` | enum \| null | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind. |
@@ -297,19 +297,23 @@ project prompt selection fall back to a parent, team-primary, or runtime session
 ### ActionExecution and SessionGitWorktree
 
 The legacy setup lifecycle tables are no longer part of the current conversation model. Setup work that affects a session is represented by
-durable operation TurnActions, and ordinary sessions have no separate setup baseline row. The session
-runner processes pending action messages before later model input. A Project-mutating action that
-succeeds invalidates prepared context and forces the next processing boundary to rebuild context;
-failed actions are marked failed and do not block later FIFO input.
+operation TurnActions carried through FIFO `action_message` input buffers, and ordinary sessions have
+no separate setup baseline row. An action input remains queue transport rather than becoming a durable
+`action_message` transcript event. Goal and Skill actions atomically apply their side effects and
+append their canonical model-visible events during preparation. A `create_git_worktree` action is
+atomically claimed as an `ActionExecution` before its source buffer is deleted. A Project-mutating
+action that succeeds invalidates the prepared context; the same active `AgentRun` rebuilds its
+turn-local request from the updated Session inference snapshot before the next model call. Failed
+actions are terminal and do not block later FIFO input.
 
-`action_executions` stores durable execution state for operation TurnActions keyed by the
-corresponding durable `action_message` event id. `action_execution_events` stores ordered progress
-records such as step start, command start/completion, stdout/stderr text, warning, failure, retry
-request, failed-final discard, and completion. `GET /chat/v1/sessions/{session_id}/live` and REST
-write snapshots expose `action_executions` as execution state plus event log so reconnect can rebuild
-the current action card without reading chat history. Retry and discard APIs mutate only failed action
-executions and return the updated action execution projection. They reject child subagent sessions
-before mutating action execution state because direct human operation writes are root-session only.
+`action_executions` stores durable execution state for operation TurnActions keyed by the source
+`input_buffer_id` and includes the durable typed action payload needed for recovery after the input
+buffer is deleted. `action_execution_events` stores ordered progress records such as step start,
+command start/completion, stdout/stderr text, warning, failure, and completion. `GET
+/chat/v1/sessions/{session_id}/live` and REST write snapshots expose only nonterminal executions as
+execution state plus event log. Terminal completed or failed projections are appended as durable
+`action_execution_result` history events. Failed actions are not retried or discarded through a
+separate mutation API.
 
 `session_git_worktrees` is the cleanup authority for Azents-owned worktrees. It stores the source
 Project path, starting ref, generated worktree path, generated branch name, base commit, status,
@@ -334,16 +338,7 @@ before destructive cleanup can remove a path or branch.
 | `status` | enum | `pending`, `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled` |
 | `active_tool_calls` | JSONB array | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, `background` |
 | `retry_state` | JSONB \| null | Durable failed-run retry state while the run remains `running`; cleared on terminal transition |
-| `requested_model_target_label` | string | Agent-owned target requested for this run |
-| `requested_reasoning_effort` | enum \| null | Explicit effort or null for model Default |
-| `inference_profile_source` | enum | `explicit_input`, `session_last_used`, `agent_default`, `parent_run`, `spawn_override`, or `retry_original` |
-| `resolved_model_selection` | JSONB \| null | Immutable full model snapshot after successful activation |
-| `resolved_reasoning_effort` | enum \| null | Activated effort; null represents model Default |
-| `resolved_at` | timestamptz \| null | Successful profile activation time |
-| `effective_context_window_tokens` | int \| null | Context limit fixed for this run |
-| `effective_auto_compaction_threshold_tokens` | int \| null | Auto-compaction threshold fixed for this run |
-| `inference_profile_failure_code` / `inference_profile_failure_message` | enum / text \| null | User-safe terminal resolution failure |
-| `parent_agent_run_id` | FK `agent_runs` \| null | Exact parent run inherited by a subagent's first run |
+| `parent_agent_run_id` | FK `agent_runs` \| null | Parent run lineage for a subagent's first run |
 | `last_completed_event_id` | `str(32)` \| null | Terminal run boundary event id when available |
 | `terminal_result_event_id` | `str(32)` \| null | Terminal assistant/error event used by parent subagent observation |
 | `terminal_result_message` | text \| null | User-safe terminal message returned by `wait_agent` and projected in the Subagent Tree |
@@ -359,9 +354,15 @@ without `run.retry` so stale retry progress does not remain visible during later
 tool progress. Terminal run updates also clear `retry_state` so retry progress cannot leak into
 completed, stopped, failed, interrupted, or cancelled runs.
 
-A run is precreated as `pending`, associated with its ordered durable input events through `agent_run_input_events`, and then atomically activated as `running` with its resolved profile. A pending run may instead become terminal `failed` with a typed profile-resolution failure. Only one pending run may exist for a session. Pending and running runs are active recovery state.
+A run is precreated as `pending` and associated with its ordered durable input events through
+`agent_run_input_events`. Normal buffered input resolves its requested profile before activation, then
+atomically writes the complete Session inference snapshot, canonical transcript events, run-input
+associations, Goal/Skill side effects, and buffer deletion. A handled preparation failure consumes the
+buffer, appends a deterministic `system_error`, preserves the previous Session inference snapshot,
+and completes the active run without retry. Only one pending run may exist for a session. Pending and
+running runs are active recovery state.
 
-The requested label is intent; `resolved_model_selection` is the immutable execution snapshot. Normal activation also updates the session-last-used profile in the same transaction. Manual retry creates a new pending run with `retry_original`, copies the original requested profile and ordered input-event associations, and resolves against current Agent routing. It never copies the old resolved snapshot. A subagent's first run is precreated with `parent_agent_run_id`. It uses `parent_run` with the exact parent requested/resolved profile and limits when no override is supplied, or `spawn_override` with a statically validated and pre-resolved Agent-owned label/effort profile for a non-full-history fork. Both sources activate from the stored physical snapshot so first-run recovery does not re-route the label. The child session stores the selected requested label and effort as last-used intent for later runs.
+The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. `AgentRun` stores lifecycle, parentage, activity, retry, and terminal-result state; it does not own or restore model selection. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, and re-resolves the Session's requested profile against current Agent routing before execution. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving model state from the parent run row.
 
 ## 4. Event Transcript Events
 
@@ -371,7 +372,6 @@ stored as JSONB and validated by event kind.
 Event kinds:
 
 - `user_message`
-- `background_completion`
 - `assistant_message`
 - `reasoning`
 - `client_tool_call`
@@ -386,7 +386,6 @@ Event kinds:
 - `system_reminder`
 - `goal_continuation`
 - `goal_updated`
-- `action_message`
 - `agent_message`
 - `action_execution_result`
 - `skill_loaded`
@@ -396,21 +395,19 @@ Event kinds:
 
 `agent_message` records agent-to-agent mailbox delivery in the target child session. Its payload stores `message_kind` (`spawn_agent`, `send_message`, or `followup_task`), source/target `SessionAgent` ids, source/target canonical paths, and content. Model lowering renders it as explicitly sourced delegated user-role-compatible input for the target session; the parent transcript keeps only the ordinary collaboration tool call/result.
 
-`action_message` records user-selected TurnActions. `skill` actions load Skill context and are hidden
-from the chat timeline once the matching `skill_loaded` event and optional normal user message are
-present. `create_git_worktree` actions are operation actions: the action message is the operation
-identity, the action payload is the request source of truth, and action execution state is stored in
-`action_executions` instead of patching the transcript event payload. `action_execution_result` is a
-durable transcript event containing the terminal action execution projection after a worktree action
-completes; it lets history reloads render completed operation logs without treating them as model
-input or ordinary chat bubbles.
+`action_message` is an InputBuffer kind for user-selected TurnActions, not a newly appended transcript
+event. `skill` actions load Skill context by appending `skill_loaded` and an optional normal
+`user_message`. `create_git_worktree` actions create buffer-keyed durable execution state before the
+source buffer is consumed. `action_execution_result` is a durable transcript event containing the
+terminal action execution projection after a worktree action completes or fails; it lets history
+reloads render operation logs without treating them as model input or ordinary chat bubbles.
 
 `skill_loaded` records a Skill turn action side effect. Its payload stores the Skill display name,
 exact `skill_path`, full Skill body, original user action message, content hash, source label, and
 relative hint. Model lowering injects `skill_loaded` as a required user-role instruction to read and
 follow the embedded Skill body; the original user action message is promoted as the following normal
-`user_message` event when non-empty. The UI renders `skill_loaded` as an expandable control event and
-hides the durable Skill `action_message` so the user's request appears once as a normal message.
+`user_message` event when non-empty. The UI renders `skill_loaded` as an expandable control event, while the consumed Skill input buffer
+does not create a duplicate action-message bubble.
 
 `system_error` payloads may include optional user-safe failed-run metadata under `failure`. The
 metadata identifies terminal failed-run output, finalization reason, retry counts, last error type,
@@ -452,7 +449,11 @@ event-list APIs:
   detail routes, projected status, latest task/message preview, latest run metadata, terminal result
   preview, and unread terminal result indicator.
 
-Durable human `user_message` and actionable `action_message` responses may include the requested profile plus one allowlisted associated-run summary. The summary contains run id/index/status, source, requested profile, safe resolved provider/model identity, resolved effort, effective limits, and typed safe failure fields. It never exposes integration ids, credentials, full model snapshots, catalog metadata, or raw provider errors. Pending buffers expose only requested intent; unresolved activation is shown as unknown rather than inferred from current Agent or Composer state.
+Durable human `user_message` events preserve their immutable requested profile intent. They do not
+embed an associated AgentRun summary and do not change when later run provenance changes. Pending
+buffers likewise expose only requested intent. The dedicated live Run projection carries the current
+Session inference snapshot's allowlisted physical provenance; clients never infer it from Composer or
+Agent defaults.
 
 Both responses use the same event transport shape as the durable transcript. The removed
 `/chat/v1/sessions/{session_id}/messages` aggregate endpoint is not part of the public contract:
@@ -520,40 +521,38 @@ error message when diagram rendering fails.
 
 ## 6. Input Buffers And Session Inputs
 
-Chat route input buffers are flushed before model-call boundaries and promoted to durable session
-input. Session runner payload ingress uses input buffers. The supported input buffer kinds are
-`user_message`, `edited_user_message`, `background_completion`, `goal_continuation`,
-`action_message`, and `agent_message`. Broker messages do not carry model input payloads.
+Chat route and collaboration inputs are prepared before model-call boundaries. The supported
+InputBuffer kinds are `user_message`, `goal_continuation`, `action_message`, and `agent_message`.
+Broker wake-ups are payload-free signals and never carry model input.
 
 Input buffers are session-bound. The `input_buffers` table stores `session_id`, not
-`agent_runtime_id`. Runtime-specific columns or runtime-scoped buffer queries are invalid because the
-buffer is part of the conversation, not the sandbox lifecycle. Run-producing human buffers also store `requested_model_target_label` and nullable `requested_reasoning_effort`; action-only buffers, background/control inputs, and agent mailbox inputs may have no requested profile.
+`agent_runtime_id`. Inference-producing buffers store optional requested target label and nullable
+reasoning effort. If the head has no explicit profile, preparation uses the current Session requested
+profile, then the Agent default when the Session has no snapshot.
 
-`InputBufferService` owns all input-buffer reads and writes. Public chat routes, worker idle
-continuation, session runner flushing, and tests should go through this service instead of calling
-`InputBufferRepository` directly, except where repository tests or migrations explicitly exercise the
-storage layer. Service methods are responsible for these transaction boundaries:
+`InputBufferService` owns input-buffer reads and writes. Enqueue commits only the pending row;
+producers own wake-up and run-state transitions. Preparation handles exactly one FIFO head per
+transaction. The worker first reads the head's identity and inference requirement, resolves the
+profile outside the transaction when needed, then locks the Session and the same FIFO head. If the
+identity changed, it discards the stale preparation result and starts again. Successful preparation
+atomically updates the complete Session inference snapshot, applies Goal/Skill state changes, appends
+canonical events, associates input events with the active run, and deletes the source buffer.
 
-- enqueueing or moving buffers to a session marks `agent_sessions.run_state` as `running` in the same
-  database transaction as the buffer mutation;
-- flushing buffers claims the session-bound pending set, appends the corresponding durable events,
-  and deletes the claimed buffers after successful promotion;
-- buffer idempotency is scoped to `(session_id, kind, idempotency_key)` when an idempotency key is
-  present.
+Canonical outcomes are:
 
-The durable event kind is determined by buffer kind at flush time:
-
-| Input buffer kind | Durable event kind |
+| Input buffer kind | Preparation result |
 | --- | --- |
-| `user_message` | `user_message` |
-| `edited_user_message` | `user_message` |
-| `background_completion` | `background_completion` |
-| `goal_continuation` | `goal_continuation` |
-| `action_message` | `action_message` |
-| `agent_message` | `agent_message` |
+| `user_message` | Durable `user_message` event. |
+| `goal_continuation` | Durable `goal_continuation` event. |
+| `agent_message` | Durable `agent_message` event. |
+| Goal `action_message` | Goal side effect plus canonical goal/user events; no `action_message` event. |
+| Skill `action_message` | `skill_loaded` plus optional `user_message`; no `action_message` event. |
+| Worktree `action_message` | Buffer-keyed `ActionExecution` claim with durable action payload; no `action_message` event. |
 
-Wake-up delivery is a signal only. The persisted buffer plus the `running` state transition is the
-recovery source of truth if the signal is lost. FIFO promotion consumes only the longest prefix that belongs to one run: matching requested profiles may combine, while a different profile or any action barrier ends the prefix. Operation `action_message` buffers are promoted and executed before later model input at the same boundary. A failed operation action is marked failed and FIFO processing continues to later pending input; no separate session-initialization gate exists.
+A handled preparation failure consumes only the failing head, appends a deterministic `system_error`,
+preserves the previous Session inference snapshot, and is never retried. FIFO draining may continue
+when a later input makes the next turn eligible. Operation failure is likewise terminal and does not
+require a separate session-initialization gate or retry/discard action.
 
 Web chat message/edit/command writes use REST commit endpoints instead of WebSocket write payloads.
 `GET /chat/v1/agents/{agent_id}/team-primary-session` resolves or creates the agent's team
@@ -576,11 +575,11 @@ retries with the same key return the same accepted target instead of creating du
 REST write idempotency is scoped to `(session_id, user_id, client_request_id)`. The same
 `client_request_id` may be reused independently for different explicit session routes because the URL
 session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` input buffer
-to the explicit path session before returning success, mark the same session running through
-`InputBufferService`, then send a worker wake-up signal for that session. The message path must not
+to the explicit path session before returning success, mark the same session running in the producer
+transaction, then send a worker wake-up signal for that session. The message path must not
 resolve runtime current/active session state to replace the requested `session_id`. Edit writes
-rewrite durable history state, clear pending input buffers, commit an
-`edited_user_message` input buffer, mark the session running through `InputBufferService`, and send a
+rewrite durable history state, clear pending input buffers, commit a
+`user_message` input buffer, mark the session running in the producer transaction, and send a
 wake-up for the explicit path session. Command writes do not enter the input buffer; they store a
 single pending command on `agent_sessions`, mark the explicit path session running, and send a wake-up
 for that session. Failed-run retry writes target the latest visible failed-run `system_error`; they
@@ -646,11 +645,11 @@ storage JSON dump.
 - Web chat stop has a single REST control boundary; WebSocket is not a fallback stop/control path.
 - `client_request_id` retry for chat writes must converge to the same accepted target without duplicate side effects.
 - Input buffers are session-bound and must not store or require `agent_runtime_id`.
-- Run-producing human inputs carry an explicit requested profile, and FIFO promotion never crosses a profile mismatch or action barrier.
-- Requested profile intent and ordered run-input associations are durable; an activated run's resolved snapshot and effective limits are immutable.
+- Run-producing human inputs carry an explicit requested profile, and preparation processes exactly one FIFO head per transaction before folding its effect into the next turn.
+- Requested profile intent and ordered run-input associations are durable; the Session's complete prepared inference snapshot is authoritative for the next turn and may change at a later boundary within the same active run.
 - `SessionAgent` is the subagent tree source of truth; `AgentSession` remains the transcript/run/input boundary.
 - Child sessions are hidden from ordinary Agent session lists by `session_kind = subagent`, not by access-control bypass.
-- Child subagent sessions are human read-only: REST message/edit/command/failed-run retry and direct operation retry/discard writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
+- Child subagent sessions are human read-only: REST message/edit/command/failed-run retry writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
 - `wait_agent` observes terminal child run projections once by advancing `parent_observed_run_index`; it must not infer results by scanning child transcript history.
 - Any service path that enqueues input buffers must mark `agent_sessions.run_state` as `running` in
   the same transaction.
@@ -659,7 +658,7 @@ storage JSON dump.
 
 Current verification:
 
-- `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/api/public/chat/v1/chat_api_test.py::TestRestMessageWriteContract::test_validate_rest_session_rejects_subagent_before_write src/azents/services/agent_session_input_test.py::TestAgentSessionInputService::test_create_buffered_agent_input_rejects_subagent_before_wake src/azents/services/chat/subagent_tree_test.py::TestSubagentTreeProjection::test_finalize_tree_propagates_interrupted_to_all_descendants src/azents/services/chat_write_test.py::TestChatWriteService::test_pending_command_rejects_subagent_session_before_write src/azents/services/session_git_worktree/service_test.py::TestSessionGitWorktreeService::test_action_execution_retry_rejects_subagent_session src/azents/services/session_git_worktree/service_test.py::TestSessionGitWorktreeService::test_action_execution_discard_rejects_subagent_session src/azents/services/session_git_worktree/service_test.py::TestSessionGitWorktreeService::test_manual_cleanup_rejects_subagent_session -q`
+- `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/api/public/chat/v1/chat_api_test.py::TestRestMessageWriteContract::test_validate_rest_session_rejects_subagent_before_write src/azents/services/agent_session_input_test.py::TestAgentSessionInputService::test_create_buffered_agent_input_rejects_subagent_before_wake src/azents/services/chat/subagent_tree_test.py::TestSubagentTreeProjection::test_finalize_tree_propagates_interrupted_to_all_descendants src/azents/services/chat_write_test.py::TestChatWriteService::test_pending_command_rejects_subagent_session_before_write src/azents/services/session_git_worktree/service_test.py -q`
 - `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/services/chat/subagent_tree_test.py src/azents/worker/run/executor_test.py -q`
 - `cd testenv/azents/e2e && uv run pytest ./src/tests/azents/public/test_subagents.py -q` in Docker-enabled deterministic E2E environments
 
@@ -673,6 +672,8 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-12** — v96. Aligned invariants and verification with Session-owned turn snapshots and terminal buffer-keyed action execution.
+- **2026-07-12** — v95. Promoted sequential single-head preparation, Session inference ownership, buffer-only action transport, and terminal action result history.
 - **2026-07-11** — v94. Added atomic spawn profile validation, `spawn_override` run provenance, and child last-used profile initialization.
 - **2026-07-10** — v93. Required concrete reasoning-effort choices for normal user input when explicit levels are advertised.
 - **2026-07-10** — v92. Added durable requested/resolved inference profiles, profile-aware FIFO run boundaries, run-input associations, session-last-used intent, and retry/subagent provenance.

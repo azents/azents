@@ -45,8 +45,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-11
-spec_version: 45
+last_verified_at: 2026-07-12
+spec_version: 46
 ---
 
 # Agent Domain Spec
@@ -253,23 +253,23 @@ Deterministic fixture in local/test environment is development/QA support path a
 
 ## 3. Runtime Resolve
 
-Every run has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
+Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
 
-Before a new normal run starts, runtime resolution:
+Before an inference-bearing FIFO head is atomically prepared, runtime resolution:
 
 1. Loads the Agent and rejects missing or disabled Agents.
 2. Resolves the requested label against the Agent's current `selectable_model_options`; missing labels fail with `model_target_not_found` and never fall back to another option.
 3. Validates every non-null requested effort against the selected snapshot's explicit normalized effort list; an empty list rejects every explicit effort, and unsupported effort fails with `reasoning_effort_unsupported` before provider invocation.
 4. Loads and validates the selected main integration plus the Agent's lightweight integration, including provider token refresh where required.
 5. Builds the main runtime model from the selected option while retaining the Agent's `lightweight_model_selection` for compaction.
-6. Computes and fixes the run's effective context window and automatic compaction threshold.
+6. Computes the prepared turn's effective context window and automatic compaction threshold.
 7. Validates Agent model parameters, applies the requested effort, and materializes user attachments.
 
-Successful activation stores the full selected `AgentModelSelection`, resolved effort, effective limits, and resolution timestamp on `AgentRun`. Subsequent turns, automatic retries, recovery, and worker takeover rebuild from that stored snapshot rather than resolving the label again. Resolution failures are terminal typed run failures with no fallback or automatic retry.
+Successful preparation atomically stores the full selected `AgentModelSelection`, resolved effort, effective limits, and resolution timestamp on `AgentSession` with the canonical input effects and buffer deletion. The Session snapshot is authoritative for the next model turn, automatic retry, recovery, and worker takeover. A later prepared profile may update that snapshot within the same active `AgentRun` and forces model/tool context to rebuild before the next model call. Resolution failures consume the failed FIFO head, preserve the previously committed Session snapshot, append a terminal typed user-safe error, and are never retried.
 
-`spawn_agent` exposes the current Agent's selectable labels and their explicit effort levels, but not integration ids, providers, physical model identifiers, display names, families, catalog metadata, context limits, pricing, or resolved snapshots. Omitted override fields preserve the exact concrete parent Run profile. An explicit target label or effort is allowed only with `fork_turns = none` or a positive bounded count; full-history forks reject overrides. A target-only override normalizes from the parent resolved effort using canonical effort order: preserve when supported, otherwise choose the greatest supported lower effort, otherwise the smallest supported effort, or null when no explicit levels exist. Explicit effort is validated exactly and never normalized. Static validation completes before child creation.
+`spawn_agent` exposes the current Agent's selectable labels and their explicit effort levels, but not integration ids, providers, physical model identifiers, display names, families, catalog metadata, context limits, pricing, or resolved snapshots. Omitted override fields preserve the exact concrete parent Session profile. An explicit target label or effort is allowed only with `fork_turns = none` or a positive bounded count; full-history forks reject overrides. A target-only override normalizes from the parent resolved effort using canonical effort order: preserve when supported, otherwise choose the greatest supported lower effort, otherwise the smallest supported effort, or null when no explicit levels exist. Explicit effort is validated exactly and never normalized. Static validation completes before child creation.
 
-Runtime does not query Workspace defaults or model listing. Workspace defaults act only as copy sources at Agent create/update submit time, and model catalog changes do not mutate an activated run.
+Runtime does not query Workspace defaults or model listing. Workspace defaults act only as copy sources at Agent create/update submit time, and model catalog changes do not mutate an already prepared Session snapshot.
 
 ## 4. Built-in Tool Validation
 
@@ -314,6 +314,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-12 | 46 | Moved prepared turn inference authority and effective limits from AgentRun to AgentSession |
 | 2026-07-11 | 45 | Added label-only subagent spawn overrides, bounded-fork restrictions, and effort transition semantics |
 | 2026-07-10 | 44 | Required concrete user-facing effort selection when advertised and made explicit-effort validation strict for empty lists |
 | 2026-07-10 | 43 | Added per-run Agent-owned target resolution, nullable effort validation, and immutable activated profile semantics |

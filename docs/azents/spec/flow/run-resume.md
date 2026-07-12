@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-11
-spec_version: 16
+last_verified_at: 2026-07-12
+spec_version: 17
 ---
 
 # Run Resume
@@ -40,7 +40,7 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Stale session activity | Worker recovery scan of `agent_sessions.run_state` | Worker enqueues a wake-up signal for the affected session |
 | Active event run | pending/running `agent_runs`, resolved inference provenance, phase, active tools, and retry state | Runtime preserves the run/input boundary, resumes from an activated snapshot, and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime executes or interrupts the missing result path without duplicating completed results |
-| Blocked operation action | Session has pending action execution that failed or has not completed | Worker preserves later pending buffers and does not create a model run until the action completes or is discarded |
+| Pending operation action | Session has a nonterminal buffer-keyed action execution | Worker resumes it from the durable action payload; terminal failure is not retried and does not permanently block later FIFO input. |
 
 ## Ownership Lease
 
@@ -166,12 +166,24 @@ The takeover path must preserve single-session execution:
 - A live owner heartbeat prevents non-owner processing.
 - A stale heartbeat permits lease stealing even if the 30-minute sticky key remains.
 - Wake-up signals remain in the per-session Redis list until a worker with valid ownership drains
-  them. Model input payloads, operation action inputs, and control state remain durable in Postgres. For newly created sessions with setup action execution, pending input buffers are also durable while setup is pending, failed, or waiting for discard; takeover must resume from the action execution state before run creation.
+  them. Model input payloads, operation action inputs, and control state remain durable in Postgres. Before an operation input buffer is deleted, its pending `ActionExecution` and typed action payload are committed under the source `input_buffer_id`; takeover recovers the nonterminal execution from that durable claim and its worktree allocation state.
 - Durable transcript and `agent_runs` remain the execution source of truth after takeover.
 
 ## Operation Action Recovery
 
-Operation TurnActions are durable `action_message` inputs. When takeover sees pending setup action input or a pending retry action execution, the worker resumes from the durable action message and `action_executions` projection. A completed action is not duplicated. A failed action is marked failed and FIFO processing continues to later pending input; retry/discard mutations remain scoped to the failed action execution but are not required to unblock the queue. Running workers also process TurnActions at model-call turn boundaries instead of waiting for the run-complete boundary. If a Project-mutating action completes and later input remains, the worker marks the current agent run cancelled without appending a completed run marker and uses a follow-up wake-up boundary so model/tool context is rebuilt from the updated Project registry before run creation or before the next model call. Completed worktree action projections are appended to durable history as `action_execution_result` events and terminal live action state is not kept as a persistent live fallback.
+Operation TurnActions enter through durable `action_message` InputBuffers, but they do not append an
+`action_message` transcript event. Preparation claims a worktree action by committing an
+`ActionExecution` keyed by `input_buffer_id` with its typed action payload, then deletes the source
+buffer in the same transaction. Takeover resumes pending work and continues a running execution from
+its durable allocation. A `ready` allocation skips duplicate Git creation and resumes remaining
+Project/catalog steps. A `creating` allocation whose Runner result was not durably recorded is
+finalized as an interrupted terminal failure rather than creating a second suffixed worktree. A
+completed action is not duplicated. A failed action is terminal, is not retried or discarded, and
+FIFO processing may continue to later pending input. Running workers process TurnActions at model-call
+turn boundaries instead of waiting for run completion. If a Project-mutating action completes, the
+same active run rebuilds model/tool context before its next model call. Completed and failed worktree
+projections are appended to durable history as `action_execution_result` events, and terminal live
+action state is not kept as a persistent fallback.
 
 ## Failed-run Retry Recovery
 
@@ -188,7 +200,7 @@ waiting leaves the run `running` for the next worker instead of writing durable 
 
 ## Inference Profile Recovery
 
-Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. A pending normal run retains requested label, effort, and source, then resolves once during activation. A running run must already contain the full resolved model snapshot and effective limits; recovery rebuilds `RunRequest` from those values and never re-resolves current Agent labels.
+Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. The Session current inference snapshot is the turn execution authority: it contains requested label, resolved physical selection, effort, effective limits, and resolution time. Recovery must not overwrite it from older run-owned provenance. A pending normal input resolves during preparation; successful preparation atomically updates the Session snapshot with canonical events and buffer deletion. A handled resolution failure preserves the previous snapshot, appends a deterministic user-safe error, consumes the failed head, and completes the active run without retry. A later profile change within a running run updates the Session snapshot for the next turn and rebuilds that same run's request.
 
 Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations, marks source `retry_original`, and leaves resolved provenance empty so current Agent routing is resolved once at activation. The first child subagent run is different: it is precreated with a parent run id and a complete resolved snapshot, effort, and limits. It uses source `parent_run` for exact inheritance or `spawn_override` for a statically resolved non-full-history override. Recovery activates either pre-resolved source without re-routing the requested label, so first-run execution does not depend on whether the original target label still exists. Later child runs resolve the stored session-last-used label normally.
 
@@ -217,7 +229,7 @@ that next run to observe `check_stop()` as true.
 ## Invariants
 
 - Durable transcript, ordered run-input associations, and pending/running `agent_runs` are the resume source of truth.
-- Activated inference snapshots and effective limits remain immutable across recovery and automatic retry.
+- The Session inference snapshot is complete and atomic per turn; recovery never restores it from an older AgentRun snapshot.
 - `agent_runs.retry_state` is the resume source for failed-run retry progress while a run remains running.
 - A live sticky owner must receive follow-up broker wake-ups directly.
 - A non-owner worker must not process a session while the owner heartbeat is live.
@@ -227,12 +239,13 @@ that next run to observe `check_stop()` as true.
   hooks.
 - Completed tool results are not duplicated.
 - User stop intent is consumed by stop finalization and must not interrupt the next wake-up.
-- Blocking operation action execution must complete or be discarded before recovery creates a model run for later pending input.
+- Nonterminal operation execution resumes from its buffer-keyed durable action payload; terminal failure is never retried.
 - SDK `RunState` compatibility is not preserved.
 
 
 ## Changelog
 
+- **2026-07-12** (spec_version 17) — Promoted Session-owned per-turn inference recovery, handled preparation failure, buffer-only action transport, buffer-keyed action recovery, and same-run context rebuild.
 - **2026-07-11** (spec_version 16) — Added recovery semantics for pre-resolved `spawn_override` child runs and later session-last-used re-resolution.
 - **2026-07-10** (spec_version 15) — Added pending/activated profile recovery, retry intent re-resolution, and exact inherited parent-run snapshot recovery.
 - **2026-07-08** (spec_version 14) — Clarified that failed TurnActions continue FIFO processing and context invalidation uses a cancelled run boundary plus follow-up wake-up, not a completed run marker.

@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-07-06
-spec_version: 12
+last_verified_at: 2026-07-12
+spec_version: 13
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -63,7 +63,7 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 - `cost_usd`
 - raw provider usage payload
 
-Chat tab header finds most recent `turn_marker` usage from loaded/live chat timeline and shows it as token usage indicator. Indicator compares latest `total_tokens` with `effective_auto_compaction_threshold_tokens` in Agent response and shows auto compaction threshold usage as small donut. When clicked, popup shows total, prompt, completion, cache read/write, reasoning, effective context window, and auto compaction threshold as numbers. Effective context window is `effective_context_window_tokens` in Agent response, calculated by backend with same criterion as runtime auto compaction trigger: `min(main_model_max_input, effective_lightweight_model_max_input, agent_context_window_tokens_if_set)`. Effective lightweight is interpreted from `lightweight_model_selection` snapshot stored in Agent. Agent context window cap is interpreted from `model_parameters.context_window_tokens` and may be larger than current model limits; model limits still win in that case. Workspace default is copied only at Agent create/update time and is not looked up again in context inspector/runtime calculation. If effective values are absent, usage numbers are shown but model/context/threshold are shown as unavailable.
+Chat tab header finds the most recent `turn_marker` usage from the loaded/live chat timeline and shows it in the token usage indicator. When clicked, the popup shows total, prompt, completion, cache read/write, and reasoning token counts. If the usage marker's `run_id` matches the currently active live run, the popup also shows that run's Session-owned applied model target label. Otherwise model provenance is reported as unavailable rather than projecting the Session's current profile onto historical usage. Effective context-window and automatic-compaction-threshold values are not rendered in this indicator.
 
 ## Approximate Breakdown
 
@@ -105,7 +105,7 @@ Ready state includes this UI:
 
 ## Verification
 
-As of 2026-07-03, verified through the Workspace Project Browser stack and existing context inspector checks.
+As of 2026-07-12, verified through the sequential input preparation stack and existing context inspector checks. Version 13 aligns token usage provenance with the active Session inference snapshot and removes the obsolete Agent-level effective-limit display contract.
 
 ```bash
 cd python/apps/azents && uv run ruff check src/azents/services/chat/context.py
