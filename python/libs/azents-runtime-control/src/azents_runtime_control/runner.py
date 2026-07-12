@@ -106,7 +106,6 @@ class RunnerOperationEnvelope:
     reply_stream_id: str
     body_stream_id: str | None
     body_chunks: Sequence[RunnerBodyChunk]
-    background: bool
     deadline_at: datetime | None
     owner_session_id: str | None
 

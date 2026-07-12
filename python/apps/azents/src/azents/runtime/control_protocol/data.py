@@ -9,11 +9,7 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
-from azents.runtime.coordination.data import (
-    JsonValue,
-    RuntimeBackgroundOperationContext,
-    RuntimeCoordinationTarget,
-)
+from azents.runtime.coordination.data import JsonValue, RuntimeCoordinationTarget
 
 
 class RuntimeRequestIdFactory(Protocol):
@@ -146,8 +142,6 @@ class RuntimeRunnerOperation:
     payload: dict[str, JsonValue]
     deadline_at: datetime
     body_stream_id: str | None
-    background: bool
-    background_context: RuntimeBackgroundOperationContext | None = None
 
 
 @dataclasses.dataclass(frozen=True)

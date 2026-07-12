@@ -283,15 +283,6 @@ class RuntimeGitDeleteBranchResult:
     final_cursor: str
 
 
-@dataclasses.dataclass(frozen=True)
-class RuntimeOperationReceipt:
-    """Background Runner operation receipt."""
-
-    operation_id: str
-    request_id: str
-    reply_stream_id: str
-
-
 type RuntimeForegroundResult = (
     RuntimeBashResult
     | RuntimeFileReadResult
@@ -360,7 +351,6 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_bash(
@@ -399,7 +389,6 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_file_read(
@@ -441,7 +430,6 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=body_stream_id,
-                background=False,
             )
         )
         return await self.resume_file_write(
@@ -474,7 +462,6 @@ class RuntimeRunnerOperationClient:
                 payload={"path": path, "recursive": recursive},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_file_delete(
@@ -507,7 +494,6 @@ class RuntimeRunnerOperationClient:
                 payload={"paths": list(paths), "recursive": recursive},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_file_bulk_delete(
@@ -540,7 +526,6 @@ class RuntimeRunnerOperationClient:
                 payload={"path": path, "parents": parents},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_file_mkdir(
@@ -578,7 +563,6 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_file_move(
@@ -616,7 +600,6 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_file_bulk_move(
@@ -653,7 +636,6 @@ class RuntimeRunnerOperationClient:
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_file_list(
@@ -685,7 +667,6 @@ class RuntimeRunnerOperationClient:
                 payload={"path": path},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_file_stat(
@@ -737,7 +718,6 @@ class RuntimeRunnerOperationClient:
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_grep_files(
@@ -770,7 +750,6 @@ class RuntimeRunnerOperationClient:
                 payload={"source_project_path": source_project_path},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_git_refs(
@@ -812,7 +791,6 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_git_create_worktree(
@@ -852,7 +830,6 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_git_remove_worktree(
@@ -890,7 +867,6 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_git_delete_branch(
@@ -937,7 +913,6 @@ class RuntimeRunnerOperationClient:
                 payload=payload,
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_process(
@@ -979,7 +954,6 @@ class RuntimeRunnerOperationClient:
                 },
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         return await self.resume_process(
@@ -1011,7 +985,6 @@ class RuntimeRunnerOperationClient:
                 payload={"owner_session_id": owner_session_id},
                 deadline_at=deadline_at,
                 body_stream_id=None,
-                background=False,
             )
         )
         await self._read_until_final(
@@ -1022,20 +995,6 @@ class RuntimeRunnerOperationClient:
             runtime_id=runtime_id,
             generation=runner_generation,
             deadline_at=deadline_at,
-        )
-
-    async def start_background_operation(
-        self,
-        operation: RuntimeRunnerOperation,
-    ) -> RuntimeOperationReceipt:
-        """Dispatch a background Runner operation without waiting for final reply."""
-        dispatch = await self._dispatch_runner_operation(
-            dataclasses.replace(operation, background=True)
-        )
-        return RuntimeOperationReceipt(
-            operation_id=dispatch.operation_id,
-            request_id=dispatch.request_id,
-            reply_stream_id=dispatch.reply_stream_id,
         )
 
     async def resume_bash(

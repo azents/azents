@@ -47,18 +47,6 @@ class RuntimeConnectionKind(enum.StrEnum):
 
 
 @dataclasses.dataclass(frozen=True)
-class RuntimeBackgroundOperationContext:
-    """Parent session context for background Runtime operation completion."""
-
-    task_id: str
-    agent_id: str
-    parent_session_id: str
-    workspace_id: str
-    tool_name: str
-    idempotency_key: str
-
-
-@dataclasses.dataclass(frozen=True)
 class RuntimeRequestEnvelope:
     """Request envelope shared between Control replicas."""
 
@@ -142,8 +130,6 @@ class RuntimeOperationMetadata:
     last_event_at: datetime | None
     cancel_requested_at: datetime | None
     final_event_cursor: str | None
-    background: bool
-    background_context: RuntimeBackgroundOperationContext | None
 
 
 @dataclasses.dataclass(frozen=True)

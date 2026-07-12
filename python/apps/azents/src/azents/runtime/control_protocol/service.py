@@ -19,7 +19,6 @@ from azents.runtime.control_protocol.data import (
 )
 from azents.runtime.coordination.data import (
     JsonValue,
-    RuntimeBackgroundOperationContext,
     RuntimeConnectionKind,
     RuntimeCoordinationTarget,
     RuntimeOperationMetadata,
@@ -223,8 +222,6 @@ class RuntimeControlProtocolService:
             body_stream_id=None,
             deadline_at=command.deadline_at,
             created_at=created_at,
-            background=False,
-            background_context=None,
         )
 
     async def dispatch_runner_operation(
@@ -266,7 +263,6 @@ class RuntimeControlProtocolService:
             "operation_type": operation.operation_type,
             "owner_session_id": operation.owner_session_id,
             "payload": operation.payload,
-            "background": operation.background,
         }
         return await self._append_request(
             request_id=request_id,
@@ -280,8 +276,6 @@ class RuntimeControlProtocolService:
             body_stream_id=operation.body_stream_id,
             deadline_at=operation.deadline_at,
             created_at=created_at,
-            background=operation.background,
-            background_context=operation.background_context,
         )
 
     async def claim_next_provider_request(
@@ -474,8 +468,6 @@ class RuntimeControlProtocolService:
         body_stream_id: str | None,
         deadline_at: datetime | None,
         created_at: datetime,
-        background: bool,
-        background_context: RuntimeBackgroundOperationContext | None,
     ) -> RuntimeDispatchResult:
         envelope = RuntimeRequestEnvelope(
             request_id=request_id,
@@ -505,8 +497,6 @@ class RuntimeControlProtocolService:
                 last_event_at=None,
                 cancel_requested_at=None,
                 final_event_cursor=None,
-                background=background,
-                background_context=background_context,
             ),
             ttl_seconds=_operation_ttl_seconds(
                 created_at=created_at,

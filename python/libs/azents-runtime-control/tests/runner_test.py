@@ -596,7 +596,6 @@ def _operation(
         reply_stream_id="runner:runtime-1:generation:7:replies",
         body_stream_id=None,
         body_chunks=(),
-        background=False,
         deadline_at=deadline_at,
         owner_session_id=owner,
     )
