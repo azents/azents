@@ -42,7 +42,6 @@ class TestAppliedInferenceProfile(unittest.TestCase):
         else:
             return AppliedInferenceProfile(
                 model_target_label = '0',
-                model_display_name = '0',
                 reasoning_effort = 'none',
         )
         """

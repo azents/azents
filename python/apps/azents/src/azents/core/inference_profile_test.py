@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import (
+    AppliedInferenceProfile,
     RequestedInferenceProfile,
     SessionInferenceState,
 )
@@ -51,6 +52,17 @@ def test_requested_profile_accepts_normalized_effort() -> None:
         "model_target_label": "Quality",
         "reasoning_effort": "high",
     }
+
+
+def test_applied_profile_accepts_persisted_payload_without_display_name() -> None:
+    profile = AppliedInferenceProfile.model_validate(
+        {
+            "model_target_label": "Quality",
+            "reasoning_effort": "high",
+        }
+    )
+
+    assert profile.model_display_name is None
 
 
 def test_session_state_projects_only_applied_public_settings() -> None:

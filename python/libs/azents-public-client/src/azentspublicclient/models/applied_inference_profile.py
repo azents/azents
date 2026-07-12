@@ -29,7 +29,7 @@ class AppliedInferenceProfile(BaseModel):
     Resolved user-visible inference settings applied by one message.
     """ # noqa: E501
     model_target_label: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Agent-owned model target label applied by the message")
-    model_display_name: Optional[Annotated[str, Field(min_length=1, strict=True)]]
+    model_display_name: Optional[Annotated[str, Field(min_length=1, strict=True)]] = None
     reasoning_effort: Optional[ModelReasoningEffort]
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["model_target_label", "model_display_name", "reasoning_effort"]

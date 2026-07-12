@@ -104,6 +104,21 @@ def test_user_message_decodes_historical_payload_without_profile() -> None:
     assert payload.applied_inference_profile is None
 
 
+def test_user_message_decodes_historical_profile_without_display_name() -> None:
+    payload = UserMessagePayload.model_validate(
+        {
+            "content": "historical",
+            "applied_inference_profile": {
+                "model_target_label": "Quality",
+                "reasoning_effort": "high",
+            },
+        }
+    )
+
+    assert payload.applied_inference_profile is not None
+    assert payload.applied_inference_profile.model_display_name is None
+
+
 def test_user_message_preserves_applied_inference_profile() -> None:
     payload = UserMessagePayload(
         content="use quality",
