@@ -25,6 +25,33 @@ function formatNumber(value: number | null): string {
   return value === null ? "—" : value.toLocaleString();
 }
 
+function percentUsed(
+  totalTokens: number | null,
+  thresholdTokens: number | null,
+): number | null {
+  if (
+    totalTokens === null ||
+    thresholdTokens === null ||
+    thresholdTokens <= 0
+  ) {
+    return null;
+  }
+  return Math.min(100, Math.max(0, (totalTokens / thresholdTokens) * 100));
+}
+
+function progressColor(percent: number | null): string {
+  if (percent === null) {
+    return "var(--mantine-color-gray-5)";
+  }
+  if (percent >= 90) {
+    return "var(--mantine-color-red-6)";
+  }
+  if (percent >= 70) {
+    return "var(--mantine-color-yellow-6)";
+  }
+  return "var(--mantine-color-teal-6)";
+}
+
 function resolveUsageProfile(
   usage: TokenUsageSummary | null,
   activeRun: ChatLiveRunState | null,
@@ -49,6 +76,19 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
     () => resolveUsageProfile(usage, activeRun),
     [activeRun, usage],
   );
+  const percent = useMemo(
+    () =>
+      percentUsed(
+        usage?.totalTokens ?? null,
+        usage?.effectiveAutoCompactionThresholdTokens ?? null,
+      ),
+    [usage?.effectiveAutoCompactionThresholdTokens, usage?.totalTokens],
+  );
+  const color = progressColor(percent);
+  const ringPercent = percent ?? 0;
+  const ringRadius = 7;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const ringDashOffset = ringCircumference * (1 - ringPercent / 100);
 
   return (
     <Popover
@@ -79,11 +119,28 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
             <circle
               cx="9"
               cy="9"
-              r="7"
+              r={ringRadius}
               fill="none"
               stroke="var(--mantine-color-default-border)"
               strokeWidth="4"
             />
+            {ringPercent > 0 && (
+              <circle
+                cx="9"
+                cy="9"
+                r={ringRadius}
+                fill="none"
+                stroke={color}
+                strokeDasharray={ringCircumference}
+                strokeDashoffset={ringDashOffset}
+                strokeLinecap="round"
+                strokeWidth="4"
+                style={{
+                  transform: "rotate(-90deg)",
+                  transformOrigin: "50% 50%",
+                }}
+              />
+            )}
           </Box>
         </ActionIcon>
       </Popover.Target>
@@ -116,6 +173,12 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
                 </Text>
               )}
           </Box>
+          <UsageRow
+            label={t("usedPercent")}
+            value={
+              percent === null ? "—" : t("percent", { value: percent / 100 })
+            }
+          />
           <UsageRow
             label={t("total")}
             value={formatNumber(usage?.totalTokens ?? null)}

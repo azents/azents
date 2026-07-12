@@ -30,8 +30,8 @@ const meta = {
     usage: {
       runId: "run-active",
       inferenceProfile: null,
-      effectiveContextWindowTokens: null,
-      effectiveAutoCompactionThresholdTokens: null,
+      effectiveContextWindowTokens: 270_000,
+      effectiveAutoCompactionThresholdTokens: 243_000,
       promptTokens: 47_043,
       completionTokens: 1_200,
       totalTokens: 48_243,
