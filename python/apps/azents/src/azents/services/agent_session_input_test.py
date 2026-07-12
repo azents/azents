@@ -106,12 +106,12 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         self.calls = calls
         self.session_kind = session_kind
 
-    async def get_by_id(
+    async def lock_by_id(
         self,
         session: AsyncSession,
         agent_session_id: str,
     ) -> AgentSession:
-        """Fetch session."""
+        """Lock and fetch session."""
         del session
         self.calls.append("get_by_id")
         now = datetime.datetime.now(datetime.UTC)

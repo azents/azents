@@ -6,8 +6,6 @@ from datetime import datetime, timedelta, timezone
 
 from azents.runtime.coordination.data import (
     JsonValue,
-    RuntimeBackgroundCompletionClaim,
-    RuntimeBackgroundCompletionClaimStatus,
     RuntimeBodyChunk,
     RuntimeBodyChunkRecord,
     RuntimeConnectionKind,
@@ -49,7 +47,6 @@ class InMemoryRuntimeCoordinationStore:
             tuple[RuntimeConnectionKind, str], RuntimeConnectionRecord
         ] = {}
         self._connection_generations: dict[tuple[RuntimeConnectionKind, str], int] = {}
-        self._completion_claims: dict[str, RuntimeBackgroundCompletionClaim] = {}
 
     async def append_request(
         self,
@@ -296,23 +293,6 @@ class InMemoryRuntimeCoordinationStore:
         async with self._lock:
             self._operation_metadata.pop(operation_id, None)
 
-    async def list_background_completion_candidates(
-        self,
-        *,
-        limit: int,
-    ) -> list[RuntimeOperationMetadata]:
-        """List final background operations awaiting completion publication."""
-        async with self._lock:
-            candidates = [
-                metadata
-                for metadata in self._operation_metadata.values()
-                if metadata.background
-                and metadata.background_context is not None
-                and metadata.status == RuntimeOperationStatus.FINAL
-            ]
-            candidates.sort(key=lambda metadata: metadata.updated_at)
-            return candidates[:limit]
-
     async def register_connection(
         self,
         *,
@@ -397,68 +377,6 @@ class InMemoryRuntimeCoordinationStore:
                 return False
             self._connections.pop(key, None)
             return True
-
-    async def claim_background_completion(
-        self,
-        *,
-        operation_id: str,
-        claimant_id: str,
-        claimed_at: datetime,
-        ttl_seconds: int,
-    ) -> RuntimeBackgroundCompletionClaim | None:
-        """Claim publishing a background operation completion."""
-        async with self._lock:
-            existing = self._completion_claims.get(operation_id)
-            if existing is not None and existing.expires_at > claimed_at:
-                if existing.claimant_id == claimant_id:
-                    return existing
-                return None
-            claim = RuntimeBackgroundCompletionClaim(
-                operation_id=operation_id,
-                claimant_id=claimant_id,
-                status=RuntimeBackgroundCompletionClaimStatus.CLAIMED,
-                claimed_at=claimed_at,
-                expires_at=claimed_at + timedelta(seconds=ttl_seconds),
-                published_at=None,
-            )
-            self._completion_claims[operation_id] = claim
-            return claim
-
-    async def get_background_completion_claim(
-        self,
-        operation_id: str,
-    ) -> RuntimeBackgroundCompletionClaim | None:
-        """Get a background completion claim."""
-        async with self._lock:
-            return self._completion_claims.get(operation_id)
-
-    async def mark_background_completion_published(
-        self,
-        *,
-        operation_id: str,
-        claimant_id: str,
-        published_at: datetime,
-    ) -> RuntimeBackgroundCompletionClaim | None:
-        """Mark a claimed background completion as published."""
-        async with self._lock:
-            existing = self._completion_claims.get(operation_id)
-            if existing is None or existing.claimant_id != claimant_id:
-                return None
-            claim = dataclasses.replace(
-                existing,
-                status=RuntimeBackgroundCompletionClaimStatus.PUBLISHED,
-                published_at=published_at,
-            )
-            self._completion_claims[operation_id] = claim
-            return claim
-
-    async def delete_background_completion_claim(
-        self,
-        operation_id: str,
-    ) -> None:
-        """Delete a background completion claim."""
-        async with self._lock:
-            self._completion_claims.pop(operation_id, None)
 
 
 def _read_after_cursor[RecordT](

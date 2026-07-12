@@ -95,6 +95,11 @@ class _AgentSessionRepository:
     def __init__(self) -> None:
         self.marked_running: list[str] = []
 
+    async def lock_by_id(self, session: object, session_id: str) -> object:
+        """Return a locked Session fixture."""
+        del session, session_id
+        return object()
+
     async def mark_running_for_input_wakeup(
         self,
         session: object,

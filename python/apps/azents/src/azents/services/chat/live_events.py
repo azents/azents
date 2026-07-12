@@ -272,10 +272,8 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
 def _event_kind_for_input_buffer(kind: InputBufferKind) -> EventKind:
     """Return live event kind corresponding to InputBuffer kind."""
     match kind:
-        case InputBufferKind.USER_MESSAGE | InputBufferKind.EDITED_USER_MESSAGE:
+        case InputBufferKind.USER_MESSAGE:
             return EventKind.USER_MESSAGE
-        case InputBufferKind.BACKGROUND_COMPLETION:
-            return EventKind.BACKGROUND_COMPLETION
         case InputBufferKind.GOAL_CONTINUATION:
             return EventKind.GOAL_CONTINUATION
         case InputBufferKind.ACTION_MESSAGE:

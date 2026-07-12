@@ -166,7 +166,6 @@ class ActionExecutionStatus(enum.StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-    FAILED_FINAL = "failed_final"
 
 
 class ActionExecutionEventKind(enum.StrEnum):
@@ -198,8 +197,6 @@ class InputBufferKind(enum.StrEnum):
     """InputBuffer payload kind."""
 
     USER_MESSAGE = "user_message"
-    EDITED_USER_MESSAGE = "edited_user_message"
-    BACKGROUND_COMPLETION = "background_completion"
     GOAL_CONTINUATION = "goal_continuation"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"
@@ -209,7 +206,6 @@ class EventKind(enum.StrEnum):
     """Event transcript event kind."""
 
     USER_MESSAGE = "user_message"
-    BACKGROUND_COMPLETION = "background_completion"
     GOAL_CONTINUATION = "goal_continuation"
     GOAL_UPDATED = "goal_updated"
     ACTION_MESSAGE = "action_message"

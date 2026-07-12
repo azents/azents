@@ -52,7 +52,6 @@ class ActionExecutionService:
                     action_event_id=action_event_id,
                     action_type=action_type,
                     status=ActionExecutionStatus.PENDING,
-                    attempt=1,
                 ),
             )
 

@@ -27,7 +27,6 @@ class EventKind(str, Enum):
     allowed enum values
     """
     USER_MESSAGE = 'user_message'
-    BACKGROUND_COMPLETION = 'background_completion'
     GOAL_CONTINUATION = 'goal_continuation'
     GOAL_UPDATED = 'goal_updated'
     ACTION_MESSAGE = 'action_message'

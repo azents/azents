@@ -64,7 +64,6 @@ from azents.engine.hooks.types import (
     SessionStartHookContext,
 )
 from azents.engine.io.user_input import RunUserMessage
-from azents.engine.run.background import BackgroundTaskRegistry
 from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import (
     AgentEngineProtocol,
@@ -139,7 +138,6 @@ from azents.transport.chat import (
 )
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.deps import (
-    get_background_registry,
     get_broadcast,
     get_builtin_toolkit_provider,
     get_claude_rules_toolkit_provider,
@@ -284,9 +282,6 @@ class RunExecutor:
     session_title_service: Annotated[SessionTitleService, Depends(SessionTitleService)]
     live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
     user_stop_finalizer: Annotated[UserStopFinalizer, Depends(UserStopFinalizer)]
-    background_registry: Annotated[
-        BackgroundTaskRegistry, Depends(get_background_registry)
-    ]
     builtin_toolkit_provider: Annotated[
         BuiltinToolkitProvider, Depends(get_builtin_toolkit_provider)
     ]
@@ -688,7 +683,6 @@ class RunExecutor:
             user_id=message.user_id,
             run_id=run_id,
             publish_event=publish_event,
-            background_registry=self.background_registry,
         )
         context = ToolkitContext(
             session_id=message.session_id,

@@ -12,8 +12,6 @@ from redis.exceptions import ResponseError
 
 from azents.runtime.coordination.data import (
     JsonValue,
-    RuntimeBackgroundCompletionClaim,
-    RuntimeBackgroundCompletionClaimStatus,
     RuntimeBackgroundOperationContext,
     RuntimeBodyChunk,
     RuntimeBodyChunkRecord,
@@ -443,31 +441,6 @@ class RedisRuntimeCoordinationStore:
         """Delete operation metadata."""
         await self._redis.delete(self._operation_key(operation_id))
 
-    async def list_background_completion_candidates(
-        self,
-        *,
-        limit: int,
-    ) -> list[RuntimeOperationMetadata]:
-        """List final background operations awaiting completion publication."""
-        candidates: list[RuntimeOperationMetadata] = []
-        async for key in self._redis.scan_iter(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits SCAN iterator.
-            match=self._operation_key("*")
-        ):
-            raw = await self._redis.get(key)
-            if raw is None:
-                continue
-            metadata = _operation_from_json(_decode_text(raw))
-            if (
-                metadata.background
-                and metadata.background_context is not None
-                and metadata.status == RuntimeOperationStatus.FINAL
-            ):
-                candidates.append(metadata)
-                if len(candidates) >= limit:
-                    break
-        candidates.sort(key=lambda metadata: metadata.updated_at)
-        return candidates[:limit]
-
     async def register_connection(
         self,
         *,
@@ -565,78 +538,6 @@ class RedisRuntimeCoordinationStore:
             generation=generation,
         )
 
-    async def claim_background_completion(
-        self,
-        *,
-        operation_id: str,
-        claimant_id: str,
-        claimed_at: datetime,
-        ttl_seconds: int,
-    ) -> RuntimeBackgroundCompletionClaim | None:
-        """Claim publishing a background operation completion."""
-        claim = RuntimeBackgroundCompletionClaim(
-            operation_id=operation_id,
-            claimant_id=claimant_id,
-            status=RuntimeBackgroundCompletionClaimStatus.CLAIMED,
-            claimed_at=claimed_at,
-            expires_at=claimed_at + timedelta(seconds=ttl_seconds),
-            published_at=None,
-        )
-        key = self._completion_claim_key(operation_id)
-        acquired = await self._redis.set(
-            key,
-            _completion_claim_to_json(claim),
-            nx=True,
-            ex=ttl_seconds,
-        )
-        if bool(acquired):
-            return claim
-        existing = await self.get_background_completion_claim(operation_id)
-        if existing is not None and existing.claimant_id == claimant_id:
-            return existing
-        return None
-
-    async def get_background_completion_claim(
-        self,
-        operation_id: str,
-    ) -> RuntimeBackgroundCompletionClaim | None:
-        """Get a background completion claim."""
-        raw = await self._redis.get(self._completion_claim_key(operation_id))
-        if raw is None:
-            return None
-        return _completion_claim_from_json(_decode_text(raw))
-
-    async def mark_background_completion_published(
-        self,
-        *,
-        operation_id: str,
-        claimant_id: str,
-        published_at: datetime,
-    ) -> RuntimeBackgroundCompletionClaim | None:
-        """Mark a claimed background completion as published."""
-        claim = await self.get_background_completion_claim(operation_id)
-        if claim is None or claim.claimant_id != claimant_id:
-            return None
-        updated = dataclasses.replace(
-            claim,
-            status=RuntimeBackgroundCompletionClaimStatus.PUBLISHED,
-            published_at=published_at,
-        )
-        key = self._completion_claim_key(operation_id)
-        await self._redis.set(
-            key,
-            _completion_claim_to_json(updated),
-            ex=await self._positive_ttl(key),
-        )
-        return updated
-
-    async def delete_background_completion_claim(
-        self,
-        operation_id: str,
-    ) -> None:
-        """Delete a background completion claim."""
-        await self._redis.delete(self._completion_claim_key(operation_id))
-
     async def _set_connection_if_generation(
         self,
         *,
@@ -727,9 +628,6 @@ class RedisRuntimeCoordinationStore:
         subject_id: str,
     ) -> str:
         return f"{self._key_prefix}:connection-generation:{kind.value}:{subject_id}"
-
-    def _completion_claim_key(self, operation_id: str) -> str:
-        return f"{self._key_prefix}:completion-claim:{operation_id}"
 
 
 def _request_record_from_xautoclaim(result: object) -> RuntimeRequestRecord | None:
@@ -992,31 +890,6 @@ def _connection_from_json(raw: str) -> RuntimeConnectionRecord:
         heartbeat_at=_required_datetime(payload["heartbeat_at"]),
         expires_at=_required_datetime(payload["expires_at"]),
         metadata=cast(dict[str, JsonValue], payload["metadata"]),
-    )
-
-
-def _completion_claim_to_json(claim: RuntimeBackgroundCompletionClaim) -> str:
-    return _json_dumps(
-        {
-            "operation_id": claim.operation_id,
-            "claimant_id": claim.claimant_id,
-            "status": claim.status.value,
-            "claimed_at": _datetime_to_json(claim.claimed_at),
-            "expires_at": _datetime_to_json(claim.expires_at),
-            "published_at": _datetime_to_json(claim.published_at),
-        }
-    )
-
-
-def _completion_claim_from_json(raw: str) -> RuntimeBackgroundCompletionClaim:
-    payload = _json_loads(raw)
-    return RuntimeBackgroundCompletionClaim(
-        operation_id=str(payload["operation_id"]),
-        claimant_id=str(payload["claimant_id"]),
-        status=RuntimeBackgroundCompletionClaimStatus(str(payload["status"])),
-        claimed_at=_required_datetime(payload["claimed_at"]),
-        expires_at=_required_datetime(payload["expires_at"]),
-        published_at=_datetime_from_json(payload.get("published_at")),
     )
 
 

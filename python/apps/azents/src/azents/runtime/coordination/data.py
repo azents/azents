@@ -46,13 +46,6 @@ class RuntimeConnectionKind(enum.StrEnum):
     RUNNER = "runner"
 
 
-class RuntimeBackgroundCompletionClaimStatus(enum.StrEnum):
-    """Background completion claim status."""
-
-    CLAIMED = "claimed"
-    PUBLISHED = "published"
-
-
 @dataclasses.dataclass(frozen=True)
 class RuntimeBackgroundOperationContext:
     """Parent session context for background Runtime operation completion."""
@@ -166,15 +159,3 @@ class RuntimeConnectionRecord:
     heartbeat_at: datetime
     expires_at: datetime
     metadata: dict[str, JsonValue]
-
-
-@dataclasses.dataclass(frozen=True)
-class RuntimeBackgroundCompletionClaim:
-    """Short-lived claim for publishing a background operation completion."""
-
-    operation_id: str
-    claimant_id: str
-    status: RuntimeBackgroundCompletionClaimStatus
-    claimed_at: datetime
-    expires_at: datetime
-    published_at: datetime | None

@@ -140,11 +140,6 @@ from azents.services.session_git_worktree import (
     GitRefPreviewAccessDenied,
     GitRefPreviewAgentNotFound,
     GitRefPreviewRuntimeUnavailable,
-    GitWorktreeActionExecutionAccessDenied,
-    GitWorktreeActionExecutionNotFound,
-    GitWorktreeActionExecutionSessionNotFound,
-    GitWorktreeActionExecutionSubagentReadOnly,
-    GitWorktreeActionExecutionUnavailable,
     GitWorktreeCleanupAccessDenied,
     GitWorktreeCleanupNotFound,
     GitWorktreeCleanupSessionNotFound,
@@ -173,7 +168,6 @@ from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
-    ActionExecutionMutationResponse,
     ActionExecutionProjectionResponse,
     AgentProjectPresetListResponse,
     AgentProjectPresetResponse,
@@ -1709,100 +1703,6 @@ async def archive_agent_session(
 
 
 @router.post(
-    "/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/retry",
-)
-async def retry_action_execution(
-    agent_id: str,
-    session_id: str,
-    action_execution_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
-    broker: Annotated[SessionBroker, Depends(get_broker)],
-) -> ActionExecutionMutationResponse:
-    """Request retry for a failed operation TurnAction execution."""
-    _validate_uuid7_hex(agent_id, label="agent ID")
-    _validate_session_id(session_id)
-    _validate_uuid7_hex(action_execution_id, label="action execution ID")
-    result = await session_git_worktree_service.request_action_execution_retry(
-        agent_id=agent_id,
-        session_id=session_id,
-        action_execution_id=action_execution_id,
-        user_id=current_user.user_id,
-    )
-    match result:
-        case Success(value):
-            if value.requested:
-                await broker.send_message(
-                    SessionWakeUp(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        user_id=current_user.user_id,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=None,
-                        workspace_handle=None,
-                    )
-                )
-            return ActionExecutionMutationResponse(
-                requested=value.requested,
-                action_execution=ActionExecutionProjectionResponse.from_domain(
-                    value.projection
-                ),
-            )
-        case Failure(error):
-            _raise_action_execution_mutation_error(error)
-        case _:
-            assert_never(result)
-
-
-@router.post(
-    "/agents/{agent_id}/sessions/{session_id}/action-executions/{action_execution_id}/discard",
-)
-async def discard_action_execution(
-    agent_id: str,
-    session_id: str,
-    action_execution_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
-    broker: Annotated[SessionBroker, Depends(get_broker)],
-) -> ActionExecutionMutationResponse:
-    """Finalize a failed operation TurnAction execution as discarded."""
-    _validate_uuid7_hex(agent_id, label="agent ID")
-    _validate_session_id(session_id)
-    _validate_uuid7_hex(action_execution_id, label="action execution ID")
-    result = await session_git_worktree_service.request_action_execution_discard(
-        agent_id=agent_id,
-        session_id=session_id,
-        action_execution_id=action_execution_id,
-        user_id=current_user.user_id,
-    )
-    match result:
-        case Success(value):
-            if value.requested:
-                await broker.send_message(
-                    SessionWakeUp(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        user_id=current_user.user_id,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=None,
-                        workspace_handle=None,
-                    )
-                )
-            return ActionExecutionMutationResponse(
-                requested=value.requested,
-                action_execution=ActionExecutionProjectionResponse.from_domain(
-                    value.projection
-                ),
-            )
-        case Failure(error):
-            _raise_action_execution_mutation_error(error)
-        case _:
-            assert_never(result)
-
-
-@router.post(
     "/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup",
     status_code=204,
 )
@@ -2880,35 +2780,6 @@ def _raise_exchange_file_error(error: ExchangeFileError) -> NoReturn:
             raise HTTPException(status_code=410, detail="File is no longer available.")
         case ExchangeSessionNotFound():
             raise HTTPException(status_code=404, detail="Session not found.")
-        case _:
-            assert_never(error)
-
-
-def _raise_action_execution_mutation_error(
-    error: (
-        GitWorktreeActionExecutionSessionNotFound
-        | GitWorktreeActionExecutionAccessDenied
-        | GitWorktreeActionExecutionSubagentReadOnly
-        | GitWorktreeActionExecutionNotFound
-        | GitWorktreeActionExecutionUnavailable
-    ),
-) -> NoReturn:
-    """Convert action execution mutation errors to HTTPException."""
-    match error:
-        case (
-            GitWorktreeActionExecutionSessionNotFound()
-            | GitWorktreeActionExecutionNotFound()
-        ):
-            raise HTTPException(status_code=404, detail="Action execution not found.")
-        case GitWorktreeActionExecutionAccessDenied():
-            raise HTTPException(status_code=403, detail="Session access denied.")
-        case GitWorktreeActionExecutionSubagentReadOnly():
-            raise HTTPException(
-                status_code=409,
-                detail="Subagent sessions are read-only.",
-            )
-        case GitWorktreeActionExecutionUnavailable():
-            raise HTTPException(status_code=409, detail=error.reason)
         case _:
             assert_never(error)
 

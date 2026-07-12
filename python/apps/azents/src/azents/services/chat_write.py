@@ -156,7 +156,7 @@ class ChatWriteService:
                 session,
                 InputBufferEnqueue(
                     session_id=session_id,
-                    kind=InputBufferKind.EDITED_USER_MESSAGE,
+                    kind=InputBufferKind.USER_MESSAGE,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
                     actor_user_id=user_id,

@@ -480,7 +480,6 @@ class ActionExecutionResponse(BaseModel):
     action_event_id: str = Field(description="Durable action_message event ID")
     action_type: str = Field(description="Action discriminator")
     status: str = Field(description="Execution status")
-    attempt: int = Field(description="Current attempt number")
     failure_summary: str | None = Field(default=None, description="Failure summary")
     started_at: datetime.datetime | None = Field(default=None, description="Start time")
     completed_at: datetime.datetime | None = Field(
@@ -489,10 +488,6 @@ class ActionExecutionResponse(BaseModel):
     )
     failed_at: datetime.datetime | None = Field(
         default=None, description="Failure time"
-    )
-    failed_final_at: datetime.datetime | None = Field(
-        default=None,
-        description="Failed-final time",
     )
     updated_at: datetime.datetime = Field(description="Updated time")
 
@@ -504,12 +499,10 @@ class ActionExecutionResponse(BaseModel):
             action_event_id=execution.action_event_id,
             action_type=execution.action_type,
             status=execution.status.value,
-            attempt=execution.attempt,
             failure_summary=execution.failure_summary,
             started_at=execution.started_at,
             completed_at=execution.completed_at,
             failed_at=execution.failed_at,
-            failed_final_at=execution.failed_final_at,
             updated_at=execution.updated_at,
         )
 
@@ -532,15 +525,6 @@ class ActionExecutionProjectionResponse(BaseModel):
                 for event in projection.events
             ],
         )
-
-
-class ActionExecutionMutationResponse(BaseModel):
-    """Action execution mutation response."""
-
-    requested: bool = Field(description="Whether a state transition was requested")
-    action_execution: ActionExecutionProjectionResponse = Field(
-        description="Updated action execution projection",
-    )
 
 
 class ChatWriteSnapshotResponse(BaseModel):

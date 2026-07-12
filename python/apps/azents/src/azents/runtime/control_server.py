@@ -6,7 +6,6 @@ import signal
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from typing import cast
 
 import boto3
 import grpc
@@ -16,14 +15,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
-from azents.broker.redis import RedisBroker
 from azents.core.config import PostgreSQLConfig
 from azents.core.redis import create_redis_client
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.input_buffer import InputBufferRepository
 from azents.runtime.control_protocol.grpc.provider_server import (
     add_runtime_provider_control_servicer,
 )
@@ -44,14 +39,6 @@ from azents.runtime.control_protocol.service import (
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
 )
-from azents.services.exchange_file import ExchangeFileService
-from azents.services.input_buffer import InputBufferService
-from azents.services.model_file import ModelFileService
-from azents.worker.input.background_completion_publisher import (
-    BackgroundCompletionPublisherConfig,
-    RuntimeBackgroundCompletionPublisher,
-)
-from azents.worker.input.queue import DatabaseWorkerInputQueue
 
 _DEFAULT_PORT = 8030
 _DEFAULT_RECONCILE_INTERVAL_SECONDS = 15.0
@@ -82,7 +69,6 @@ class RuntimeControlSettings(BaseSettings):
         _DEFAULT_LIFECYCLE_RETRY_DELAY_SECONDS
     )
     runtime_control_start_timeout_seconds: float = _DEFAULT_START_TIMEOUT_SECONDS
-    runtime_control_completion_interval_seconds: float = 1.0
     runtime_control_auth_enabled: bool = False
     runtime_control_auth_token: str | None = None
     runtime_runner_image: str
@@ -105,29 +91,11 @@ async def runtime_control_server_lifespan(
     """Manage runtime-control gRPC server resources."""
     redis = create_redis_client(settings.redis_url)
     coordination_store = RedisRuntimeCoordinationStore(redis)
-    broker = RedisBroker(redis)
     control_protocol = RuntimeControlProtocolService(coordination_store)
     control_token = runtime_control_auth_token(settings)
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
     runtime_repository = AgentRuntimeRepository()
-    session_repository = AgentSessionRepository()
-    input_buffer_service = InputBufferService(
-        session_manager=session_manager,
-        input_buffer_repository=InputBufferRepository(),
-        exchange_file_service=cast(ExchangeFileService, object()),
-        model_file_service=cast(ModelFileService, object()),
-        agent_session_repository=session_repository,
-        event_transcript_repository=cast(EventTranscriptRepository, object()),
-        agent_run_repository=AgentRunRepository(),
-    )
-    worker_input_queue = DatabaseWorkerInputQueue(
-        broker=broker,
-        session_manager=session_manager,
-        agent_runtime_repository=runtime_repository,
-        agent_session_repository=session_repository,
-        input_buffer_service=input_buffer_service,
-    )
     provider_sink = RuntimeProviderReportRepositorySink(
         runtime_repository=runtime_repository,
         session_manager=session_manager,
@@ -162,22 +130,6 @@ async def runtime_control_server_lifespan(
         ),
         name="runtime-lifecycle-reconciler",
     )
-    completion_publisher = RuntimeBackgroundCompletionPublisher(
-        coordination_store=coordination_store,
-        worker_input_queue=worker_input_queue,
-        config=BackgroundCompletionPublisherConfig(
-            claimant_id=f"{settings.runtime_control_instance_id}:completion"
-        ),
-    )
-    stop_completion_publisher = asyncio.Event()
-    completion_publisher_task = asyncio.create_task(
-        _run_background_completion_publisher(
-            completion_publisher,
-            stop=stop_completion_publisher,
-            interval_seconds=settings.runtime_control_completion_interval_seconds,
-        ),
-        name="runtime-background-completion-publisher",
-    )
     server = grpc.aio.server()
     add_runtime_provider_control_servicer(
         server,
@@ -206,9 +158,6 @@ async def runtime_control_server_lifespan(
             "reconcile_interval_seconds": (
                 settings.runtime_control_reconcile_interval_seconds
             ),
-            "completion_interval_seconds": (
-                settings.runtime_control_completion_interval_seconds
-            ),
             "start_timeout_seconds": settings.runtime_control_start_timeout_seconds,
             "lifecycle_retry_delay_seconds": (
                 settings.runtime_control_lifecycle_retry_delay_seconds
@@ -220,15 +169,9 @@ async def runtime_control_server_lifespan(
         yield server
     finally:
         stop_reconciler.set()
-        stop_completion_publisher.set()
         reconciler_task.cancel()
-        completion_publisher_task.cancel()
         try:
             await reconciler_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await completion_publisher_task
         except asyncio.CancelledError:
             pass
         await server.stop(grace=5)
@@ -252,30 +195,6 @@ async def _run_reconciler(
                 )
         except Exception:
             _LOGGER.exception("Runtime lifecycle reconciler iteration failed")
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
-        except TimeoutError:
-            continue
-
-
-async def _run_background_completion_publisher(
-    publisher: RuntimeBackgroundCompletionPublisher,
-    *,
-    stop: asyncio.Event,
-    interval_seconds: float,
-) -> None:
-    while not stop.is_set():
-        try:
-            published = await publisher.publish_once()
-            if published:
-                _LOGGER.info(
-                    "Runtime background completion publisher emitted events",
-                    extra={"published": published},
-                )
-        except Exception:
-            _LOGGER.exception(
-                "Runtime background completion publisher iteration failed"
-            )
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
         except TimeoutError:

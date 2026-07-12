@@ -519,13 +519,6 @@ class InputBufferService:
                         return _CreateGitWorktreeActionInputBufferProcessor(action)
                     case _:
                         assert_never(action)
-            case InputBufferKind.EDITED_USER_MESSAGE:
-                return _UserMessageInputBufferProcessor(self)
-            case InputBufferKind.BACKGROUND_COMPLETION:
-                return _LegacyDirectInputBufferProcessor(
-                    self,
-                    EventKind.BACKGROUND_COMPLETION,
-                )
             case _:
                 assert_never(buffer.kind)
 
@@ -910,37 +903,6 @@ class _CreateGitWorktreeActionInputBufferProcessor:
                 )
             ],
             TurnEffect.NEUTRAL,
-        )
-
-
-@dataclasses.dataclass(frozen=True)
-class _LegacyDirectInputBufferProcessor:
-    """Keep a legacy kind processable until its producer is removed."""
-
-    service: InputBufferService
-    event_kind: EventKind
-
-    async def process(
-        self,
-        context: InputBufferPreparationContext,
-        buffer: InputBuffer,
-    ) -> InputBufferPreparationOutcome:
-        user_message = await self.service.buffer_to_user_message(
-            buffer,
-            external_id=f"{buffer.id}:{self.event_kind.value}",
-            fallback_profile=context.required_inference_profile,
-        )
-        return _preparation_outcome(
-            [
-                _PromotedInputBuffer(
-                    buffer=buffer,
-                    user_message=user_message,
-                    event_kind=self.event_kind,
-                    payload=_user_message_payload_json(user_message),
-                    external_id=user_message.external_id,
-                )
-            ],
-            TurnEffect.ELIGIBLE,
         )
 
 

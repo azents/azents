@@ -481,7 +481,6 @@ EventPayload = (
 
 PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.USER_MESSAGE: UserMessagePayload,
-    EventKind.BACKGROUND_COMPLETION: UserMessagePayload,
     EventKind.GOAL_CONTINUATION: UserMessagePayload,
     EventKind.GOAL_UPDATED: UserMessagePayload,
     EventKind.ACTION_MESSAGE: ActionMessagePayload,

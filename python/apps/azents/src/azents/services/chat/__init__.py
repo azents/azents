@@ -1013,7 +1013,7 @@ class ChatSessionService:
             )
             terminal_action_statuses = {
                 ActionExecutionStatus.COMPLETED,
-                ActionExecutionStatus.FAILED_FINAL,
+                ActionExecutionStatus.FAILED,
             }
             projections = (
                 await self.action_execution_repository.list_projections_by_session_id(

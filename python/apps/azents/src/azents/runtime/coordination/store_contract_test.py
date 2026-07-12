@@ -10,7 +10,6 @@ import pytest_asyncio
 from redis.asyncio import Redis
 
 from azents.runtime.coordination.data import (
-    RuntimeBackgroundCompletionClaimStatus,
     RuntimeBodyChunk,
     RuntimeConnectionKind,
     RuntimeCoordinationTarget,
@@ -633,55 +632,6 @@ async def test_redis_get_connection_does_not_delete_reconnected_generation() -> 
     assert current is not None
     assert current.generation == 2
     assert current.connection_id == "runner-b"
-
-
-@pytest.mark.asyncio
-async def test_background_completion_claim_is_exclusive_until_published(
-    store: RuntimeCoordinationStore,
-) -> None:
-    """Background completion claims are exclusive and markable as published."""
-    claimed_at = _now()
-
-    first = await store.claim_background_completion(
-        operation_id="op-1",
-        claimant_id="worker-a",
-        claimed_at=claimed_at,
-        ttl_seconds=60,
-    )
-    second = await store.claim_background_completion(
-        operation_id="op-1",
-        claimant_id="worker-b",
-        claimed_at=claimed_at,
-        ttl_seconds=60,
-    )
-    repeat = await store.claim_background_completion(
-        operation_id="op-1",
-        claimant_id="worker-a",
-        claimed_at=claimed_at,
-        ttl_seconds=60,
-    )
-    published = await store.mark_background_completion_published(
-        operation_id="op-1",
-        claimant_id="worker-a",
-        published_at=claimed_at + timedelta(seconds=1),
-    )
-
-    assert first is not None
-    assert second is None
-    assert repeat == first
-    assert published is not None
-    assert published.status == RuntimeBackgroundCompletionClaimStatus.PUBLISHED
-    assert (
-        await store.mark_background_completion_published(
-            operation_id="op-1",
-            claimant_id="worker-b",
-            published_at=claimed_at + timedelta(seconds=2),
-        )
-        is None
-    )
-
-    await store.delete_background_completion_claim("op-1")
-    assert await store.get_background_completion_claim("op-1") is None
 
 
 @pytest.mark.asyncio

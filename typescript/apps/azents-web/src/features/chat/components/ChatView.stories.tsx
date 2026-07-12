@@ -235,8 +235,6 @@ const baseArgs = {
   authorizationRequests: [],
   onAuthorizationComplete: noop,
   actionExecutions: [],
-  onRetryActionExecution: noop,
-  onDiscardActionExecution: noop,
   workspacePanel,
   goal: { objective: null, status: null },
   todo: { items: [] },
@@ -328,7 +326,6 @@ export const WithActionExecutionFailure = {
           action_event_id: "event-action-1",
           action_type: "create_git_worktree",
           status: "failed",
-          attempt: 1,
           failure_summary:
             "Git worktree creation failed because the branch already exists.",
           started_at: "2026-05-19T00:00:00Z",

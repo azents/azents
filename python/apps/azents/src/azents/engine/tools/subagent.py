@@ -931,6 +931,12 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         content: str,
         wake: bool,
     ) -> None:
+        locked_target = await self.agent_session_repository.lock_by_id(
+            session,
+            target.agent_session_id,
+        )
+        if locked_target is None:
+            raise ValueError("Target AgentSession not found")
         await self.input_buffer_service.enqueue(
             session,
             InputBufferEnqueue(

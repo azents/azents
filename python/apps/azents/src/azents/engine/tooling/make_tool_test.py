@@ -1,13 +1,11 @@
 """make_tool utility tests."""
 
-import asyncio
 import json
-from contextlib import suppress
 
 import pytest
 from pydantic import BaseModel, Field
 
-from azents.engine.run.types import BackgroundHandle, FunctionToolError
+from azents.engine.run.types import FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 
 # ---------------------------------------------------------------------------
@@ -198,91 +196,3 @@ class TestWithPrefix:
         tool = make_tool(async_greet)
         prefixed = tool.with_prefix("runtime_")
         assert prefixed.handler is tool.handler
-
-
-# ---------------------------------------------------------------------------
-# supports_background mode
-# ---------------------------------------------------------------------------
-
-
-class TestSupportsBackground:
-    """Validate ``supports_background=True`` mode behavior."""
-
-    def test_schema_injects_run_in_background_property(self) -> None:
-        """supports_background=True injects run_in_background property."""
-        tool = make_tool(async_greet, supports_background=True)
-        properties = tool.spec.input_schema.get("properties")
-        assert isinstance(properties, dict)
-        assert "run_in_background" in properties
-        rib = properties["run_in_background"]
-        assert isinstance(rib, dict)
-        assert rib.get("type") == "boolean"
-        assert rib.get("default") is False
-
-    def test_schema_unchanged_when_disabled(self) -> None:
-        """With default (supports_background=False), schema is unchanged."""
-        tool = make_tool(async_greet)
-        properties = tool.spec.input_schema.get("properties")
-        assert isinstance(properties, dict)
-        assert "run_in_background" not in properties
-
-    @pytest.mark.asyncio
-    async def test_blocking_path_when_run_in_background_false(self) -> None:
-        """run_in_background=False performs existing blocking behavior."""
-        tool = make_tool(async_greet, supports_background=True)
-        result = await tool.handler(
-            json.dumps({"name": "Alice", "run_in_background": False})
-        )
-        assert result == "Hello, Alice!"
-
-    @pytest.mark.asyncio
-    async def test_blocking_path_when_run_in_background_missing(self) -> None:
-        """Blocking behavior when run_in_background key is absent."""
-        tool = make_tool(async_greet, supports_background=True)
-        result = await tool.handler(json.dumps({"name": "Bob"}))
-        assert result == "Hello, Bob!"
-
-    @pytest.mark.asyncio
-    async def test_background_path_returns_handle_immediately(self) -> None:
-        """run_in_background=True returns BackgroundHandle immediately."""
-        tool = make_tool(async_greet, supports_background=True)
-        result = await tool.handler(
-            json.dumps({"name": "Carol", "run_in_background": True})
-        )
-        assert isinstance(result, BackgroundHandle)
-        assert result.task_id
-        assert "task_id" in result.initial_message
-        assert "running" in result.initial_message
-        # wait until future completes to check result
-        inner_result = await result.future
-        assert inner_result == "Hello, Carol!"
-
-    @pytest.mark.asyncio
-    async def test_background_path_propagates_input_validation_errors(self) -> None:
-        """Inner handler validation error propagates to background future."""
-        tool = make_tool(async_greet, supports_background=True)
-        result = await tool.handler(
-            json.dumps({"run_in_background": True})  # name missing
-        )
-        assert isinstance(result, BackgroundHandle)
-        with pytest.raises(FunctionToolError):
-            await result.future
-
-    @pytest.mark.asyncio
-    async def test_background_task_can_be_cancelled(self) -> None:
-        """BackgroundHandle.future can be cancelled externally."""
-
-        async def slow_task(args: GreetInput) -> str:
-            """Slow greeting for cancel test."""
-            await asyncio.sleep(10)
-            return f"{args.greeting}, {args.name}!"
-
-        tool = make_tool(slow_task, supports_background=True)
-        result = await tool.handler(
-            json.dumps({"name": "Dan", "run_in_background": True})
-        )
-        assert isinstance(result, BackgroundHandle)
-        result.future.cancel()
-        with suppress(asyncio.CancelledError):
-            await result.future
-        assert result.future.cancelled()

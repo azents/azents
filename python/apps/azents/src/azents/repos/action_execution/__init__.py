@@ -46,7 +46,6 @@ class ActionExecutionRepository:
                 action_event_id=create.action_event_id,
                 action_type=create.action_type,
                 status=create.status,
-                attempt=create.attempt,
             )
             .on_conflict_do_nothing(
                 constraint="uq_action_executions_action_event_id",
@@ -226,7 +225,6 @@ class ActionExecutionRepository:
         rdb.started_at = started_at
         rdb.completed_at = None
         rdb.failed_at = None
-        rdb.failed_final_at = None
         rdb.failure_summary = None
         await session.flush()
         await session.refresh(rdb)
@@ -256,45 +254,11 @@ class ActionExecutionRepository:
         failure_summary: str,
         failed_at: datetime.datetime,
     ) -> ActionExecution:
-        """Mark execution as failed and awaiting user decision."""
+        """Mark execution as terminally failed."""
         rdb = await self._get_required(session, action_execution_id)
         rdb.status = ActionExecutionStatus.FAILED
         rdb.failure_summary = failure_summary
         rdb.failed_at = failed_at
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build_execution(rdb)
-
-    async def mark_pending_for_retry(
-        self,
-        session: AsyncSession,
-        *,
-        action_execution_id: str,
-    ) -> ActionExecution:
-        """Reset a failed execution for retry while preserving durable events."""
-        rdb = await self._get_required(session, action_execution_id)
-        rdb.status = ActionExecutionStatus.PENDING
-        rdb.attempt += 1
-        rdb.failure_summary = None
-        rdb.started_at = None
-        rdb.completed_at = None
-        rdb.failed_at = None
-        rdb.failed_final_at = None
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build_execution(rdb)
-
-    async def mark_failed_final(
-        self,
-        session: AsyncSession,
-        *,
-        action_execution_id: str,
-        failed_final_at: datetime.datetime,
-    ) -> ActionExecution:
-        """Finalize a failed execution after user discard."""
-        rdb = await self._get_required(session, action_execution_id)
-        rdb.status = ActionExecutionStatus.FAILED_FINAL
-        rdb.failed_final_at = failed_final_at
         await session.flush()
         await session.refresh(rdb)
         return self._build_execution(rdb)
@@ -353,12 +317,10 @@ class ActionExecutionRepository:
             action_event_id=rdb.action_event_id,
             action_type=rdb.action_type,
             status=rdb.status,
-            attempt=rdb.attempt,
             failure_summary=rdb.failure_summary,
             started_at=rdb.started_at,
             completed_at=rdb.completed_at,
             failed_at=rdb.failed_at,
-            failed_final_at=rdb.failed_final_at,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )
