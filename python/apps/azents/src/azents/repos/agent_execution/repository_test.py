@@ -144,6 +144,7 @@ class TestEventExecutionRepositories:
         transcript_repo = EventTranscriptRepository()
         applied_profile = AppliedInferenceProfile(
             model_target_label="Quality",
+            model_display_name="GPT 5.5",
             reasoning_effort=None,
         )
 
@@ -170,6 +171,7 @@ class TestEventExecutionRepositories:
         assert stored is not None
         assert stored.payload["applied_inference_profile"] == {
             "model_target_label": "Quality",
+            "model_display_name": "GPT 5.5",
             "reasoning_effort": None,
         }
 

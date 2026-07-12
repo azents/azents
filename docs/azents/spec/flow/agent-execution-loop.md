@@ -39,7 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-12
-spec_version: 71
+spec_version: 72
 ---
 
 # Agent Execution Loop
@@ -96,7 +96,9 @@ tool activity uses `executing_tools` and `active_tool_calls`.
 A newly selected run begins as `pending`. For normal buffered input, the worker resolves the
 Agent-owned target label and optional effort before transactionally preparing the FIFO head. Successful
 preparation stores the complete Session inference snapshot and uses it to activate or continue the
-run. Resolution failure is a handled preparation failure: it consumes that head, appends a
+run. A canonical user message stores the applied target label, resolved model display name, and
+reasoning effort from that prepared snapshot so sent-message metadata remains stable after reload.
+Resolution failure is a handled preparation failure: it consumes that head, appends a
 user-safe `system_error`, preserves the previous Session snapshot, completes the active run, and is
 not retried.
 
@@ -583,6 +585,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-12** (spec_version 72) — Restored durable sent-message model label, resolved display name, and reasoning effort metadata from the prepared Session snapshot.
 - **2026-07-10** (spec_version 67) — Added explicit child identity to forked-history boundaries and rejected self-targeted `wait_agent` calls.
 - **2026-07-09** (spec_version 65) — Clarified that retry live state is cleared before the next retry attempt starts so stale retry errors do not remain visible during successful progress.
 - **2026-07-06** (spec_version 58) — Promoted existing-session Register Project worktree actions and action retry/discard mutation semantics.

@@ -5,13 +5,14 @@ import {
   MessageMetadataFooter,
   MessageMetadataSurface,
 } from "./MessageMetadataFooter";
-import type { RequestedInferenceProfile } from "@azents/public-client";
+import type { AppliedInferenceProfile } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-const requestedProfile = {
+const appliedProfile = {
   model_target_label: "Quality",
+  model_display_name: "GPT 5.5",
   reasoning_effort: "high",
-} satisfies RequestedInferenceProfile;
+} satisfies AppliedInferenceProfile;
 
 const meta = {
   component: MessageMetadataFooter,
@@ -40,9 +41,9 @@ type Story = StoryObj<typeof meta>;
 
 export const TimestampOnly: Story = {};
 
-export const RequestedProfile: Story = {
+export const ResolvedModel: Story = {
   args: {
-    profile: requestedProfile,
+    profile: appliedProfile,
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -75,6 +76,7 @@ export const RequestedProfile: Story = {
     });
     await fireEvent.click(trigger);
     const page = within(canvasElement.ownerDocument.body);
+    await expect(page.getByText("GPT 5.5")).toBeVisible();
     await expect(page.getByText("high")).toBeVisible();
     await expect(page.queryByText("Model label")).not.toBeInTheDocument();
     await expect(page.queryByText("Actual model")).not.toBeInTheDocument();
@@ -100,7 +102,7 @@ export const RequestedProfile: Story = {
       padding: "5px 10px",
     });
     await expect(
-      getComputedStyle(within(popover).getByText("Quality")).fontSize,
+      getComputedStyle(within(popover).getByText("GPT 5.5")).fontSize,
     ).toBe("14px");
   },
 };

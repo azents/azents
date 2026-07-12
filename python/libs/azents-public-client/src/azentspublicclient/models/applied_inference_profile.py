@@ -29,9 +29,10 @@ class AppliedInferenceProfile(BaseModel):
     Resolved user-visible inference settings applied by one message.
     """ # noqa: E501
     model_target_label: Annotated[str, Field(min_length=1, strict=True)] = Field(description="Agent-owned model target label applied by the message")
+    model_display_name: Optional[Annotated[str, Field(min_length=1, strict=True)]]
     reasoning_effort: Optional[ModelReasoningEffort]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["model_target_label", "reasoning_effort"]
+    __properties: ClassVar[List[str]] = ["model_target_label", "model_display_name", "reasoning_effort"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -79,6 +80,11 @@ class AppliedInferenceProfile(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if model_display_name (nullable) is None
+        # and model_fields_set contains the field
+        if self.model_display_name is None and "model_display_name" in self.model_fields_set:
+            _dict['model_display_name'] = None
+
         # set to None if reasoning_effort (nullable) is None
         # and model_fields_set contains the field
         if self.reasoning_effort is None and "reasoning_effort" in self.model_fields_set:
@@ -97,6 +103,7 @@ class AppliedInferenceProfile(BaseModel):
 
         _obj = cls.model_validate({
             "model_target_label": obj.get("model_target_label"),
+            "model_display_name": obj.get("model_display_name"),
             "reasoning_effort": obj.get("reasoning_effort")
         })
         # store additional fields in additional_properties

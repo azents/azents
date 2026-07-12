@@ -2280,6 +2280,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
         run.inference_profile
         == AppliedInferenceProfile(
             model_target_label="default",
+            model_display_name="gpt-4o",
             reasoning_effort=None,
         )
         for _, run in live_event_projector.live_run_updates
@@ -2291,6 +2292,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
     assert isinstance(wire_run, dict)
     assert wire_run["inference_profile"] == {
         "model_target_label": "default",
+        "model_display_name": "gpt-4o",
         "reasoning_effort": None,
     }
 

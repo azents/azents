@@ -109,6 +109,7 @@ def test_user_message_preserves_applied_inference_profile() -> None:
         content="use quality",
         applied_inference_profile=AppliedInferenceProfile(
             model_target_label="Quality",
+            model_display_name="GPT 5.5",
             reasoning_effort=ModelReasoningEffort.HIGH,
         ),
     )
@@ -119,6 +120,7 @@ def test_user_message_preserves_applied_inference_profile() -> None:
         "metadata": {},
         "applied_inference_profile": {
             "model_target_label": "Quality",
+            "model_display_name": "GPT 5.5",
             "reasoning_effort": "high",
         },
     }

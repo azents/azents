@@ -225,6 +225,7 @@ class TestChatSessionInputBuffer:
         assert isinstance(payload, UserMessagePayload)
         assert payload.applied_inference_profile is not None
         assert payload.applied_inference_profile.model_target_label == "main"
+        assert payload.applied_inference_profile.model_display_name is None
         assert payload.applied_inference_profile.reasoning_effort == (
             ModelReasoningEffort.HIGH
         )

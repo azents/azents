@@ -239,7 +239,8 @@ function eventRequestedInferenceProfile(
   event: ChatEventResponse,
 ): RequestedInferenceProfile | null {
   return requestedInferenceProfileFromValue(
-    event.payload.requested_inference_profile,
+    event.payload.requested_inference_profile ??
+      event.payload.applied_inference_profile,
   );
 }
 
@@ -250,9 +251,20 @@ function isAppliedInferenceProfile(
     isRecord(value) &&
     typeof value.model_target_label === "string" &&
     value.model_target_label.length > 0 &&
+    "model_display_name" in value &&
+    (value.model_display_name === null ||
+      (typeof value.model_display_name === "string" &&
+        value.model_display_name.length > 0)) &&
     (value.reasoning_effort === null ||
       modelReasoningEffortFromValue(value.reasoning_effort) !== null)
   );
+}
+
+function eventAppliedInferenceProfile(
+  event: ChatEventResponse,
+): AppliedInferenceProfile | null {
+  const value = event.payload.applied_inference_profile;
+  return isAppliedInferenceProfile(value) ? value : null;
 }
 
 function chatActionFromValue(value: unknown): ChatAction | null {
@@ -834,7 +846,7 @@ function mapEvents(
             createdAt: event.created_at,
             status: "complete",
             metadata: eventMetadata(event),
-            inferenceProfile: eventRequestedInferenceProfile(event),
+            inferenceProfile: eventAppliedInferenceProfile(event),
             ...(attachments.length > 0 ? { attachments } : {}),
           },
         ];

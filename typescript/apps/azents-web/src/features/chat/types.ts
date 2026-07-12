@@ -741,8 +741,8 @@ export interface ChatMessage {
   action?: ChatAction | null;
   /** message metadata. */
   metadata?: Record<string, string> | null;
-  /** requested profile for a run-producing human input */
-  inferenceProfile?: RequestedInferenceProfile | null;
+  /** requested or resolved profile for a run-producing human input */
+  inferenceProfile?: RequestedInferenceProfile | AppliedInferenceProfile | null;
   /** failed-run recovery metadata for terminal failed-run errors */
   failedRunFailure?: FailedRunFailureMetadata | null;
 }

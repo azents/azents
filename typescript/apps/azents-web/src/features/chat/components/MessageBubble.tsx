@@ -47,7 +47,10 @@ import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { RunRetryCard } from "./RunRetryCard";
 import { ToolCallCard } from "./ToolCallCard";
 import type { ChatMessage } from "../types";
-import type { RequestedInferenceProfile } from "@azents/public-client";
+import type {
+  AppliedInferenceProfile,
+  RequestedInferenceProfile,
+} from "@azents/public-client";
 
 interface FailedRunRetryAction {
   canRetry: boolean;
@@ -360,7 +363,7 @@ function MessageActionRow({
   content: string | null;
   createdAt: string;
   align: MessageActionAlign;
-  inferenceProfile?: RequestedInferenceProfile | null;
+  inferenceProfile?: RequestedInferenceProfile | AppliedInferenceProfile | null;
   editable?: boolean;
   onEdit?: () => void;
 }): React.ReactElement {

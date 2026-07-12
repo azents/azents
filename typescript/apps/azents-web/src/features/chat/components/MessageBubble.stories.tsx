@@ -71,7 +71,7 @@ export const UserText = {
   },
 } satisfies Story;
 
-export const UserRequestedProfile = {
+export const UserAppliedProfile = {
   args: {
     message: createChatMessage({
       id: "user-requested-profile",
@@ -79,6 +79,7 @@ export const UserRequestedProfile = {
       content: "Use the quality model for this analysis.",
       inferenceProfile: {
         model_target_label: "Quality",
+        model_display_name: "GPT 5.5",
         reasoning_effort: "high",
       },
     }),
