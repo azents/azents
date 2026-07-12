@@ -318,7 +318,7 @@ class TestChatSessionInputBuffer:
     ) -> None:
         """Flushed buffer remains as user input in history event."""
         async with rdb_session_manager() as session:
-            session_id, user_id, _ = await _create_session_with_buffer(
+            session_id, user_id, buffer_id = await _create_session_with_buffer(
                 session,
                 handle="chat-buffer-flushed-history",
                 slug="chat-buffer-flushed-history",
@@ -340,7 +340,8 @@ class TestChatSessionInputBuffer:
             active_run_id=None,
         )
         assert promoted.inserted_count == 1
-        assert promoted.deleted_buffer_ids == [promoted.user_messages[0].external_id]
+        assert promoted.deleted_buffer_ids == [buffer_id]
+        assert promoted.user_messages[0].external_id == f"{buffer_id}:user_message"
 
         result = await _service(rdb_session_manager).list_history_events(
             session_id,
