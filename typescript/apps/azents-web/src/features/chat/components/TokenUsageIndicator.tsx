@@ -29,6 +29,9 @@ function resolveUsageProfile(
   usage: TokenUsageSummary | null,
   activeRun: ChatLiveRunState | null,
 ): AppliedInferenceProfile | null {
+  if (usage !== null && usage.inferenceProfile !== null) {
+    return usage.inferenceProfile;
+  }
   const runId = usage?.runId ?? null;
   if (runId === null || activeRun?.run_id !== runId) {
     return null;
@@ -93,6 +96,18 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
             <Text size="xs" c="dimmed">
               {inferenceProfile?.model_target_label ?? t("unknownModel")}
             </Text>
+            {inferenceProfile !== null &&
+              (inferenceProfile.model_display_name !== null ||
+                inferenceProfile.reasoning_effort !== null) && (
+                <Text size="xs" c="dimmed">
+                  {[
+                    inferenceProfile.model_display_name,
+                    inferenceProfile.reasoning_effort,
+                  ]
+                    .filter((value) => value !== null)
+                    .join(" · ")}
+                </Text>
+              )}
             {usage !== null &&
               usage.runId !== null &&
               inferenceProfile === null && (
@@ -104,6 +119,16 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
           <UsageRow
             label={t("total")}
             value={formatNumber(usage?.totalTokens ?? null)}
+          />
+          <UsageRow
+            label={t("effectiveContextWindow")}
+            value={formatNumber(usage?.effectiveContextWindowTokens ?? null)}
+          />
+          <UsageRow
+            label={t("autoCompactionThreshold")}
+            value={formatNumber(
+              usage?.effectiveAutoCompactionThresholdTokens ?? null,
+            )}
           />
           <UsageRow
             label={t("prompt")}

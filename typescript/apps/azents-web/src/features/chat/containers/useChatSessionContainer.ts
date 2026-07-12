@@ -589,6 +589,17 @@ function tokenUsageFromRecord(
   }
   return {
     runId: stringField(usage, "run_id"),
+    inferenceProfile: appliedInferenceProfileFromValue(
+      usage.applied_inference_profile,
+    ),
+    effectiveContextWindowTokens: usageNumberField(
+      usage,
+      "effective_context_window_tokens",
+    ),
+    effectiveAutoCompactionThresholdTokens: usageNumberField(
+      usage,
+      "effective_auto_compaction_threshold_tokens",
+    ),
     promptTokens: usageNumberField(usage, "prompt_tokens"),
     completionTokens: usageNumberField(usage, "completion_tokens"),
     totalTokens,
@@ -1014,6 +1025,16 @@ function mapEvents(
           ? {
               ...payload.usage,
               run_id: stringField(payload, "run_id"),
+              applied_inference_profile:
+                payload.applied_inference_profile ?? null,
+              effective_context_window_tokens: numberField(
+                payload,
+                "effective_context_window_tokens",
+              ),
+              effective_auto_compaction_threshold_tokens: numberField(
+                payload,
+                "effective_auto_compaction_threshold_tokens",
+              ),
             }
           : null;
         return [

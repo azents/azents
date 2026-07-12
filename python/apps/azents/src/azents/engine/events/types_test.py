@@ -18,6 +18,7 @@ from azents.engine.events.types import (
     ProviderToolResultPayload,
     SystemErrorPayload,
     TokenUsagePayload,
+    TurnMarkerPayload,
     UserMessagePayload,
     build_native_compat_key,
 )
@@ -96,6 +97,24 @@ def test_event_rejects_payload_kind_mismatch() -> None:
             ),
             created_at=now,
         )
+
+
+def test_turn_marker_decodes_historical_payload_without_provenance() -> None:
+    payload = TurnMarkerPayload.model_validate(
+        {
+            "run_id": "run-1",
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "raw": {},
+            },
+        }
+    )
+
+    assert payload.applied_inference_profile is None
+    assert payload.effective_context_window_tokens is None
+    assert payload.effective_auto_compaction_threshold_tokens is None
 
 
 def test_user_message_decodes_historical_payload_without_profile() -> None:

@@ -410,6 +410,7 @@ class AgentEngineAdapter:
                 raise
             return PreparedModelCall(
                 native_request=native_request,
+                inference_state=request.inference_state,
                 system_prompt_analysis=system_prompt_result.analysis,
                 tool_executor=hooked_tool_executor,
                 on_turn_end=on_turn_end,

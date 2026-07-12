@@ -16,6 +16,7 @@ from azents.engine.events.types import (
     AgentRunState,
     Event,
     EventPayload,
+    TurnMarkerPayload,
     UserMessagePayload,
     validate_event_payload,
 )
@@ -49,7 +50,7 @@ def _serialize_payload(payload: EventPayload) -> dict[str, JSONValue]:
         payload.model_dump(mode="json", exclude_none=True)
     )
     if (
-        isinstance(payload, UserMessagePayload)
+        isinstance(payload, (TurnMarkerPayload, UserMessagePayload))
         and payload.applied_inference_profile is not None
     ):
         serialized["applied_inference_profile"] = _JSON_OBJECT_ADAPTER.validate_python(

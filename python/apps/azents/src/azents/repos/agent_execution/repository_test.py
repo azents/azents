@@ -20,6 +20,8 @@ from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.types import (
     ActiveToolCall,
+    TokenUsagePayload,
+    TurnMarkerPayload,
     UserMessagePayload,
     validate_event_payload,
 )
@@ -167,6 +169,64 @@ class TestEventExecutionRepositories:
         assert loaded is not None
         assert isinstance(loaded.payload, UserMessagePayload)
         assert loaded.payload.applied_inference_profile == applied_profile
+        stored = await rdb_session.get(RDBEvent, appended.id)
+        assert stored is not None
+        assert stored.payload["applied_inference_profile"] == {
+            "model_target_label": "Quality",
+            "model_display_name": "GPT 5.5",
+            "reasoning_effort": None,
+        }
+
+    async def test_turn_marker_default_effort_round_trip(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Preserve explicit null effort in durable turn provenance."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            handle="turn-marker-profile-default-ws",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        transcript_repo = EventTranscriptRepository()
+        applied_profile = AppliedInferenceProfile(
+            model_target_label="Quality",
+            model_display_name="GPT 5.5",
+            reasoning_effort=None,
+        )
+        turn_marker = TurnMarkerPayload(
+            run_id="run-1",
+            usage=TokenUsagePayload(
+                prompt_tokens=10,
+                completion_tokens=5,
+                total_tokens=15,
+                raw={},
+            ),
+            applied_inference_profile=applied_profile,
+        )
+
+        appended = await transcript_repo.append(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.TURN_MARKER,
+                payload=turn_marker.model_dump(mode="json"),
+            ),
+        )
+        loaded = await transcript_repo.get_by_id(
+            rdb_session,
+            event_id=appended.id,
+        )
+
+        assert loaded is not None
+        assert isinstance(loaded.payload, TurnMarkerPayload)
+        assert loaded.payload == turn_marker
         stored = await rdb_session.get(RDBEvent, appended.id)
         assert stored is not None
         assert stored.payload["applied_inference_profile"] == {

@@ -55,7 +55,7 @@ from azents.engine.run.errors import (
 from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
 from azents.engine.run.resolve import ResolvedInvokeInputProfile
-from azents.engine.run.types import PollMessagesResult
+from azents.engine.run.types import PollMessages, PollMessagesResult
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
@@ -558,6 +558,36 @@ class _RecordingEngine(_Engine):
         )
 
 
+class _BoundarySwitchEngine(_Engine):
+    """Engine that returns control once for a turn-boundary profile switch."""
+
+    def __init__(self) -> None:
+        self.requests: list[RunRequest] = []
+
+    def run(
+        self,
+        request: RunRequest,
+        context: object,
+        *,
+        poll_messages: object = None,
+        check_stop: object = None,
+    ) -> AsyncIterator[Emit]:
+        """Poll the first boundary, then complete the rebuilt request."""
+        del check_stop
+        assert isinstance(context, RunContext)
+        self.requests.append(request)
+
+        async def iterator() -> AsyncIterator[Emit]:
+            if len(self.requests) == 1:
+                poll = cast(PollMessages, poll_messages)
+                poll_result = await poll()
+                assert poll_result.context_invalidated is True
+                return
+            yield ephemeral(RunComplete(run_id=context.run_id))
+
+        return iterator()
+
+
 class _FlakyEngine(_Engine):
     """Engine that fails once and then completes."""
 
@@ -882,6 +912,7 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
                 workspace_id="workspace-001",
                 agent_id="agent-001",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             ),
             model_selection=make_test_model_selection(),
             reasoning_effort=None,
@@ -903,6 +934,7 @@ async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
             workspace_id="workspace-001",
             agent_id="agent-001",
             auto_compaction_threshold_tokens=None,
+            inference_state=None,
         )
     )
 
@@ -1049,6 +1081,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
                 workspace_id="workspace-001",
                 agent_id="agent-001",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             )
         )
 
@@ -1185,6 +1218,7 @@ async def test_execute_recovers_activated_command_run(
                 workspace_id="workspace-001",
                 agent_id="agent-001",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             )
         )
 
@@ -1281,6 +1315,7 @@ async def test_execute_recovers_durable_retry_budget(
                 workspace_id="workspace-001",
                 agent_id="agent-001",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             )
         )
 
@@ -1455,6 +1490,86 @@ async def test_execute_activates_pending_child_from_session_snapshot(
     assert request.context_window_tokens == 64_000
     assert request.compaction_max_input_tokens == 64_000
     assert request.auto_compaction_threshold_tokens == 51_200
+    assert request.inference_state == inference_state
+
+
+@pytest.mark.asyncio
+async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A turn-boundary profile change reaches the next model call exactly."""
+    initial_state = SessionInferenceState(
+        model_target_label="fast",
+        model_selection=make_test_model_selection(model_identifier="gpt-fast"),
+        reasoning_effort=ModelReasoningEffort.LOW,
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+    updated_state = SessionInferenceState(
+        model_target_label="planning",
+        model_selection=make_test_model_selection(model_identifier="gpt-planning"),
+        reasoning_effort=ModelReasoningEffort.XHIGH,
+        effective_context_window_tokens=128_000,
+        effective_auto_compaction_threshold_tokens=102_400,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+    session_repo = _AgentSessionRepository(inference_state=initial_state)
+    engine = _BoundarySwitchEngine()
+    executor = _executor(
+        engine=engine,
+        agent_session_repository=session_repo,
+    )
+    poll_count = 0
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        nonlocal poll_count
+        del args, kwargs
+        poll_count += 1
+        if poll_count == 2:
+            session_repo.inference_state = updated_state
+            return RunInputPollResult(
+                context_invalidated=True,
+                complete_run=False,
+                requested_inference_profile=RequestedInferenceProfile(
+                    model_target_label="planning",
+                    reasoning_effort=ModelReasoningEffort.XHIGH,
+                ),
+                promoted_event_ids=["event-002"],
+                user_messages=[],
+                has_actionable_work=True,
+            )
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            requested_inference_profile=None,
+            promoted_event_ids=["event-001"],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    _patch_successful_resolution(monkeypatch)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert [request.inference_state for request in engine.requests] == [
+        initial_state,
+        updated_state,
+    ]
+    assert engine.requests[1].effective_max_input_tokens == 128_000
+    assert engine.requests[1].auto_compaction_threshold_tokens == 102_400
 
 
 @pytest.mark.asyncio

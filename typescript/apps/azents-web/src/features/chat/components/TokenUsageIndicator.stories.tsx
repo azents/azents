@@ -29,6 +29,9 @@ const meta = {
     activeRun,
     usage: {
       runId: "run-active",
+      inferenceProfile: null,
+      effectiveContextWindowTokens: null,
+      effectiveAutoCompactionThresholdTokens: null,
       promptTokens: 47_043,
       completionTokens: 1_200,
       totalTokens: 48_243,
@@ -45,11 +48,36 @@ type Story = StoryObj<typeof meta>;
 
 export const ActiveRun = {} satisfies Story;
 
+export const HistoricalRunWithDurableProvenance = {
+  args: {
+    activeRun: null,
+    usage: {
+      runId: "run-terminal",
+      inferenceProfile: {
+        model_target_label: "planning",
+        model_display_name: "GPT 5.6 Sol",
+        reasoning_effort: "future-ultra",
+      },
+      effectiveContextWindowTokens: 128_000,
+      effectiveAutoCompactionThresholdTokens: 102_400,
+      promptTokens: 58_000,
+      completionTokens: 2_400,
+      totalTokens: 60_400,
+      cachedTokens: 8_000,
+      cacheCreationTokens: 1_200,
+      reasoningTokens: 1_100,
+    },
+  },
+} satisfies Story;
+
 export const HistoricalRunUnavailable = {
   args: {
     activeRun: null,
     usage: {
       runId: "run-terminal",
+      inferenceProfile: null,
+      effectiveContextWindowTokens: null,
+      effectiveAutoCompactionThresholdTokens: null,
       promptTokens: 58_000,
       completionTokens: 2_400,
       totalTokens: 60_400,
