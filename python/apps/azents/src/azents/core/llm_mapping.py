@@ -6,11 +6,15 @@ credentials to LiteLLM kwargs format.
 
 from typing import cast
 
-from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
+from azents.core.chatgpt_oauth import (
+    CHATGPT_OAUTH_BACKEND_BASE_URL,
+    build_chatgpt_oauth_headers,
+)
 from azents.core.credentials import (
     ApiKeySecrets,
     AwsConfig,
     AwsSecrets,
+    ChatGPTOAuthConfig,
     ChatGPTOAuthSecrets,
     GcpConfig,
     GcpSecrets,
@@ -80,10 +84,16 @@ def build_credential_kwargs(
                 }
             return {"api_key": key}
         case ChatGPTOAuthSecrets(access_token=token):
+            config = integration.config
+            if not isinstance(config, ChatGPTOAuthConfig):
+                raise ValueError("ChatGPT OAuth integration config is required")
             return {
                 "api_key": token,
                 "base_url": CHATGPT_OAUTH_BACKEND_BASE_URL,
                 "api_base": CHATGPT_OAUTH_BACKEND_BASE_URL,
+                "extra_headers": build_chatgpt_oauth_headers(
+                    account_id=config.account_id
+                ),
             }
         case XaiOAuthSecrets(access_token=token):
             return {

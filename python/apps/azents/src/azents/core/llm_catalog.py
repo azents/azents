@@ -109,6 +109,7 @@ class ModelCompatibilityCapabilities(BaseModel):
     model_config = ConfigDict(extra="ignore")
     provider_family: str | None = None
     responses_api: bool | None = None
+    responses_lite: bool = False
     unsupported_media_policy: UnsupportedMediaPolicy | None = None
 
 

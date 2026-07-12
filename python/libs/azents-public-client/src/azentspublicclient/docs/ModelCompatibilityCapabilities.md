@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **provider_family** | **str** |  | [optional] 
 **responses_api** | **bool** |  | [optional] 
+**responses_lite** | **bool** |  | [optional] [default to False]
 **unsupported_media_policy** | [**UnsupportedMediaPolicy**](UnsupportedMediaPolicy.md) |  | [optional] 
 
 ## Example

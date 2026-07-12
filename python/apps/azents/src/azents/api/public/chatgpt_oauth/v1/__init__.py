@@ -1,10 +1,11 @@
 """ChatGPT OAuth v1 Public API routes."""
 
+import logging
 from textwrap import dedent
 from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Success
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
@@ -17,6 +18,7 @@ from azents.services.chatgpt_oauth.data import (
     SessionNotFound,
     SessionTransitionFailed,
 )
+from azents.services.llm_catalog import IntegrationCatalogProjectionService
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
@@ -25,6 +27,7 @@ from .data import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _require_write_permission(member: WorkspaceMember) -> None:
@@ -61,6 +64,8 @@ async def start_device(
 async def poll_device(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ChatGPTOAuthService, Depends()],
+    catalog_sync_service: Annotated[IntegrationCatalogProjectionService, Depends()],
+    background_tasks: BackgroundTasks,
     *,
     session_id: str,
 ) -> ChatGPTOAuthDeviceStatusResponse:
@@ -73,6 +78,13 @@ async def poll_device(
     )
     match result:
         case Success(value):
+            if value.integration is not None:
+                background_tasks.add_task(
+                    _run_initial_catalog_sync,
+                    service=catalog_sync_service,
+                    integration_id=value.integration.id,
+                    workspace_id=member.workspace_id,
+                )
             return ChatGPTOAuthDeviceStatusResponse.convert_from(value)
         case Failure(error):
             _raise_oauth_error(error)
@@ -103,6 +115,25 @@ async def cancel_device(
             raise AssertionError("unreachable")
         case _:
             assert_never(result)
+
+
+async def _run_initial_catalog_sync(
+    *,
+    service: IntegrationCatalogProjectionService,
+    integration_id: str,
+    workspace_id: str,
+) -> None:
+    """Run initial ChatGPT catalog sync after OAuth connection."""
+    try:
+        await service.sync_integration_catalog(
+            integration_id=integration_id,
+            workspace_id=workspace_id,
+        )
+    except Exception:
+        logger.exception(
+            "Unexpected ChatGPT catalog initial sync failure.",
+            extra={"integration_id": integration_id, "workspace_id": workspace_id},
+        )
 
 
 def _raise_oauth_error(error: object) -> None:
