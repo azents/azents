@@ -86,11 +86,17 @@ class TestSerializeEngineEvent:
 
     def test_run_complete(self) -> None:
         """Serialize RunComplete."""
-        assert serialize_event(RunComplete()) == {"type": "run_complete"}
+        assert serialize_event(RunComplete(run_id="run-001")) == {
+            "type": "run_complete",
+            "run_id": "run-001",
+        }
 
     def test_run_stopped(self) -> None:
         """Serialize RunStopped."""
-        assert serialize_event(RunStopped()) == {"type": "run_stopped"}
+        assert serialize_event(RunStopped(run_id="run-001")) == {
+            "type": "run_stopped",
+            "run_id": "run-001",
+        }
 
     def test_runtime_error(self) -> None:
         """Serialize RuntimeErrorEvent."""

@@ -29,11 +29,7 @@ from azents.core.inference_profile import (
 )
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.builders import make_system_error_event
-from azents.engine.events.engine_events import (
-    ContentDelta,
-    ReasoningDelta,
-    RunComplete,
-)
+from azents.engine.events.engine_events import ContentDelta, ReasoningDelta
 from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
@@ -341,6 +337,17 @@ class _RunExecutor:
 
     def __init__(self, host: "_Host") -> None:
         self.host = host
+
+    async def finalize_unhandled_active_run(
+        self,
+        session_id: str,
+        exc: Exception,
+        *,
+        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+    ) -> str | None:
+        """Report that command-only test failures have no active Run."""
+        del session_id, exc, dispatch_event
+        return None
 
     async def execute(
         self,
@@ -986,16 +993,13 @@ async def test_session_command_reports_compaction_error_as_internal_error() -> N
     finally:
         await runner.shutdown()
 
-    assert len(host.dispatched_events) == 2
+    assert len(host.dispatched_events) == 1
     session_id, event = host.dispatched_events[0]
     assert session_id == "session-001"
     assert isinstance(event, Event)
     assert event.kind == EventKind.SYSTEM_ERROR
     assert isinstance(event.payload, SystemErrorPayload)
     assert event.payload.content == "An internal error occurred."
-    run_complete_session_id, run_complete_event = host.dispatched_events[1]
-    assert run_complete_session_id == "session-001"
-    assert isinstance(run_complete_event, RunComplete)
 
 
 def test_apply_active_tool_call_event_tracks_until_output() -> None:

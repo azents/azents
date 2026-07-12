@@ -41,6 +41,7 @@ class LiveEventProjector:
         self._live_event_store = live_event_store
         self._broadcast = broadcast
         self._partial_batcher = LivePartialBatcher(self._flush_partial_batch)
+        self._active_run_ids: dict[str, str] = {}
 
     async def flush_session(self, session_id: str) -> None:
         """Reflect pending live partial batch of session to store and WebSocket."""
@@ -60,8 +61,9 @@ class LiveEventProjector:
                     pass
 
             match event:
-                case RunStarted():
+                case RunStarted(run_id=run_id):
                     await self.clear_session(session_id)
+                    self._active_run_ids[session_id] = run_id
                 case ContentDelta(delta=delta, content_index=content_index):
                     await self._partial_batcher.append_content_delta(
                         session_id=session_id,
@@ -82,8 +84,11 @@ class LiveEventProjector:
                         before=before,
                         after=after,
                     )
-                case RunComplete() | RunStopped():
-                    await self.clear_session(session_id)
+                case RunComplete(run_id=run_id) | RunStopped(run_id=run_id):
+                    active_run_id = self._active_run_ids.get(session_id)
+                    if active_run_id is None or active_run_id == run_id:
+                        await self.clear_session(session_id)
+                        self._active_run_ids.pop(session_id, None)
                 case _:
                     pass
         except Exception:
@@ -134,14 +139,25 @@ class LiveEventProjector:
         run: ChatLiveRunState,
     ) -> None:
         """Broadcast current live run state."""
+        self._active_run_ids[session_id] = run.run_id
         await self._broadcast.publish(
             session_id, chat_live_run_updated_dump(session_id, run)
         )
 
-    async def publish_live_run_cleared(self, session_id: str) -> None:
+    async def publish_live_run_cleared(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+    ) -> None:
         """Broadcast live run state removal."""
+        active_run_id = self._active_run_ids.get(session_id)
+        if active_run_id is not None and active_run_id != run_id:
+            return
+        self._active_run_ids.pop(session_id, None)
         await self._broadcast.publish(
-            session_id, chat_live_run_cleared_dump(session_id)
+            session_id,
+            chat_live_run_cleared_dump(session_id, run_id),
         )
 
     async def remove_event(self, session_id: str, event_id: str) -> None:

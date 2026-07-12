@@ -1978,17 +1978,22 @@ export function useChatSessionContainer(
           isModelResponsePending: false,
         }));
       };
-      const markRunInactive = (): void => {
-        setManagedLiveState((prev) => ({
-          ...prev,
-          liveRun: null,
-          liveRunPhase: null,
-          sessionRunState: "idle",
-          isResponsePending: false,
-          isModelResponsePending: false,
-          isCompacting: false,
-          isStopPending: false,
-        }));
+      const markRunInactive = (runId: string): void => {
+        setManagedLiveState((prev) => {
+          if (prev.liveRun?.run_id !== runId) {
+            return prev;
+          }
+          return {
+            ...prev,
+            liveRun: null,
+            liveRunPhase: null,
+            sessionRunState: "idle",
+            isResponsePending: false,
+            isModelResponsePending: false,
+            isCompacting: false,
+            isStopPending: false,
+          };
+        });
       };
 
       if ("type" in event && event.type === "todo_state_changed") {
@@ -2071,7 +2076,7 @@ export function useChatSessionContainer(
       }
 
       if ("type" in event && event.type === "live_run_cleared") {
-        markRunInactive();
+        markRunInactive(event.run_id);
         return;
       }
 
@@ -2180,7 +2185,10 @@ export function useChatSessionContainer(
                 ),
         }));
         if (responseEvent.kind === "run_marker") {
-          markRunInactive();
+          const markerRunId = stringField(responseEvent.payload, "run_id");
+          if (markerRunId !== null) {
+            markRunInactive(markerRunId);
+          }
         } else if (
           responseEvent.kind === "assistant_message" ||
           responseEvent.kind === "reasoning" ||
@@ -2215,12 +2223,13 @@ export function useChatSessionContainer(
                 status: "complete",
               }),
             );
+          } else {
+            markRunInactive(event.run_id);
+            void utils.chat.getSubagentTree.invalidate();
           }
-          markRunInactive();
-          void utils.chat.getSubagentTree.invalidate();
           break;
         case "run_stopped":
-          markRunInactive();
+          markRunInactive(event.run_id);
           void utils.chat.getSubagentTree.invalidate();
           break;
         case "runtime_error":
@@ -2234,7 +2243,6 @@ export function useChatSessionContainer(
               status: "complete",
             },
           ]);
-          markRunInactive();
           break;
         case "authorization_request":
           setAuthorizationRequests((prev) =>

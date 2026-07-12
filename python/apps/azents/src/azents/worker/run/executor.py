@@ -74,6 +74,7 @@ from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.failure import (
     FailedRunAttempt,
     FailedRunAttemptSource,
+    FailedRunAttemptVisibility,
     FailedRunFinalizationReason,
     FailedRunRetryability,
     FailedRunRetryState,
@@ -329,6 +330,66 @@ class RunExecutor:
         init=False,
     )
 
+    async def finalize_unhandled_active_run(
+        self,
+        session_id: str,
+        exc: Exception,
+        *,
+        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+    ) -> str | None:
+        """Finalize an active Run after an exception escapes its execution boundary."""
+        active_run = await self.session_lifecycle.get_running_agent_run(session_id)
+        if active_run is None:
+            return None
+        previous_retry_state = active_run.retry_state
+        user_message = (
+            exc.user_message
+            if isinstance(exc, UserVisibleRuntimeError)
+            else _INTERNAL_ERROR_MESSAGE
+        )
+        visibility: FailedRunAttemptVisibility = (
+            "user_visible" if isinstance(exc, UserVisibleRuntimeError) else "internal"
+        )
+        attempt_number = (
+            1
+            if previous_retry_state is None
+            else previous_retry_state.failed_attempt_count + 1
+        )
+        retry_state = await self._record_failed_run_attempt(
+            session_id=session_id,
+            run_id=active_run.id,
+            attempt=FailedRunAttempt(
+                user_message=user_message,
+                internal_message=str(exc),
+                error_type=exc.__class__.__name__,
+                source="session_runner",
+                visibility=visibility,
+                attempt_number=attempt_number,
+                occurred_at=datetime.datetime.now(datetime.UTC),
+                retryability="non_retryable",
+            ),
+            previous_retry_state=previous_retry_state,
+        )
+        logger.exception(
+            "Unhandled active Run error escaped to session runner",
+            extra={
+                "session_id": session_id,
+                "run_id": active_run.id,
+                "error_type": exc.__class__.__name__,
+            },
+        )
+        await self.failed_run_finalizer.finalize(
+            FailedRunFinalizationInput(
+                session_id=session_id,
+                run_id=active_run.id,
+                user_message=retry_state.last_user_message,
+                retry_state=retry_state,
+                reason="non_retryable",
+            ),
+            dispatch_event=dispatch_event,
+        )
+        return active_run.id
+
     async def execute(
         self,
         message: SessionWakeUp,
@@ -493,7 +554,7 @@ class RunExecutor:
                         status=AgentRunStatus.COMPLETED,
                     )
                     terminal_run_status = AgentRunStatus.COMPLETED
-                await dispatch_event(message.session_id, RunComplete())
+                await dispatch_event(message.session_id, RunComplete(run_id=run_id))
                 return RunExecutionResult(
                     toolkits=[],
                     terminal_event_observed=True,
@@ -567,6 +628,12 @@ class RunExecutor:
                     await self.session_lifecycle.cancel_pending_agent_run(
                         message.session_id, run_id=run_id
                     )
+                else:
+                    await self.session_lifecycle.mark_agent_run_terminal_if_running(
+                        message.session_id,
+                        run_id=run_id,
+                        status=AgentRunStatus.CANCELLED,
+                    )
                 await dispatch_event(
                     message.session_id,
                     make_system_error_event(
@@ -574,7 +641,7 @@ class RunExecutor:
                         content=failure.message,
                     ),
                 )
-                await dispatch_event(message.session_id, RunComplete())
+                await dispatch_event(message.session_id, RunComplete(run_id=run_id))
                 return RunExecutionResult(
                     toolkits=[],
                     terminal_event_observed=True,
@@ -636,7 +703,7 @@ class RunExecutor:
                         content=failure.message,
                     ),
                 )
-                await dispatch_event(message.session_id, RunComplete())
+                await dispatch_event(message.session_id, RunComplete(run_id=run_id))
                 return RunExecutionResult(
                     toolkits=[],
                     terminal_event_observed=True,
@@ -997,6 +1064,7 @@ class RunExecutor:
         run_completed = False
         run_end_reason: RunEndReason = "unknown"
         terminal_run_status: AgentRunStatus | None = None
+        terminal_state_persisted = False
         turn_boundary_context_invalidated = False
 
         def mark_turn_boundary_context_invalidated() -> None:
@@ -1005,15 +1073,32 @@ class RunExecutor:
 
         async def consume_emit(item: Emit) -> None:
             """Apply run lifecycle side effects for one engine emit."""
-            nonlocal active_phase, run_completed, run_end_reason, terminal_run_status
+            nonlocal active_phase, run_completed, run_end_reason
+            nonlocal terminal_run_status, terminal_state_persisted
             match item.event:
                 case RunStarted():
                     return
-                case RunComplete():
+                case RunComplete(run_id=event_run_id):
+                    if event_run_id != run_id:
+                        raise RuntimeError("RunComplete run ID mismatch")
+                    await self.session_lifecycle.mark_agent_run_terminal_if_running(
+                        message.session_id,
+                        run_id=run_id,
+                        status=AgentRunStatus.COMPLETED,
+                    )
+                    terminal_state_persisted = True
                     run_completed = True
                     run_end_reason = "completed"
                     terminal_run_status = AgentRunStatus.COMPLETED
-                case RunStopped():
+                case RunStopped(run_id=event_run_id):
+                    if event_run_id != run_id:
+                        raise RuntimeError("RunStopped run ID mismatch")
+                    await self.session_lifecycle.mark_agent_run_terminal_if_running(
+                        message.session_id,
+                        run_id=run_id,
+                        status=AgentRunStatus.STOPPED,
+                    )
+                    terminal_state_persisted = True
                     run_end_reason = "cancelled"
                     terminal_run_status = AgentRunStatus.STOPPED
                 case RunPhaseChanged(phase=phase):
@@ -1181,7 +1266,16 @@ class RunExecutor:
                         await publish_live_run()
                         continue
                     if command_handler is not None:
-                        await dispatch_event(message.session_id, RunComplete())
+                        await self.session_lifecycle.mark_agent_run_terminal_if_running(
+                            message.session_id,
+                            run_id=run_id,
+                            status=AgentRunStatus.COMPLETED,
+                        )
+                        terminal_state_persisted = True
+                        await dispatch_event(
+                            message.session_id,
+                            RunComplete(run_id=run_id),
+                        )
                         run_completed = True
                         run_end_reason = "completed"
                         terminal_run_status = AgentRunStatus.COMPLETED
@@ -1335,7 +1429,7 @@ class RunExecutor:
                         "run_id": run_id,
                     },
                 )
-            else:
+            elif not terminal_state_persisted:
                 await self.session_lifecycle.mark_agent_run_terminal_if_running(
                     message.session_id,
                     run_id=run_id,
@@ -1360,7 +1454,8 @@ class RunExecutor:
             else:
                 await self.session_lifecycle.clear_session_activity(message.session_id)
                 await self.live_event_projector.publish_live_run_cleared(
-                    message.session_id
+                    message.session_id,
+                    run_id=run_id,
                 )
                 await publish_session_tree_changed()
             if command is not None:

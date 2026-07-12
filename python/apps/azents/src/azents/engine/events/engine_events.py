@@ -64,6 +64,7 @@ class RunComplete(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: Literal["run_complete"] = "run_complete"
+    run_id: str
 
 
 class RunStopped(BaseModel):
@@ -72,6 +73,7 @@ class RunStopped(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: Literal["run_stopped"] = "run_stopped"
+    run_id: str
 
 
 class RuntimeInitializingEvent(BaseModel):

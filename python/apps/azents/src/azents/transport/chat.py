@@ -159,11 +159,15 @@ def chat_live_run_updated_dump(
     }
 
 
-def chat_live_run_cleared_dump(session_id: str) -> dict[str, object]:
+def chat_live_run_cleared_dump(
+    session_id: str,
+    run_id: str,
+) -> dict[str, object]:
     """Convert live run clear action to chat WS wire dict."""
     return {
         "type": "live_run_cleared",
         "session_id": session_id,
+        "run_id": run_id,
     }
 
 

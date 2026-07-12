@@ -79,7 +79,6 @@ class UserStopFinalizer:
         )
         if effective_run_id is not None:
             await self._append_user_stop_events(session_id, effective_run_id)
-        await self.event_publisher.dispatch_event(session_id, RunStopped())
         if effective_run_id is None:
             await self._mark_session_agent_runs_terminal(
                 session_id,
@@ -90,6 +89,10 @@ class UserStopFinalizer:
                 session_id,
                 run_id=effective_run_id,
                 status=AgentRunStatus.STOPPED,
+            )
+            await self.event_publisher.dispatch_event(
+                session_id,
+                RunStopped(run_id=effective_run_id),
             )
         await self._clear_stop_request(session_id)
         await self.broker.clear_session_activity(session_id)
@@ -102,7 +105,15 @@ class UserStopFinalizer:
     ) -> None:
         """Record run marker stopped by User stop and RunStopped event."""
         await self._append_user_stop_events(session_id, run_id)
-        await self.event_publisher.dispatch_event(session_id, RunStopped())
+        await self._mark_agent_run_terminal_if_running(
+            session_id,
+            run_id=run_id,
+            status=AgentRunStatus.STOPPED,
+        )
+        await self.event_publisher.dispatch_event(
+            session_id,
+            RunStopped(run_id=run_id),
+        )
         await self._clear_stop_request(session_id)
 
     async def _get_running_agent_run(

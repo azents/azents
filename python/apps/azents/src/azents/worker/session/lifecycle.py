@@ -161,6 +161,17 @@ class SessionLifecycleService:
                 session_id,
             )
 
+    async def get_running_agent_run(
+        self,
+        session_id: str,
+    ) -> AgentRunState | None:
+        """Return the session's active running Run without claiming pending work."""
+        async with self.session_manager() as db_session:
+            return await self.agent_run_repository.get_running_by_session_id(
+                db_session,
+                session_id=session_id,
+            )
+
     async def claim_recoverable_agent_run(
         self,
         session_id: str,
