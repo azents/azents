@@ -2,6 +2,7 @@
 
 import datetime
 
+import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -232,11 +233,12 @@ class TestChatSessionInputBuffer:
         assert result.value.partial_history_events == []
         assert result.value.session_run_state == AgentSessionRunState.IDLE
 
-    async def test_list_live_events_includes_running_run_state(
+    async def test_list_live_events_running_run_overrides_idle_session_state(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Live event list returns running run state."""
+        """A running AgentRun is authoritative over stale Session idle state."""
         async with rdb_session_manager() as session:
             session_id, user_id, _ = await _create_session_with_buffer(
                 session,
@@ -256,7 +258,6 @@ class TestChatSessionInputBuffer:
                     resolved_at=now,
                 ),
             )
-            await AgentSessionRepository().mark_running(session, session_id)
             run = await AgentRunRepository().create(
                 session,
                 AgentRunCreate(
@@ -313,6 +314,18 @@ class TestChatSessionInputBuffer:
         assert result.value.run.retry.attempts[0].attempt_number == 2
         assert result.value.run.retry.attempts[0].user_message == "temporary failure"
         assert result.value.session_run_state == AgentSessionRunState.RUNNING
+        contradiction_record = next(
+            record
+            for record in caplog.records
+            if record.message
+            == "Active AgentRun contradicts persisted Session run state"
+        )
+        assert contradiction_record.__dict__["session_id"] == session_id
+        assert contradiction_record.__dict__["run_id"] == run.id
+        assert (
+            contradiction_record.__dict__["session_run_state"]
+            == AgentSessionRunState.IDLE
+        )
 
     async def test_flushed_input_buffer_remains_in_message_history(
         self,

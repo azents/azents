@@ -6,8 +6,8 @@ Agent-owned target label and optional explicit reasoning effort.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**model_target_label** | **str** | Agent-owned selectable model target label | 
-**reasoning_effort** | [**ModelReasoningEffort**](ModelReasoningEffort.md) |  | 
+**model_target_label** | **str** | Agent-owned selectable model target label |
+**reasoning_effort** | **str** |  |
 
 ## Example
 

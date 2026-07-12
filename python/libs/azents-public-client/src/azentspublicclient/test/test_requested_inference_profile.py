@@ -36,12 +36,12 @@ class TestRequestedInferenceProfile(unittest.TestCase):
         if include_optional:
             return RequestedInferenceProfile(
                 model_target_label = '0',
-                reasoning_effort = 'none'
+                reasoning_effort = ''
             )
         else:
             return RequestedInferenceProfile(
                 model_target_label = '0',
-                reasoning_effort = 'none',
+                reasoning_effort = '',
         )
         """
 

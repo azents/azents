@@ -42,16 +42,47 @@ def test_requested_profile_requires_explicit_nullable_effort() -> None:
     assert profile.reasoning_effort is None
 
 
-def test_requested_profile_accepts_normalized_effort() -> None:
+@pytest.mark.parametrize(
+    "effort",
+    [
+        ModelReasoningEffort.NONE,
+        ModelReasoningEffort.MINIMAL,
+        ModelReasoningEffort.XHIGH,
+        ModelReasoningEffort.MAX,
+    ],
+)
+def test_requested_profile_accepts_supported_expanded_effort(
+    effort: ModelReasoningEffort,
+) -> None:
     profile = RequestedInferenceProfile(
         model_target_label="Quality",
-        reasoning_effort=ModelReasoningEffort.HIGH,
+        reasoning_effort=effort,
     )
 
     assert profile.model_dump(mode="json") == {
         "model_target_label": "Quality",
-        "reasoning_effort": "high",
+        "reasoning_effort": effort.value,
     }
+
+
+def test_requested_profile_rejects_unknown_effort_at_runtime() -> None:
+    with pytest.raises(ValidationError):
+        RequestedInferenceProfile.model_validate(
+            {
+                "model_target_label": "Quality",
+                "reasoning_effort": "future-effort",
+            }
+        )
+
+
+def test_public_profile_schema_exposes_opaque_nullable_effort() -> None:
+    for profile_type in (RequestedInferenceProfile, AppliedInferenceProfile):
+        schema = profile_type.model_json_schema()
+        effort_schema = schema["properties"]["reasoning_effort"]
+        assert effort_schema["anyOf"] == [
+            {"type": "string"},
+            {"type": "null"},
+        ]
 
 
 def test_applied_profile_accepts_persisted_payload_without_display_name() -> None:

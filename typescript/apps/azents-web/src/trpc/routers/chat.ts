@@ -58,9 +58,7 @@ const inputActionSchema = z.discriminatedUnion("type", [
 
 const inferenceProfileSchema = z.object({
   model_target_label: z.string().min(1),
-  reasoning_effort: z
-    .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
-    .nullable(),
+  reasoning_effort: z.string().nullable(),
 });
 
 const setupActionSchema = z.object({

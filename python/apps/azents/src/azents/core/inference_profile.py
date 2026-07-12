@@ -2,11 +2,17 @@
 
 import datetime
 import enum
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
 
 from azents.core.agent import AgentModelSelection
 from azents.core.llm_catalog import ModelReasoningEffort
+
+PublicReasoningEffort = Annotated[
+    ModelReasoningEffort | None,
+    WithJsonSchema({"anyOf": [{"type": "string"}, {"type": "null"}]}),
+]
 
 
 class InferenceProfileSource(enum.StrEnum):
@@ -37,7 +43,7 @@ class RequestedInferenceProfile(BaseModel):
         min_length=1,
         description="Agent-owned selectable model target label",
     )
-    reasoning_effort: ModelReasoningEffort | None = Field(
+    reasoning_effort: PublicReasoningEffort = Field(
         description="Explicit reasoning effort, or null for model Default",
     )
 
@@ -56,7 +62,7 @@ class AppliedInferenceProfile(BaseModel):
         min_length=1,
         description="Resolved model display name, or null before preparation",
     )
-    reasoning_effort: ModelReasoningEffort | None = Field(
+    reasoning_effort: PublicReasoningEffort = Field(
         description="Applied explicit effort, or null for model Default",
     )
 

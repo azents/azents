@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+import logging
 from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
@@ -97,6 +98,8 @@ from .data import (
     UpdateSessionTitleError,
 )
 from .live_events import LiveEventStore, input_buffer_to_live_event
+
+logger = logging.getLogger(__name__)
 
 
 def _latest_agent_message_at(
@@ -1026,6 +1029,19 @@ class ChatSessionService:
                 for projection in projections
                 if projection.execution.status not in terminal_action_statuses
             ]
+            session_run_state = agent_session.run_state
+            if run is not None:
+                if session_run_state != AgentSessionRunState.RUNNING:
+                    logger.warning(
+                        "Active AgentRun contradicts persisted Session run state",
+                        extra={
+                            "session_id": session_id,
+                            "run_id": run.id,
+                            "run_status": run.status,
+                            "session_run_state": session_run_state,
+                        },
+                    )
+                session_run_state = AgentSessionRunState.RUNNING
             return Success(
                 ChatLiveStateSnapshot(
                     partial_history_events=partial_history_events,
@@ -1065,7 +1081,7 @@ class ChatSessionService:
                             ],
                         ),
                     ),
-                    session_run_state=agent_session.run_state,
+                    session_run_state=session_run_state,
                     todo=todo,
                     goal=goal,
                     action_executions=action_executions,

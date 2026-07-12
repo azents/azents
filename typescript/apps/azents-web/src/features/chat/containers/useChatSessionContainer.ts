@@ -9,6 +9,7 @@
  * previous session of WebSocket/buffer new session to ensures it does not leak.
  */
 
+import * as Sentry from "@sentry/nextjs";
 import { useQueryClient } from "@tanstack/react-query";
 import { getQueryKey } from "@trpc/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -50,7 +51,6 @@ import type {
   ChatEventResponse,
   ChatWriteResponse,
   LiveEventListResponse,
-  ModelReasoningEffort,
   RequestedInferenceProfile,
 } from "@azents/public-client";
 
@@ -201,17 +201,8 @@ function booleanField(
   return typeof value === "boolean" ? value : null;
 }
 
-function modelReasoningEffortFromValue(
-  value: unknown,
-): ModelReasoningEffort | null {
-  switch (value) {
-    case "low":
-    case "medium":
-    case "high":
-      return value;
-    default:
-      return null;
-  }
+function reasoningEffortFromValue(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 function requestedInferenceProfileFromValue(
@@ -225,7 +216,7 @@ function requestedInferenceProfileFromValue(
     return null;
   }
   const effortValue = value.reasoning_effort;
-  const reasoningEffort = modelReasoningEffortFromValue(effortValue);
+  const reasoningEffort = reasoningEffortFromValue(effortValue);
   if (effortValue != null && reasoningEffort === null) {
     return null;
   }
@@ -255,7 +246,7 @@ function appliedInferenceProfileFromValue(
   const modelDisplayName = value.model_display_name;
   const hasReasoningEffort = "reasoning_effort" in value;
   const effortValue = value.reasoning_effort;
-  const reasoningEffort = modelReasoningEffortFromValue(effortValue);
+  const reasoningEffort = reasoningEffortFromValue(effortValue);
   if (
     modelTargetLabel === null ||
     modelTargetLabel.length === 0 ||
@@ -621,11 +612,22 @@ function latestTokenUsage(messages: ChatMessage[]): TokenUsageSummary | null {
   return null;
 }
 
-function liveRunFromResponse(live: unknown): ChatLiveRunState | null {
+type LiveRunSnapshot =
+  | { type: "ABSENT" }
+  | { type: "INVALID"; value: unknown }
+  | { type: "PRESENT"; run: ChatLiveRunState };
+
+function liveRunSnapshotFromResponse(live: unknown): LiveRunSnapshot {
   if (!isRecord(live)) {
-    return null;
+    return { type: "INVALID", value: live };
   }
-  return chatLiveRunStateFromValue(live.run);
+  if (live.run == null) {
+    return { type: "ABSENT" };
+  }
+  const run = chatLiveRunStateFromValue(live.run);
+  return run === null
+    ? { type: "INVALID", value: live.run }
+    : { type: "PRESENT", run };
 }
 
 function liveRunPhase(liveRun: ChatLiveRunState | null): AgentRunPhase | null {
@@ -1378,6 +1380,11 @@ interface ManagedLiveState {
   actionExecutions: ActionExecutionProjection[];
 }
 
+interface RestSnapshotRequest {
+  epoch: number;
+  liveObservationGeneration: number;
+}
+
 interface LiveTaxonomySnapshot {
   partial_history: { items: ChatEventResponse[] };
   input_buffers: ChatEventResponse[];
@@ -1534,9 +1541,19 @@ function orderedPartialHistoryEvents(
   });
 }
 
+interface InvalidLiveRunSnapshot {
+  value: unknown;
+}
+
+interface MappedLiveStateSnapshot {
+  state: ManagedLiveState;
+  invalidLiveRun: InvalidLiveRunSnapshot | null;
+}
+
 function replaceLiveStateFromSnapshot(
   live: LiveTaxonomySnapshot,
-): ManagedLiveState {
+  previous: ManagedLiveState | null,
+): MappedLiveStateSnapshot {
   const partialHistory = live.partial_history.items
     .filter((event) => event.kind !== "provider_tool_call")
     .reduce(upsertPartialHistoryEvent, emptyPartialHistoryState());
@@ -1552,23 +1569,40 @@ function replaceLiveStateFromSnapshot(
     const buffer = mapInputBufferLiveEvent(event);
     return buffer === null ? [] : [buffer];
   });
-  const liveRun = liveRunFromResponse(live);
+  const runSnapshot = liveRunSnapshotFromResponse(live);
+  const liveRun =
+    runSnapshot.type === "PRESENT"
+      ? runSnapshot.run
+      : runSnapshot.type === "INVALID"
+        ? (previous?.liveRun ?? null)
+        : null;
   const currentLiveRunPhase = liveRunPhase(liveRun);
   return {
-    ...emptyManagedLiveState(),
-    partialHistory: partialHistoryWithGoalContinuations,
-    pendingInputBuffers,
-    liveRun,
-    liveRunPhase: currentLiveRunPhase,
-    sessionRunState: sessionRunStateFromResponse(live),
-    isResponsePending:
-      isUserBlockingRunPhase(currentLiveRunPhase) ||
-      partialHistory.order.length > 0,
-    isModelResponsePending: isModelRunPhase(currentLiveRunPhase),
-    isCompacting: currentLiveRunPhase === "compacting",
-    todo: live.todo ?? emptyTodoState(),
-    goal: normalizeGoalState(live.goal),
-    actionExecutions: live.action_executions ?? [],
+    state: {
+      ...emptyManagedLiveState(),
+      partialHistory: partialHistoryWithGoalContinuations,
+      pendingInputBuffers,
+      liveRun,
+      liveRunPhase: currentLiveRunPhase,
+      sessionRunState:
+        liveRun?.status === "running"
+          ? "running"
+          : sessionRunStateFromResponse(live),
+      isResponsePending:
+        isUserBlockingRunPhase(currentLiveRunPhase) ||
+        partialHistory.order.length > 0,
+      isModelResponsePending: isModelRunPhase(currentLiveRunPhase),
+      isCompacting: currentLiveRunPhase === "compacting",
+      isStopPending:
+        runSnapshot.type === "INVALID"
+          ? (previous?.isStopPending ?? false)
+          : false,
+      todo: live.todo ?? emptyTodoState(),
+      goal: normalizeGoalState(live.goal),
+      actionExecutions: live.action_executions ?? [],
+    },
+    invalidLiveRun:
+      runSnapshot.type === "INVALID" ? { value: runSnapshot.value } : null,
   };
 }
 
@@ -1649,33 +1683,38 @@ function mergeHistoryAndPartialHistory(
   ];
 }
 
-function mapSessionEvents(data: {
-  history: {
-    items: ChatEventResponse[];
-    has_more: boolean;
-    has_newer?: boolean;
-  };
-  live: LiveEventListResponse;
-}): {
+function mapSessionEvents(
+  data: {
+    history: {
+      items: ChatEventResponse[];
+      has_more: boolean;
+      has_newer?: boolean;
+    };
+    live: LiveEventListResponse;
+  },
+  previousLiveState: ManagedLiveState | null,
+): {
   historyMessages: ChatMessage[];
   liveState: ManagedLiveState;
+  invalidLiveRun: InvalidLiveRunSnapshot | null;
   hasMore: boolean;
   hasNewer: boolean;
   newestCursor: string | null;
   latestDurableInferenceIntent: DurableInferenceIntent | null;
 } {
-  const liveState = replaceLiveStateFromSnapshot(data.live);
+  const mappedLive = replaceLiveStateFromSnapshot(data.live, previousLiveState);
   return {
     historyMessages: mapEvents(data.history.items, {
       renderIncompleteToolCalls: false,
     }),
     liveState: {
-      ...liveState,
+      ...mappedLive.state,
       actionExecutions: mergeActionExecutionProjections(
         actionExecutionResultsFromEvents(data.history.items),
-        liveState.actionExecutions,
+        mappedLive.state.actionExecutions,
       ),
     },
+    invalidLiveRun: mappedLive.invalidLiveRun,
     hasMore: data.history.has_more,
     hasNewer: data.history.has_newer ?? false,
     newestCursor: data.history.items.at(-1)?.id ?? null,
@@ -1687,16 +1726,22 @@ function mapSessionEvents(data: {
   };
 }
 
-function mapChatWriteSnapshot(response: ChatWriteResponse): ManagedLiveState {
-  return replaceLiveStateFromSnapshot({
-    partial_history: { items: response.snapshot.partial_history_events },
-    input_buffers: response.snapshot.input_buffer_events,
-    run: response.snapshot.run,
-    session_run_state: response.snapshot.session_run_state,
-    todo: response.snapshot.todo,
-    goal: normalizeGoalState(response.snapshot.goal),
-    action_executions: response.snapshot.action_executions,
-  });
+function mapChatWriteSnapshot(
+  response: ChatWriteResponse,
+  previousLiveState: ManagedLiveState,
+): MappedLiveStateSnapshot {
+  return replaceLiveStateFromSnapshot(
+    {
+      partial_history: { items: response.snapshot.partial_history_events },
+      input_buffers: response.snapshot.input_buffer_events,
+      run: response.snapshot.run,
+      session_run_state: response.snapshot.session_run_state,
+      todo: response.snapshot.todo,
+      goal: normalizeGoalState(response.snapshot.goal),
+      action_executions: response.snapshot.action_executions,
+    },
+    previousLiveState,
+  );
 }
 
 function getToolCallKeys(message: ChatMessage): string[] {
@@ -1818,6 +1863,33 @@ export function useChatSessionContainer(
   const failedWriteRequestRef = useRef<{ key: string; id: string } | null>(
     null,
   );
+  const liveObservationGenerationRef = useRef(0);
+  const restSnapshotEpochRef = useRef(0);
+  const eventsQueryRequestRef = useRef<RestSnapshotRequest | null>(null);
+  const startRestSnapshotRequest = useCallback((): RestSnapshotRequest => {
+    restSnapshotEpochRef.current += 1;
+    return {
+      epoch: restSnapshotEpochRef.current,
+      liveObservationGeneration: liveObservationGenerationRef.current,
+    };
+  }, []);
+  const canApplyRestSnapshot = useCallback(
+    (request: RestSnapshotRequest): boolean =>
+      request.epoch === restSnapshotEpochRef.current &&
+      request.liveObservationGeneration ===
+        liveObservationGenerationRef.current,
+    [],
+  );
+  const reportInvalidLiveRun = useCallback(
+    (value: unknown): void => {
+      Sentry.captureMessage("Invalid chat live Run projection", {
+        level: "warning",
+        tags: { session_id: sessionId },
+        extra: { run: value },
+      });
+    },
+    [sessionId],
+  );
   const partialHistoryMessages = useMemo(
     () =>
       chatTimelineState.type === "LATEST_FOLLOWING"
@@ -1883,6 +1955,7 @@ export function useChatSessionContainer(
 
   const handleChatEvent = useCallback(
     (event: ChatEvent): void => {
+      liveObservationGenerationRef.current += 1;
       const markRunActive = (phase: AgentRunPhase | null): void => {
         setManagedLiveState((prev) => ({
           ...prev,
@@ -1978,6 +2051,7 @@ export function useChatSessionContainer(
       if ("type" in event && event.type === "live_run_updated") {
         const nextLiveRun = chatLiveRunStateFromValue(event.run);
         if (nextLiveRun === null) {
+          reportInvalidLiveRun(event.run);
           return;
         }
         const nextLiveRunPhase = liveRunPhase(nextLiveRun);
@@ -2198,6 +2272,7 @@ export function useChatSessionContainer(
     [
       agent.id,
       connectionInfoQuery,
+      reportInvalidLiveRun,
       sessionId,
       utils.chat.getSessionProjectBrowserManifest,
       utils.chat.getSubagentTree,
@@ -2218,6 +2293,7 @@ export function useChatSessionContainer(
     onEvent: handleChatEvent,
     onBatchReload: () => batchReloadRef.current(),
     onSubscribed: () => {
+      eventsQueryRequestRef.current = startRestSnapshotRequest();
       setIsSubscribeReady(true);
       setBufferingLiveEvents(true);
       setChatViewState({ type: "LOADING_HISTORY" });
@@ -2243,6 +2319,7 @@ export function useChatSessionContainer(
         return;
       }
       setBufferingLiveEvents(true);
+      eventsQueryRequestRef.current = startRestSnapshotRequest();
       void eventsQuery.refetch().catch(() => replayBufferedLiveEvents());
     });
     return true;
@@ -2253,16 +2330,24 @@ export function useChatSessionContainer(
     replayBufferedLiveEvents,
     requestSubscriptionHealthCheck,
     setBufferingLiveEvents,
+    startRestSnapshotRequest,
   ]);
   batchReloadRef.current = messagesRefetch;
 
   const applyLatestSnapshot = useCallback(
     async (targetSessionId: string): Promise<void> => {
       setBufferingLiveEvents(true);
+      const request = startRestSnapshotRequest();
       const result = await utils.chat.listSessionEvents.fetch({
         sessionId: targetSessionId,
       });
-      const mapped = mapSessionEvents(result);
+      if (!canApplyRestSnapshot(request)) {
+        if (request.epoch === restSnapshotEpochRef.current) {
+          replayBufferedLiveEvents();
+        }
+        return;
+      }
+      const mapped = mapSessionEvents(result, null);
       historyNewestCursorRef.current = mapped.newestCursor;
       setHistoryMessages((prev) =>
         mergeWithOlderPages(prev, mapped.historyMessages),
@@ -2272,22 +2357,35 @@ export function useChatSessionContainer(
       setLatestHumanInferenceProfile(
         mapped.latestDurableInferenceIntent?.profile ?? null,
       );
-      setManagedLiveState(mapped.liveState);
+      setManagedLiveState((prev) => {
+        const next = mapSessionEvents(result, prev);
+        if (next.invalidLiveRun !== null) {
+          reportInvalidLiveRun(next.invalidLiveRun.value);
+        }
+        return next.liveState;
+      });
       setHasMore(mapped.hasMore);
       setChatTimelineState({ type: "LATEST_FOLLOWING" });
       replayBufferedLiveEvents();
       setChatViewState({ type: "READY" });
     },
     [
+      canApplyRestSnapshot,
       replayBufferedLiveEvents,
+      reportInvalidLiveRun,
       setBufferingLiveEvents,
+      startRestSnapshotRequest,
       utils.chat.listSessionEvents,
     ],
   );
 
   compactionReloadRef.current = (continuing) => {
+    const request = startRestSnapshotRequest();
     void utils.chat.listSessionEvents.fetch({ sessionId }).then((result) => {
-      const mapped = mapSessionEvents(result);
+      if (!canApplyRestSnapshot(request)) {
+        return;
+      }
+      const mapped = mapSessionEvents(result, null);
       historyNewestCursorRef.current = mapped.newestCursor;
       setHistoryMessages(mapped.historyMessages);
       latestHumanModelOrderRef.current =
@@ -2295,12 +2393,18 @@ export function useChatSessionContainer(
       setLatestHumanInferenceProfile(
         mapped.latestDurableInferenceIntent?.profile ?? null,
       );
-      setManagedLiveState((prev) => ({
-        ...mapped.liveState,
-        isResponsePending: continuing
-          ? mapped.liveState.isResponsePending || prev.isResponsePending
-          : mapped.liveState.isResponsePending,
-      }));
+      setManagedLiveState((prev) => {
+        const next = mapSessionEvents(result, prev);
+        if (next.invalidLiveRun !== null) {
+          reportInvalidLiveRun(next.invalidLiveRun.value);
+        }
+        return {
+          ...next.liveState,
+          isResponsePending: continuing
+            ? next.liveState.isResponsePending || prev.isResponsePending
+            : next.liveState.isResponsePending,
+        };
+      });
       setHasMore(mapped.hasMore);
     });
   };
@@ -2317,7 +2421,11 @@ export function useChatSessionContainer(
       eventsQuery.data &&
       agentSessionQuery.data
     ) {
-      const mapped = mapSessionEvents(eventsQuery.data);
+      const request = eventsQueryRequestRef.current;
+      if (request === null || !canApplyRestSnapshot(request)) {
+        return;
+      }
+      const mapped = mapSessionEvents(eventsQuery.data, null);
       historyNewestCursorRef.current = mapped.newestCursor;
       setHistoryMessages(mapped.historyMessages);
       latestHumanModelOrderRef.current =
@@ -2325,7 +2433,13 @@ export function useChatSessionContainer(
       setLatestHumanInferenceProfile(
         mapped.latestDurableInferenceIntent?.profile ?? null,
       );
-      setManagedLiveState(mapped.liveState);
+      setManagedLiveState((prev) => {
+        const next = mapSessionEvents(eventsQuery.data, prev);
+        if (next.invalidLiveRun !== null) {
+          reportInvalidLiveRun(next.invalidLiveRun.value);
+        }
+        return next.liveState;
+      });
       setHasMore(mapped.hasMore);
       setChatTimelineState({ type: "LATEST_FOLLOWING" });
       setChatViewState({ type: "READY" });
@@ -2333,9 +2447,11 @@ export function useChatSessionContainer(
     }
   }, [
     agentSessionQuery.data,
+    canApplyRestSnapshot,
     chatViewState.type,
     eventsQuery.data,
     replayBufferedLiveEvents,
+    reportInvalidLiveRun,
   ]);
 
   // batch text withtext data text. Detached  in live state  textdoes not..
@@ -2343,13 +2459,23 @@ export function useChatSessionContainer(
     if (chatViewState.type !== "READY" || !eventsQuery.data) {
       return;
     }
-    const mapped = mapSessionEvents(eventsQuery.data);
+    const request = eventsQueryRequestRef.current;
+    if (request === null || !canApplyRestSnapshot(request)) {
+      return;
+    }
+    const mapped = mapSessionEvents(eventsQuery.data, null);
     latestHumanModelOrderRef.current =
       mapped.latestDurableInferenceIntent?.modelOrder ?? null;
     setLatestHumanInferenceProfile(
       mapped.latestDurableInferenceIntent?.profile ?? null,
     );
-    setManagedLiveState(mapped.liveState);
+    setManagedLiveState((prev) => {
+      const next = mapSessionEvents(eventsQuery.data, prev);
+      if (next.invalidLiveRun !== null) {
+        reportInvalidLiveRun(next.invalidLiveRun.value);
+      }
+      return next.liveState;
+    });
     if (chatTimelineState.type === "DETACHED_HISTORY_BROWSING") {
       setChatTimelineState({
         type: "DETACHED_HISTORY_BROWSING",
@@ -2500,31 +2626,44 @@ export function useChatSessionContainer(
     trpc.chat.updateSessionGoalStatus.useMutation();
 
   const applyWriteResponse = useCallback(
-    (response: ChatWriteResponse): void => {
+    (response: ChatWriteResponse, request: RestSnapshotRequest): void => {
       if (response.session_id !== sessionId) {
         throw new Error("Chat write response session mismatch");
       }
-      const snapshotInferenceIntent = latestDurableInferenceIntent([
-        ...response.snapshot.partial_history_events,
-        ...response.snapshot.input_buffer_events,
-      ]);
-      if (
-        snapshotInferenceIntent !== null &&
-        (latestHumanModelOrderRef.current === null ||
-          snapshotInferenceIntent.modelOrder >=
-            latestHumanModelOrderRef.current)
-      ) {
-        latestHumanModelOrderRef.current = snapshotInferenceIntent.modelOrder;
-        setLatestHumanInferenceProfile(snapshotInferenceIntent.profile);
+      if (canApplyRestSnapshot(request)) {
+        const snapshotInferenceIntent = latestDurableInferenceIntent([
+          ...response.snapshot.partial_history_events,
+          ...response.snapshot.input_buffer_events,
+        ]);
+        if (
+          snapshotInferenceIntent !== null &&
+          (latestHumanModelOrderRef.current === null ||
+            snapshotInferenceIntent.modelOrder >=
+              latestHumanModelOrderRef.current)
+        ) {
+          latestHumanModelOrderRef.current = snapshotInferenceIntent.modelOrder;
+          setLatestHumanInferenceProfile(snapshotInferenceIntent.profile);
+        }
+        setManagedLiveState((prev) => {
+          const mapped = mapChatWriteSnapshot(response, prev);
+          if (mapped.invalidLiveRun !== null) {
+            reportInvalidLiveRun(mapped.invalidLiveRun.value);
+          }
+          return mapped.state;
+        });
       }
-      setManagedLiveState(mapChatWriteSnapshot(response));
       if (response.history_reload_required) {
         void utils.chat.listSessionEvents.invalidate({
           sessionId: response.session_id,
         });
       }
     },
-    [sessionId, utils.chat.listSessionEvents],
+    [
+      canApplyRestSnapshot,
+      reportInvalidLiveRun,
+      sessionId,
+      utils.chat.listSessionEvents,
+    ],
   );
 
   const createClientRequestId = useCallback((): string => {
@@ -2552,24 +2691,34 @@ export function useChatSessionContainer(
       }
       writeInFlightRef.current = true;
       setIsWritePending(true);
+      const writeSnapshotRequest = startRestSnapshotRequest();
       try {
         const response = await run();
         failedWriteRequestRef.current = null;
-        applyWriteResponse(response);
+        applyWriteResponse(response, writeSnapshotRequest);
         if (response.history_reload_required) {
+          const reloadRequest = startRestSnapshotRequest();
           const result = await utils.chat.listSessionEvents.fetch({
             sessionId: response.session_id,
           });
-          const mapped = mapSessionEvents(result);
-          historyNewestCursorRef.current = mapped.newestCursor;
-          setHistoryMessages(mapped.historyMessages);
-          latestHumanModelOrderRef.current =
-            mapped.latestDurableInferenceIntent?.modelOrder ?? null;
-          setLatestHumanInferenceProfile(
-            mapped.latestDurableInferenceIntent?.profile ?? null,
-          );
-          setManagedLiveState(mapped.liveState);
-          setHasMore(mapped.hasMore);
+          if (canApplyRestSnapshot(reloadRequest)) {
+            const mapped = mapSessionEvents(result, null);
+            historyNewestCursorRef.current = mapped.newestCursor;
+            setHistoryMessages(mapped.historyMessages);
+            latestHumanModelOrderRef.current =
+              mapped.latestDurableInferenceIntent?.modelOrder ?? null;
+            setLatestHumanInferenceProfile(
+              mapped.latestDurableInferenceIntent?.profile ?? null,
+            );
+            setManagedLiveState((prev) => {
+              const next = mapSessionEvents(result, prev);
+              if (next.invalidLiveRun !== null) {
+                reportInvalidLiveRun(next.invalidLiveRun.value);
+              }
+              return next.liveState;
+            });
+            setHasMore(mapped.hasMore);
+          }
         }
         return true;
       } catch {
@@ -2580,7 +2729,13 @@ export function useChatSessionContainer(
         setIsWritePending(false);
       }
     },
-    [applyWriteResponse, utils.chat.listSessionEvents],
+    [
+      applyWriteResponse,
+      canApplyRestSnapshot,
+      reportInvalidLiveRun,
+      startRestSnapshotRequest,
+      utils.chat.listSessionEvents,
+    ],
   );
 
   const onSendInput = useCallback(
