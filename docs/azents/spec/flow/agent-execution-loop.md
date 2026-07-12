@@ -39,7 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-12
-spec_version: 72
+spec_version: 73
 ---
 
 # Agent Execution Loop
@@ -110,6 +110,12 @@ boundary. If that input changes the profile, the same `AgentRun` rebuilds the ne
 the newly prepared Session snapshot. It does not restore an older run-owned model selection or cancel
 the run merely to change profiles. Commands use the implicit selection but have no client-submitted
 profile.
+
+Model-call preparation carries that exact turn-local Session snapshot through `RunRequest` and
+`PreparedModelCall`. When provider usage is appended, the `turn_marker` copies the snapshot's public
+applied profile and effective limits. A multi-turn run can therefore contain different immutable
+marker snapshots after a boundary profile change; it never stamps all turns with one run-start
+selection or queries a later Session value while appending an earlier turn.
 
 `terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. Subagent parent observation and Subagent Tree unread/result previews read this projection instead of scanning child transcript history.
 
@@ -516,6 +522,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-12** — v73. Added exact terminal Run correlation, durable-before-publication ordering, and exact per-turn inference provenance.
 - **2026-07-12** — v71. Promoted sequential single-head preparation, Session-owned per-turn inference snapshots, buffer-only action transport, buffer-keyed operation execution, handled preparation failures, and same-run profile changes.
 - **2026-07-11** — v70. Added bounded-fork subagent inference overrides, label-only schema guidance, atomic validation, and session-last-used continuation semantics.
 - **2026-07-10** — v69. Added profile-aware FIFO promotion, atomic run activation, immutable resolved provenance, and exact parent-run profile inheritance.
@@ -545,18 +552,27 @@ The warm runner polls input buffers at model-call turn boundaries, so accepted T
 held until the run-complete boundary. If a wake-up reaches the runner and there is no pending command,
 input buffer, or other actionable work, the runner must no-op instead of forcing a model call.
 
+Terminal control events identify one concrete run. `RunComplete`, `RunStopped`, and live-run clear
+payloads require `run_id`; consumers apply them only when that ID exactly matches the run being
+completed or cleared. The worker persists the terminal AgentRun status and result projection before
+publishing the matching terminal control event. A delayed Run A event cannot terminate or clear a
+newer Run B. Generic SessionRunner error reporting does not synthesize `RunComplete`: failures that
+escape an active Run use durable failed-run finalization, while failures before Run activation remain
+error observations without a terminal Run event.
+
 The required run-completion order is:
 
-1. Append or observe the terminal run event (`RunComplete`).
-2. Check whether follow-up work already exists.
-3. If follow-up work exists, keep or restore `running` and continue with the next run.
-4. If no follow-up work exists, transition `AgentSession.run_state` to `idle`.
-5. Clear session activity state that belongs to the completed run.
-6. Run `on_session_idle` hooks.
-7. Collect returned continuation prompts.
-8. Enqueue collected prompts through `InputBufferService`, which inserts the buffers and marks
+1. Persist the terminal AgentRun state and durable terminal transcript output.
+2. Publish or observe the correlated terminal control event (`RunComplete` or `RunStopped`).
+3. Check whether follow-up work already exists.
+4. If follow-up work exists, keep or restore `running` and continue with the next run.
+5. If no follow-up work exists, transition `AgentSession.run_state` to `idle`.
+6. Clear session activity state that belongs to the completed run.
+7. Run `on_session_idle` hooks.
+8. Collect returned continuation prompts.
+9. Enqueue collected prompts through `InputBufferService`, which inserts the buffers and marks
    `AgentSession.run_state` as `running` in the same database transaction.
-9. Publish pending-buffer live state and send a broker wake-up signal.
+10. Publish pending-buffer live state and send a broker wake-up signal.
 
 `on_session_idle` hook providers do not write durable transcript events directly and do not send
 broker wake-ups. They return continuation input only. The input-buffer service owns the atomic

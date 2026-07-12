@@ -92,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-12
-spec_version: 96
+spec_version: 97
 ---
 
 # Conversation & Events
@@ -455,6 +455,15 @@ buffers likewise expose only requested intent. The dedicated live Run projection
 Session inference snapshot's allowlisted physical provenance; clients never infer it from Composer or
 Agent defaults.
 
+Each `turn_marker` with provider usage copies the exact Session inference snapshot applied to that
+model call. The immutable public provenance consists only of the Agent-owned target label, raw
+nullable reasoning effort, nullable user-facing model display name, effective context window, and
+effective automatic-compaction threshold. `run_id` remains the marker-to-AgentRun link. Historical
+markers without these nullable fields remain valid, and readers report provenance as unavailable
+instead of borrowing the current Session, Agent, Composer, or live Run profile. Physical provider and
+model identifiers, integration selection, credentials, and the full resolved selection are not stored
+in the public marker payload.
+
 Both responses use the same event transport shape as the durable transcript. The removed
 `/chat/v1/sessions/{session_id}/messages` aggregate endpoint is not part of the public contract:
 history, live state, pending input, and activity state must not be recombined into a message-list
@@ -482,7 +491,7 @@ WebSocket chat clients receive subscription and event actions:
 - `input_actions_updated` when composer action definitions change, including Skill projection list changes;
 - `todo_state_changed` when the session-scoped TodoToolkit State changes;
 - `live_run_updated` when the authoritative running run projection changes, including failed-run retry state;
-- `live_run_cleared` when terminal run cleanup removes the current run projection;
+- `live_run_cleared` with the exact terminal `run_id` when cleanup removes that current run projection;
 - `action_execution_updated` when an operation TurnAction execution projection changes;
 - `subagent_tree_changed` when subagent tool side effects or wait observation cursors change the
   durable Subagent Tree projection. This event is an invalidation signal only; clients refetch the
@@ -495,7 +504,8 @@ Durable/live handoff follows these invariants:
 - `live_event_removed` removes only the live projection. It must not remove a durable view model that
   has already been promoted from `history_event_appended`.
 - `live_run_updated` replaces the current `run` live-state snapshot atomically; `live_run_cleared`
-  clears only the live run snapshot and does not remove durable transcript events.
+  clears only when its required `run_id` exactly matches the current live run, and it does not remove
+  durable transcript events. A delayed terminal or clear for Run A cannot clear a newer Run B.
 - When a durable event has a matching live counterpart, the worker publishes the history
   append action before publishing the live removal action.
 - If the same semantic entity is present in both durable history and live projection, durable history
@@ -672,6 +682,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-12** — v97. Added exact terminal Run correlation, durable per-turn inference provenance, and historical-marker compatibility.
 - **2026-07-12** — v96. Aligned invariants and verification with Session-owned turn snapshots and terminal buffer-keyed action execution.
 - **2026-07-12** — v95. Promoted sequential single-head preparation, Session inference ownership, buffer-only action transport, and terminal action result history.
 - **2026-07-11** — v94. Added atomic spawn profile validation, `spawn_override` run provenance, and child last-used profile initialization.

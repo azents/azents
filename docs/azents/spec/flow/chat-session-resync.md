@@ -16,7 +16,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-12
-spec_version: 25
+spec_version: 26
 ---
 
 # Chat Session Resync
@@ -70,7 +70,7 @@ sequenceDiagram
 | `live_event_upserted` | server → client | `session_id`, `event` | non-durable live event projection upsert. |
 | `live_event_removed` | server → client | `session_id`, `event_id` | non-durable live projection removal. |
 | `live_run_updated` | server → client | `session_id`, `run` | authoritative current run projection replacement, including `run.retry`. |
-| `live_run_cleared` | server → client | `session_id` | authoritative current run projection removal after terminal cleanup. |
+| `live_run_cleared` | server → client | `session_id`, `run_id` | removes the current run only when the terminal Run ID matches exactly. |
 | `input_actions_updated` | server → client | `session_id` | composer action definitions changed; client reloads `/actions`. |
 | `todo_state_changed` | server → client | `todo` | session todo Toolkit State snapshot changed. |
 | `action_execution_updated` | server → client | `session_id`, `action_execution` | Current operation TurnAction execution projection changed, including status and durable progress events. |
@@ -123,6 +123,15 @@ Response fields:
 
 History events and live/pending event projections preserve immutable requested profile intent. They do not embed associated AgentRun summaries or change when run provenance changes. The dedicated live Run projection carries the current run's allowlisted inference summary. Unknown physical resolution is never derived from Composer or Agent defaults.
 
+A valid non-null running `/live.run` projection overrides a contradictory Session idle field. For
+frontend replacement, `run: null` is an explicit authoritative absence, while a malformed non-null
+Run is an invalid observation that preserves the last valid Run and emits a diagnostic. WebSocket
+observations advance a local generation, and each REST request records its start generation and
+request epoch. A REST response replaces Run, partial history, input buffers, Todo, and action
+executions only when no newer WebSocket observation or newer REST request has superseded it. Exact
+`run_id` matching is also required for `RunComplete`, `RunStopped`, and `live_run_cleared`; a delayed
+Run A event cannot clear active Run B.
+
 Action execution progress is reconciled through `action_execution_updated` and the
 `/live.action_executions` baseline. Clients upsert projections by execution id. Failed operation
 actions are terminal and have no retry/discard mutation response; terminal completed or failed
@@ -164,9 +173,9 @@ tree, tab, and internal-message surfaces use a robot icon as their representativ
 
 ## 5.3 Composer Profile State
 
-The Composer presents separate desktop Model and effort controls and a combined mobile control. Model choices come only from the Agent's selectable target labels. Effort choices come from the selected target's normalized reasoning capabilities; switching to a target that does not support the current explicit effort visibly resets effort to Default.
+The Composer presents separate desktop Model and effort controls and a combined mobile control. Model choices come only from the Agent's selectable target labels. Effort options come from the selected target's normalized reasoning capabilities, but stored, decoded, and rendered effort values are opaque nullable strings. The frontend does not normalize or reject an unknown read-side string; backend submission and preparation remain authoritative for supported values. Switching to a target that does not support the current explicit effort visibly resets effort to Default.
 
-The local draft stores message, selected action, target label, and nullable effort atomically. Restoration precedence is local draft, newest durable or pending human requested intent, session-last-used profile, then Agent default. Edit mode initializes from the edited message's requested profile and restores the ordinary draft when edit is cancelled or completed. Commands may display the current selection but submit a null profile.
+Draft persistence and last-selected-profile persistence are separate agent/session-scoped entries. The draft stores message, selected action, target label, and nullable effort atomically. A successful normal send clears message/action draft data while retaining the selected target and raw effort as last selected. Restoration precedence is unsent draft profile, last-selected profile, durable/default profile, then Agent default. A deleted or unavailable stored target removes only that stale selection and falls through without deleting draft content. Edit mode initializes from the edited message's requested profile, does not overwrite normal Composer persistence, and restores the ordinary persisted draft when edit is cancelled or completed. Commands may display the current selection but submit a null profile.
 
 ## 6. Timeline State Rules
 
@@ -179,7 +188,7 @@ The local draft stores message, selected action, target label, and nullable effo
 - When `run.retry` is present, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history; the normal model dots indicator remains below the card when the run phase is `waiting_for_model` or `streaming_model`.
 - Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
 - Human and actionable input rows show their immutable requested target/effort intent. Historical rows do not resolve or embed the associated run's physical model.
-- Token/context usage binds only when `usage.runId` exactly matches the current live run summary; it is never attributed to a historical event, the newest message, or the current Composer selection by position.
+- Token/context usage prefers immutable provenance stored on the durable `turn_marker`: target label, raw nullable effort, display name, effective context window, and automatic-compaction threshold. For historical markers without provenance, a matching active live Run may supply the profile temporarily; otherwise provenance is unavailable and is never inferred from the newest message, current Session, Agent default, or Composer selection.
 - Follow is active only when scroll viewport is at bottom or in iOS bottom bounce area.
 - When Follow is active, new timeline item and streaming update automatically scroll to bottom.
 - If scroll viewport leaves bottom/bounce area, immediately stop follow; subsequent new timeline items are rendered immediately but do not auto-scroll, and “new message” chip is displayed.
@@ -334,6 +343,7 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 ## 11. Changelog
 
+- **2026-07-12** — v26. Added resilient live snapshot ordering, exact terminal correlation, opaque effort handling, Composer last-selected persistence, and durable token provenance.
 - **2026-07-12** — v25. Promoted buffer-keyed unanchored action progress, terminal success/failure history recovery, and removal of action retry/discard mutations.
 - **2026-07-11** — v24. Kept resolved inference provenance run-owned, removed event-level summaries, and made duplicate history append delivery position-preserving.
 - **2026-07-10** — v23. Added Composer profile restoration, requested/resolved provenance rendering, safe unresolved/failure behavior, and exact run-scoped usage attribution.
