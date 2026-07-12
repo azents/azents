@@ -1703,6 +1703,56 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
 
 
 @pytest.mark.asyncio
+async def test_execute_cancels_pending_run_after_terminal_preparation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed initial preparation cannot leave a recoverable pending run."""
+    lifecycle = _SessionLifecycle()
+    executor = _executor(session_lifecycle=lifecycle)
+    dispatched: list[PublishedEvent] = []
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=True,
+            requested_inference_profile=None,
+            promoted_event_ids=["failure-event"],
+            user_messages=[],
+            has_actionable_work=False,
+        )
+
+    async def resolve_failure(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("resolve_invoke_input should not be called")
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_failure,
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id
+        dispatched.append(event)
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+    )
+
+    assert lifecycle.cancelled_pending_run_ids == [result.run_id]
+    assert lifecycle.terminal_runs == []
+    assert result.terminal_run_status is AgentRunStatus.CANCELLED
+    assert any(isinstance(event, RunComplete) for event in dispatched)
+
+
+@pytest.mark.asyncio
 async def test_execute_ignores_wake_up_without_runtime_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

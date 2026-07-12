@@ -408,12 +408,14 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
+        resuming = execution.status is ActionExecutionStatus.RUNNING
         async with self.session_manager() as session:
-            execution = await self.action_execution_repository.mark_running(
-                session,
-                action_execution_id=execution.id,
-                started_at=datetime.now(UTC),
-            )
+            if not resuming:
+                execution = await self.action_execution_repository.mark_running(
+                    session,
+                    action_execution_id=execution.id,
+                    started_at=datetime.now(UTC),
+                )
             allocation = await self._ensure_action_worktree_allocation(
                 session,
                 execution=execution,
@@ -462,18 +464,59 @@ class SessionGitWorktreeService:
                 context_invalidated=False,
             )
 
-        create_result = await self._run_action_create_worktree_step(
-            runtime=runtime,
-            execution=execution,
-            allocation=allocation,
-            on_projection_updated=on_projection_updated,
-            on_history_event_appended=on_history_event_appended,
-        )
-        if create_result is None:
+        if resuming and allocation.status is SessionGitWorktreeStatus.CREATING:
+            await self._mark_action_execution_failed(
+                execution=execution,
+                allocation=allocation,
+                reason=(
+                    "Git worktree creation was interrupted before its result "
+                    "could be recorded."
+                ),
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
             )
+        if allocation.status in {
+            SessionGitWorktreeStatus.FAILED,
+            SessionGitWorktreeStatus.CLEANUP_PENDING,
+            SessionGitWorktreeStatus.CLEANED,
+            SessionGitWorktreeStatus.CLEANUP_FAILED,
+        }:
+            await self._mark_action_execution_failed(
+                execution=execution,
+                allocation=allocation,
+                reason=allocation.failure_summary or "Git worktree allocation failed.",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        if allocation.status is SessionGitWorktreeStatus.READY:
+            if allocation.base_commit is None:
+                raise RuntimeError("Ready worktree allocation has no base commit")
+            create_result = _CreateWorktreeSuccess(
+                worktree_path=allocation.worktree_path,
+                branch_name=allocation.branch_name,
+                base_commit=allocation.base_commit,
+            )
+        else:
+            create_result = await self._run_action_create_worktree_step(
+                runtime=runtime,
+                execution=execution,
+                allocation=allocation,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            if create_result is None:
+                return GitWorktreeActionExecutionResult(
+                    completed=True,
+                    context_invalidated=False,
+                )
         if not await self._run_action_register_project_step(
             agent_id=agent_id,
             execution=execution,

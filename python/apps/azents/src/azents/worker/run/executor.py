@@ -467,18 +467,26 @@ class RunExecutor:
                     source=InferenceProfileSource.EXPLICIT_INPUT,
                 )
             if initial_input.complete_run:
-                await self.session_lifecycle.mark_agent_run_terminal_if_running(
-                    message.session_id,
-                    run_id=run_id,
-                    status=AgentRunStatus.COMPLETED,
-                )
+                if agent_run.status is AgentRunStatus.PENDING:
+                    await self.session_lifecycle.cancel_pending_agent_run(
+                        message.session_id,
+                        run_id=run_id,
+                    )
+                    terminal_run_status = AgentRunStatus.CANCELLED
+                else:
+                    await self.session_lifecycle.mark_agent_run_terminal_if_running(
+                        message.session_id,
+                        run_id=run_id,
+                        status=AgentRunStatus.COMPLETED,
+                    )
+                    terminal_run_status = AgentRunStatus.COMPLETED
                 await dispatch_event(message.session_id, RunComplete())
                 return RunExecutionResult(
                     toolkits=[],
                     terminal_event_observed=True,
                     no_actionable_work=True,
                     run_id=run_id,
-                    terminal_run_status=AgentRunStatus.COMPLETED,
+                    terminal_run_status=terminal_run_status,
                 )
             if created_run and not initial_input.has_actionable_work:
                 await self.session_lifecycle.cancel_pending_agent_run(
@@ -1714,7 +1722,8 @@ class RunExecutor:
         pending = [
             projection.execution
             for projection in projections
-            if projection.execution.status is ActionExecutionStatus.PENDING
+            if projection.execution.status
+            in {ActionExecutionStatus.PENDING, ActionExecutionStatus.RUNNING}
             and projection.execution.input_buffer_id not in processed_input_buffer_ids
         ]
         for execution in pending:

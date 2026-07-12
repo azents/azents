@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import cast
 
+import pytest
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -723,6 +724,100 @@ class TestSessionGitWorktreeService:
                 "starting_ref": "main",
             }
         ]
+
+    async def test_running_action_recovers_interrupted_creation_as_terminal_failure(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Recovery avoids duplicate worktrees after uncertain interruption."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                "action-interrupted",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            action = CreateGitWorktreeAction(
+                source_project_path="/workspace/agent/repo",
+                starting_ref="main",
+            )
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    id=None,
+                    session_id=agent_session.id,
+                    input_buffer_id="01900000000070008000000000000003",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                ),
+            )
+        interrupted_runner = _RunnerOperations()
+
+        async def interrupt_create(**kwargs: object) -> object:
+            del kwargs
+            raise RuntimeError("worker interrupted")
+
+        monkeypatch.setattr(
+            interrupted_runner,
+            "create_git_worktree",
+            interrupt_create,
+        )
+        with pytest.raises(RuntimeError, match="worker interrupted"):
+            await _service(
+                rdb_session_manager,
+                interrupted_runner,
+            ).run_git_worktree_action(
+                agent_id=agent_id,
+                session_id=agent_session.id,
+                execution=execution,
+                action=action,
+            )
+
+        async with rdb_session_manager() as session:
+            interrupted = await ActionExecutionRepository().get_by_id(
+                session,
+                action_execution_id=execution.id,
+            )
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=agent_session.id,
+            )
+        assert interrupted is not None
+        assert interrupted.status is ActionExecutionStatus.RUNNING
+        assert allocations[0].status is SessionGitWorktreeStatus.CREATING
+
+        recovery_runner = _RunnerOperations()
+        result = await _service(
+            rdb_session_manager,
+            recovery_runner,
+        ).run_git_worktree_action(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            execution=interrupted,
+            action=action,
+        )
+
+        assert result.completed is True
+        assert result.context_invalidated is False
+        assert recovery_runner.calls == []
+        async with rdb_session_manager() as session:
+            recovered = await ActionExecutionRepository().get_by_id(
+                session,
+                action_execution_id=execution.id,
+            )
+        assert recovered is not None
+        assert recovered.status is ActionExecutionStatus.FAILED
+        assert recovered.failure_summary == (
+            "Git worktree creation was interrupted before its result could be recorded."
+        )
 
     async def test_preview_git_refs_lists_source_project_refs(
         self,

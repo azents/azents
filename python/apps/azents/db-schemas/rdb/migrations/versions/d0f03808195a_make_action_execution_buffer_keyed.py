@@ -63,43 +63,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Restore the former action-event identity schema."""
-    op.execute(
-        "DELETE FROM action_executions AS executions "
-        "WHERE NOT EXISTS ("
-        "SELECT 1 FROM events WHERE events.id = executions.input_buffer_id"
-        ")"
-    )
-    op.drop_column("action_executions", "action")
-    op.drop_index(
-        "ix_action_executions_session_id_input_buffer_id",
-        table_name="action_executions",
-    )
-    op.drop_constraint(
-        "uq_action_executions_input_buffer_id",
-        "action_executions",
-        type_="unique",
-    )
-    op.alter_column(
-        "action_executions",
-        "input_buffer_id",
-        new_column_name="action_event_id",
-    )
-    op.create_unique_constraint(
-        "uq_action_executions_action_event_id",
-        "action_executions",
-        ["action_event_id"],
-    )
-    op.create_index(
-        "ix_action_executions_session_id_action_event_id",
-        "action_executions",
-        ["session_id", "action_event_id"],
-    )
-    op.create_foreign_key(
-        "action_executions_action_event_id_fkey",
-        "action_executions",
-        "events",
-        ["action_event_id"],
-        ["id"],
-        ondelete="CASCADE",
+    """Reject lossy restoration of the removed action-event identity."""
+    raise RuntimeError(
+        "d0f03808195a is irreversible because buffer-keyed action executions "
+        "have no transcript event identity"
     )
