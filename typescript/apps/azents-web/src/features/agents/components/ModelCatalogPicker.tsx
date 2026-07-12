@@ -145,7 +145,6 @@ function syncSupportedForIntegration(
   }
   return (
     integration.provider === "aws_bedrock" ||
-    integration.provider === "chatgpt_oauth" ||
     integration.provider === "google_vertex_ai"
   );
 }
