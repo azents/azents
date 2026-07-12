@@ -1,8 +1,8 @@
 """ChatSessionService InputBuffer tests."""
 
 import datetime
+from unittest.mock import patch
 
-import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -236,7 +236,6 @@ class TestChatSessionInputBuffer:
     async def test_list_live_events_running_run_overrides_idle_session_state(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
-        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """A running AgentRun is authoritative over stale Session idle state."""
         async with rdb_session_manager() as session:
@@ -286,10 +285,11 @@ class TestChatSessionInputBuffer:
                 retry_state,
             )
 
-        result = await _service(rdb_session_manager).list_live_events(
-            session_id,
-            user_id=user_id,
-        )
+        with patch("azents.services.chat.logger.warning") as warning:
+            result = await _service(rdb_session_manager).list_live_events(
+                session_id,
+                user_id=user_id,
+            )
 
         assert isinstance(result, Success)
         assert result.value.run is not None
@@ -314,17 +314,14 @@ class TestChatSessionInputBuffer:
         assert result.value.run.retry.attempts[0].attempt_number == 2
         assert result.value.run.retry.attempts[0].user_message == "temporary failure"
         assert result.value.session_run_state == AgentSessionRunState.RUNNING
-        contradiction_record = next(
-            record
-            for record in caplog.records
-            if record.message
-            == "Active AgentRun contradicts persisted Session run state"
-        )
-        assert contradiction_record.__dict__["session_id"] == session_id
-        assert contradiction_record.__dict__["run_id"] == run.id
-        assert (
-            contradiction_record.__dict__["session_run_state"]
-            == AgentSessionRunState.IDLE
+        warning.assert_called_once_with(
+            "Active AgentRun contradicts persisted Session run state",
+            extra={
+                "session_id": session_id,
+                "run_id": run.id,
+                "run_status": AgentRunStatus.RUNNING,
+                "session_run_state": AgentSessionRunState.IDLE,
+            },
         )
 
     async def test_flushed_input_buffer_remains_in_message_history(
