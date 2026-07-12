@@ -22,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-12
-spec_version: 17
+spec_version: 18
 ---
 
 # Run Resume
@@ -39,7 +39,7 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Broker redelivery | Unacked session wake-up signal | Another worker receives and resumes from durable DB state |
 | Stale session activity | Worker recovery scan of `agent_sessions.run_state` | Worker enqueues a wake-up signal for the affected session |
 | Active event run | pending/running `agent_runs`, resolved inference provenance, phase, active tools, and retry state | Runtime preserves the run/input boundary, resumes from an activated snapshot, and repairs missing interrupted results |
-| Pending tool call | Event transcript has call without result | Runtime executes or interrupts the missing result path without duplicating completed results |
+| Pending tool call | Event transcript has call without result | Runtime appends one deterministic cancelled result without executing the handler |
 | Pending operation action | Session has a nonterminal buffer-keyed action execution | Worker resumes it from the durable action payload; terminal failure is not retried and does not permanently block later FIFO input. |
 
 ## Ownership Lease
@@ -206,9 +206,7 @@ Manual failed-run retry is a distinct new pending run. It copies the original re
 
 ## Tool Recovery
 
-If a foreground tool call has no corresponding result after interruption, the runtime appends a
-synthetic `client_tool_result(status=interrupted)` and then appends a terminal run marker. Completed
-tool results are never re-executed.
+Tool recovery reconciles the durable call event, active ownership entry, terminal result, and owner generation before any resumed model dispatch. A previous-generation active call is cancelled best effort and receives one deterministic `client_tool_result(status=cancelled)`. A durable call without active ownership or result is an orphan and receives the same cancelled result without handler execution. A result with stale active ownership keeps the existing result and removes only the stale ownership entry. Completed tool results are never re-executed, and duplicate recovery converges through the result external ID.
 
 ## User Stop Resume Boundary
 
@@ -245,6 +243,7 @@ that next run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-12** (spec_version 18) — Made ownership generation and durable call/result state authoritative for no-reexecution tool recovery.
 - **2026-07-12** (spec_version 17) — Promoted Session-owned per-turn inference recovery, handled preparation failure, buffer-only action transport, buffer-keyed action recovery, and same-run context rebuild.
 - **2026-07-11** (spec_version 16) — Added recovery semantics for pre-resolved `spawn_override` child runs and later session-last-used re-resolution.
 - **2026-07-10** (spec_version 15) — Added pending/activated profile recovery, retry intent re-resolution, and exact inherited parent-run snapshot recovery.
