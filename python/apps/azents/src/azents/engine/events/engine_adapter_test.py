@@ -2,7 +2,7 @@
 
 import asyncio
 import datetime
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
 import pytest
 from pydantic import BaseModel
@@ -77,6 +77,17 @@ from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+
+
+class _OpenToolAdmissionBarrier:
+    """Admission barrier that remains open for adapter tests."""
+
+    closed = False
+
+    async def run_if_open(self, action: Callable[[], Awaitable[None]]) -> bool:
+        """Run one admission action."""
+        await action()
+        return True
 
 
 class _SessionContext:
@@ -626,6 +637,8 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 inference_state=None,
             ),
             RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -671,6 +684,8 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             inference_state=None,
         ),
         RunContext(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             user_id="user-1",
             run_id="0" * 32,
             publish_event=_noop_publish,
@@ -716,6 +731,8 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 inference_state=None,
             ),
             RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -761,6 +778,8 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             inference_state=None,
         ),
         RunContext(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             user_id="user-1",
             run_id="0" * 32,
             publish_event=_noop_publish,
@@ -810,6 +829,8 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 inference_state=None,
             ),
             RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -855,6 +876,8 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 inference_state=None,
             ),
             RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -912,6 +935,8 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 inference_state=None,
             ),
             RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -968,6 +993,8 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 compaction_max_input_tokens=32_000,
             ),
             RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -1331,6 +1358,7 @@ def _agent_session() -> AgentSession:
     """Return legacy agent session for tests."""
     now = datetime.datetime.now(datetime.UTC)
     return AgentSession(
+        owner_generation=0,
         inference_state=None,
         id="session-1",
         workspace_id="workspace-1",
@@ -1357,6 +1385,8 @@ async def _noop_publish(_event: object) -> None:
 def _run_context() -> RunContext:
     """Return manual compaction run context for tests."""
     return RunContext(
+        owner_generation=1,
+        tool_admission_barrier=_OpenToolAdmissionBarrier(),
         user_id="user-1",
         run_id="0" * 32,
         publish_event=_noop_publish,

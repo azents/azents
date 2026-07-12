@@ -154,6 +154,7 @@ class _FakeAgentSessionRepository:
         if session_id != "session-1":
             return None
         return AgentSession(
+            owner_generation=0,
             inference_state=None,
             id="session-1",
             workspace_id="workspace-1",

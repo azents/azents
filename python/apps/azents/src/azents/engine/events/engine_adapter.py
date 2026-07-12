@@ -491,6 +491,8 @@ class AgentEngineAdapter:
                     AgentRunExecutionRequest(
                         run_id=context.run_id,
                         session_id=request.session_id,
+                        owner_generation=context.owner_generation,
+                        tool_admission_barrier=context.tool_admission_barrier,
                         run_index=run_state.run_index,
                         model=request.model,
                         max_turns=request.max_turns,

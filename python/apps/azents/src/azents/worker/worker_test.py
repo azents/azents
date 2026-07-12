@@ -70,7 +70,7 @@ from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.runner import (
     SessionRunner,
 )
-from azents.worker.session.supervisor import RunStopController
+from azents.worker.session.supervisor import RunStopController, ToolAdmissionBarrier
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 
@@ -358,10 +358,12 @@ class _RunExecutor:
         prepare_toolkits: PrepareToolkits | None,
         shutdown_event: asyncio.Event,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+        owner_generation: int,
+        tool_admission_barrier: object,
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Delegate to Host message handling fake."""
-        del shutdown_event, dispatch_event
+        del shutdown_event, dispatch_event, owner_generation, tool_admission_barrier
         if command is not None:
             self.host.commands.append(command)
             self.host.command_processed.set()
@@ -475,11 +477,18 @@ class _Host:
         self.commands: list[PendingSessionCommand] = []
         self.dispatched_events: list[tuple[str, PublishedEvent]] = []
         self.event_dispatched = asyncio.Event()
+        self.owner_generation_claims = 0
 
     @property
     def shutdown_event(self) -> asyncio.Event:
         """Return global shutdown event."""
         return self._shutdown_event
+
+    async def claim_owner_generation(self, session_id: str) -> int:
+        """Return one durable ownership generation for the test runner."""
+        del session_id
+        self.owner_generation_claims += 1
+        return self.owner_generation_claims
 
     async def process_message(
         self,
@@ -733,6 +742,29 @@ def test_observed_terminal_run_event_requires_terminal_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_admission_barrier_orders_admission_before_close() -> None:
+    """Close waits for admitted persistence and rejects later admission."""
+    barrier = ToolAdmissionBarrier()
+    action_started = asyncio.Event()
+    release_action = asyncio.Event()
+
+    async def action() -> None:
+        action_started.set()
+        await release_action.wait()
+
+    admission_task = asyncio.create_task(barrier.run_if_open(action))
+    await action_started.wait()
+    close_task = asyncio.create_task(barrier.close())
+    await asyncio.sleep(0)
+    assert not close_task.done()
+
+    release_action.set()
+    assert await admission_task is True
+    await close_task
+    assert await barrier.run_if_open(action) is False
+
+
+@pytest.mark.asyncio
 async def test_run_stop_controller_user_stop_cancels_active_task_once() -> None:
     """RunStopController delivers user stop as cancel idempotently."""
     controller = RunStopController()
@@ -890,6 +922,7 @@ async def test_noop_wake_up_after_terminal_run_finishes_delayed_idle() -> None:
         await runner.shutdown()
 
     assert host.processed_messages == [first, stale]
+    assert host.owner_generation_claims == 1
     assert host.idle_session_ids == ["session-001"]
     assert host.idle_continuation_calls == [(first, [])]
     assert host.lifecycle_events == [
@@ -1038,13 +1071,13 @@ def test_apply_active_tool_call_event_tracks_until_output() -> None:
         created_at=datetime.now(timezone.utc),
     )
 
-    active = apply_active_tool_call_event([], tool_call)
+    active = apply_active_tool_call_event([], tool_call, owner_generation=1)
     assert len(active) == 1
     assert active[0].call_id == "call-1"
     assert active[0].name == "shell"
     assert active[0].arguments == '{"cmd":"pwd"}'
 
-    active = apply_active_tool_call_event(active, output)
+    active = apply_active_tool_call_event(active, output, owner_generation=1)
     assert active == []
 
 
@@ -1060,8 +1093,8 @@ async def test_replace_live_active_tool_calls_preserves_running_calls() -> None:
         call_id="call-1",
         name="bash",
         arguments='{"command":"sleep 60"}',
-        background=False,
         started_at=datetime.now(timezone.utc),
+        owner_generation=1,
     )
 
     await projector.replace_active_tool_calls(

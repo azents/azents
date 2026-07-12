@@ -85,6 +85,7 @@ class _SubagentLockRepository(AgentSessionRepository):
         self.calls.append("lock_by_id")
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
+            owner_generation=0,
             inference_state=None,
             id=agent_session_id,
             workspace_id="workspace-1",

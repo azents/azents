@@ -495,7 +495,7 @@ class BaseLiveEventStore:
                     name=active_tool_call.name,
                     arguments=active_tool_call.arguments or "",
                     source="active_tool_call",
-                    background=active_tool_call.background,
+                    background=False,
                     created_at=active_tool_call.started_at,
                 )
             )

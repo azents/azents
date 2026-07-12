@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.broker.types import SessionBroker
 from azents.core.enums import AgentRunStatus, EventKind
 from azents.engine.events.engine_events import RunStopped
+from azents.engine.events.tool_calls import finalize_tool_result
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentRunState,
@@ -75,6 +76,7 @@ class UserStopFinalizer:
         await self.live_event_projector.flush_session(session_id)
         await self._persist_live_events_for_user_stop(
             session_id,
+            run_id=effective_run_id,
             active_tool_calls=effective_tool_calls,
         )
         if effective_run_id is not None:
@@ -131,6 +133,7 @@ class UserStopFinalizer:
         self,
         session_id: str,
         *,
+        run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
     ) -> None:
         """Promote live projection to durable history on Stop critical path."""
@@ -138,6 +141,7 @@ class UserStopFinalizer:
         await self._append_live_partial_events(session_id, live_events)
         await self._append_cancelled_tool_results(
             session_id,
+            run_id=run_id,
             active_tool_calls=active_tool_calls,
             live_events=live_events,
         )
@@ -269,37 +273,24 @@ class UserStopFinalizer:
         self,
         session_id: str,
         *,
+        run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
         live_events: Sequence[Event],
     ) -> None:
         """Record cancelled result for Active tool call to durable history."""
-        calls_by_id = {call.call_id: call for call in active_tool_calls}
+        calls_by_id: dict[str, ActiveToolCall | ClientToolCallPayload] = {
+            call.call_id: call for call in active_tool_calls
+        }
         for event in live_events:
             if isinstance(event.payload, ClientToolCallPayload):
-                calls_by_id.setdefault(
-                    event.payload.call_id,
-                    ActiveToolCall(
-                        call_id=event.payload.call_id,
-                        name=event.payload.name,
-                        arguments=event.payload.arguments,
-                        background=False,
-                        started_at=event.created_at,
-                    ),
-                )
+                calls_by_id.setdefault(event.payload.call_id, event.payload)
         if not calls_by_id:
             return
+        if run_id is None:
+            raise RuntimeError("Active tool calls require a running AgentRun")
 
         async def append(db_session: AsyncSession) -> None:
             for call in calls_by_id.values():
-                external_id = f"tool-result:{call.call_id}:cancelled"
-                get_by_external_id = self.event_transcript_repository.get_by_external_id
-                existing = await get_by_external_id(
-                    db_session,
-                    session_id,
-                    external_id,
-                )
-                if existing is not None:
-                    continue
                 payload = ClientToolResultPayload(
                     call_id=call.call_id,
                     name=call.name,
@@ -313,14 +304,14 @@ class UserStopFinalizer:
                         )
                     ],
                 )
-                await self.event_transcript_repository.append(
+                await finalize_tool_result(
                     db_session,
-                    EventCreate(
-                        session_id=session_id,
-                        kind=EventKind.CLIENT_TOOL_RESULT,
-                        payload=payload.model_dump(mode="json", exclude_none=True),
-                        external_id=external_id,
-                    ),
+                    run_repo=self.agent_run_repository,
+                    transcript_repo=self.event_transcript_repository,
+                    run_id=run_id,
+                    session_id=session_id,
+                    call=call,
+                    result=payload,
                 )
 
         await self._run_short_db(

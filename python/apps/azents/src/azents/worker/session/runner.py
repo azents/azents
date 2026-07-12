@@ -102,6 +102,7 @@ class SessionRunner:
         self.started = False
         self.stop_controller = RunStopController()
         self.running_session_id: str | None = None
+        self.owner_generation: int | None = None
         self.toolkit_scope = SessionToolkitScope()
         self.waiter = SessionRunnerWaiter()
         self.run_supervisor = RunTaskSupervisor(
@@ -219,6 +220,7 @@ class SessionRunner:
 
             if self.shutdown_event.is_set():
                 self.stop_controller.request_handover_stop()
+                await self.stop_controller.tool_admission_barrier.close()
                 return True
 
             return False
@@ -232,12 +234,15 @@ class SessionRunner:
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Delegate engine execution to stop/shutdown supervisor."""
+        if self.owner_generation is None:
+            raise RuntimeError("Session ownership generation was not claimed")
         return await self.run_supervisor.run(
             message,
             poll_fn=self._make_poll_fn(),
             check_stop=self._make_check_stop_fn(message.session_id),
             prepare_toolkits=self.prepare_toolkits,
             drain_stop_signals=self._drain_stop_signals,
+            owner_generation=self.owner_generation,
             command=command,
         )
 
@@ -413,6 +418,12 @@ class SessionRunner:
             case ShutdownResult():
                 return False
             case MessageResult(message):
+                if self.running_session_id is None:
+                    self.owner_generation = (
+                        await self.session_lifecycle.claim_owner_generation(
+                            message.session_id
+                        )
+                    )
                 self.running_session_id = message.session_id
                 self.stop_controller.clear_for_next_run()
                 self.handover_wake_up = None

@@ -3,7 +3,7 @@
 import asyncio
 import datetime
 import logging
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +64,41 @@ class _Session(AsyncSession):
         value = self._commit_value() if self._commit_value is not None else 0
         self.commits.append(value)
 
+    async def rollback(self) -> None:
+        """Accept rollback calls from rejected admission tests."""
+
+
+class _OpenToolAdmissionBarrier:
+    """Admission barrier that keeps tests open by default."""
+
+    closed = False
+
+    async def run_if_open(self, action: Callable[[], Awaitable[None]]) -> bool:
+        """Run the requested admission action."""
+        await action()
+        return True
+
+
+class _MutableToolAdmissionBarrier(_OpenToolAdmissionBarrier):
+    """Admission barrier that tests can close after a committed call."""
+
+    closed = False
+
+    def close(self) -> None:
+        """Close future admissions and mark TERM as observed."""
+        self.closed = True
+
+
+class _ClosedToolAdmissionBarrier:
+    """Admission barrier closed before model output can be admitted."""
+
+    closed = True
+
+    async def run_if_open(self, action: Callable[[], Awaitable[None]]) -> bool:
+        """Reject admission without invoking its transaction."""
+        del action
+        return False
+
 
 class _RunRepo:
     """Run repository for tests."""
@@ -72,6 +107,7 @@ class _RunRepo:
         self.phases: list[AgentRunPhase] = []
         self.terminal: AgentRunStatus | None = None
         self.active_tool_calls: list[ActiveToolCall] = []
+        self.active_tool_call_snapshots: list[list[ActiveToolCall]] = []
         self.terminal_result_event_id: str | None = None
         self.terminal_result_message: str | None = None
 
@@ -95,6 +131,14 @@ class _RunRepo:
             updated_at=datetime.datetime.now(datetime.UTC),
         )
 
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState:
+        """Return locked run state."""
+        return await self.get_by_id(session, run_id)
+
     async def update_phase(
         self,
         session: AsyncSession,
@@ -108,6 +152,7 @@ class _RunRepo:
         self.phases.append(phase)
         if active_tool_calls is not None:
             self.active_tool_calls = list(active_tool_calls)
+            self.active_tool_call_snapshots.append(list(active_tool_calls))
         return object()
 
     async def mark_terminal(
@@ -182,6 +227,14 @@ class _TranscriptRepo:
         create: EventCreate,
     ) -> Event:
         """Materialize append request as event."""
+        if create.external_id is not None:
+            existing = await self.get_by_external_id(
+                session,
+                create.session_id,
+                create.external_id,
+            )
+            if existing is not None:
+                return existing
         payload_type = {
             EventKind.ASSISTANT_MESSAGE: AssistantMessagePayload,
             EventKind.CLIENT_TOOL_CALL: ClientToolCallPayload,
@@ -399,10 +452,12 @@ class _ToolExecutor:
     """Tool executor for tests."""
 
     def __init__(self) -> None:
+        self.executed_calls: list[ClientToolCallPayload] = []
         self.cancelled_calls: list[ClientToolCallPayload] = []
 
     async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
         """Return tool result."""
+        self.executed_calls.append(call)
         return ClientToolResultPayload(
             call_id=call.call_id,
             name=call.name,
@@ -413,6 +468,22 @@ class _ToolExecutor:
     def request_cancel(self, call: ClientToolCallPayload) -> None:
         """Record cancellation request."""
         self.cancelled_calls.append(call)
+
+
+class _OrderedToolExecutor(_ToolExecutor):
+    """Hold one parallel call so completion order is deterministic."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocked_started = asyncio.Event()
+        self.release_blocked = asyncio.Event()
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Complete call-1 immediately and hold call-2."""
+        if call.call_id == "call-2":
+            self.blocked_started.set()
+            await self.release_blocked.wait()
+        return await super().execute(call)
 
 
 class _FailingToolExecutor:
@@ -521,17 +592,33 @@ def _usage() -> TokenUsagePayload:
     )
 
 
-def _tool_call_event() -> Event:
+def _tool_call_event(call_id: str = "call-1") -> Event:
     """Create client tool call event."""
     return Event(
         id="0" * 32,
         session_id="session-1",
         kind=EventKind.CLIENT_TOOL_CALL,
         payload=ClientToolCallPayload(
-            call_id="call-1",
+            call_id=call_id,
             name="read_text",
             arguments="{}",
             native_artifact=_artifact(),
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+def _tool_result_event(call_id: str = "call-1") -> Event:
+    """Create client tool result event."""
+    return Event(
+        id="2" * 32,
+        session_id="session-1",
+        kind=EventKind.CLIENT_TOOL_RESULT,
+        payload=ClientToolResultPayload(
+            call_id=call_id,
+            name="read_text",
+            status="completed",
+            output=[OutputTextPart(text="done")],
         ),
         created_at=datetime.datetime.now(datetime.UTC),
     )
@@ -592,6 +679,8 @@ async def test_text_run_completes() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -636,6 +725,8 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
     status = await execution.run(
         session,
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -675,6 +766,8 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -744,6 +837,8 @@ async def test_model_usage_is_appended_as_turn_marker(
         status = await execution.run(
             _Session(),
             AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -805,6 +900,8 @@ async def test_model_input_uses_session_head_event_id() -> None:
     await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -812,6 +909,40 @@ async def test_model_input_uses_session_head_event_id() -> None:
     )
 
     assert transcript_repo.head_event_ids == ["2" * 32]
+
+
+async def test_closed_admission_barrier_prevents_call_and_handler_start() -> None:
+    """TERM observed before admission leaves no call event or handler side effect."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _ToolExecutor()
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event()]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            owner_generation=2,
+            tool_admission_barrier=_ClosedToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.RUNNING
+    assert transcript_repo.events == []
+    assert tool_executor.executed_calls == []
+    assert run_repo.active_tool_calls == []
 
 
 async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
@@ -832,6 +963,8 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -841,9 +974,126 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
 
     assert status == AgentRunStatus.INTERRUPTED
     assert AgentRunPhase.EXECUTING_TOOLS in run_repo.phases
-    assert any(
-        event.kind == EventKind.CLIENT_TOOL_RESULT for event in transcript_repo.events
+    tool_events = [
+        event
+        for event in transcript_repo.events
+        if event.kind in {EventKind.CLIENT_TOOL_CALL, EventKind.CLIENT_TOOL_RESULT}
+    ]
+    assert [event.external_id for event in tool_events] == [
+        "tool-call:run-1:call-1",
+        "tool-result:run-1:call-1",
+    ]
+
+
+async def test_parallel_calls_finalize_independently() -> None:
+    """One parallel completion removes only that call before peers finish."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _OrderedToolExecutor()
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer(
+            [_tool_call_event("call-1"), _tool_call_event("call-2")]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
     )
+    run_task = asyncio.create_task(
+        execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=3,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+                max_turns=1,
+            ),
+        )
+    )
+
+    await asyncio.wait_for(tool_executor.blocked_started.wait(), timeout=1)
+
+    async def wait_for_first_result() -> None:
+        while not any(
+            event.kind == EventKind.CLIENT_TOOL_RESULT
+            for event in transcript_repo.events
+        ):
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_first_result(), timeout=1)
+    assert [call.call_id for call in run_repo.active_tool_calls] == ["call-2"]
+    assert run_repo.active_tool_calls[0].owner_generation == 3
+
+    tool_executor.release_blocked.set()
+    assert await run_task == AgentRunStatus.INTERRUPTED
+    assert run_repo.active_tool_calls == []
+    result_ids = [
+        event.external_id
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert result_ids == [
+        "tool-result:run-1:call-1",
+        "tool-result:run-1:call-2",
+    ]
+
+
+async def test_term_after_admission_keeps_normal_result_and_run_recoverable() -> None:
+    """Admitted work may finish after TERM without dispatching another model turn."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _OrderedToolExecutor()
+    barrier = _MutableToolAdmissionBarrier()
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event("call-2")]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    async def check_stop() -> bool:
+        return barrier.closed
+
+    run_task = asyncio.create_task(
+        execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=4,
+                tool_admission_barrier=barrier,
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+            check_stop=check_stop,
+        )
+    )
+    await asyncio.wait_for(tool_executor.blocked_started.wait(), timeout=1)
+    barrier.close()
+    tool_executor.release_blocked.set()
+
+    assert await run_task == AgentRunStatus.RUNNING
+    result_events = [
+        event
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert len(result_events) == 1
+    payload = result_events[0].payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.status == "completed"
+    assert run_repo.terminal is None
+    assert run_repo.active_tool_calls == []
 
 
 async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
@@ -869,6 +1119,8 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -926,6 +1178,8 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -982,6 +1236,8 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
         await execution.run(
             _Session(),
             AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -1013,6 +1269,8 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1051,6 +1309,8 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1107,6 +1367,8 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1174,6 +1436,8 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1236,6 +1500,8 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1273,6 +1539,8 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1293,8 +1561,8 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     assert result_events[0] in lowerer.transcripts[0]
 
 
-async def test_active_orphan_tool_call_is_not_cancelled_before_lowering() -> None:
-    """Active tool calls remaining in state are not cancelled repair targets."""
+async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> None:
+    """Never replay an admitted call when execution resumes."""
     run_repo = _RunRepo()
     run_repo.active_tool_calls = [
         ActiveToolCall(
@@ -1302,7 +1570,7 @@ async def test_active_orphan_tool_call_is_not_cancelled_before_lowering() -> Non
             name="read_text",
             arguments="{}",
             started_at=datetime.datetime.now(datetime.UTC),
-            background=False,
+            owner_generation=1,
         )
     ]
     transcript_repo = _TranscriptRepo()
@@ -1322,6 +1590,8 @@ async def test_active_orphan_tool_call_is_not_cancelled_before_lowering() -> Non
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1329,9 +1599,97 @@ async def test_active_orphan_tool_call_is_not_cancelled_before_lowering() -> Non
     )
 
     assert status == AgentRunStatus.COMPLETED
-    assert all(
-        event.kind != EventKind.CLIENT_TOOL_RESULT for event in lowerer.transcripts[0]
+    result_events = [
+        event
+        for event in lowerer.transcripts[0]
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert len(result_events) == 1
+    payload = result_events[0].payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.status == "cancelled"
+    assert run_repo.active_tool_calls == []
+
+
+async def test_stale_active_entry_with_result_is_removed_without_replacement() -> None:
+    """Preserve the terminal result and clear only stale active ownership."""
+    run_repo = _RunRepo()
+    run_repo.active_tool_calls = [
+        ActiveToolCall(
+            call_id="call-1",
+            name="read_text",
+            arguments="{}",
+            started_at=datetime.datetime.now(datetime.UTC),
+            owner_generation=1,
+        )
+    ]
+    transcript_repo = _TranscriptRepo()
+    transcript_repo.events.extend([_tool_call_event(), _tool_result_event()])
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
     )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            owner_generation=2,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert run_repo.active_tool_calls == []
+    results = [
+        event
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert len(results) == 1
+    result_payload = results[0].payload
+    assert isinstance(result_payload, ClientToolResultPayload)
+    assert result_payload.status == "completed"
+
+
+async def test_active_entry_without_call_event_fails_invariant() -> None:
+    """Never execute state that lacks its authoritative durable call event."""
+    run_repo = _RunRepo()
+    run_repo.active_tool_calls = [
+        ActiveToolCall(
+            call_id="missing-call",
+            name="read_text",
+            arguments="{}",
+            started_at=datetime.datetime.now(datetime.UTC),
+            owner_generation=1,
+        )
+    ]
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        run_repo=run_repo,
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    with pytest.raises(RuntimeError, match="no durable call event"):
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=2,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
 
 
 async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
@@ -1362,6 +1720,8 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1397,6 +1757,8 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1409,8 +1771,8 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     ]
 
 
-async def test_non_user_tool_cancellation_reraises_without_repair() -> None:
-    """Non-user tool cancellation propagates cancellation without durable repair."""
+async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
+    """Shutdown cancellation records one deterministic result before handover."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor()
@@ -1429,6 +1791,8 @@ async def test_non_user_tool_cancellation_reraises_without_repair() -> None:
         await execution.run(
             _Session(),
             AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -1440,9 +1804,12 @@ async def test_non_user_tool_cancellation_reraises_without_repair() -> None:
         for event in transcript_repo.events
         if event.kind == EventKind.CLIENT_TOOL_RESULT
     ]
-    assert result_events == []
-    assert run_repo.active_tool_calls
-    assert tool_executor.cancelled_calls == []
+    assert len(result_events) == 1
+    payload = result_events[0].payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.status == "cancelled"
+    assert run_repo.active_tool_calls == []
+    assert [call.call_id for call in tool_executor.cancelled_calls] == ["call-1"]
 
 
 async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
@@ -1464,6 +1831,8 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1516,6 +1885,8 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1545,6 +1916,8 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1584,6 +1957,8 @@ async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1625,6 +2000,8 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     status = await execution.run(
         _Session(),
         AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1656,6 +2033,8 @@ async def test_empty_model_output_propagates_for_retry() -> None:
         await execution.run(
             _Session(),
             AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -1690,6 +2069,8 @@ async def test_blank_assistant_message_propagates_for_retry() -> None:
         await execution.run(
             _Session(),
             AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -1719,6 +2100,8 @@ async def test_model_call_error_propagates_for_retry() -> None:
         await execution.run(
             _Session(),
             AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",

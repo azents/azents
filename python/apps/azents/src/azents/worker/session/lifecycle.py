@@ -41,6 +41,16 @@ class SessionLifecycleService:
         InputBufferRepository, Depends(InputBufferRepository)
     ]
 
+    async def claim_owner_generation(self, session_id: str) -> int:
+        """Claim the next durable generation after Redis ownership acquisition."""
+        async with self.session_manager() as db_session:
+            generation = await self.agent_session_repository.claim_owner_generation(
+                db_session,
+                session_id,
+            )
+            await db_session.commit()
+            return generation
+
     async def release_session_lock(self, session_id: str) -> None:
         """Release session lock."""
         await self.broker.release_session_lock(session_id)

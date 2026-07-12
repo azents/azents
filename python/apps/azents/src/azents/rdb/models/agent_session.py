@@ -320,6 +320,12 @@ class RDBAgentSession(RDBModel):
         server_default=sa.func.now(),
         nullable=False,
     )
+    owner_generation: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        init=False,
+        server_default="0",
+        nullable=False,
+    )
     pending_command_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         init=False,

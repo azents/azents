@@ -177,6 +177,7 @@ async def test_replace_active_tool_calls_removes_stale_tool_projection() -> None
                 name="bash",
                 arguments='{"cmd":"sleep"}',
                 started_at=now,
+                owner_generation=1,
             )
         ],
     )
@@ -198,6 +199,7 @@ async def test_tool_call_live_projection_stays_until_result() -> None:
                 name="bash",
                 arguments='{"cmd":"sleep"}',
                 started_at=now,
+                owner_generation=1,
             )
         ],
     )

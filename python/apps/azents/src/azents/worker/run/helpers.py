@@ -15,6 +15,8 @@ from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 def apply_active_tool_call_event(
     active_tool_calls: list[ActiveToolCall],
     event: object,
+    *,
+    owner_generation: int,
 ) -> list[ActiveToolCall]:
     """Reflect event in running tool call list."""
     if isinstance(event, Event):
@@ -31,7 +33,7 @@ def apply_active_tool_call_event(
                     name=payload.name,
                     arguments=payload.arguments,
                     started_at=event.created_at,
-                    background=False,
+                    owner_generation=owner_generation,
                 ),
             ]
         if isinstance(payload, ClientToolResultPayload):
