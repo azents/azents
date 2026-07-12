@@ -6,7 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
 last_verified_at: 2026-07-12
-spec_version: 13
+spec_version: 14
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -14,6 +14,8 @@ code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/__init__.py
   - python/apps/azents/src/azents/api/public/chat/v1/data.py
   - python/apps/azents/src/azents/repos/agent_execution/__init__.py
+  - python/apps/azents/src/azents/engine/events/types.py
+  - python/apps/azents/src/azents/engine/events/execution.py
   - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/features/agents/AgentContextPage.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
@@ -63,7 +65,7 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 - `cost_usd`
 - raw provider usage payload
 
-Chat tab header finds the most recent `turn_marker` usage from the loaded/live chat timeline and shows it in the token usage indicator. When clicked, the popup shows total, prompt, completion, cache read/write, and reasoning token counts. If the usage marker's `run_id` matches the currently active live run, the popup also shows that run's Session-owned applied model target label. Otherwise model provenance is reported as unavailable rather than projecting the Session's current profile onto historical usage. Effective context-window and automatic-compaction-threshold values are not rendered in this indicator.
+Chat tab header finds the most recent `turn_marker` usage from the loaded/live chat timeline and shows it in the token usage indicator. When clicked, the popup shows total, prompt, completion, cache read/write, and reasoning token counts. New markers also carry an immutable allowlisted snapshot of the exact Session inference state applied to that model call: target label, raw nullable reasoning effort, nullable model display name, effective context window, and effective automatic-compaction threshold. The popup renders this durable snapshot after terminal cleanup and reload. Historical markers without the snapshot remain valid; a matching active live Run may temporarily provide its applied profile, otherwise provenance and effective limits render as unavailable. Readers never substitute the current Session, Agent default, or Composer selection.
 
 ## Approximate Breakdown
 
@@ -105,7 +107,7 @@ Ready state includes this UI:
 
 ## Verification
 
-As of 2026-07-12, verified through the sequential input preparation stack and existing context inspector checks. Version 13 aligns token usage provenance with the active Session inference snapshot and removes the obsolete Agent-level effective-limit display contract.
+As of 2026-07-12, verified through the chat Run state hardening stack and existing context inspector checks. Version 14 persists immutable per-turn provenance and effective limits so historical usage remains interpretable after live Run cleanup, while preserving unavailable behavior for older markers.
 
 ```bash
 cd python/apps/azents && uv run ruff check src/azents/services/chat/context.py
