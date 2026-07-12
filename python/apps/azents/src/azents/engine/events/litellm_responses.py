@@ -21,6 +21,10 @@ from openai.types.responses.tool_param import ToolParam
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import TypeAdapter, ValidationError
 
+from azents.core.chatgpt_oauth import (
+    CHATGPT_OAUTH_PROTOCOL_VERSION,
+    CHATGPT_RESPONSES_LITE_HEADER,
+)
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.engine.events.file_parts import (
@@ -300,10 +304,87 @@ class LiteLLMResponsesLowerer:
             model_developer=self._model_developer,
         )
         kwargs.update(hosted.kwargs)
+        if self._uses_responses_lite():
+            return self._lower_responses_lite_request(
+                model=model,
+                input_items=input_items,
+                tools=tools,
+                instructions=(
+                    system_prompt if system_prompt is not None else instructions
+                ),
+                kwargs=kwargs,
+            )
         return NativeModelRequest(
             model=model,
             input=input_items,
             tools=tools,
+            kwargs=kwargs,
+        )
+
+    def _uses_responses_lite(self) -> bool:
+        """Return whether the saved model snapshot requires Responses Lite."""
+        return (
+            self._provider_id == LLMProvider.CHATGPT_OAUTH
+            and self._model_capabilities.compatibility.responses_lite
+        )
+
+    def _lower_responses_lite_request(
+        self,
+        *,
+        model: str,
+        input_items: Sequence[dict[str, object]],
+        tools: Sequence[dict[str, object]],
+        instructions: str,
+        kwargs: dict[str, object],
+    ) -> NativeModelRequest:
+        """Apply the ChatGPT Responses Lite request contract."""
+        kwargs.pop("instructions", None)
+        kwargs["parallel_tool_calls"] = False
+        kwargs["store"] = False
+        reasoning = kwargs.get("reasoning")
+        if reasoning is None:
+            kwargs["reasoning"] = {"context": "all_turns"}
+        elif isinstance(reasoning, dict):
+            kwargs["reasoning"] = {**reasoning, "context": "all_turns"}
+        else:
+            raise TypeError("LiteLLM kwarg reasoning must be dict")
+        session_id = self._prompt_cache_scope
+        if session_id is None or not session_id.strip():
+            raise ValueError("Responses Lite requires a session identifier")
+        kwargs["prompt_cache_key"] = session_id
+        headers = _merged_string_headers(kwargs.get("extra_headers"))
+        headers.update(
+            {
+                "session-id": session_id,
+                "x-session-affinity": session_id,
+            }
+        )
+        headers.update(
+            {
+                "version": CHATGPT_OAUTH_PROTOCOL_VERSION,
+                CHATGPT_RESPONSES_LITE_HEADER: "true",
+            }
+        )
+        kwargs["extra_headers"] = headers
+        prefix: list[dict[str, object]] = [
+            {
+                "type": "additional_tools",
+                "role": "developer",
+                "tools": list(tools),
+            }
+        ]
+        if instructions:
+            prefix.append(
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": instructions}],
+                }
+            )
+        return NativeModelRequest(
+            model=model,
+            input=[*prefix, *_strip_responses_lite_image_details(input_items)],
+            tools=[],
             kwargs=kwargs,
         )
 
@@ -480,6 +561,46 @@ def _openai_prompt_cache_key(scope: str | None) -> str | None:
         return None
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
     return f"{_PROMPT_CACHE_KEY_PREFIX}:{digest}"[:_OPENAI_PROMPT_CACHE_KEY_MAX_CHARS]
+
+
+def _merged_string_headers(value: object) -> dict[str, str]:
+    """Copy optional string headers for provider-specific augmentation."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    ):
+        raise TypeError("LiteLLM kwarg extra_headers must be dict[str, str]")
+    return dict(value)
+
+
+def _strip_responses_lite_image_details(
+    input_items: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Remove unsupported image detail fields from Responses Lite input."""
+    stripped: list[dict[str, object]] = []
+    for item in input_items:
+        copied = dict(item)
+        content = copied.get("content")
+        if isinstance(content, list):
+            copied["content"] = [
+                _strip_image_detail_from_part(part) for part in content
+            ]
+        output = copied.get("output")
+        if isinstance(output, list):
+            copied["output"] = [_strip_image_detail_from_part(part) for part in output]
+        stripped.append(copied)
+    return stripped
+
+
+def _strip_image_detail_from_part(part: object) -> object:
+    """Copy one content part without an input image detail field."""
+    if not isinstance(part, dict):
+        return part
+    copied = dict(part)
+    if copied.get("type") == "input_image":
+        copied.pop("detail", None)
+    return copied
 
 
 def _append_include_value(
@@ -915,11 +1036,14 @@ def _optional_float(kwargs: dict[str, object], key: str) -> float | None:
 
 
 def _optional_reasoning(kwargs: dict[str, object], key: str) -> Reasoning | None:
-    """Return optional reasoning kwarg."""
+    """Return optional reasoning kwarg while preserving Lite extensions."""
     value = kwargs.get(key)
     if value is None:
         return None
-    return _REASONING_ADAPTER.validate_python(value)
+    validated = _REASONING_ADAPTER.validate_python(value)
+    if isinstance(value, dict) and value.get("context") == "all_turns":
+        return cast(Reasoning, {**validated, "context": "all_turns"})
+    return validated
 
 
 def _optional_stop(kwargs: dict[str, object], key: str) -> str | list[str] | None:
