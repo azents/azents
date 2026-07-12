@@ -14,9 +14,6 @@ from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
     ClientToolCallPayload,
-    ClientToolResultPayload,
-    Event,
-    NativeArtifact,
     ReasoningPayload,
 )
 from azents.repos.input_buffer.data import InputBuffer
@@ -25,21 +22,9 @@ from .live_events import (
     InMemoryLiveEventStore,
     LiveEventStore,
     RedisLiveEventStore,
+    active_tool_call_to_live_event,
     input_buffer_to_live_event,
 )
-
-
-def _native_artifact() -> NativeArtifact:
-    """Create native artifact for tests."""
-    return NativeArtifact(
-        compat_key="test:test:test:test:1",
-        adapter="test",
-        native_format="test",
-        provider="test",
-        model="test",
-        schema_version="1",
-        item={},
-    )
 
 
 def test_action_input_buffer_live_event_preserves_requested_profile() -> None:
@@ -101,27 +86,9 @@ async def _assert_live_store_contract(store: LiveEventStore) -> None:
     )
     await store.append_reasoning_delta(session_id, delta="think", now=now)
     await store.append_reasoning_delta(session_id, delta="ing", now=now)
-    await store.append_client_tool_call_delta(
-        session_id,
-        call_id="call-1",
-        name="bash",
-        arguments_delta='{"cmd"',
-        index=0,
-        now=now,
-    )
-    await store.append_client_tool_call_delta(
-        session_id,
-        call_id="call-1",
-        name=None,
-        arguments_delta=':"ls"}',
-        index=0,
-        now=now,
-    )
-
     events = await store.list_by_session_id(session_id)
     assert {event.kind for event in events} == {
         EventKind.ASSISTANT_MESSAGE,
-        EventKind.CLIENT_TOOL_CALL,
         EventKind.REASONING,
     }
 
@@ -136,13 +103,6 @@ async def _assert_live_store_contract(store: LiveEventStore) -> None:
     )
     assert isinstance(reasoning_payload, ReasoningPayload)
     assert reasoning_payload.text == "thinking"
-
-    tool_payload = next(
-        event.payload for event in events if event.kind == EventKind.CLIENT_TOOL_CALL
-    )
-    assert isinstance(tool_payload, ClientToolCallPayload)
-    assert tool_payload.name == "bash"
-    assert tool_payload.arguments == '{"cmd":"ls"}'
 
     await store.remove_live_counterpart(assistant)
     assert all(
@@ -163,76 +123,22 @@ async def test_redis_live_event_store_contract(redis: Redis) -> None:
     await _assert_live_store_contract(RedisLiveEventStore(redis))
 
 
-@pytest.mark.asyncio
-async def test_replace_active_tool_calls_removes_stale_tool_projection() -> None:
-    """Active tool call projection is replaced as a set."""
-    store = InMemoryLiveEventStore()
+def test_active_tool_call_projection_has_stable_live_shape() -> None:
+    """PostgreSQL active calls use the same stable event shape as tool deltas."""
     now = datetime.datetime(2026, 6, 4, tzinfo=datetime.UTC)
-
-    await store.replace_active_tool_calls(
+    event = active_tool_call_to_live_event(
         "session-1",
-        [
-            ActiveToolCall(
-                call_id="call-1",
-                name="bash",
-                arguments='{"cmd":"sleep"}',
-                started_at=now,
-                owner_generation=1,
-            )
-        ],
-    )
-    await store.replace_active_tool_calls("session-1", [])
-
-    assert await store.list_by_session_id("session-1") == []
-
-
-@pytest.mark.asyncio
-async def test_tool_call_live_projection_stays_until_result() -> None:
-    """Durable tool call alone does not remove running live projection."""
-    store = InMemoryLiveEventStore()
-    now = datetime.datetime(2026, 6, 4, tzinfo=datetime.UTC)
-    await store.replace_active_tool_calls(
-        "session-1",
-        [
-            ActiveToolCall(
-                call_id="call-1",
-                name="bash",
-                arguments='{"cmd":"sleep"}',
-                started_at=now,
-                owner_generation=1,
-            )
-        ],
+        ActiveToolCall(
+            call_id="call-1",
+            name="bash",
+            arguments='{"cmd":"sleep"}',
+            started_at=now,
+            owner_generation=1,
+        ),
     )
 
-    await store.remove_live_counterpart(
-        Event(
-            id="1".rjust(32, "0"),
-            session_id="session-1",
-            kind=EventKind.CLIENT_TOOL_CALL,
-            payload=ClientToolCallPayload(
-                call_id="call-1",
-                name="bash",
-                arguments='{"cmd":"sleep"}',
-                native_artifact=_native_artifact(),
-            ),
-            created_at=now,
-        )
-    )
-    assert len(await store.list_by_session_id("session-1")) == 1
-
-    await store.remove_live_counterpart(
-        Event(
-            id="2".rjust(32, "0"),
-            session_id="session-1",
-            kind=EventKind.CLIENT_TOOL_RESULT,
-            payload=ClientToolResultPayload(
-                call_id="call-1",
-                name="bash",
-                status="completed",
-                output="done",
-                attachments=[],
-            ),
-            created_at=now,
-        )
-    )
-    assert await store.list_by_session_id("session-1") == []
+    assert event.kind == EventKind.CLIENT_TOOL_CALL
+    assert isinstance(event.payload, ClientToolCallPayload)
+    assert event.payload.call_id == "call-1"
+    assert event.payload.arguments == '{"cmd":"sleep"}'
+    assert event.created_at == now

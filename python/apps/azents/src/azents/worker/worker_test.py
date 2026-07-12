@@ -216,7 +216,6 @@ class _LiveEventStore:
         self._after = after
         self._listed = 0
         self.removed_counterparts: list[str] = []
-        self.active_tool_call_replacements: list[tuple[str, list[ActiveToolCall]]] = []
         self.assistant_deltas: list[tuple[str, str, int]] = []
         self.reasoning_deltas: list[tuple[str, str]] = []
         self.cleared_session_ids: list[str] = []
@@ -239,14 +238,6 @@ class _LiveEventStore:
     async def remove(self, session_id: str, event_id: str) -> None:
         """Record remove request event ID."""
         self.removed_events.append((session_id, event_id))
-
-    async def replace_active_tool_calls(
-        self,
-        session_id: str,
-        active_tool_calls: list[ActiveToolCall],
-    ) -> None:
-        """Record active tool call replacement request."""
-        self.active_tool_call_replacements.append((session_id, active_tool_calls))
 
     async def append_assistant_delta(
         self,
@@ -1082,12 +1073,13 @@ def test_apply_active_tool_call_event_tracks_until_output() -> None:
 
 
 @pytest.mark.asyncio
-async def test_replace_live_active_tool_calls_preserves_running_calls() -> None:
-    """Running tool call list is also reflected as-is in REST live state store."""
+async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None:
+    """Running tool calls broadcast without entering the Redis live store."""
     live_store = _LiveEventStore(before=[], after=[])
+    broadcast = _Broadcast()
     projector = LiveEventProjector(
         live_event_store=cast(Any, live_store),
-        broadcast=cast(WebSocketBroadcast, _Broadcast()),
+        broadcast=cast(WebSocketBroadcast, broadcast),
     )
     active_tool_call = ActiveToolCall(
         call_id="call-1",
@@ -1102,9 +1094,9 @@ async def test_replace_live_active_tool_calls_preserves_running_calls() -> None:
         [active_tool_call],
     )
 
-    assert live_store.active_tool_call_replacements == [
-        ("session-1", [active_tool_call])
-    ]
+    assert live_store.removed_events == []
+    assert len(broadcast.events) == 1
+    assert broadcast.events[0][1]["type"] == "live_event_upserted"
 
 
 @pytest.mark.asyncio

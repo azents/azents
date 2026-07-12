@@ -1,11 +1,9 @@
 """Broker type definitions."""
 
 import dataclasses
-from collections.abc import Sequence
 from typing import Literal, Protocol
 
 from azents.core.enums import AgentRunPhase
-from azents.engine.events.types import ActiveToolCall
 from azents.engine.run.emit import PublishedEvent
 
 
@@ -15,7 +13,6 @@ class SessionActivity:
 
     run_id: str
     phase: AgentRunPhase | None = None
-    active_tool_calls: list[ActiveToolCall] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -94,7 +91,6 @@ class SessionBroker(Protocol):
         *,
         run_id: str,
         phase: AgentRunPhase | None = None,
-        active_tool_calls: Sequence[ActiveToolCall] = (),
     ) -> None:
         """Record that a session is being processed with automatic TTL refresh."""
         ...

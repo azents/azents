@@ -1,5 +1,6 @@
 """Live event projector Run-correlation tests."""
 
+import datetime
 from typing import cast
 
 import pytest
@@ -8,6 +9,7 @@ from azents.broker.broadcast import WebSocketBroadcast
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.engine_events import RunComplete
+from azents.engine.events.types import ActiveToolCall
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.worker.live.event_projector import LiveEventProjector
@@ -78,3 +80,35 @@ async def test_stale_terminal_event_does_not_clear_newer_run_projection() -> Non
         "session_id": "session-001",
         "run_id": "run-b",
     }
+
+
+@pytest.mark.asyncio
+async def test_active_tool_calls_broadcast_without_redis_storage() -> None:
+    """Active calls broadcast directly from PostgreSQL state."""
+    store = _LiveEventStore()
+    broadcast = _Broadcast()
+    projector = LiveEventProjector(
+        live_event_store=cast(RedisLiveEventStore, store),
+        broadcast=cast(WebSocketBroadcast, broadcast),
+    )
+    active_call = ActiveToolCall(
+        call_id="call-1",
+        name="bash",
+        arguments='{"cmd":"sleep"}',
+        started_at=datetime.datetime(2026, 6, 4, tzinfo=datetime.UTC),
+        owner_generation=1,
+    )
+
+    await projector.replace_active_tool_calls("session-001", [active_call])
+    await projector.replace_active_tool_calls("session-001", [])
+
+    assert [event[1]["type"] for event in broadcast.events] == [
+        "live_event_upserted",
+        "live_event_removed",
+    ]
+    upserted = broadcast.events[0][1]["event"]
+    assert isinstance(upserted, dict)
+    payload = upserted["payload"]
+    assert isinstance(payload, dict)
+    assert payload["call_id"] == "call-1"
+    assert broadcast.events[1][1]["event_id"] == upserted["id"]

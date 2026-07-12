@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import AgentRunPhase, AgentRunStatus
-from azents.engine.events.types import ActiveToolCall, AgentRunState
+from azents.engine.events.types import AgentRunState
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -69,14 +69,12 @@ class SessionLifecycleService:
         *,
         run_id: str,
         phase: AgentRunPhase | None = None,
-        active_tool_calls: Sequence[ActiveToolCall] = (),
     ) -> None:
         """Record session activity and refresh TTL."""
         await self.broker.set_session_activity(
             session_id,
             run_id=run_id,
             phase=phase,
-            active_tool_calls=active_tool_calls,
         )
 
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:

@@ -1044,7 +1044,6 @@ class RunExecutor:
                 message.session_id,
                 run_id=run_id,
                 phase=active_phase,
-                active_tool_calls=active_tool_calls,
             )
             await publish_live_run()
 
@@ -1052,6 +1051,10 @@ class RunExecutor:
         await dispatch_event(
             message.session_id,
             RunStarted(run_id=run_id, phase=active_phase),
+        )
+        await self.live_event_projector.replace_active_tool_calls(
+            message.session_id,
+            active_tool_calls,
         )
         await publish_session_tree_changed()
         now = loop.time()
@@ -1558,7 +1561,6 @@ class RunExecutor:
             session_id,
             run_id=run_id,
             phase=None,
-            active_tool_calls=[],
         )
         return retry_state
 

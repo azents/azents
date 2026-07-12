@@ -9,7 +9,6 @@ same worker handles messages for the same session.
 
 import logging
 import time
-from collections.abc import Sequence
 from typing import Any, NamedTuple, cast
 
 from pydantic import TypeAdapter
@@ -17,7 +16,6 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError, ResponseError
 
 from azents.core.enums import AgentRunPhase
-from azents.engine.events.types import ActiveToolCall
 
 from .types import BrokerMessage, PublishedEvent, SessionActivity, SessionWakeUp
 
@@ -400,21 +398,18 @@ class RedisBroker:
         *,
         run_id: str,
         phase: AgentRunPhase | None = None,
-        active_tool_calls: Sequence[ActiveToolCall] = (),
     ) -> None:
         """Record that a session is being processed.
 
         :param session_id: Session ID
         :param run_id: Run ID
         :param phase: Current agent run phase
-        :param active_tool_calls: Active tool call list
         """
         key = f"{self._SESSION_PREFIX}{session_id}:activity"
         value = _session_activity_adapter.dump_json(
             SessionActivity(
                 run_id=run_id,
                 phase=phase,
-                active_tool_calls=list(active_tool_calls),
             )
         )
         await self._redis.set(key, value, ex=self._ACTIVITY_TTL)

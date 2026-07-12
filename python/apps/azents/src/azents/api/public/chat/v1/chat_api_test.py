@@ -1,7 +1,6 @@
 """Chat v1 public endpoint tests."""
 
 import datetime
-from collections.abc import Sequence
 from typing import cast
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
@@ -72,11 +71,7 @@ from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
     SkillAction,
 )
-from azents.engine.events.types import (
-    ActiveToolCall,
-    Event,
-    UserMessagePayload,
-)
+from azents.engine.events.types import Event, UserMessagePayload
 from azents.engine.run.input import InputMessage
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.skill import SkillProjectionState
@@ -147,7 +142,6 @@ class _MemoryBroker:
         *,
         run_id: str,
         phase: AgentRunPhase | None = None,
-        active_tool_calls: Sequence[ActiveToolCall] = (),
     ) -> None:
         """Not used in tests."""
 

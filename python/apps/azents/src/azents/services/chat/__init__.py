@@ -23,7 +23,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.action_messages import CreateGitWorktreeAction
-from azents.engine.events.types import AgentRunState, Event
+from azents.engine.events.types import AgentRunState, ClientToolCallPayload, Event
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
 from azents.rdb.deps import get_session_manager
@@ -97,7 +97,11 @@ from .data import (
     UpdateGoalStatusInput,
     UpdateSessionTitleError,
 )
-from .live_events import LiveEventStore, input_buffer_to_live_event
+from .live_events import (
+    LiveEventStore,
+    active_tool_call_to_live_event,
+    input_buffer_to_live_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1006,6 +1010,17 @@ class ChatSessionService:
                 session,
                 session_id=session_id,
             )
+            partial_history_events = [
+                event
+                for event in partial_history_events
+                if not isinstance(event.payload, ClientToolCallPayload)
+            ]
+            if run is not None:
+                partial_history_events.extend(
+                    active_tool_call_to_live_event(session_id, active)
+                    for active in run.active_tool_calls
+                )
+            partial_history_events.sort(key=lambda event: (event.created_at, event.id))
             goal_store = GoalStateStore(session_manager=self.session_manager)
             goal = GoalStateSnapshot.from_state(
                 await goal_store.load(agent_session.agent_id, session_id)
