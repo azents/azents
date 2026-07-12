@@ -723,6 +723,7 @@ class RunExecutor:
             auto_compaction_threshold_tokens=(
                 turn_inference_state.effective_auto_compaction_threshold_tokens
             ),
+            inference_state=turn_inference_state,
         )
         if agent_run.status == AgentRunStatus.PENDING:
             agent_run = await self.session_lifecycle.activate_pending_agent_run(
@@ -1249,6 +1250,7 @@ class RunExecutor:
                             auto_compaction_threshold_tokens=(
                                 next_inference_state.effective_auto_compaction_threshold_tokens
                             ),
+                            inference_state=next_inference_state,
                         )
                         selected_profile = RequestedProfileSelection(
                             profile=RequestedInferenceProfile(

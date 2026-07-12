@@ -11,6 +11,7 @@ from typing import Literal, Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.inference_profile import SessionInferenceState
 from azents.engine.events.model_file_refs import unique_model_file_ids
 from azents.engine.events.protocols import (
     AdapterOutputNormalizer,
@@ -91,6 +92,7 @@ class PreparedModelCall:
     """Turn-local model call dependencies."""
 
     native_request: NativeModelRequest
+    inference_state: SessionInferenceState | None
     system_prompt_analysis: SystemPromptAnalysisPayload | None
     tool_executor: ClientToolExecutor
     on_turn_end: TurnEndCallback | None
@@ -342,6 +344,7 @@ class AgentRunExecution:
                         request.session_id,
                         request.run_id,
                         normalized.usage,
+                        inference_state=prepared.inference_state,
                         system_prompt=prepared.system_prompt_analysis,
                     )
                     turn_events = [turn_marker] if turn_marker is not None else []
@@ -754,6 +757,7 @@ class AgentRunExecution:
         run_id: str,
         usage: TokenUsagePayload | None,
         *,
+        inference_state: SessionInferenceState | None,
         system_prompt: SystemPromptAnalysisPayload | None = None,
     ) -> Event | None:
         """Append turn marker."""
@@ -767,6 +771,21 @@ class AgentRunExecution:
                 payload=TurnMarkerPayload(
                     run_id=run_id,
                     usage=usage,
+                    applied_inference_profile=(
+                        inference_state.applied_profile
+                        if inference_state is not None
+                        else None
+                    ),
+                    effective_context_window_tokens=(
+                        inference_state.effective_context_window_tokens
+                        if inference_state is not None
+                        else None
+                    ),
+                    effective_auto_compaction_threshold_tokens=(
+                        inference_state.effective_auto_compaction_threshold_tokens
+                        if inference_state is not None
+                        else None
+                    ),
                     system_prompt=system_prompt,
                 ).model_dump(mode="json", exclude_none=True),
             ),

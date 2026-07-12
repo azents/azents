@@ -634,6 +634,7 @@ async def resolve_invoke_input_with_model_source(
                 workspace_id=agent.workspace_id,
                 agent_id=invoke_input.agent_id,
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
                 temperature=params.temperature if params else None,
                 max_output_tokens=params.max_output_tokens if params else None,
                 top_p=params.top_p if params else None,

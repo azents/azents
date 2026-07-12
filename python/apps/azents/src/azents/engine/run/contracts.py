@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from typing import Any, NamedTuple, Protocol, TypeVar
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
+from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.tools import PublishEventFn, Toolkit
 from azents.engine.context.window import compute_effective_context_window_tokens
@@ -71,6 +72,8 @@ class RunRequest:
     agent_id: str
     auto_compaction_threshold_tokens: int | None
     """Exact auto-compaction threshold, or None to derive it from input limits."""
+    inference_state: SessionInferenceState | None
+    """Exact Session inference snapshot applied to this model-call turn."""
     model_capabilities: ModelCapabilities = dataclasses.field(
         default_factory=ModelCapabilities,
     )

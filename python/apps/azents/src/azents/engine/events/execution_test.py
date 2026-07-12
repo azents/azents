@@ -9,6 +9,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.inference_profile import SessionInferenceState
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.execution import (
     AgentRunExecution,
     AgentRunExecutionRequest,
@@ -47,6 +49,7 @@ from azents.engine.events.types import (
 from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.repos.agent_execution.data import EventCreate
+from azents.testing.model_selection import make_test_model_selection
 
 
 class _Session(AsyncSession):
@@ -453,6 +456,7 @@ def _model_call_preparer(
     | _CancellingToolExecutor
     | None = None,
     system_prompt: SystemPromptAnalysisPayload | None = None,
+    inference_state: SessionInferenceState | None = None,
 ) -> ModelCallPreparer:
     """Create a turn-local model call preparer for tests."""
     resolved_lowerer = lowerer or _Lowerer()
@@ -465,6 +469,7 @@ def _model_call_preparer(
     ) -> PreparedModelCall:
         return PreparedModelCall(
             native_request=resolved_lowerer.lower(transcript, model=model),
+            inference_state=inference_state,
             system_prompt_analysis=system_prompt,
             tool_executor=resolved_tool_executor,
             on_turn_end=None,
@@ -704,6 +709,14 @@ async def test_model_usage_is_appended_as_turn_marker(
         cost_usd=0.001,
         raw_hidden_params={"response_cost": 0.001, "model_id": "gpt-5.1"},
     )
+    inference_state = SessionInferenceState(
+        model_target_label="planning",
+        model_selection=make_test_model_selection(model_identifier="gpt-5.1"),
+        reasoning_effort=ModelReasoningEffort.XHIGH,
+        effective_context_window_tokens=128_000,
+        effective_auto_compaction_threshold_tokens=102_400,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
     system_prompt = SystemPromptAnalysisPayload(
         agent_prompt=SystemPromptFragmentPayload(
             id="agent",
@@ -722,6 +735,7 @@ async def test_model_usage_is_appended_as_turn_marker(
             lowerer=_Lowerer(),
             tool_executor=_ToolExecutor(),
             system_prompt=system_prompt,
+            inference_state=inference_state,
         ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
@@ -747,7 +761,14 @@ async def test_model_usage_is_appended_as_turn_marker(
     assert isinstance(payload, TurnMarkerPayload)
     assert payload.run_id == "run-1"
     assert payload.usage == usage
+    assert payload.applied_inference_profile == inference_state.applied_profile
+    assert payload.effective_context_window_tokens == 128_000
+    assert payload.effective_auto_compaction_threshold_tokens == 102_400
     assert payload.system_prompt == system_prompt
+    serialized_payload = turn_markers[0].payload.model_dump(mode="json")
+    assert "provider" not in serialized_payload
+    assert "model_selection" not in serialized_payload
+    assert "credential_kwargs" not in serialized_payload
     record = next(
         item for item in caplog.records if item.message == "Model token usage"
     )
@@ -882,6 +903,7 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
 
         return PreparedModelCall(
             native_request=NativeModelRequest(model=model, input=[]),
+            inference_state=None,
             system_prompt_analysis=None,
             tool_executor=_ToolExecutor(),
             on_turn_end=on_turn_end,
@@ -941,6 +963,7 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
 
         return PreparedModelCall(
             native_request=NativeModelRequest(model=model, input=[]),
+            inference_state=None,
             system_prompt_analysis=None,
             tool_executor=_ToolExecutor(),
             on_turn_end=on_turn_end,

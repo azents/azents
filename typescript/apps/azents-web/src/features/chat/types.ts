@@ -24,6 +24,9 @@ export interface WireTokenUsage {
 
 export interface TokenUsageSummary {
   runId: string | null;
+  inferenceProfile: AppliedInferenceProfile | null;
+  effectiveContextWindowTokens: number | null;
+  effectiveAutoCompactionThresholdTokens: number | null;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
@@ -187,6 +190,9 @@ export interface ProviderToolResultPayload {
 export interface TurnMarkerPayload {
   run_id: string;
   usage?: WireTokenUsage | null;
+  applied_inference_profile?: AppliedInferenceProfile | null;
+  effective_context_window_tokens?: number | null;
+  effective_auto_compaction_threshold_tokens?: number | null;
 }
 
 export interface RunMarkerPayload {

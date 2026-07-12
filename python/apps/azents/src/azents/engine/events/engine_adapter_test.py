@@ -623,6 +623,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -667,6 +668,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             workspace_id="workspace-1",
             agent_id="agent-1",
             auto_compaction_threshold_tokens=None,
+            inference_state=None,
         ),
         RunContext(
             user_id="user-1",
@@ -711,6 +713,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -755,6 +758,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             workspace_id="workspace-1",
             agent_id="agent-1",
             auto_compaction_threshold_tokens=None,
+            inference_state=None,
         ),
         RunContext(
             user_id="user-1",
@@ -803,6 +807,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -847,6 +852,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -903,6 +909,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             ),
             RunContext(
                 user_id="user-1",
@@ -955,6 +962,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
                 max_output_tokens=123,
                 max_input_tokens=64_000,
                 compaction_max_input_tokens=32_000,
@@ -1038,6 +1046,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             ),
             _run_context(),
         )
@@ -1111,6 +1120,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
             ),
             _run_context(),
         )
@@ -1220,6 +1230,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
                 workspace_id="workspace-1",
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
+                inference_state=None,
                 max_input_tokens=12_000,
                 compaction_max_input_tokens=12_000,
             ),
@@ -1273,6 +1284,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
             workspace_id="workspace-1",
             agent_id="agent-1",
             auto_compaction_threshold_tokens=None,
+            inference_state=None,
         ),
         _run_context(),
     )

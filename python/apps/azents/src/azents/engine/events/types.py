@@ -318,6 +318,12 @@ class TurnMarkerPayload(BaseModel):
 
     run_id: str = Field(min_length=1)
     usage: TokenUsagePayload
+    applied_inference_profile: AppliedInferenceProfile | None = Field(default=None)
+    effective_context_window_tokens: int | None = Field(default=None, gt=0)
+    effective_auto_compaction_threshold_tokens: int | None = Field(
+        default=None,
+        gt=0,
+    )
     system_prompt: "SystemPromptAnalysisPayload | None" = Field(default=None)
 
 
