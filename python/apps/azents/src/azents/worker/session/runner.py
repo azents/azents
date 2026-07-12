@@ -95,6 +95,7 @@ class SessionRunner:
         self.agent_session_repository = agent_session_repository
         self.input_buffer_service = input_buffer_service
         self.idle_continuation_service = idle_continuation_service
+        self.run_executor = run_executor
         self.inbox = SessionRunnerInbox()
         self.runner_shutdown = asyncio.Event()
         self.terminated_event = asyncio.Event()
@@ -515,6 +516,19 @@ class SessionRunner:
         except asyncio.CancelledError:
             raise
         except UserVisibleRuntimeError as exc:
+            finalized_run_id = await self.run_executor.finalize_unhandled_active_run(
+                message.session_id,
+                exc,
+                dispatch_event=self.event_publisher.dispatch_event,
+            )
+            if finalized_run_id is not None:
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=True,
+                    no_actionable_work=False,
+                    run_id=finalized_run_id,
+                    terminal_run_status=AgentRunStatus.FAILED,
+                )
             await self.error_reporter.report_user_visible(message.session_id, exc)
             await self._clear_activity_after_failed_message(
                 message.session_id,
@@ -526,6 +540,19 @@ class SessionRunner:
                 no_actionable_work=False,
             )
         except Exception as exc:
+            finalized_run_id = await self.run_executor.finalize_unhandled_active_run(
+                message.session_id,
+                exc,
+                dispatch_event=self.event_publisher.dispatch_event,
+            )
+            if finalized_run_id is not None:
+                return RunExecutionResult(
+                    toolkits=[],
+                    terminal_event_observed=True,
+                    no_actionable_work=False,
+                    run_id=finalized_run_id,
+                    terminal_run_status=AgentRunStatus.FAILED,
+                )
             await self.error_reporter.report_unhandled(message.session_id, exc)
             await self._clear_activity_after_failed_message(
                 message.session_id,

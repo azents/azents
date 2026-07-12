@@ -238,6 +238,19 @@ class _SessionLifecycle:
         """Record the session id passed to heartbeat."""
         self.heartbeat_session_ids.append(session_id)
 
+    async def get_running_agent_run(
+        self,
+        session_id: str,
+    ) -> _PendingRun | None:
+        """Return the configured Run only when it is active."""
+        del session_id
+        if (
+            self.recoverable_run is not None
+            and self.recoverable_run.status == AgentRunStatus.RUNNING
+        ):
+            return self.recoverable_run
+        return None
+
     async def claim_recoverable_agent_run(
         self,
         session_id: str,
@@ -456,7 +469,7 @@ class _LiveEventProjector:
         self.flushed_session_ids: list[str] = []
         self.active_tool_calls: list[tuple[str, object]] = []
         self.live_run_updates: list[tuple[str, ChatLiveRunState]] = []
-        self.live_run_cleared_session_ids: list[str] = []
+        self.live_run_clears: list[tuple[str, str]] = []
 
     async def publish_live_run_updated(
         self,
@@ -466,9 +479,14 @@ class _LiveEventProjector:
         """Record live run update broadcasts."""
         self.live_run_updates.append((session_id, run))
 
-    async def publish_live_run_cleared(self, session_id: str) -> None:
+    async def publish_live_run_cleared(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+    ) -> None:
         """Record live run clear broadcasts."""
-        self.live_run_cleared_session_ids.append(session_id)
+        self.live_run_clears.append((session_id, run_id))
 
     async def replace_active_tool_calls(
         self,
@@ -505,10 +523,11 @@ class _Engine:
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Emit RunComplete immediately."""
-        del request, context, poll_messages, check_stop
+        del request, poll_messages, check_stop
+        assert isinstance(context, RunContext)
 
         async def iterator() -> AsyncIterator[Emit]:
-            yield ephemeral(RunComplete())
+            yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
 
@@ -554,13 +573,14 @@ class _FlakyEngine(_Engine):
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Fail the first attempt and complete the second."""
-        del request, context, poll_messages, check_stop
+        del request, poll_messages, check_stop
+        assert isinstance(context, RunContext)
 
         async def iterator() -> AsyncIterator[Emit]:
             self.calls += 1
             if self.calls == 1:
                 raise ModelCallError("model temporarily unavailable")
-            yield ephemeral(RunComplete())
+            yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
 
@@ -580,13 +600,14 @@ class _InternalFlakyEngine(_Engine):
         check_stop: object = None,
     ) -> AsyncIterator[Emit]:
         """Fail the first attempt with a generic exception and complete the second."""
-        del request, context, poll_messages, check_stop
+        del request, poll_messages, check_stop
+        assert isinstance(context, RunContext)
 
         async def iterator() -> AsyncIterator[Emit]:
             self.calls += 1
             if self.calls == 1:
                 raise RuntimeError("database temporarily unavailable")
-            yield ephemeral(RunComplete())
+            yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
 
@@ -761,6 +782,41 @@ def _executor(
         subagent_toolkit_provider=cast(SubagentToolkitProvider, object()),
         broadcast=cast(WebSocketBroadcast, object()),
     )
+
+
+@pytest.mark.asyncio
+async def test_finalize_unhandled_active_run_uses_terminal_finalizer() -> None:
+    """An exception escaping an active Run reaches durable failed finalization."""
+    lifecycle = _SessionLifecycle(
+        recoverable_run=_PendingRun(status=AgentRunStatus.RUNNING)
+    )
+    failed_run_finalizer = _FailedRunFinalizer()
+    executor = _executor(
+        lifecycle,
+        failed_run_finalizer=failed_run_finalizer,
+    )
+    dispatched: list[tuple[str, PublishedEvent]] = []
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        dispatched.append((session_id, event))
+
+    try:
+        raise RuntimeError("escaped active run failure")
+    except RuntimeError as exc:
+        finalized_run_id = await executor.finalize_unhandled_active_run(
+            "session-001",
+            exc,
+            dispatch_event=dispatch_event,
+        )
+
+    assert finalized_run_id == "run-001"
+    assert lifecycle.retry_states[-1] is not None
+    assert lifecycle.retry_states[-1].attempts[-1].source == "session_runner"
+    assert lifecycle.retry_states[-1].attempts[-1].retryability == "non_retryable"
+    assert len(failed_run_finalizer.inputs) == 1
+    assert failed_run_finalizer.inputs[0].run_id == "run-001"
+    assert failed_run_finalizer.inputs[0].reason == "non_retryable"
+    assert dispatched == []
 
 
 def test_matching_session_inference_state_preserves_resolved_model() -> None:
@@ -2086,7 +2142,7 @@ async def test_execute_clears_activity_after_run_complete(
         for _, event in tree_changes
     )
     assert order == ["activate_pending", "clear_session_activity"]
-    assert live_event_projector.live_run_cleared_session_ids == ["session-001"]
+    assert live_event_projector.live_run_clears == [("session-001", result.run_id)]
 
 
 def test_actionable_tail_ignores_completed_run_marker() -> None:

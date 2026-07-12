@@ -356,7 +356,9 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     assert broker.cleared_session_ids == [session_id]
     assert len(event_publisher.dispatched) == 1
     assert event_publisher.dispatched[0][0] == session_id
-    assert isinstance(event_publisher.dispatched[0][1], RunStopped)
+    stopped_event = event_publisher.dispatched[0][1]
+    assert isinstance(stopped_event, RunStopped)
+    assert stopped_event.run_id == "11111111111111111111111111111111"
 
 
 @pytest.mark.asyncio
@@ -386,13 +388,15 @@ async def test_record_interrupted_run_only_records_marker_and_stopped_event() ->
         EventKind.INTERRUPTED,
         EventKind.RUN_MARKER,
     ]
-    assert event_publisher.dispatched and isinstance(
-        event_publisher.dispatched[0][1],
-        RunStopped,
-    )
+    assert event_publisher.dispatched
+    stopped_event = event_publisher.dispatched[0][1]
+    assert isinstance(stopped_event, RunStopped)
+    assert stopped_event.run_id == "22222222222222222222222222222222"
     assert session_repository.cleared_stop_request_session_ids == [session_id]
     assert projector.flushed_session_ids == []
     assert projector.removed_events == []
     assert broker.cleared_session_ids == []
-    assert run_repository.terminal_runs == []
+    assert run_repository.terminal_runs == [
+        ("22222222222222222222222222222222", AgentRunStatus.STOPPED)
+    ]
     assert run_repository.terminal_sessions == []

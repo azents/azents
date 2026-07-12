@@ -532,11 +532,11 @@ class AgentEngineAdapter:
                     await run_task
 
         if status in {AgentRunStatus.COMPLETED, AgentRunStatus.FAILED}:
-            yield ephemeral(RunComplete())
+            yield ephemeral(RunComplete(run_id=context.run_id))
         elif status in {AgentRunStatus.RUNNING, AgentRunStatus.CANCELLED}:
             return
         else:
-            yield ephemeral(RunStopped())
+            yield ephemeral(RunStopped(run_id=context.run_id))
 
 
 def _cancel_run_task(

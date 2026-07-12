@@ -203,5 +203,7 @@ async def test_failed_run_finalizer_appends_error_marker_and_run_complete() -> N
     marker_payload = result.run_marker.payload
     assert isinstance(marker_payload, RunMarkerPayload)
     assert marker_payload.status == "failed"
-    assert isinstance(dispatched[-1][1], RunComplete)
+    terminal_event = dispatched[-1][1]
+    assert isinstance(terminal_event, RunComplete)
+    assert terminal_event.run_id == "run-001".rjust(32, "0")
     assert lifecycle.cleared_session_ids == ["session-001"]

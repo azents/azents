@@ -4,7 +4,6 @@ import asyncio
 import logging
 
 from azents.engine.events.builders import make_system_error_event
-from azents.engine.events.engine_events import RunComplete
 from azents.engine.run.contracts import AgentEngineProtocol
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.worker.events.publisher import WorkerEventPublisher
@@ -96,7 +95,6 @@ class SessionRunnerErrorReporter:
             )
         try:
             await self.event_publisher.dispatch_event(session_id, error_event)
-            await self.event_publisher.dispatch_event(session_id, RunComplete())
         except asyncio.CancelledError:
             raise
         except Exception:

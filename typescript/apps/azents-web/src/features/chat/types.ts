@@ -352,6 +352,7 @@ export type ChatHistoryEvent =
 /** run completion control event */
 export interface RunCompleteControlEvent {
   type: "run_complete";
+  run_id: string;
 }
 
 /** run start — notify client that processing is in progress */
@@ -371,6 +372,7 @@ export interface RunPhaseChangedEvent {
 /** run stop — user stopped run */
 export interface RunStoppedEvent {
   type: "run_stopped";
+  run_id: string;
 }
 
 /** Runtime allocating */
@@ -569,6 +571,7 @@ export interface LiveRunUpdatedEvent {
 export interface LiveRunClearedEvent {
   type: "live_run_cleared";
   session_id: string;
+  run_id: string;
 }
 
 export type AgentRunStatus =

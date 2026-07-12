@@ -73,7 +73,7 @@ class FailedRunErrorFinalizer:
             run_marker = finalized.run_marker
         await dispatch_event(input.session_id, error_event)
         await dispatch_event(input.session_id, run_marker)
-        await dispatch_event(input.session_id, RunComplete())
+        await dispatch_event(input.session_id, RunComplete(run_id=input.run_id))
         await self.session_lifecycle.clear_session_activity(input.session_id)
         return FailedRunFinalizationResult(
             error_event=error_event,
