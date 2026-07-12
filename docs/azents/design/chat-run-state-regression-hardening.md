@@ -60,7 +60,7 @@ A successful send clears the draft and resets the selected profile to the normal
 
 ### 1. Treat reasoning effort as an opaque frontend string
 
-Frontend wire/state types use `string | null` for reasoning effort. The public request/response OpenAPI field is also a nullable string rather than a generated closed enum. Backend request handling validates the submitted string against the selected target at the authoritative preparation boundary. Runtime frontend mapping verifies only that a non-null value is a string; it does not enumerate, normalize, downgrade, or reject values.
+Frontend wire/state types use `string | null` for reasoning effort. The public request/response OpenAPI field is also a nullable string rather than a generated closed enum. Before typed InputBuffer or Session persistence, backend request handling converts supported strings to the canonical `ModelReasoningEffort` enum and rejects unsupported strings without writing state; preparation revalidates target capability authoritatively. Runtime frontend mapping verifies only that a non-null value is a string; it does not enumerate, normalize, downgrade, or reject values.
 
 The raw value must survive:
 
@@ -88,8 +88,8 @@ An invalid snapshot never clears an existing Run. It records an observable parse
 The frontend owns a monotonic observation generation for each mounted session. Applying a valid WebSocket live-state event increments the generation. Every REST live or write request records the generation and request epoch at dispatch time.
 
 - Subscription/reconcile baselines continue to buffer WebSocket events, apply the REST baseline, and then replay the buffered events. Only the newest baseline request epoch may commit.
-- A write response may replace managed Run state only when no newer WebSocket live-state observation has advanced the generation since the request began.
-- An older or superseded REST response is ignored for replaceable Run state while its non-conflicting mutation result may still be processed.
+- A write response may replace the compound managed live snapshot only when no newer WebSocket live-state observation has advanced the generation since the request began.
+- An older or superseded REST response is ignored for Run, partial history, input buffers, Todo, and action-execution replacement together; its non-snapshot mutation result may still be processed.
 
 This order contract is local to the mounted chat session and does not add a distributed server revision. It prevents delayed write responses and overlapping periodic reconciles from moving state backward while preserving the existing subscribe-ack buffering boundary.
 
@@ -175,7 +175,8 @@ Product behavior verification is E2E-first, with focused unit and integration te
 
 | Scenario | Expected evidence |
 |---|---|
-| Unknown/future effort value | Raw value survives live/history mapping, reload, Composer persistence, and visible metadata. |
+| Expanded supported effort value | `none`, `minimal`, `xhigh`, or `max` survives public write, live/history mapping, reload, Composer persistence, and visible metadata. |
+| Unknown/future effort read compatibility | An injected unknown response value survives frontend decoding, persistence, and rendering; submitting it is passed unchanged to the backend and may be rejected authoritatively without a client-side rewrite. |
 | Client-tool boundary | Running/pending UI and Stop control remain visible between tool result and the next model call. |
 | Contradictory live snapshot | Valid running Run wins over Session idle and produces a backend diagnostic. |
 | Stale REST response | Newer WebSocket Run state remains active after an older write or reconcile response arrives. |
