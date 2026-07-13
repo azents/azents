@@ -465,7 +465,6 @@ class _LiveEventProjector:
     """LiveEventProjector test double."""
 
     def __init__(self) -> None:
-        self.flushed_session_ids: list[str] = []
         self.active_tool_calls: list[tuple[str, object]] = []
         self.live_run_updates: list[tuple[str, ChatLiveRunState]] = []
         self.live_run_clears: list[tuple[str, str]] = []
@@ -497,10 +496,6 @@ class _LiveEventProjector:
         """Record active tool call projection replacements."""
         del removed_call_ids
         self.active_tool_calls.append((session_id, active_tool_calls))
-
-    async def flush_session(self, session_id: str) -> None:
-        """Record flushed sessions."""
-        self.flushed_session_ids.append(session_id)
 
 
 class _Engine:
@@ -2090,7 +2085,6 @@ async def test_execute_runs_pending_command_inside_run_boundary(
         "RunPhaseChanged",
         "RunComplete",
     ]
-    assert live_event_projector.flushed_session_ids == ["session-001"]
     assert lifecycle.cleared_session_ids == ["session-001"]
     assert lifecycle.terminal_runs == [(run_id, AgentRunStatus.COMPLETED)]
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
@@ -2136,7 +2130,6 @@ async def test_execute_ignores_unknown_command_without_run_boundary() -> None:
     assert lifecycle.cleared_session_ids == []
     assert lifecycle.terminal_runs == []
     assert session_repository.cleared_commands == [("session-001", "command-001")]
-    assert live_event_projector.flushed_session_ids == []
 
 
 @pytest.mark.asyncio

@@ -1433,7 +1433,6 @@ class RunExecutor:
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
-            await self.live_event_projector.flush_session(message.session_id)
             terminal_event_observed = observed_terminal_run_event(
                 run_completed=run_completed,
                 terminal_run_status=terminal_run_status,

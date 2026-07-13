@@ -1229,24 +1229,98 @@ class LiteLLMResponsesOutputNormalizer:
             schema_version=self.schema_version,
         )
 
-    def start(self, session_id: str) -> "_LiteLLMResponsesOutputStream":
-        """Start incremental normalization for one native model stream."""
-        return _LiteLLMResponsesOutputStream(self, session_id)
-
     def normalize(
         self,
         session_id: str,
         native_events: Sequence[NativeEvent],
     ) -> NormalizedAdapterOutput:
-        """Normalize a completed native event sequence for direct callers."""
-        output_stream = self.start(session_id)
+        """Convert native stream events to events and UI projection."""
         projections: list[StreamProjection] = []
-        for native_event in native_events:
-            projections.extend(output_stream.process_event(native_event).projections)
-        completed = output_stream.complete()
-        return completed.model_copy(update={"projections": projections})
+        events: list[Event] = []
+        tool_refs: dict[int, tuple[str, str]] = {}
+        completed_output_items: list[dict[str, object]] = []
+        completed_response_seen = False
+        usage: TokenUsagePayload | None = None
 
-    def normalize_completed(
+        for native_event in native_events:
+            event_type = native_event.type
+            item = native_event.item
+            if event_type in {"OutputTextDeltaEvent", "ResponseTextDeltaEvent"}:
+                projections.append(
+                    StreamProjection(
+                        type="content_delta",
+                        delta=str(item.get("delta", "")),
+                    )
+                )
+            elif event_type in {"OutputItemAddedEvent", "ResponseOutputItemAddedEvent"}:
+                output_index = _int_or_none(item.get("output_index"))
+                raw_item = _dict(item.get("item"))
+                if raw_item.get("type") == "function_call" and output_index is not None:
+                    call_id = str(raw_item.get("call_id") or raw_item.get("id") or "")
+                    name = str(raw_item.get("name") or "")
+                    tool_refs[output_index] = (call_id, name)
+                    projections.append(
+                        StreamProjection(
+                            type="function_call_delta",
+                            index=output_index,
+                            call_id=call_id,
+                            name=name,
+                            delta="",
+                        )
+                    )
+            elif event_type in {"OutputItemDoneEvent", "ResponseOutputItemDoneEvent"}:
+                raw_item = _dict(item.get("item"))
+                if _has_output_item_type(raw_item):
+                    completed_output_items.append(raw_item)
+            elif event_type in {
+                "FunctionCallArgumentsDeltaEvent",
+                "ResponseFunctionCallArgumentsDeltaEvent",
+            }:
+                output_index = _int_or_none(item.get("output_index"))
+                call_id, name = tool_refs.get(output_index or -1, (None, None))
+                projections.append(
+                    StreamProjection(
+                        type="function_call_delta",
+                        index=output_index,
+                        call_id=call_id,
+                        name=name,
+                        delta=str(item.get("delta", "")),
+                    )
+                )
+            elif event_type in {
+                "ReasoningSummaryTextDeltaEvent",
+                "ResponseReasoningSummaryTextDeltaEvent",
+            }:
+                projections.append(
+                    StreamProjection(
+                        type="reasoning_delta",
+                        delta=str(item.get("delta", "")),
+                    )
+                )
+            elif event_type == "ResponseCompletedEvent":
+                completed_response_seen = True
+                response = _dict(item.get("response"))
+                usage = _normalize_response_usage(response) or usage
+                events.extend(
+                    self._normalize_completed(
+                        session_id,
+                        response,
+                        completed_output_items,
+                    )
+                )
+
+        if not completed_response_seen and completed_output_items:
+            events.extend(
+                self._normalize_output_items(session_id, completed_output_items)
+            )
+
+        return NormalizedAdapterOutput(
+            events=events,
+            projections=projections,
+            usage=usage,
+        )
+
+    def _normalize_completed(
         self,
         session_id: str,
         response: dict[str, object],
@@ -1255,10 +1329,10 @@ class LiteLLMResponsesOutputNormalizer:
         """Convert completed response output item to event."""
         output = response.get("output")
         if isinstance(output, list) and output:
-            return self.normalize_output_items(session_id, output)
-        return self.normalize_output_items(session_id, completed_output_items)
+            return self._normalize_output_items(session_id, output)
+        return self._normalize_output_items(session_id, completed_output_items)
 
-    def normalize_output_items(
+    def _normalize_output_items(
         self,
         session_id: str,
         output_items: Sequence[object],
@@ -1268,10 +1342,10 @@ class LiteLLMResponsesOutputNormalizer:
         for output_item in output_items:
             raw_item = _dict(output_item)
             if _has_output_item_type(raw_item):
-                events.append(self.normalize_output_item(session_id, raw_item))
+                events.append(self._normalize_output_item(session_id, raw_item))
         return events
 
-    def normalize_output_item(
+    def _normalize_output_item(
         self,
         session_id: str,
         output_item: dict[str, object],
@@ -1334,39 +1408,6 @@ class LiteLLMResponsesOutputNormalizer:
             ),
         )
 
-    def normalize_partial_assistant(self, session_id: str, text: str) -> Event:
-        """Create canonical-fallback output from interrupted text deltas."""
-        item: dict[str, object] = {
-            "type": "message",
-            "status": "incomplete",
-            "content": [{"type": "output_text", "text": text}],
-        }
-        partial_schema_version = f"{self.schema_version}-partial"
-        artifact = NativeArtifact(
-            compat_key=build_native_compat_key(
-                adapter=self.adapter,
-                native_format=self.native_format,
-                provider=self.provider,
-                model=self.model,
-                schema_version=partial_schema_version,
-            ),
-            adapter=self.adapter,
-            native_format=self.native_format,
-            provider=self.provider,
-            model=self.model,
-            schema_version=partial_schema_version,
-            item=item,
-        )
-        return _event(
-            session_id,
-            EventKind.ASSISTANT_MESSAGE,
-            AssistantMessagePayload(
-                content=text,
-                attachments=[],
-                native_artifact=artifact,
-            ),
-        )
-
     def _artifact(self, item: dict[str, object]) -> NativeArtifact:
         """Create native artifact."""
         return NativeArtifact(
@@ -1378,149 +1419,6 @@ class LiteLLMResponsesOutputNormalizer:
             schema_version=self.schema_version,
             item=_sanitize_native_item(item),
         )
-
-
-class _LiteLLMResponsesOutputStream:
-    """Minimal normalization state for one LiteLLM Responses stream."""
-
-    def __init__(
-        self,
-        normalizer: LiteLLMResponsesOutputNormalizer,
-        session_id: str,
-    ) -> None:
-        self._normalizer = normalizer
-        self._session_id = session_id
-        self._tool_refs: dict[int, tuple[str, str]] = {}
-        self._completed_output_items: list[dict[str, object]] = []
-        self._completed_response: dict[str, object] | None = None
-        self._completed_response_seen = False
-        self._usage: TokenUsagePayload | None = None
-        self._partial_text: list[str] = []
-
-    def process_event(
-        self,
-        native_event: NativeEvent,
-    ) -> NormalizedAdapterOutput:
-        """Update stream state and return projections for one native event."""
-        event_type = native_event.type
-        item = native_event.item
-        projections: list[StreamProjection] = []
-
-        if event_type in {"OutputTextDeltaEvent", "ResponseTextDeltaEvent"}:
-            delta = str(item.get("delta", ""))
-            self._partial_text.append(delta)
-            projections.append(
-                StreamProjection(
-                    type="content_delta",
-                    delta=delta,
-                )
-            )
-        elif event_type in {"OutputItemAddedEvent", "ResponseOutputItemAddedEvent"}:
-            output_index = _int_or_none(item.get("output_index"))
-            raw_item = _dict(item.get("item"))
-            if raw_item.get("type") == "function_call" and output_index is not None:
-                call_id = str(raw_item.get("call_id") or raw_item.get("id") or "")
-                name = str(raw_item.get("name") or "")
-                self._tool_refs[output_index] = (call_id, name)
-                projections.append(
-                    StreamProjection(
-                        type="function_call_delta",
-                        index=output_index,
-                        call_id=call_id,
-                        name=name,
-                        delta="",
-                    )
-                )
-        elif event_type in {"OutputItemDoneEvent", "ResponseOutputItemDoneEvent"}:
-            raw_item = _dict(item.get("item"))
-            if _has_output_item_type(raw_item):
-                self._completed_output_items.append(raw_item)
-        elif event_type in {
-            "FunctionCallArgumentsDeltaEvent",
-            "ResponseFunctionCallArgumentsDeltaEvent",
-        }:
-            output_index = _int_or_none(item.get("output_index"))
-            ref_index = output_index if output_index is not None else -1
-            call_id, name = self._tool_refs.get(ref_index, (None, None))
-            projections.append(
-                StreamProjection(
-                    type="function_call_delta",
-                    index=output_index,
-                    call_id=call_id,
-                    name=name,
-                    delta=str(item.get("delta", "")),
-                )
-            )
-        elif event_type in {
-            "ReasoningSummaryTextDeltaEvent",
-            "ResponseReasoningSummaryTextDeltaEvent",
-        }:
-            projections.append(
-                StreamProjection(
-                    type="reasoning_delta",
-                    delta=str(item.get("delta", "")),
-                )
-            )
-        elif event_type == "ResponseCompletedEvent":
-            self._completed_response_seen = True
-            self._completed_response = _dict(item.get("response"))
-            self._usage = (
-                _normalize_response_usage(self._completed_response) or self._usage
-            )
-
-        return NormalizedAdapterOutput(projections=projections)
-
-    def complete(self) -> NormalizedAdapterOutput:
-        """Build durable events and usage after normal stream completion."""
-        events: list[Event] = []
-        if self._completed_response_seen:
-            events.extend(
-                self._normalizer.normalize_completed(
-                    self._session_id,
-                    self._completed_response or {},
-                    self._completed_output_items,
-                )
-            )
-        elif self._completed_output_items:
-            events.extend(
-                self._normalizer.normalize_output_items(
-                    self._session_id,
-                    self._completed_output_items,
-                )
-            )
-        return NormalizedAdapterOutput(events=events, usage=self._usage)
-
-    def interrupt(self) -> NormalizedAdapterOutput:
-        """Build completed output plus received partial assistant text."""
-        completed = self.complete()
-        partial_text = "".join(self._partial_text)
-        if not partial_text or _has_assistant_text(completed.events):
-            return completed
-        partial_event = self._normalizer.normalize_partial_assistant(
-            self._session_id,
-            partial_text,
-        )
-        return completed.model_copy(
-            update={"events": [*completed.events, partial_event]}
-        )
-
-
-def _has_assistant_text(events: Sequence[Event]) -> bool:
-    """Return whether normalized output already has assistant text."""
-    for event in events:
-        payload = event.payload
-        if not isinstance(payload, AssistantMessagePayload):
-            continue
-        if isinstance(payload.content, str):
-            if payload.content:
-                return True
-            continue
-        if any(
-            isinstance(part, OutputTextPart) and bool(part.text)
-            for part in payload.content
-        ):
-            return True
-    return False
 
 
 def _event(

@@ -34,7 +34,6 @@ from azents.transport.chat import (
     chat_live_run_updated_dump,
 )
 from azents.worker.deps import get_broadcast, get_live_event_store
-from azents.worker.live.partial_batcher import LivePartialBatcher, LivePartialFlush
 
 logger = logging.getLogger(__name__)
 
@@ -58,21 +57,8 @@ class LiveEventProjector:
         self._broadcast = broadcast
         self._session_manager = session_manager
         self._agent_run_repository = agent_run_repository
-        self._partial_batcher = LivePartialBatcher(self._flush_partial_batch)
         self._active_run_ids: dict[str, str] = {}
         self._active_tool_events: dict[str, dict[str, Event]] = {}
-
-    async def flush_session(self, session_id: str) -> None:
-        """Reflect pending live partial batches best-effort."""
-        try:
-            await self._partial_batcher.flush_session(session_id)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(
-                "Failed to flush session live partial batches",
-                extra={"session_id": session_id},
-            )
 
     async def _terminal_matches_current_run(
         self,
@@ -98,26 +84,22 @@ class LiveEventProjector:
         """Reflect Runtime event to live projection store best-effort."""
         try:
             match event:
-                case Event() | RunComplete() | RunStopped():
-                    await self.flush_session(session_id)
-                case _:
-                    pass
-
-            match event:
                 case RunStarted(run_id=run_id):
                     await self.clear_session(session_id)
                     self._active_run_ids[session_id] = run_id
                 case ContentDelta(delta=delta, content_index=content_index):
-                    await self._partial_batcher.append_content_delta(
-                        session_id=session_id,
+                    live_event = await self._live_event_store.append_assistant_delta(
+                        session_id,
                         delta=delta,
                         content_index=content_index,
                     )
+                    await self._publish_event_upserted(live_event)
                 case ReasoningDelta(delta=delta):
-                    await self._partial_batcher.append_reasoning_delta(
-                        session_id=session_id,
+                    live_event = await self._live_event_store.append_reasoning_delta(
+                        session_id,
                         delta=delta,
                     )
+                    await self._publish_event_upserted(live_event)
                 case Event():
                     before = await self._live_event_store.list_by_session_id(session_id)
                     await self._live_event_store.remove_live_counterpart(event)
@@ -248,23 +230,6 @@ class LiveEventProjector:
                 "Failed to remove live event projection",
                 extra={"session_id": session_id, "event_id": event_id},
             )
-
-    async def _flush_partial_batch(self, batch: LivePartialFlush) -> None:
-        """Reflect batched live partial delta to store and broadcast."""
-        if batch.kind == "content":
-            if batch.content_index is None:
-                return
-            live_event = await self._live_event_store.append_assistant_delta(
-                batch.session_id,
-                delta=batch.delta,
-                content_index=batch.content_index,
-            )
-        else:
-            live_event = await self._live_event_store.append_reasoning_delta(
-                batch.session_id,
-                delta=batch.delta,
-            )
-        await self._publish_event_upserted(live_event)
 
     async def _publish_removed_events(
         self,

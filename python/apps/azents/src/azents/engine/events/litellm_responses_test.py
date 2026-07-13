@@ -37,11 +37,7 @@ from azents.engine.events.litellm_responses import (
     coerce_litellm_completed_response_for_logging,
     guard_litellm_streaming_logging,
 )
-from azents.engine.events.protocols import (
-    NativeEvent,
-    NativeModelRequest,
-    StreamProjection,
-)
+from azents.engine.events.protocols import NativeEvent, NativeModelRequest
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
     format_goal_continuation_reminder,
@@ -2207,93 +2203,6 @@ class TestLiteLLMResponsesModelAdapter:
 
 class TestLiteLLMResponsesOutputNormalizer:
     """LiteLLM Responses normalizer tests."""
-
-    def test_processes_live_deltas_before_stream_completion(self) -> None:
-        """Return text and reasoning projections one native event at a time."""
-        normalizer = LiteLLMResponsesOutputNormalizer(
-            provider="openai",
-            model="gpt-5.1",
-        )
-        output_stream = normalizer.start("session-1")
-
-        text = output_stream.process_event(
-            NativeEvent(type="OutputTextDeltaEvent", item={"delta": "hello"})
-        )
-        reasoning = output_stream.process_event(
-            NativeEvent(
-                type="ReasoningSummaryTextDeltaEvent",
-                item={"delta": "thinking"},
-            )
-        )
-
-        assert text.events == []
-        assert text.projections == [
-            StreamProjection(type="content_delta", delta="hello")
-        ]
-        assert reasoning.events == []
-        assert reasoning.projections == [
-            StreamProjection(type="reasoning_delta", delta="thinking")
-        ]
-
-    def test_interrupt_preserves_received_partial_assistant_text(self) -> None:
-        """Create one incomplete assistant event from received text deltas."""
-        normalizer = LiteLLMResponsesOutputNormalizer(
-            provider="openai",
-            model="gpt-5.1",
-        )
-        output_stream = normalizer.start("session-1")
-        output_stream.process_event(
-            NativeEvent(type="OutputTextDeltaEvent", item={"delta": "hel"})
-        )
-        output_stream.process_event(
-            NativeEvent(type="ResponseTextDeltaEvent", item={"delta": "lo"})
-        )
-
-        interrupted = output_stream.interrupt()
-
-        assert len(interrupted.events) == 1
-        payload = interrupted.events[0].payload
-        assert isinstance(payload, AssistantMessagePayload)
-        assert payload.content == "hello"
-        assert payload.native_artifact.item == {
-            "type": "message",
-            "status": "incomplete",
-            "content": [{"type": "output_text", "text": "hello"}],
-        }
-        assert payload.native_artifact.schema_version == "1-partial"
-
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
-        request = lowerer.lower(interrupted.events, model="gpt-5.1")
-
-        assert request.input == [{"role": "assistant", "content": "hello"}]
-
-    def test_withholds_tool_call_until_stream_completion(self) -> None:
-        """Do not expose a completed tool call as durable output mid-stream."""
-        normalizer = LiteLLMResponsesOutputNormalizer(
-            provider="openai",
-            model="gpt-5.1",
-        )
-        output_stream = normalizer.start("session-1")
-
-        incremental = output_stream.process_event(
-            NativeEvent(
-                type="OutputItemDoneEvent",
-                item={
-                    "item": {
-                        "type": "function_call",
-                        "call_id": "call-1",
-                        "name": "read_text",
-                        "arguments": '{"path": "/tmp/example"}',
-                    }
-                },
-            )
-        )
-
-        assert incremental.events == []
-        completed = output_stream.complete()
-        assert [event.kind for event in completed.events] == [
-            EventKind.CLIENT_TOOL_CALL
-        ]
 
     def test_normalizes_completed_output_items(self) -> None:
         """Convert completed response output item to event."""

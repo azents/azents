@@ -73,7 +73,6 @@ class WorkerEventPublisher:
         :param event: Engine event
         """
         if isinstance(event, Event):
-            await self.live_event_projector.flush_session(session_id)
             await self._broadcast_history_event(session_id, event)
         elif isinstance(event, PUBLIC_CHAT_CONTROL_EVENT_TYPES):
             await self._broadcast_control_event(session_id, event)

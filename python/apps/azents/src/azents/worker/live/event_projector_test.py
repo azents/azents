@@ -13,10 +13,16 @@ from azents.broker.broadcast import (
 )
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
-from azents.engine.events.engine_events import RunComplete
-from azents.engine.events.types import ActiveToolCall, AgentRunState
+from azents.engine.events.engine_events import ContentDelta, ReasoningDelta, RunComplete
+from azents.engine.events.types import (
+    ActiveToolCall,
+    AgentRunState,
+    AssistantMessagePayload,
+    Event,
+    ReasoningPayload,
+)
 from azents.services.chat.data import ChatLiveRunState
-from azents.services.chat.live_events import RedisLiveEventStore
+from azents.services.chat.live_events import BaseLiveEventStore, RedisLiveEventStore
 from azents.worker.live.event_projector import LiveEventProjector
 
 
@@ -56,21 +62,39 @@ class _AgentRunRepository:
         return self.current
 
 
-class _LiveEventStore:
-    """Live event store test double."""
+class _LiveEventStore(BaseLiveEventStore):
+    """In-memory live event store test double."""
 
     def __init__(self) -> None:
         self.clear_count = 0
+        self.events: dict[tuple[str, str], Event] = {}
 
-    async def list_by_session_id(self, session_id: str) -> list[object]:
-        """Return no partial events."""
-        del session_id
-        return []
+    async def list_by_session_id(self, session_id: str) -> list[Event]:
+        """Return live events for one session."""
+        return [
+            event
+            for (stored_session_id, _), event in self.events.items()
+            if stored_session_id == session_id
+        ]
+
+    async def upsert(self, event: Event) -> None:
+        """Store one live event."""
+        self.events[(event.session_id, event.id)] = event
+
+    async def remove(self, session_id: str, event_id: str) -> None:
+        """Remove one live event."""
+        self.events.pop((session_id, event_id), None)
 
     async def clear_session(self, session_id: str) -> None:
-        """Record a session clear."""
-        del session_id
+        """Record a session clear and remove its events."""
         self.clear_count += 1
+        self.events = {
+            key: event for key, event in self.events.items() if key[0] != session_id
+        }
+
+    async def _get(self, session_id: str, event_id: str) -> Event | None:
+        """Return one live event."""
+        return self.events.get((session_id, event_id))
 
 
 class _Broadcast:
@@ -120,6 +144,45 @@ def _projector(
         session_manager=_SessionManager(),
         agent_run_repository=cast(Any, _AgentRunRepository(current_run)),
     )
+
+
+@pytest.mark.asyncio
+async def test_each_model_delta_updates_live_projection_immediately() -> None:
+    """Persist and broadcast every text and reasoning delta without batching."""
+    store = _LiveEventStore()
+    broadcast = _Broadcast()
+    projector = _projector(store, broadcast)
+
+    await projector.update(
+        "session-001",
+        ContentDelta(delta="hel", content_index=0),
+    )
+    await projector.update(
+        "session-001",
+        ContentDelta(delta="lo", content_index=0),
+    )
+    await projector.update("session-001", ReasoningDelta(delta="think"))
+    await projector.update("session-001", ReasoningDelta(delta="ing"))
+
+    assert [event[1]["type"] for event in broadcast.events] == [
+        "live_event_upserted",
+        "live_event_upserted",
+        "live_event_upserted",
+        "live_event_upserted",
+    ]
+    live_events = await store.list_by_session_id("session-001")
+    assistant = next(
+        event.payload
+        for event in live_events
+        if isinstance(event.payload, AssistantMessagePayload)
+    )
+    reasoning = next(
+        event.payload
+        for event in live_events
+        if isinstance(event.payload, ReasoningPayload)
+    )
+    assert assistant.content == "hello"
+    assert reasoning.text == "thinking"
 
 
 @pytest.mark.asyncio
