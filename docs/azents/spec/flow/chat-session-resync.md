@@ -15,15 +15,15 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-12
-spec_version: 26
+last_verified_at: 2026-07-13
+spec_version: 27
 ---
 
 # Chat Session Resync
 
 ## 1. Overview
 
-Chat session resync binds WebSocket session subscription and REST history/live baseline into one recovery flow. WebSocket open is not completion of session event delivery registration. Client queries REST baseline after receiving `subscribed` ack or `subscription_health_check_ack`.
+Chat session resync binds WebSocket session subscription and REST history/live baseline into one recovery flow. WebSocket open is not completion of session event delivery registration. Initial entry starts only after `subscribed`, and every baseline query starts after the resync transaction receives its matching `subscription_health_check_ack`.
 
 Chat screen has two timeline states.
 
@@ -50,12 +50,13 @@ sequenceDiagram
 
     UI->>WS: connect /sessions/{session_id}
     WS-->>UI: subscribed(session_id)
-    UI->>UI: buffer WS events after ack
-    UI->>API: GET /history
-    UI->>API: GET /live
+    UI->>UI: begin epoch and buffer WS observations
+    UI->>WS: subscription_health_check(request_id)
+    WS-->>UI: subscription_health_check_ack(request_id)
+    UI->>API: fresh GET /history + GET /live
     API-->>UI: history page + live projection
-    UI->>UI: apply baseline
-    UI->>UI: replay buffered WS events
+    UI->>UI: apply baseline if epoch/generation still current
+    UI->>UI: replay buffered valid observations and release buffer
     UI->>UI: enter LATEST_FOLLOWING
 ```
 
@@ -72,13 +73,27 @@ sequenceDiagram
 | `live_run_updated` | server → client | `session_id`, `run` | authoritative current run projection replacement, including `run.retry`. |
 | `live_run_cleared` | server → client | `session_id`, `run_id` | removes the current run only when the terminal Run ID matches exactly. |
 | `input_actions_updated` | server → client | `session_id` | composer action definitions changed; client reloads `/actions`. |
+| `runtime_error` | server → client | `message` | user-facing runtime failure control. |
+| `authorization_request` | server → client | `toolkit_id`, `toolkit_name` | integration authorization is required. |
+| `account_link_nudge` | server → client | `toolkit_id`, `toolkit_name`, `toolkit_type` | integration account connection guidance. |
+| `compaction_started` | server → client | `continuing` | transient compaction UI state begins. |
+| `compaction_complete` | server → client | `continuing` | transient compaction UI state ends. |
 | `todo_state_changed` | server → client | `todo` | session todo Toolkit State snapshot changed. |
 | `action_execution_updated` | server → client | `session_id`, `action_execution` | Current operation TurnAction execution projection changed, including status and durable progress events. |
 | `subagent_tree_changed` | server → client | `root_session_agent_id`, `changed_session_agent_id` | Subagent Tree projection invalidation signal; client refetches the dedicated tree API. |
 
-Client does not query history/live REST baseline before `subscribed` ack. If health check ack timeout or socket close occurs, switch to ticket refresh/reconnect path.
+The server sends `subscribed` only after the Redis session subscription is confirmed for the current
+send-loop generation. A `subscription_health_check_ack` is emitted only while that same generation
+still owns the confirmed subscription, including a second check under the WebSocket send lock. Client
+does not query the history/live REST baseline before `subscribed`. If health check ack timeout or
+socket close occurs, it switches to the ticket refresh/reconnect path.
 
-`history_event_appended` is append-only and idempotent by event ID. A duplicate delivery preserves the existing timeline item and its position. Run lifecycle or provenance changes do not republish an existing history event.
+Server-to-client delivery uses the canonical action envelopes and explicitly public control frames in
+the table above. A durable Event is nested in `history_event_appended`; a raw top-level durable Event
+is not public. Internal provider deltas and Run/runtime lifecycle telemetry are projected into
+canonical live actions rather than broadcast directly. `history_event_appended` is append-only and
+idempotent by event ID. A duplicate delivery preserves the existing timeline item and its position.
+Run lifecycle or provenance changes do not republish an existing history event.
 
 ## 5. REST History Contract
 
@@ -101,8 +116,15 @@ Response fields:
 | `items` | events sorted oldest to newest. |
 | `has_more` | whether older events exist. |
 | `has_newer` | whether newer events exist. |
-| `next_cursor` | next older page cursor. |
-| `previous_cursor` | next newer page cursor. |
+| `next_cursor` | next older raw page cursor. |
+| `previous_cursor` | next newer raw page cursor. |
+
+Each response is a raw event page and owns both cursor values. The client stores raw events before
+projecting view models, advances the direction cursor through render-hidden/control-only pages, and
+stops only when a visible timeline item is added or that direction is exhausted. Selector identity is
+stable across pages: assistant output uses native output identity or response/content indices,
+reasoning uses native identity or its projection root, and client/provider tool calls and results use
+`call_id`. This lets call/result pairs merge even when they land on different raw pages.
 
 ## 5.1 REST Live Contract
 
@@ -136,6 +158,13 @@ Action execution progress is reconciled through `action_execution_updated` and t
 `/live.action_executions` baseline. Clients upsert projections by execution id. Failed operation
 actions are terminal and have no retry/discard mutation response; terminal completed or failed
 projections move to durable `action_execution_result` history.
+
+Raw live partials remain separate from raw durable history until render selection. Assistant,
+reasoning, provider-tool, client-tool, and internal-agent rows use semantic projection identity so a
+durable history append replaces its live counterpart without duplicate frames or temporary
+disappearance. Provider results preserve completion/failure status, output text, and attachments.
+Live `agent_message` uses the same collapsed, source-labeled internal-agent row as the durable event.
+Durable action execution results take precedence over any competing live projection.
 
 ## 5.2 REST Subagent Tree Contract
 
@@ -189,10 +218,13 @@ Draft persistence and last-selected-profile persistence are separate agent/sessi
 - Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
 - Human and actionable input rows show their immutable requested target/effort intent. Historical rows do not resolve or embed the associated run's physical model.
 - Token/context usage prefers immutable provenance stored on the durable `turn_marker`: target label, raw nullable effort, display name, effective context window, and automatic-compaction threshold. For historical markers without provenance, a matching active live Run may supply the profile temporarily; otherwise provenance is unavailable and is never inferred from the newest message, current Session, Agent default, or Composer selection.
-- Follow is active only when scroll viewport is at bottom or in iOS bottom bounce area.
-- When Follow is active, new timeline item and streaming update automatically scroll to bottom.
-- If scroll viewport leaves bottom/bounce area, immediately stop follow; subsequent new timeline items are rendered immediately but do not auto-scroll, and “new message” chip is displayed.
-- Clicking “new message” chip reactivates follow and moves to bottom. Stop condition after that is same.
+- Follow is active when the non-negative distance from the viewport bottom is at most 48px; negative iOS bounce is clamped to zero and remains inside the same boundary.
+- When Follow is active, new timeline items, streaming resize, and visual viewport resize/scroll schedule a programmatic pin to bottom.
+- If the viewport leaves the 48px boundary, immediately stop follow; subsequent new timeline items are rendered immediately but do not auto-scroll, and the “new message” control is displayed.
+- A short programmatic-scroll guard prevents component-owned scrolling from cancelling follow, but explicit wheel, touch start/move, scrollbar pointer, or non-editable scroll-key intent cancels that guard immediately and wins over a scheduled pin.
+- Clicking or keyboard-activating the semantic “new message” button reactivates follow and moves to bottom. Stop condition after that is the same.
+- A saved non-follow position is restored by its distance from bottom independently of follow-entry hysteresis. Older raw pages continue loading as needed to reach that distance or until history is exhausted.
+- Underfilled latest history automatically loads older raw pages without detaching until the viewport becomes scrollable or older history is exhausted; render-hidden pages do not stop the fill loop.
 - Follow stop does not mean transition to `DETACHED_HISTORY_BROWSING` or WS live event buffering.
 - When user actually loads older history pagination, transition to `DETACHED_HISTORY_BROWSING`.
 
@@ -200,12 +232,13 @@ Draft persistence and last-selected-profile persistence are separate agent/sessi
 
 - Does not render live state. Todo preview is also treated as live state and hidden.
 - Hides pending input buffer and live-only indicators, including action execution progress blocks.
-- WS event is not immediately rendered until latest tail reset.
-- “new message” chip is displayed only when actual latest-direction gap or buffered live event is confirmed, not by detached state itself.
-- Scrolling up fetches older history with `before` cursor.
-- Scrolling down fetches newer history with `after` cursor.
-- When reaching page with `has_newer=false`, perform latest reset.
-- Clicking “new message” chip performs latest reset.
+- WS durable or live observations do not mutate the visible detached history or detached live state. A durable append records only confirmed newer availability; live upserts/removals and live Run/action updates are ignored for detached rendering.
+- A successful periodic/resume baseline may also confirm a newer durable gap by comparing the fresh latest cursor with the cursor saved on detach.
+- The “new message” button is displayed only when a durable append or fresh latest cursor confirms an actual latest-direction gap, not by detached state or live-only activity itself.
+- Scrolling up fetches older raw history with the page-owned `before` cursor.
+- Scrolling down fetches newer raw history with the page-owned `after` cursor.
+- When reaching a page with `has_newer=false`, perform a fresh latest reset.
+- Clicking or keyboard-activating the “new message” button performs a fresh latest reset.
 
 ## 7. Browser Idle Resume and Periodic Reconcile
 
@@ -221,22 +254,29 @@ Client treats the following signals as browser idle return candidates.
 | `online` | browser returns to network online state. |
 | timer drift | interval between JS timer ticks exceeds drift threshold, possible sleep/suspend. |
 
-Resume candidate signals are merged into one resume resync flow. Client applies in-flight guard and short throttle window to prevent duplicate lifecycle event bursts.
+Resume candidate signals are merged into one finite resync transaction. Client applies an in-flight
+guard and short throttle window to prevent duplicate lifecycle event bursts. Initial entry, periodic
+reconcile, browser resume, compaction reload, and detached latest reset use the same transaction
+boundary.
 
-Resume resync flow runs in this order.
+A resync transaction runs in this order.
 
-1. Client sends `subscription_health_check`.
-2. When Server sends `subscription_health_check_ack`, client starts REST baseline reload.
-3. Immediately before REST baseline reload, client turns on WS live event buffering and clears existing buffer.
-4. Client queries REST `/history` and `/live` baseline again.
-5. Client applies baseline according to current timeline state.
-6. Client replays buffered WS events on top of baseline.
-7. If health check ack timeout, failure, reload not started, or REST reload failure occurs, client immediately replays buffered WS events so live/history event is not trapped in buffer.
-8. If health check ack timeout or failure occurs, client does not trust subscription and switches to ticket refresh/reconnect path.
+1. Client enables WebSocket observation buffering and allocates a monotonically newer REST request epoch while recording the current applied-observation generation. The first owner starts with an empty buffer; a superseding transaction takes ownership of the existing buffered observations instead of dropping them.
+2. Client sends exactly one `subscription_health_check` for the transaction.
+3. After the matching `subscription_health_check_ack`, client performs a fresh imperative REST history/live query. Retained query-cache data is not a new baseline.
+4. Client applies the response only if both its request epoch and starting observation generation are still current. A newer request or already-applied WebSocket observation supersedes the response.
+5. In latest-following state, client replaces the latest baseline. In detached state, a periodic/resume transaction preserves the visible raw window and records only a confirmed newer cursor gap; an explicit latest transaction replaces the tail and returns to latest-following.
+6. The transaction replays buffered valid observations in arrival order on top of an accepted baseline and disables buffering.
 
-Even when screen stays open visible for long time, perform same health check-based reconcile flow periodically.
+Health-check timeout, socket close, REST failure, or an inapplicable response cannot leave observations
+trapped. The current buffer owner replays and disables buffering on every terminal failure path; a
+superseded transaction leaves release to the newer transaction that took ownership. Health-check
+failure also refreshes the ticket/reconnects because the subscription is no longer trusted. Malformed,
+unknown, or wrong-session WebSocket frames are rejected individually before buffering. A malformed
+frame or one reducer failure does not prevent later buffered valid frames from replaying.
 
-If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buffered events. If `DETACHED_HISTORY_BROWSING`, do not render live state below history window and only keep chip state for newer event existence.
+Even when the screen stays visible for a long time, the client performs the same health-check-based
+finite transaction periodically.
 
 ## 8. Error Cases
 
@@ -245,9 +285,12 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 | No WebSocket ticket | server closes 4001. |
 | WebSocket ticket expired/error | server closes 4003. |
 | Session access denied | server closes 4003 or REST 403. |
-| Health check ack timeout | Client does not trust subscription and refreshes/reconnects ticket. |
-| Browser idle resume signal | Client starts health check-based resume resync and buffers live WS events immediately before REST baseline reload. |
-| Timer drift threshold exceeded | Client treats as sleep/suspend return possibility and resume resyncs. |
+| Health check ack timeout | Client replays its owned buffer, stops buffering, and refreshes/reconnects because the subscription is not trusted. |
+| Browser idle resume signal | Client starts one finite resync, enables observation buffering, then performs the health-check barrier and fresh REST query. |
+| REST baseline failure | Client preserves the previous baseline, replays its owned observations, and stops buffering. |
+| Superseded REST response | Client does not apply it; the newer transaction owns and eventually releases the shared buffer. |
+| Malformed or wrong-session frame | Client rejects only that frame and continues processing later valid observations. |
+| Timer drift threshold exceeded | Client treats it as a sleep/suspend return possibility and starts the same finite resync. |
 | `before` and `after` both specified | REST 400. |
 | Session absent | REST 404. |
 
@@ -259,11 +302,11 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 - When: connect to WebSocket.
 - Then: server registers Redis subscription and sends `subscribed`.
 
-**TC-2: Initial baseline after ack**
+**TC-2: Initial finite baseline after barriers**
 
-- Given: client received `subscribed` ack.
-- When: client queries `/history` and `/live`.
-- Then: WS event arriving during baseline application is reflected without duplication through buffer replay.
+- Given: client received `subscribed` and enabled observation buffering.
+- When: the matching health-check ack arrives and the client queries a fresh `/history` and `/live` baseline.
+- Then: a valid WS observation arriving during the transaction is reflected without duplication through buffer replay, and buffering ends.
 
 **TC-3: Recent cursor**
 
@@ -271,16 +314,16 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 - When: call `/history?after=<cursor>`.
 - Then: newer persisted events are returned oldest to newest and `has_newer` indicates latest tail state.
 
-**TC-4: Follow boundary and chip**
+**TC-4: Follow boundary and new-message control**
 
-- Given: timeline state is `LATEST_FOLLOWING` and scroll viewport is at bottom or bottom bounce area.
-- When: new timeline item or streaming update arrives.
+- Given: timeline state is `LATEST_FOLLOWING` and scroll viewport is within 48px of bottom or in the clamped iOS bounce area.
+- When: a new timeline item, streaming resize, or visual viewport change arrives.
 - Then: client auto-scrolls to bottom.
-- When: user leaves bottom/bounce area.
-- Then: client immediately stops follow and renders WS history/live event immediately but does not auto-scroll.
-- When: new timeline item arrives while follow is stopped.
-- Then: client displays “new message” chip.
-- When: user clicks “new message” chip.
+- When: explicit wheel, touch, pointer, or scroll-key intent moves the viewport beyond 48px, including during a scheduled programmatic pin.
+- Then: client immediately stops follow and renders WS history/live state without auto-scrolling.
+- When: a new timeline item arrives while follow is stopped.
+- Then: client displays the semantic “new message” button.
+- When: user clicks the button or activates it from the keyboard.
 - Then: client reactivates follow and moves to bottom.
 
 **TC-5: Detached browsing hides live state**
@@ -289,11 +332,11 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 - When: user actually loads older history pagination.
 - Then: timeline state transitions to `DETACHED_HISTORY_BROWSING` and pending input/live indicators are hidden.
 
-**TC-6: New message chip latest reset**
+**TC-6: New-message button latest reset**
 
 - Given: timeline state is `DETACHED_HISTORY_BROWSING`.
-- When: user clicks “new message” chip.
-- Then: client queries latest history/live baseline again and transitions to `LATEST_FOLLOWING`.
+- When: user clicks or keyboard-activates the “new message” button.
+- Then: client queries a fresh latest history/live baseline and transitions to `LATEST_FOLLOWING`.
 
 **TC-7: Periodic health check reconcile**
 
@@ -305,44 +348,65 @@ If `LATEST_FOLLOWING`, apply reconcile result to latest baseline and replay buff
 
 - Given: chat screen becomes active again after mobile browser background, other tab, PC sleep, page cache, or offline state.
 - When: `visibilitychange`, `focus`, `pageshow`, `online`, or timer drift resume signal occurs.
-- Then: client turns on WS live event buffering immediately before REST baseline reload after subscription health check, then resynchronizes.
+- Then: client starts one finite resync transaction, buffers observations before its one health check, queries a fresh REST baseline after the ack, applies it only if epoch/generation remain current, and always releases the owned buffer.
 
 **TC-9: Older history scroll does not imply new message**
 
 - Given: session is stopped and no actual newer event exists.
 - When: user scrolls up, loads older history, and transitions to `DETACHED_HISTORY_BROWSING`.
-- Then: “new message” chip is not displayed.
+- Then: the “new message” button is not displayed.
 
-**TC-10: Buffered live event marks newer while detached**
+**TC-10: Only durable confirmation marks newer while detached**
 
 - Given: timeline state is `DETACHED_HISTORY_BROWSING`.
-- When: WS live event is not immediately rendered and stored in buffer.
-- Then: client can consider latest-direction gap exists and display “new message” chip.
+- When: live-only Run, partial, or action observations arrive.
+- Then: visible detached state and newer availability remain unchanged.
+- When: a durable history append arrives or a fresh baseline exposes a different latest cursor.
+- Then: client records the latest-direction gap and displays the “new message” button.
+
+**TC-11: Raw page advancement and cross-page identity**
+
+- Given: one raw page contains only render-hidden control events and a tool call/result pair crosses the next page boundary.
+- When: client loads in either direction.
+- Then: it advances the page-owned cursor through the hidden page and renders one merged tool row after the counterpart arrives.
+
+**TC-12: Live-to-durable output promotion**
+
+- Given: live assistant, reasoning, provider-tool, or internal-agent output is visible.
+- When: the matching durable history append arrives before live removal.
+- Then: durable projection replaces the semantic live counterpart without duplicate/disappearing rows, and provider result status, output, and attachments remain visible.
 
 ## 10. Invariants
 
-- WebSocket open is not subscribe completion.
-- REST baseline is applied as latest source only after session subscription ack.
+- WebSocket open is not subscribe completion; `subscribed` and health-check ack require the current Redis-confirmed send-loop generation.
+- Public WebSocket delivery uses canonical action envelopes plus the listed control frames; the server does not emit raw top-level durable Events or internal runtime telemetry.
+- Every resync is a finite epoch/generation-guarded transaction with a fresh REST query and eventual release of its owned observation buffer.
+- REST baseline is applied as latest source only after session subscription ack and a successful health check for that transaction.
 - REST `/live` does not return aggregate event list and returns live state taxonomy snapshot split into `partial_history`, `input_buffers`, `run`, `session_run_state`, `todo`, and `action_executions`.
 - `live_run_updated` and REST `/live.run` are the authoritative current run snapshot sources; clients replace the stored run snapshot rather than merging individual retry or profile fields.
 - Requested inference intent is restored from durable/pending data, and unresolved physical provenance is never inferred from current Agent or Composer state.
 - Usage provenance requires an exact run-id match.
 - `action_execution_updated` and REST `/live.action_executions` are the authoritative nonterminal operation progress sources; clients upsert by execution id and render buffer-keyed executions without requiring a transcript or pending-buffer anchor.
 - REST write `snapshot` does not return aggregate `live_events` and returns live state taxonomy snapshot split into `partial_history_events`, `input_buffer_events`, `run`, `session_run_state`, `todo`, and `action_executions`.
-- Detached state does not synthesize live state below history window.
+- Detached state does not synthesize or mutate live state below the history window; live-only observations do not confirm a newer durable gap.
 - Entering detached state itself does not mean “new message” exists.
 - Follow stop does not mean entering detached state or live event buffering.
-- Follow is active only at bottom or bottom bounce area, and stops immediately when leaving that area.
-- Older history pagination prepend does not display “new message” chip.
-- Browser idle return candidate signals are handled by WebSocket health check and REST baseline convergence.
-- History pagination always returns page renderable oldest to newest.
+- Follow uses one 48px non-negative bottom/bounce boundary; explicit wheel, touch, pointer, or scroll-key intent overrides programmatic pinning.
+- Saved non-follow distance restoration and underfilled viewport loading may traverse multiple raw pages without using the 48px follow threshold as a restore target.
+- Older history pagination prepend does not display the “new message” button.
+- Browser idle return candidate signals are handled by WebSocket health check and fresh REST baseline convergence.
+- Raw history pagination always returns events oldest to newest, keeps page-owned cursors even for render-hidden pages, and merges semantic output identity across page boundaries.
 - Legacy aggregate `/messages` fallback is not used.
 - Terminal worktree action execution results are chat history events of kind `action_execution_result`; clients reconcile in-progress action logs through `/live.action_executions` and `action_execution_updated`.
+- Durable semantic projections override matching live assistant, reasoning, provider-tool, client-tool, internal-agent, and action-execution projections without duplicate rows.
+- Provider result rendering preserves status, text output, and attachments.
+- The “new message” control is a semantic keyboard-accessible button.
 - Subagent Tree state is restored from the dedicated tree endpoint; `subagent_tree_changed` only invalidates/refetches cached tree queries.
 - Child subagent detail views are human read-only for input but retain stop controls for running child sessions.
 
 ## 11. Changelog
 
+- **2026-07-13** — v27. Promoted confirmed-generation WebSocket barriers, finite fresh-baseline resync, detached observation isolation, raw-page projection identity, durable output promotion, and exact follow/accessibility behavior.
 - **2026-07-12** — v26. Added resilient live snapshot ordering, exact terminal correlation, opaque effort handling, Composer last-selected persistence, and durable token provenance.
 - **2026-07-12** — v25. Promoted buffer-keyed unanchored action progress, terminal success/failure history recovery, and removal of action retry/discard mutations.
 - **2026-07-11** — v24. Kept resolved inference provenance run-owned, removed event-level summaries, and made duplicate history append delivery position-preserving.

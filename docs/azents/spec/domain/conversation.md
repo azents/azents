@@ -91,8 +91,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-12
-spec_version: 98
+last_verified_at: 2026-07-13
+spec_version: 99
 ---
 
 # Conversation & Events
@@ -438,8 +438,9 @@ event-list APIs:
 
 - `GET /chat/v1/sessions/{session_id}/history` returns persisted transcript events, paginated by
   durable event id. `before` pages older history and `after` pages newer history; the two cursors
-  are mutually exclusive. Responses include `has_more` for older pages and `has_newer` for newer
-  pages.
+  are mutually exclusive. Responses include directionally accurate `has_more` for older pages and
+  `has_newer` for newer pages. Each raw response page owns its `next_cursor` and `previous_cursor`;
+  clients advance those cursors even when every event on a page is hidden by the render projection.
 - `GET /chat/v1/sessions/{session_id}/live` returns current non-durable live state such as
   streaming assistant text, streaming reasoning, PostgreSQL-backed active tool calls, pending input buffers, run state,
   session todo snapshot, and action execution projections. Redis stores only streaming assistant/reasoning
@@ -464,6 +465,15 @@ markers without these nullable fields remain valid, and readers report provenanc
 instead of borrowing the current Session, Agent, Composer, or live Run profile. Physical provider and
 model identifiers, integration selection, credentials, and the full resolved selection are not stored
 in the public marker payload.
+
+The frontend retains raw durable events and raw live partial events separately from rendered
+`ChatMessage` view models. Projection identity is semantic rather than event-kind-global: assistant
+output uses native output identity or response/content indices, reasoning uses native identity or its
+projection root, and client/provider tool pairs use `call_id`. Selectors merge call and result events
+across raw page boundaries. Provider tool results preserve completion/failure status, output text, and
+attachments; live `agent_message` events use the same source-labeled internal-agent row as their
+durable form. When a live entity and durable event describe the same semantic output, the durable
+projection replaces the live projection without a duplicate or disappearance.
 
 Both responses use the same event transport shape as the durable transcript. The removed
 `/chat/v1/sessions/{session_id}/messages` aggregate endpoint is not part of the public contract:
@@ -490,6 +500,9 @@ WebSocket chat clients receive subscription and event actions:
 - `live_event_upserted` for current live projections;
 - `live_event_removed` when a projection is no longer current;
 - `input_actions_updated` when composer action definitions change, including Skill projection list changes;
+- `runtime_error`, `authorization_request`, and `account_link_nudge` for user-facing runtime and
+  integration controls;
+- `compaction_started` and `compaction_complete` for transient compaction UI state;
 - `todo_state_changed` when the session-scoped TodoToolkit State changes;
 - `live_run_updated` when the authoritative running run projection changes, including failed-run retry state;
 - `live_run_cleared` with the exact terminal `run_id` when cleanup removes that current run projection;
@@ -497,6 +510,12 @@ WebSocket chat clients receive subscription and event actions:
 - `subagent_tree_changed` when subagent tool side effects or wait observation cursors change the
   durable Subagent Tree projection. This event is an invalidation signal only; clients refetch the
   dedicated tree API instead of treating the live event as tree state.
+
+The server-to-client contract consists of canonical action envelopes plus the explicitly public
+control frames listed above. A durable event appears only as the nested `event` of
+`history_event_appended`; a raw top-level durable Event frame is not public. Internal runtime telemetry
+such as provider deltas and Run lifecycle events is projected into canonical live actions rather than
+broadcast directly.
 
 Durable/live handoff follows these invariants:
 
@@ -683,6 +702,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-13** — v99. Promoted raw-page cursor ownership, cross-page semantic projection identity, provider/internal-agent rendering, durable-over-live promotion, and explicit public WebSocket delivery boundaries.
 - **2026-07-12** — v98. Made PostgreSQL active tool ownership authoritative for execution and live reconstruction, and removed the Background flag from active calls.
 - **2026-07-12** — v97. Added exact terminal Run correlation, durable per-turn inference provenance, and historical-marker compatibility.
 - **2026-07-12** — v96. Aligned invariants and verification with Session-owned turn snapshots and terminal buffer-keyed action execution.
