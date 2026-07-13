@@ -42,7 +42,7 @@ async def get_bootstrap_status(
     the first user exists and is gated by server-side bootstrap invariants.
     """
     output = await workspace_service.get_bootstrap_status()
-    return BootstrapStatusResponse.model_validate(output)
+    return BootstrapStatusResponse.model_validate(output.model_dump())
 
 
 @router.post("/bootstrap/first-owner", status_code=status.HTTP_201_CREATED)
@@ -59,7 +59,7 @@ async def bootstrap_first_owner(
     result = await workspace_service.bootstrap_first_owner(request_body)
     match result:
         case Success(value):
-            return BootstrapFirstOwnerResponse.model_validate(value)
+            return BootstrapFirstOwnerResponse.model_validate(value.model_dump())
         case Failure(error):
             match error:
                 case BootstrapNotAvailable():
