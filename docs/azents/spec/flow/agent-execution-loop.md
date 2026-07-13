@@ -41,7 +41,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-13
-spec_version: 76
+spec_version: 77
 ---
 
 # Agent Execution Loop
@@ -67,13 +67,19 @@ Main steps:
    into a LiteLLM Responses native request.
 7. `PostLowerFilterPipeline` applies adapter-native request size guard.
 8. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
-9. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
+9. `AdapterOutputNormalizer` processes each native event as it arrives, emits immediate UI stream
+   projections, and builds durable output when the native stream completes.
 10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
 11. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
-Streaming deltas are UI projection only. Durable events are appended based on completed output items
-or completed responses.
+Streaming text and reasoning deltas are normalized and sent to the output sink while the provider
+stream remains open. The execution core retains only the incremental state needed for completed
+output items, tool-call identity, usage, and user-stop partial text; it does not retain the complete
+native event sequence. The worker still coalesces live partial writes for at most 75 milliseconds or
+96 characters before updating Redis and WebSocket projection. Durable events are appended only from
+completed output items or completed responses. A user stop may durably preserve assistant text that
+arrived before completion, but incomplete tool calls are never admitted or executed.
 
 ## 2. Run State
 
@@ -616,6 +622,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-13** (spec_version 77) — Made native model stream normalization incremental so text and reasoning projections are emitted before provider completion without retaining the full native event sequence.
 - **2026-07-13** (spec_version 76) — Clarified that the LLM running indicator remains visible through the complete model streaming phase, including after partial output appears.
 - **2026-07-13** (spec_version 75) — Promoted immutable requested input intent, non-fatal live projection boundaries, essential wake-up ordering, and explicit public WebSocket delivery boundaries.
 - **2026-07-12** (spec_version 74) — Added atomic tool-call admission/completion, deterministic cancellation and result identity, ownership-generation recovery, and PostgreSQL-backed active-call state.
