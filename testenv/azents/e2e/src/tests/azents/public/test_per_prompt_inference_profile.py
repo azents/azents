@@ -537,12 +537,20 @@ class TestPerPromptInferenceProfile:
             target="Quality",
             effort="xhigh",
         )
-        _wait_for_input_event(
+        quality_event = _wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
             message=_QUALITY_MESSAGE,
         )
+        quality_payload = _object(
+            quality_event.get("payload"),
+            label="quality input payload",
+        )
+        assert quality_payload.get("requested_inference_profile") == {
+            "model_target_label": "Quality",
+            "reasoning_effort": "xhigh",
+        }
 
         _write_profile(
             server_url=azents_public_server_url,
@@ -553,12 +561,20 @@ class TestPerPromptInferenceProfile:
             target="Fast",
             effort=None,
         )
-        _wait_for_input_event(
+        fast_event = _wait_for_input_event(
             server_url=azents_public_server_url,
             token=token,
             session_id=session_id,
             message=_FAST_MESSAGE,
         )
+        fast_payload = _object(
+            fast_event.get("payload"),
+            label="fast input payload",
+        )
+        assert fast_payload.get("requested_inference_profile") == {
+            "model_target_label": "Fast",
+            "reasoning_effort": None,
+        }
 
         _wait_for_mock_models(mock_openai_url, "gpt-5.5", "gpt-5.5-mini")
 
