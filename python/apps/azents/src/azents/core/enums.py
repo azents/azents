@@ -11,6 +11,12 @@ class WorkspaceUserRole(enum.StrEnum):
     MEMBER = "member"
 
 
+class SystemUserRole(enum.StrEnum):
+    """Instance-wide User role."""
+
+    SYSTEM_ADMIN = "system_admin"
+
+
 class InvitationStatus(enum.StrEnum):
     """Workspace invitation status."""
 

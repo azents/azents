@@ -55,7 +55,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest | 
+    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest |
 
     try:
         # Create Password Reset Token
@@ -92,6 +92,10 @@ Class | Method | HTTP request | Description
 *ModelCatalogV1Api* | [**model_catalog_v1_list_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_list_system_model_catalogs) | **GET** /model-catalog/v1/system-catalogs | List System Model Catalogs
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalog**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalog) | **POST** /model-catalog/v1/system-catalogs/{provider}/refresh | Refresh System Model Catalog
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
+*SystemV1Api* | [**system_v1_get_system_admin_me**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_system_admin_me) | **GET** /system/v1/me | Get System Admin Me
+*SystemV1Api* | [**system_v1_grant_system_admin**](azentsadminclient/docs/SystemV1Api.md#system_v1_grant_system_admin) | **PUT** /system/v1/users/{user_id}/roles/system_admin | Grant System Admin
+*SystemV1Api* | [**system_v1_list_system_role_assignments**](azentsadminclient/docs/SystemV1Api.md#system_v1_list_system_role_assignments) | **GET** /system/v1/role-assignments | List System Role Assignments
+*SystemV1Api* | [**system_v1_revoke_system_admin**](azentsadminclient/docs/SystemV1Api.md#system_v1_revoke_system_admin) | **DELETE** /system/v1/users/{user_id}/roles/system_admin | Revoke System Admin
 *UserEmailV1Api* | [**useremail_v1_create_email**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_create_email) | **POST** /user-email/v1/users/{user_id}/emails | Create Email
 *UserEmailV1Api* | [**useremail_v1_delete_email**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_delete_email) | **DELETE** /user-email/v1/emails/{email_id} | Delete Email
 *UserEmailV1Api* | [**useremail_v1_list_emails**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_list_emails) | **GET** /user-email/v1/emails | List Emails
@@ -140,11 +144,15 @@ Class | Method | HTTP request | Description
  - [SignupTokenDeliveryMethod](azentsadminclient/docs/SignupTokenDeliveryMethod.md)
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)
  - [SignupTokenResponse](azentsadminclient/docs/SignupTokenResponse.md)
+ - [SystemAdminMeResponse](azentsadminclient/docs/SystemAdminMeResponse.md)
  - [SystemModelCatalogListResponse](azentsadminclient/docs/SystemModelCatalogListResponse.md)
  - [SystemModelCatalogRefreshListResponse](azentsadminclient/docs/SystemModelCatalogRefreshListResponse.md)
  - [SystemModelCatalogRefreshResponse](azentsadminclient/docs/SystemModelCatalogRefreshResponse.md)
  - [SystemModelCatalogResponse](azentsadminclient/docs/SystemModelCatalogResponse.md)
  - [SystemModelCatalogSyncAttemptResponse](azentsadminclient/docs/SystemModelCatalogSyncAttemptResponse.md)
+ - [SystemUserRole](azentsadminclient/docs/SystemUserRole.md)
+ - [SystemUserRoleAssignmentListResponse](azentsadminclient/docs/SystemUserRoleAssignmentListResponse.md)
+ - [SystemUserRoleAssignmentResponse](azentsadminclient/docs/SystemUserRoleAssignmentResponse.md)
  - [TransferOwnershipRequest](azentsadminclient/docs/TransferOwnershipRequest.md)
  - [UserEmailCreateRequest](azentsadminclient/docs/UserEmailCreateRequest.md)
  - [UserEmailListResponse](azentsadminclient/docs/UserEmailListResponse.md)
@@ -176,7 +184,3 @@ Authentication schemes defined for the API:
 
 
 ## Author
-
-
-
-

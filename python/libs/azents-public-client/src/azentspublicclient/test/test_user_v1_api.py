@@ -26,6 +26,13 @@ class TestUserV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_user_v1_get_my_system_roles(self) -> None:
+        """Test case for user_v1_get_my_system_roles
+
+        Get My System Roles
+        """
+        pass
+
     def test_user_v1_me(self) -> None:
         """Test case for user_v1_me
 

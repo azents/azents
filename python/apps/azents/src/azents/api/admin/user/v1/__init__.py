@@ -4,10 +4,12 @@ User management endpoints.
 """
 
 from textwrap import dedent
-from typing import Annotated
+from typing import Annotated, assert_never
 
+from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from azents.repos.system_user_role.data import LastSystemAdmin
 from azents.services.user import UserService
 from azents.utils.fastapi.route import RouteMounter
 
@@ -54,7 +56,20 @@ async def delete_user(
     user_id: str,
 ) -> None:
     """Delete a User."""
-    await user_service.delete(user_id)
+    result = await user_service.delete(user_id)
+    match result:
+        case Success():
+            return
+        case Failure(LastSystemAdmin()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "last_system_admin",
+                    "message": "The final system administrator cannot be deleted.",
+                },
+            )
+        case _:
+            assert_never(result)
 
 
 def mount(mounter: RouteMounter) -> None:

@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Get Agent Runtime
@@ -206,6 +206,7 @@ Class | Method | HTTP request | Description
 *ToolkitV1Api* | [**toolkit_v1_list_toolkit_scopes**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_list_toolkit_scopes) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes | List Toolkit Scopes
 *ToolkitV1Api* | [**toolkit_v1_list_toolkits**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_list_toolkits) | **GET** /toolkit/v1/toolkits | List Toolkits
 *ToolkitV1Api* | [**toolkit_v1_update_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_update_toolkit_config) | **PATCH** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Update Toolkit Config
+*UserV1Api* | [**user_v1_get_my_system_roles**](azentspublicclient/docs/UserV1Api.md#user_v1_get_my_system_roles) | **GET** /user/v1/me/system-roles | Get My System Roles
 *UserV1Api* | [**user_v1_me**](azentspublicclient/docs/UserV1Api.md#user_v1_me) | **GET** /user/v1/me | Me
 *WorkspaceUserV1Api* | [**workspaceuser_v1_delete_workspace_user**](azentspublicclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_delete_workspace_user) | **DELETE** /workspace-user/v1/workspaces/{handle}/workspace-users/{workspace_user_id} | Delete Workspace User
 *WorkspaceUserV1Api* | [**workspaceuser_v1_get_current_member**](azentspublicclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_get_current_member) | **GET** /workspace-user/v1/workspaces/{handle}/me | Get Current Member
@@ -399,6 +400,7 @@ Class | Method | HTTP request | Description
  - [ModelReasoningEffort](azentspublicclient/docs/ModelReasoningEffort.md)
  - [ModelToolCallingCapabilities](azentspublicclient/docs/ModelToolCallingCapabilities.md)
  - [MyJoinRequestResponse](azentspublicclient/docs/MyJoinRequestResponse.md)
+ - [MySystemRolesResponse](azentspublicclient/docs/MySystemRolesResponse.md)
  - [OAuthAuthorizeResponse](azentspublicclient/docs/OAuthAuthorizeResponse.md)
  - [OAuthExchangeRequest](azentspublicclient/docs/OAuthExchangeRequest.md)
  - [PartialHistoryResponse](azentspublicclient/docs/PartialHistoryResponse.md)
@@ -458,6 +460,7 @@ Class | Method | HTTP request | Description
  - [SubagentSettings](azentspublicclient/docs/SubagentSettings.md)
  - [SubagentTreeNodeResponse](azentspublicclient/docs/SubagentTreeNodeResponse.md)
  - [SubagentTreeResponse](azentspublicclient/docs/SubagentTreeResponse.md)
+ - [SystemUserRole](azentspublicclient/docs/SystemUserRole.md)
  - [TestConnectionRequest](azentspublicclient/docs/TestConnectionRequest.md)
  - [TestConnectionResponse](azentspublicclient/docs/TestConnectionResponse.md)
  - [TodoItemResponse](azentspublicclient/docs/TodoItemResponse.md)
@@ -508,7 +511,3 @@ Authentication schemes defined for the API:
 
 
 ## Author
-
-
-
-

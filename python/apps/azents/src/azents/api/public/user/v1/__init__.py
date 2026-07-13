@@ -9,10 +9,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 
 from azents.core.auth.deps import CurrentUser, get_current_user
+from azents.services.system_user_role.service import SystemUserRoleService
 from azents.services.user import UserService
 from azents.utils.fastapi.route import RouteMounter
 
-from .data import MeResponse
+from .data import MeResponse, MySystemRolesResponse
 
 router = APIRouter()
 
@@ -31,6 +32,16 @@ async def me(
         email=user.primary_email,
         created_at=user.created_at,
     )
+
+
+@router.get("/me/system-roles")
+async def get_my_system_roles(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    system_role_service: Annotated[SystemUserRoleService, Depends()],
+) -> MySystemRolesResponse:
+    """Return system roles assigned to the current User."""
+    output = await system_role_service.get_current_roles(current_user.user_id)
+    return MySystemRolesResponse(roles=output.roles)
 
 
 def mount(mounter: RouteMounter) -> None:

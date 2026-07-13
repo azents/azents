@@ -216,6 +216,7 @@ __all__ = [
     "ModelReasoningEffort",
     "ModelToolCallingCapabilities",
     "MyJoinRequestResponse",
+    "MySystemRolesResponse",
     "OAuthAuthorizeResponse",
     "OAuthExchangeRequest",
     "PartialHistoryResponse",
@@ -275,6 +276,7 @@ __all__ = [
     "SubagentSettings",
     "SubagentTreeNodeResponse",
     "SubagentTreeResponse",
+    "SystemUserRole",
     "TestConnectionRequest",
     "TestConnectionResponse",
     "TodoItemResponse",
@@ -516,6 +518,7 @@ from azentspublicclient.models.model_reasoning_capabilities import ModelReasonin
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort as ModelReasoningEffort
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities as ModelToolCallingCapabilities
 from azentspublicclient.models.my_join_request_response import MyJoinRequestResponse as MyJoinRequestResponse
+from azentspublicclient.models.my_system_roles_response import MySystemRolesResponse as MySystemRolesResponse
 from azentspublicclient.models.o_auth_authorize_response import OAuthAuthorizeResponse as OAuthAuthorizeResponse
 from azentspublicclient.models.o_auth_exchange_request import OAuthExchangeRequest as OAuthExchangeRequest
 from azentspublicclient.models.partial_history_response import PartialHistoryResponse as PartialHistoryResponse
@@ -575,6 +578,7 @@ from azentspublicclient.models.skill_action import SkillAction as SkillAction
 from azentspublicclient.models.subagent_settings import SubagentSettings as SubagentSettings
 from azentspublicclient.models.subagent_tree_node_response import SubagentTreeNodeResponse as SubagentTreeNodeResponse
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse as SubagentTreeResponse
+from azentspublicclient.models.system_user_role import SystemUserRole as SystemUserRole
 from azentspublicclient.models.test_connection_request import TestConnectionRequest as TestConnectionRequest
 from azentspublicclient.models.test_connection_response import TestConnectionResponse as TestConnectionResponse
 from azentspublicclient.models.todo_item_response import TodoItemResponse as TodoItemResponse
@@ -611,4 +615,3 @@ from azentspublicclient.models.xai_o_auth_device_start_response import XaiOAuthD
 from azentspublicclient.models.xai_o_auth_device_status_response import XaiOAuthDeviceStatusResponse as XaiOAuthDeviceStatusResponse
 from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets as XaiOAuthSecrets
 from azentspublicclient.models.xai_o_auth_session_status import XaiOAuthSessionStatus as XaiOAuthSessionStatus
-

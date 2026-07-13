@@ -1,17 +1,24 @@
 """User service."""
 
 import dataclasses
+import logging
 from typing import Annotated
 
+from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import SystemUserRole
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.system_user_role.data import LastSystemAdmin
+from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 
 from .data import UserListOutput, UserOutput
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -19,6 +26,7 @@ class UserService:
     """User CRUD service."""
 
     user_repository: Annotated[UserRepository, Depends()]
+    system_role_repository: Annotated[SystemUserRoleRepository, Depends()]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -73,10 +81,29 @@ class UserService:
             total=result.total,
         )
 
-    async def delete(self, user_id: str) -> None:
-        """Delete User.
+    async def delete(self, user_id: str) -> Result[None, LastSystemAdmin]:
+        """Delete User while preserving the final system administrator.
 
         :param user_id: User ID
+        :return: Success or final-admin invariant error
         """
         async with self.session_manager() as session:
+            await self.system_role_repository.acquire_mutation_lock(session)
+            system_admin = await self.system_role_repository.get(
+                session,
+                user_id,
+                SystemUserRole.SYSTEM_ADMIN,
+            )
+            if system_admin is not None:
+                count = await self.system_role_repository.count_by_role(
+                    session,
+                    SystemUserRole.SYSTEM_ADMIN,
+                )
+                if count <= 1:
+                    logger.warning(
+                        "Final system administrator deletion denied",
+                        extra={"target_user_id": user_id},
+                    )
+                    return Failure(LastSystemAdmin(user_id=user_id))
             await self.user_repository.delete(session, user_id)
+        return Success(None)

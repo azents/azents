@@ -17,6 +17,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.system_user_role.service import SystemUserRoleService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -24,6 +25,15 @@ bearer_scheme = HTTPBearer(auto_error=False)
 @dataclass
 class CurrentUser:
     """Current authenticated user context."""
+
+    user_id: str
+    session_id: str
+    elevated: bool = False
+
+
+@dataclass
+class SystemAdmin:
+    """Authenticated instance system administrator context."""
 
     user_id: str
     session_id: str
@@ -113,6 +123,26 @@ async def get_elevated_user(
             detail="Elevated access required",
         )
     return current_user
+
+
+async def get_system_admin(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    system_role_service: Annotated[SystemUserRoleService, Depends()],
+) -> SystemAdmin:
+    """Return the current User as a system administrator.
+
+    :raises HTTPException: 403 when the User lacks system-admin authority
+    """
+    if not await system_role_service.require_system_admin(current_user.user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="System administrator access required",
+        )
+    return SystemAdmin(
+        user_id=current_user.user_id,
+        session_id=current_user.session_id,
+        elevated=current_user.elevated,
+    )
 
 
 async def get_workspace_member(
