@@ -7,7 +7,7 @@ from fastapi import Depends
 from azents.core.crypto import CredentialCipher
 from azents.utils.appctx import AppContext
 
-from .config import AuthConfig, Config, EmailConfig
+from .config import AuthConfig, Config, EmailConfig, SystemBootstrapConfig
 
 
 def get_appctx() -> AppContext[Config]:
@@ -26,6 +26,13 @@ def get_config(appctx: Annotated[AppContext[Config], Depends(get_appctx)]) -> Co
 def get_auth_config(config: Annotated[Config, Depends(get_config)]) -> AuthConfig:
     """AuthDependency that returns Config."""
     return config.auth
+
+
+def get_system_bootstrap_config(
+    config: Annotated[Config, Depends(get_config)],
+) -> SystemBootstrapConfig:
+    """Return initial system bootstrap configuration."""
+    return config.system_bootstrap
 
 
 def get_email_config(

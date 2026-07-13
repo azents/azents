@@ -23,6 +23,7 @@ __all__ = [
     "HealthV1Api",
     "InvitationV1Api",
     "ModelCatalogV1Api",
+    "SystemBootstrapV1Api",
     "SystemV1Api",
     "UserEmailV1Api",
     "UserV1Api",
@@ -37,9 +38,6 @@ __all__ = [
     "ApiKeyError",
     "ApiAttributeError",
     "ApiException",
-    "BootstrapFirstOwnerRequest",
-    "BootstrapFirstOwnerResponse",
-    "BootstrapStatusResponse",
     "CreatePasswordResetTokenRequest",
     "CreatePasswordResetTokenResponse",
     "CreateSignupTokenRequest",
@@ -62,6 +60,9 @@ __all__ = [
     "SignupTokenListResponse",
     "SignupTokenResponse",
     "SystemAdminMeResponse",
+    "SystemBootstrapFirstAdminRequest",
+    "SystemBootstrapFirstAdminResponse",
+    "SystemBootstrapStatusResponse",
     "SystemModelCatalogListResponse",
     "SystemModelCatalogRefreshListResponse",
     "SystemModelCatalogRefreshResponse",
@@ -95,6 +96,7 @@ from azentsadminclient.api.debug_v1_api import DebugV1Api as DebugV1Api
 from azentsadminclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api as ModelCatalogV1Api
+from azentsadminclient.api.system_bootstrap_v1_api import SystemBootstrapV1Api as SystemBootstrapV1Api
 from azentsadminclient.api.system_v1_api import SystemV1Api as SystemV1Api
 from azentsadminclient.api.user_email_v1_api import UserEmailV1Api as UserEmailV1Api
 from azentsadminclient.api.user_v1_api import UserV1Api as UserV1Api
@@ -113,9 +115,6 @@ from azentsadminclient.exceptions import ApiAttributeError as ApiAttributeError
 from azentsadminclient.exceptions import ApiException as ApiException
 
 # import models into sdk package
-from azentsadminclient.models.bootstrap_first_owner_request import BootstrapFirstOwnerRequest as BootstrapFirstOwnerRequest
-from azentsadminclient.models.bootstrap_first_owner_response import BootstrapFirstOwnerResponse as BootstrapFirstOwnerResponse
-from azentsadminclient.models.bootstrap_status_response import BootstrapStatusResponse as BootstrapStatusResponse
 from azentsadminclient.models.create_password_reset_token_request import CreatePasswordResetTokenRequest as CreatePasswordResetTokenRequest
 from azentsadminclient.models.create_password_reset_token_response import CreatePasswordResetTokenResponse as CreatePasswordResetTokenResponse
 from azentsadminclient.models.create_signup_token_request import CreateSignupTokenRequest as CreateSignupTokenRequest
@@ -138,6 +137,9 @@ from azentsadminclient.models.signup_token_delivery_method import SignupTokenDel
 from azentsadminclient.models.signup_token_list_response import SignupTokenListResponse as SignupTokenListResponse
 from azentsadminclient.models.signup_token_response import SignupTokenResponse as SignupTokenResponse
 from azentsadminclient.models.system_admin_me_response import SystemAdminMeResponse as SystemAdminMeResponse
+from azentsadminclient.models.system_bootstrap_first_admin_request import SystemBootstrapFirstAdminRequest as SystemBootstrapFirstAdminRequest
+from azentsadminclient.models.system_bootstrap_first_admin_response import SystemBootstrapFirstAdminResponse as SystemBootstrapFirstAdminResponse
+from azentsadminclient.models.system_bootstrap_status_response import SystemBootstrapStatusResponse as SystemBootstrapStatusResponse
 from azentsadminclient.models.system_model_catalog_list_response import SystemModelCatalogListResponse as SystemModelCatalogListResponse
 from azentsadminclient.models.system_model_catalog_refresh_list_response import SystemModelCatalogRefreshListResponse as SystemModelCatalogRefreshListResponse
 from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse as SystemModelCatalogRefreshResponse

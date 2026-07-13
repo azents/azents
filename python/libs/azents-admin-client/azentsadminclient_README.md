@@ -92,6 +92,8 @@ Class | Method | HTTP request | Description
 *ModelCatalogV1Api* | [**model_catalog_v1_list_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_list_system_model_catalogs) | **GET** /model-catalog/v1/system-catalogs | List System Model Catalogs
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalog**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalog) | **POST** /model-catalog/v1/system-catalogs/{provider}/refresh | Refresh System Model Catalog
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
+*SystemBootstrapV1Api* | [**system_bootstrap_v1_bootstrap_first_system_admin**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_bootstrap_first_system_admin) | **POST** /system/v1/bootstrap/first-admin | Bootstrap First System Admin
+*SystemBootstrapV1Api* | [**system_bootstrap_v1_get_system_bootstrap_status**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_get_system_bootstrap_status) | **GET** /system/v1/bootstrap/status | Get System Bootstrap Status
 *SystemV1Api* | [**system_v1_get_system_admin_me**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_system_admin_me) | **GET** /system/v1/me | Get System Admin Me
 *SystemV1Api* | [**system_v1_grant_system_admin**](azentsadminclient/docs/SystemV1Api.md#system_v1_grant_system_admin) | **PUT** /system/v1/users/{user_id}/roles/system_admin | Grant System Admin
 *SystemV1Api* | [**system_v1_list_system_role_assignments**](azentsadminclient/docs/SystemV1Api.md#system_v1_list_system_role_assignments) | **GET** /system/v1/role-assignments | List System Role Assignments
@@ -109,10 +111,8 @@ Class | Method | HTTP request | Description
 *WorkspaceUserV1Api* | [**workspaceuser_v1_list_workspace_users**](azentsadminclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_list_workspace_users) | **GET** /workspace-user/v1/workspaces/{handle}/workspace-users | List Workspace Users
 *WorkspaceUserV1Api* | [**workspaceuser_v1_transfer_workspace_ownership**](azentsadminclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_transfer_workspace_ownership) | **POST** /workspace-user/v1/workspaces/{handle}/transfer-ownership | Transfer Workspace Ownership
 *WorkspaceUserV1Api* | [**workspaceuser_v1_update_workspace_user**](azentsadminclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_update_workspace_user) | **PATCH** /workspace-user/v1/workspace-users/{workspace_user_id} | Update Workspace User
-*WorkspaceV1Api* | [**workspace_v1_bootstrap_first_owner**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_bootstrap_first_owner) | **POST** /workspace/v1/bootstrap/first-owner | Bootstrap First Owner
 *WorkspaceV1Api* | [**workspace_v1_create_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_create_workspace) | **POST** /workspace/v1/workspaces | Create Workspace
 *WorkspaceV1Api* | [**workspace_v1_delete_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_delete_workspace) | **DELETE** /workspace/v1/workspaces/{handle} | Delete Workspace
-*WorkspaceV1Api* | [**workspace_v1_get_bootstrap_status**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_get_bootstrap_status) | **GET** /workspace/v1/bootstrap/status | Get Bootstrap Status
 *WorkspaceV1Api* | [**workspace_v1_get_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_get_workspace) | **GET** /workspace/v1/workspaces/{handle} | Get Workspace
 *WorkspaceV1Api* | [**workspace_v1_list_workspaces**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_list_workspaces) | **GET** /workspace/v1/workspaces | List Workspaces
 *WorkspaceV1Api* | [**workspace_v1_update_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_update_workspace) | **PATCH** /workspace/v1/workspaces/{handle} | Update Workspace
@@ -120,9 +120,6 @@ Class | Method | HTTP request | Description
 
 ## Documentation For Models
 
- - [BootstrapFirstOwnerRequest](azentsadminclient/docs/BootstrapFirstOwnerRequest.md)
- - [BootstrapFirstOwnerResponse](azentsadminclient/docs/BootstrapFirstOwnerResponse.md)
- - [BootstrapStatusResponse](azentsadminclient/docs/BootstrapStatusResponse.md)
  - [CreatePasswordResetTokenRequest](azentsadminclient/docs/CreatePasswordResetTokenRequest.md)
  - [CreatePasswordResetTokenResponse](azentsadminclient/docs/CreatePasswordResetTokenResponse.md)
  - [CreateSignupTokenRequest](azentsadminclient/docs/CreateSignupTokenRequest.md)
@@ -145,6 +142,9 @@ Class | Method | HTTP request | Description
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)
  - [SignupTokenResponse](azentsadminclient/docs/SignupTokenResponse.md)
  - [SystemAdminMeResponse](azentsadminclient/docs/SystemAdminMeResponse.md)
+ - [SystemBootstrapFirstAdminRequest](azentsadminclient/docs/SystemBootstrapFirstAdminRequest.md)
+ - [SystemBootstrapFirstAdminResponse](azentsadminclient/docs/SystemBootstrapFirstAdminResponse.md)
+ - [SystemBootstrapStatusResponse](azentsadminclient/docs/SystemBootstrapStatusResponse.md)
  - [SystemModelCatalogListResponse](azentsadminclient/docs/SystemModelCatalogListResponse.md)
  - [SystemModelCatalogRefreshListResponse](azentsadminclient/docs/SystemModelCatalogRefreshListResponse.md)
  - [SystemModelCatalogRefreshResponse](azentsadminclient/docs/SystemModelCatalogRefreshResponse.md)

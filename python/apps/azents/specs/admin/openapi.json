@@ -50,6 +50,81 @@
         }
       }
     },
+    "/system/v1/bootstrap/status": {
+      "get": {
+        "tags": [
+          "System Bootstrap v1"
+        ],
+        "summary": "Get System Bootstrap Status",
+        "description": "Return whether initial system bootstrap is available.",
+        "operationId": "system_bootstrap_v1_get_system_bootstrap_status",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemBootstrapStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/v1/bootstrap/first-admin": {
+      "post": {
+        "tags": [
+          "System Bootstrap v1"
+        ],
+        "summary": "Bootstrap First System Admin",
+        "description": "Create the first User and system administrator session.",
+        "operationId": "system_bootstrap_v1_bootstrap_first_system_admin",
+        "parameters": [
+          {
+            "name": "X-Azents-Setup-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Azents-Setup-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemBootstrapFirstAdminRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemBootstrapFirstAdminResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/v1/email-verifications": {
       "get": {
         "tags": [
@@ -1398,80 +1473,6 @@
         }
       }
     },
-    "/workspace/v1/bootstrap/status": {
-      "get": {
-        "tags": [
-          "Workspace v1"
-        ],
-        "summary": "Get Bootstrap Status",
-        "description": "Get whether first owner bootstrap is available.",
-        "operationId": "workspace_v1_get_bootstrap_status",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BootstrapStatusResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/workspace/v1/bootstrap/first-owner": {
-      "post": {
-        "tags": [
-          "Workspace v1"
-        ],
-        "summary": "Bootstrap First Owner",
-        "description": "Create the first Owner and Workspace.",
-        "operationId": "workspace_v1_bootstrap_first_owner",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BootstrapFirstOwnerRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BootstrapFirstOwnerResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/workspace/v1/workspaces": {
       "get": {
         "tags": [
@@ -1986,87 +1987,6 @@
   },
   "components": {
     "schemas": {
-      "BootstrapFirstOwnerRequest": {
-        "properties": {
-          "email": {
-            "type": "string",
-            "title": "Email",
-            "description": "Owner email"
-          },
-          "password": {
-            "type": "string",
-            "title": "Password",
-            "description": "Owner initial password"
-          },
-          "owner_name": {
-            "type": "string",
-            "title": "Owner Name",
-            "description": "Owner display name"
-          },
-          "workspace_name": {
-            "type": "string",
-            "title": "Workspace Name",
-            "description": "Workspace name"
-          },
-          "workspace_handle": {
-            "type": "string",
-            "title": "Workspace Handle",
-            "description": "Workspace handle"
-          },
-          "locale": {
-            "type": "string",
-            "title": "Locale",
-            "description": "Locale (BCP 47)",
-            "default": "ko-KR"
-          }
-        },
-        "type": "object",
-        "required": [
-          "email",
-          "password",
-          "owner_name",
-          "workspace_name",
-          "workspace_handle"
-        ],
-        "title": "BootstrapFirstOwnerRequest",
-        "description": "First owner bootstrap request."
-      },
-      "BootstrapFirstOwnerResponse": {
-        "properties": {
-          "workspace_handle": {
-            "type": "string",
-            "title": "Workspace Handle",
-            "description": "Created Workspace handle"
-          },
-          "user_id": {
-            "type": "string",
-            "title": "User Id",
-            "description": "Created Owner User ID"
-          }
-        },
-        "type": "object",
-        "required": [
-          "workspace_handle",
-          "user_id"
-        ],
-        "title": "BootstrapFirstOwnerResponse",
-        "description": "First owner bootstrap response."
-      },
-      "BootstrapStatusResponse": {
-        "properties": {
-          "available": {
-            "type": "boolean",
-            "title": "Available",
-            "description": "bootstrap availability flag"
-          }
-        },
-        "type": "object",
-        "required": [
-          "available"
-        ],
-        "title": "BootstrapStatusResponse",
-        "description": "First owner bootstrap status response."
-      },
       "CreatePasswordResetTokenRequest": {
         "properties": {
           "user_id": {
@@ -2707,6 +2627,69 @@
         ],
         "title": "SystemAdminMeResponse",
         "description": "Current system administrator response."
+      },
+      "SystemBootstrapFirstAdminRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Initial administrator email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "Initial administrator password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "SystemBootstrapFirstAdminRequest",
+        "description": "Initial system administrator credentials."
+      },
+      "SystemBootstrapFirstAdminResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token",
+            "description": "JWT access token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token",
+            "description": "Refresh token"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "description": "Access token expiration time in seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_in"
+        ],
+        "title": "SystemBootstrapFirstAdminResponse",
+        "description": "Initial system administrator session response."
+      },
+      "SystemBootstrapStatusResponse": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "Whether initial bootstrap is available"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "SystemBootstrapStatusResponse",
+        "description": "Initial system bootstrap availability response."
       },
       "SystemModelCatalogListResponse": {
         "properties": {
@@ -3500,6 +3483,10 @@
     {
       "name": "Health v1",
       "description": "Server status API (Admin)"
+    },
+    {
+      "name": "System Bootstrap v1",
+      "description": "\nSystem Bootstrap API (Admin)\n\nOne-time initialization for a zero-user Azents instance.\n"
     },
     {
       "name": "Auth v1",

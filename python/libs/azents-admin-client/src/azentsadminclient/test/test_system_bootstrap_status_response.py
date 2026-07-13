@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentsadminclient.models.bootstrap_first_owner_response import BootstrapFirstOwnerResponse
+from azentsadminclient.models.system_bootstrap_status_response import SystemBootstrapStatusResponse
 
-class TestBootstrapFirstOwnerResponse(unittest.TestCase):
-    """BootstrapFirstOwnerResponse unit test stubs"""
+class TestSystemBootstrapStatusResponse(unittest.TestCase):
+    """SystemBootstrapStatusResponse unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,28 +25,26 @@ class TestBootstrapFirstOwnerResponse(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> BootstrapFirstOwnerResponse:
-        """Test BootstrapFirstOwnerResponse
+    def make_instance(self, include_optional) -> SystemBootstrapStatusResponse:
+        """Test SystemBootstrapStatusResponse
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `BootstrapFirstOwnerResponse`
+        # uncomment below to create an instance of `SystemBootstrapStatusResponse`
         """
-        model = BootstrapFirstOwnerResponse()
+        model = SystemBootstrapStatusResponse()
         if include_optional:
-            return BootstrapFirstOwnerResponse(
-                workspace_handle = '',
-                user_id = ''
+            return SystemBootstrapStatusResponse(
+                available = True
             )
         else:
-            return BootstrapFirstOwnerResponse(
-                workspace_handle = '',
-                user_id = '',
+            return SystemBootstrapStatusResponse(
+                available = True,
         )
         """
 
-    def testBootstrapFirstOwnerResponse(self):
-        """Test BootstrapFirstOwnerResponse"""
+    def testSystemBootstrapStatusResponse(self):
+        """Test SystemBootstrapStatusResponse"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

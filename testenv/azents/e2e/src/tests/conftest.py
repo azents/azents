@@ -9,8 +9,8 @@ import sys
 import tempfile
 import time
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -28,6 +28,7 @@ from testcontainers.postgres import PostgresContainer
 from types_boto3_s3.client import S3Client
 
 from support.consts import REPOSITORY_ROOT
+from support.system_bootstrap import SystemBootstrapEvidence
 
 _AIMOCK_FIXTURE_DIR = REPOSITORY_ROOT / "testenv/azents/e2e/src/support/aimock_fixtures"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
@@ -37,6 +38,13 @@ _ECR_CACHE_PREFIX = "azents-production-server"
 _DOCKER_BUILDER_ENV = "AZENTS_E2E_DOCKER_BUILDER"
 _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
 _LOCAL_DOCKER_CACHE_WRITE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_WRITE_ROOT"
+
+
+class _RedactedSecret(str):
+    """String secret whose pytest/debug representation never reveals its value."""
+
+    def __repr__(self) -> str:
+        return "<redacted>"
 
 
 def random_secret(length: int = 32) -> str:
@@ -53,6 +61,12 @@ def random_fernet_key() -> str:
 def auth_jwt_secret_key() -> str:
     """Return one JWT signing key shared by all server processes."""
     return random_secret(32)
+
+
+@pytest.fixture(scope="session")
+def system_bootstrap_setup_token() -> str:
+    """Return a configured bootstrap token that is never written to test output."""
+    return _RedactedSecret(secrets.token_urlsafe(32))
 
 
 # =============================================================================
@@ -334,6 +348,7 @@ def _configure_azents_server_container(
     s3_bucket_name: str,
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
+    system_bootstrap_setup_token: str,
     mock_openai_container: DockerContainer,
 ) -> DockerContainer:
     """azents server container t settings."""
@@ -351,6 +366,7 @@ def _configure_azents_server_container(
         .with_env("AWS_SECRET_ACCESS_KEY", rustfs_secret_key)
         .with_env("AZ_AUTH_JWT_SECRET_KEY", auth_jwt_secret_key)
         .with_env("AZ_CREDENTIAL_ENCRYPTION_KEY", credential_encryption_key)
+        .with_env("AZ_SYSTEM_BOOTSTRAP_SETUP_TOKEN", system_bootstrap_setup_token)
         .with_env("AZ_REDIS_URL", "redis://valkey:6379")
         .with_env("AZ_WORKSPACE_S3_BUCKET", s3_bucket_name)
         .with_env("AZ_WORKSPACE_S3_PREFIX", "v1")
@@ -487,6 +503,7 @@ def azents_public_server_container(
     azents_server_image: str,
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
+    system_bootstrap_setup_token: str,
     mock_openai_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
     """azents Public API server container (port 8010)."""
@@ -509,6 +526,7 @@ def azents_public_server_container(
         s3_bucket_name,
         auth_jwt_secret_key,
         credential_encryption_key,
+        system_bootstrap_setup_token,
         mock_openai_container,
     )
 
@@ -531,6 +549,7 @@ def azents_admin_server_container(
     azents_public_server_container: DockerContainer,  # public server t t
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
+    system_bootstrap_setup_token: str,
     mock_openai_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
     """azents Admin API server container (port 8011)."""
@@ -554,6 +573,7 @@ def azents_admin_server_container(
         s3_bucket_name,
         auth_jwt_secret_key,
         credential_encryption_key,
+        system_bootstrap_setup_token,
         mock_openai_container,
     )
 
@@ -576,6 +596,7 @@ def azents_engine_worker_container(
     azents_admin_server_container: DockerContainer,
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
+    system_bootstrap_setup_token: str,
     mock_openai_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
     """WebSocket session runt processt azents engine worker container."""
@@ -601,6 +622,7 @@ def azents_engine_worker_container(
         s3_bucket_name,
         auth_jwt_secret_key,
         credential_encryption_key,
+        system_bootstrap_setup_token,
         mock_openai_container,
     )
     container = container.with_env("AZ_WORKER_HEALTH_PORT", "8012").with_env(
@@ -651,6 +673,7 @@ def azents_runtime_control_container(
     azents_admin_server_container: DockerContainer,
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
+    system_bootstrap_setup_token: str,
     mock_openai_container: DockerContainer,
     azents_runtime_runner_image: str,
 ) -> Generator[DockerContainer, None, None]:
@@ -676,6 +699,7 @@ def azents_runtime_control_container(
         s3_bucket_name,
         auth_jwt_secret_key,
         credential_encryption_key,
+        system_bootstrap_setup_token,
         mock_openai_container,
     )
     container = (
@@ -786,55 +810,85 @@ def azents_admin_server_url(
 
 
 @pytest.fixture(scope="session")
-def admin_access_token(
-    azents_public_server_url: str,
+def system_bootstrap_evidence(
+    azents_public_server_container: DockerContainer,
     azents_admin_server_container: DockerContainer,
-) -> str:
-    """Create and promote the initial User for authenticated Admin API tests."""
-    email = f"e2e-system-admin-{random_secret(4)}@example.com"
-    password = "SystemAdmin123!"
-    bootstrap_response = requests.post(
-        f"{azents_public_server_url}/workspace/v1/bootstrap/first-owner",
+    azents_admin_server_url: str,
+    system_bootstrap_setup_token: str,
+) -> SystemBootstrapEvidence:
+    """Bootstrap the initial administrator and retain only sanitized evidence."""
+    status_response = requests.get(
+        f"{azents_admin_server_url}/system/v1/bootstrap/status",
+        timeout=5,
+    )
+    if status_response.status_code != 200:
+        pytest.fail(f"bootstrap status failed with HTTP {status_response.status_code}")
+    initial_available = status_response.json().get("available") is True
+
+    invalid_response = requests.post(
+        f"{azents_admin_server_url}/system/v1/bootstrap/first-admin",
+        headers={"X-Azents-Setup-Token": f"invalid-{random_secret(8)}"},
         json={
-            "email": email,
-            "password": password,
-            "owner_name": "E2E system administrator",
-            "workspace_name": "E2E bootstrap",
-            "workspace_handle": f"e2e-bootstrap-{random_secret(4)}",
-            "locale": "en-US",
+            "email": "invalid-bootstrap@example.com",
+            "password": "InvalidBootstrap123!",
         },
         timeout=10,
     )
-    if bootstrap_response.status_code != 201:
-        pytest.fail(
-            f"first-owner bootstrap failed with HTTP {bootstrap_response.status_code}"
+
+    email = f"system-admin-{random_secret(4)}@example.com"
+    request_body = {"email": email, "password": "SystemAdmin123!"}
+
+    def attempt_bootstrap(_: int) -> requests.Response:
+        return requests.post(
+            f"{azents_admin_server_url}/system/v1/bootstrap/first-admin",
+            headers={"X-Azents-Setup-Token": system_bootstrap_setup_token},
+            json=request_body,
+            timeout=15,
         )
 
-    cli_result = azents_admin_server_container.get_wrapped_container().exec_run(
-        [
-            "python",
-            "src/cli/system_admin.py",
-            "grant",
-            "--email",
-            email,
-        ]
-    )
-    if cast(Any, cli_result).exit_code != 0:
-        pytest.fail("system-admin CLI grant failed")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(attempt_bootstrap, range(2)))
 
-    login_response = requests.post(
-        f"{azents_public_server_url}/auth/v1/login/password",
-        json={"email": email, "password": password},
-        timeout=10,
+    statuses = sorted(response.status_code for response in responses)
+    if statuses != [201, 403]:
+        pytest.fail(f"concurrent bootstrap returned unexpected statuses: {statuses}")
+    success_payload = next(
+        response for response in responses if response.status_code == 201
+    ).json()
+    access_token = success_payload.get("access_token")
+    refresh_token = success_payload.get("refresh_token")
+    if not isinstance(access_token, str) or not isinstance(refresh_token, str):
+        pytest.fail("successful bootstrap did not return a complete session")
+
+    final_status_response = requests.get(
+        f"{azents_admin_server_url}/system/v1/bootstrap/status",
+        timeout=5,
     )
-    if login_response.status_code != 200:
+    if final_status_response.status_code != 200:
         pytest.fail(
-            f"initial Admin login failed with HTTP {login_response.status_code}"
+            "post-bootstrap status failed with HTTP "
+            f"{final_status_response.status_code}"
         )
-    access_token = login_response.json().get("access_token")
-    if not isinstance(access_token, str):
-        pytest.fail("initial Admin login returned no access token")
-    return access_token
+    final_available = final_status_response.json().get("available") is True
+
+    for container in (
+        azents_public_server_container,
+        azents_admin_server_container,
+    ):
+        stdout, stderr = container.get_logs()
+        logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
+        if system_bootstrap_setup_token in logs:
+            pytest.fail("configured bootstrap token appeared in server logs")
+
+    return SystemBootstrapEvidence(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        email=email,
+        initial_available=initial_available,
+        invalid_attempt_status=invalid_response.status_code,
+        concurrent_attempt_statuses=(statuses[0], statuses[1]),
+        final_available=final_available,
+    )
 
 
 # =============================================================================
@@ -845,13 +899,13 @@ def admin_access_token(
 @pytest.fixture(scope="function")
 def admin_api_client(
     azents_admin_server_url: str,
-    admin_access_token: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
 ) -> azentsadminclient.ApiClient:
-    """Azents Admin API client authenticated as a system administrator."""
+    """Azents Admin API client authenticated as the bootstrapped administrator."""
     return azentsadminclient.ApiClient(
         configuration=azentsadminclient.Configuration(
             host=azents_admin_server_url,
-            access_token=admin_access_token,
+            access_token=system_bootstrap_evidence.access_token,
         )
     )
 

@@ -12,17 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from azents.core.auth.deps import CurrentUser, get_current_user
 from azents.repos.workspace.data import HandleConflict
 from azents.services.workspace import WorkspaceService
-from azents.services.workspace.data import (
-    BootstrapNotAvailable,
-    CreateWithOwnerInput,
-    WeakBootstrapPassword,
-)
+from azents.services.workspace.data import CreateWithOwnerInput
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
-    BootstrapFirstOwnerRequest,
-    BootstrapFirstOwnerResponse,
-    BootstrapStatusResponse,
     CreateWorkspaceRequest,
     CreateWorkspaceResponse,
     WorkspaceListResponse,
@@ -30,57 +23,6 @@ from .data import (
 )
 
 router = APIRouter()
-
-
-@router.get("/bootstrap/status")
-async def get_bootstrap_status(
-    workspace_service: Annotated[WorkspaceService, Depends()],
-) -> BootstrapStatusResponse:
-    """Get whether first owner bootstrap is available.
-
-    This endpoint is intentionally public because it is available only before
-    the first user exists and is gated by server-side bootstrap invariants.
-    """
-    output = await workspace_service.get_bootstrap_status()
-    return BootstrapStatusResponse.model_validate(output.model_dump())
-
-
-@router.post("/bootstrap/first-owner", status_code=status.HTTP_201_CREATED)
-async def bootstrap_first_owner(
-    workspace_service: Annotated[WorkspaceService, Depends()],
-    request_body: BootstrapFirstOwnerRequest,
-) -> BootstrapFirstOwnerResponse:
-    """Create the first Owner and Workspace.
-
-    This endpoint is intentionally public because normal authentication cannot
-    exist before the first user. The service allows it only when user count is
-    zero and first-owner bootstrap is enabled.
-    """
-    result = await workspace_service.bootstrap_first_owner(request_body)
-    match result:
-        case Success(value):
-            return BootstrapFirstOwnerResponse.model_validate(value.model_dump())
-        case Failure(error):
-            match error:
-                case BootstrapNotAvailable():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="First owner bootstrap is not available.",
-                    )
-                case HandleConflict():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Workspace handle already exists.",
-                    )
-                case WeakBootstrapPassword(message):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=message,
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
 
 
 @router.get("/workspaces/{handle}")
