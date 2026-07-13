@@ -127,30 +127,15 @@ class ModelAdapter(Protocol):
         ...
 
 
-class AdapterOutputStream(Protocol):
-    """Incrementally normalize one adapter-native model stream."""
-
-    def process_event(
-        self,
-        native_event: NativeEvent,
-    ) -> NormalizedAdapterOutput:
-        """Convert one native event to immediate live projections."""
-        ...
-
-    def complete(self) -> NormalizedAdapterOutput:
-        """Build durable output after the native stream completes."""
-        ...
-
-    def interrupt(self) -> NormalizedAdapterOutput:
-        """Build preservable partial output after user interruption."""
-        ...
-
-
 class AdapterOutputNormalizer(Protocol):
-    """Create incremental normalizers for adapter-native model streams."""
+    """Normalize adapter native output to event."""
 
-    def start(self, session_id: str) -> AdapterOutputStream:
-        """Start normalization state for one native model stream."""
+    def normalize(
+        self,
+        session_id: str,
+        native_events: Sequence[NativeEvent],
+    ) -> NormalizedAdapterOutput:
+        """Convert native event sequence to event output."""
         ...
 
 
