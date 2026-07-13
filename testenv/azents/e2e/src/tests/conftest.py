@@ -51,6 +51,13 @@ _ADMIN_WEB_GATEWAY_URL = "https://azents-web-gateway:8444/console"
 _ADMIN_WEB_BROWSER_URL = "https://azents-web-gateway:8445"
 
 
+class _RedactedSecret(str):
+    """String secret whose pytest/debug representation never reveals its value."""
+
+    def __repr__(self) -> str:
+        return "<redacted>"
+
+
 def random_secret(length: int = 32) -> str:
     """testt t t create."""
     return secrets.token_hex(length)
@@ -70,7 +77,7 @@ def auth_jwt_secret_key() -> str:
 @pytest.fixture(scope="session")
 def system_bootstrap_setup_token() -> str:
     """Return a configured bootstrap token that is never written to test output."""
-    return secrets.token_urlsafe(32)
+    return _RedactedSecret(secrets.token_urlsafe(32))
 
 
 # =============================================================================
@@ -509,6 +516,20 @@ def _wait_for_tcp_ready(
         time.sleep(1)
 
 
+def _read_sanitized_container_logs(
+    container: DockerContainer,
+    *,
+    secret_values: tuple[str, ...],
+) -> str:
+    """Read container logs while guaranteeing supplied secrets remain redacted."""
+    stdout, stderr = container.get_logs()
+    logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
+    for secret_value in secret_values:
+        if secret_value:
+            logs = logs.replace(secret_value, "<redacted>")
+    return logs
+
+
 def _log_server_output(container: DockerContainer, server_name: str) -> None:
     """server t output."""
     try:
@@ -875,7 +896,14 @@ def system_bootstrap_evidence(
         timeout=5,
     )
     if status_response.status_code != 200:
-        pytest.fail(f"bootstrap status failed with HTTP {status_response.status_code}")
+        admin_logs = _read_sanitized_container_logs(
+            azents_admin_server_container,
+            secret_values=(system_bootstrap_setup_token,),
+        )
+        pytest.fail(
+            f"bootstrap status failed with HTTP {status_response.status_code}\n"
+            f"sanitized Admin API logs:\n{admin_logs[-12000:]}"
+        )
     initial_available = status_response.json().get("available") is True
 
     invalid_response = requests.post(
