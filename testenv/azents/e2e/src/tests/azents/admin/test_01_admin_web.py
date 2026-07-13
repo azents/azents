@@ -241,6 +241,12 @@ def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
         )
     )
     revoke_button.click()
+    confirm_revoke_button = _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, "//button[normalize-space()='Revoke access']")
+        )
+    )
+    confirm_revoke_button.click()
     _wait(browser_driver).until(ec.url_contains("/login"))
     _wait_for_cookies_cleared(browser_driver, names=_ADMIN_COOKIE_NAMES)
 
