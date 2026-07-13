@@ -10,14 +10,14 @@ import {
   userV1ListUsers,
 } from "@azents/admin-client";
 import { z } from "zod/v4";
-import { publicProcedure, router } from "../init";
+import { protectedProcedure, router } from "../init";
 
 // --- Router ---
 export const userRouter = router({
   /**
    * User 목록 조회
    */
-  list: publicProcedure.query(async ({ ctx }) => {
+  list: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await userV1ListUsers({
       client: ctx.adminApiClient,
       throwOnError: true,
@@ -32,7 +32,7 @@ export const userRouter = router({
   /**
    * User 상세 조회
    */
-  get: publicProcedure
+  get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await userV1GetUser({
@@ -46,7 +46,7 @@ export const userRouter = router({
   /**
    * User 삭제
    */
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await userV1DeleteUser({

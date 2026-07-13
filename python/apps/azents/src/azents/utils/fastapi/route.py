@@ -2,9 +2,10 @@
 
 import logging
 import re
+from collections.abc import Sequence
 from typing import Protocol
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, params
 from fastapi.routing import APIRoute
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class RouteMounter(Protocol):
         prefix: str,
         tag: str,
         description: str | None = None,
+        dependencies: Sequence[params.Depends] | None = None,
     ) -> None: ...
 
 
@@ -73,11 +75,13 @@ def as_route_mounter(app: FastAPI) -> RouteMounter:
         prefix: str,
         tag: str,
         description: str | None = None,
+        dependencies: Sequence[params.Depends] | None = None,
     ) -> None:
         app.include_router(
             router,
             prefix=prefix,
             tags=[tag],
+            dependencies=dependencies,
         )
         app.openapi_tags = [
             *(app.openapi_tags or []),

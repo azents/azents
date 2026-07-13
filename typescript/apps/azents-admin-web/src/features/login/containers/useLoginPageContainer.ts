@@ -1,33 +1,39 @@
 "use client";
 
 import { useLogin } from "@refinedev/core";
+import { useState } from "react";
 import type { LoginState } from "../types";
 
 export interface LoginPageContainerOutput {
   state: LoginState;
+  email: string;
+  password: string;
+  onEmailChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
   onLogin: () => void;
 }
 
-/**
- * 로그인 페이지 컨테이너 훅
- *
- * Refine의 useLogin을 사용하여 GitHub OAuth 로그인을 처리합니다.
- */
 export function useLoginPageContainer(): LoginPageContainerOutput {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const { mutate: login, isPending, error } = useLogin();
 
   const state: LoginState = error
-    ? { type: "ERROR", message: error.message || "로그인에 실패했습니다." }
+    ? { type: "ERROR", message: error.message || "Login failed." }
     : isPending
       ? { type: "LOADING" }
       : { type: "IDLE" };
 
   const handleLogin = (): void => {
-    login({});
+    login({ email, password });
   };
 
   return {
     state,
+    email,
+    password,
+    onEmailChange: setEmail,
+    onPasswordChange: setPassword,
     onLogin: handleLogin,
   };
 }

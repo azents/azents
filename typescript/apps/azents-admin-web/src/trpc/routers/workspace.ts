@@ -12,7 +12,7 @@ import {
   workspaceV1UpdateWorkspace,
 } from "@azents/admin-client";
 import { z } from "zod/v4";
-import { publicProcedure, router } from "../init";
+import { protectedProcedure, router } from "../init";
 
 // --- Input Schemas ---
 const WorkspaceCreateInput = z.object({
@@ -31,7 +31,7 @@ export const workspaceRouter = router({
   /**
    * 워크스페이스 목록 조회
    */
-  list: publicProcedure.query(async ({ ctx }) => {
+  list: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await workspaceV1ListWorkspaces({
       client: ctx.adminApiClient,
       throwOnError: true,
@@ -45,7 +45,7 @@ export const workspaceRouter = router({
   /**
    * 워크스페이스 상세 조회
    */
-  get: publicProcedure
+  get: protectedProcedure
     .input(z.object({ handle: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await workspaceV1GetWorkspace({
@@ -59,7 +59,7 @@ export const workspaceRouter = router({
   /**
    * 워크스페이스 생성
    */
-  create: publicProcedure
+  create: protectedProcedure
     .input(WorkspaceCreateInput)
     .mutation(async ({ ctx, input }) => {
       const { data } = await workspaceV1CreateWorkspace({
@@ -73,7 +73,7 @@ export const workspaceRouter = router({
   /**
    * 워크스페이스 수정
    */
-  update: publicProcedure
+  update: protectedProcedure
     .input(WorkspaceUpdateInput)
     .mutation(async ({ ctx, input }) => {
       const { handle, ...body } = input;
@@ -89,7 +89,7 @@ export const workspaceRouter = router({
   /**
    * 워크스페이스 삭제
    */
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ handle: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await workspaceV1DeleteWorkspace({

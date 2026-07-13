@@ -4,7 +4,6 @@ import { Notifications } from "@mantine/notifications";
 import { cookies } from "next/headers";
 import { getPublicConfig } from "@/config";
 import { ConfigProvider } from "@/config/client";
-import { SessionProvider } from "@/providers/session";
 import { ClientLayout } from "./client-layout";
 
 import "@mantine/core/styles.css";
@@ -51,7 +50,7 @@ export default async function RootLayout({
     initialPreference === "system" ? "auto" : initialResolvedMode;
 
   return (
-    <html lang="ko" style={{ height: "100%" }} suppressHydrationWarning>
+    <html lang="en" style={{ height: "100%" }} suppressHydrationWarning>
       <head>
         <ColorSchemeScript defaultColorScheme={colorScheme} />
       </head>
@@ -60,14 +59,12 @@ export default async function RootLayout({
           <MantineProvider defaultColorScheme={colorScheme}>
             <ModalsProvider>
               <Notifications position="top-right" />
-              <SessionProvider>
-                <ClientLayout
-                  initialPreference={initialPreference}
-                  initialResolvedMode={initialResolvedMode}
-                >
-                  {children}
-                </ClientLayout>
-              </SessionProvider>
+              <ClientLayout
+                initialPreference={initialPreference}
+                initialResolvedMode={initialResolvedMode}
+              >
+                {children}
+              </ClientLayout>
             </ModalsProvider>
           </MantineProvider>
         </ConfigProvider>

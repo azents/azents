@@ -10,14 +10,14 @@ import {
   useremailV1ListEmailsByUser,
 } from "@azents/admin-client";
 import { z } from "zod/v4";
-import { publicProcedure, router } from "../init";
+import { protectedProcedure, router } from "../init";
 
 // --- Router ---
 export const userEmailRouter = router({
   /**
    * User별 이메일 목록 조회
    */
-  listByUser: publicProcedure
+  listByUser: protectedProcedure
     .input(z.object({ user_id: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await useremailV1ListEmailsByUser({
@@ -35,7 +35,7 @@ export const userEmailRouter = router({
   /**
    * UserEmail 생성
    */
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         user_id: z.string(),
@@ -55,7 +55,7 @@ export const userEmailRouter = router({
   /**
    * UserEmail 삭제
    */
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ email_id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await useremailV1DeleteEmail({

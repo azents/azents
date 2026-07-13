@@ -19,6 +19,7 @@ Create a UserEmail.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -33,13 +34,22 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserEmailV1Api(api_client)
-    user_id = 'user_id_example' # str | 
-    user_email_create_request = azentsadminclient.UserEmailCreateRequest() # UserEmailCreateRequest | 
+    user_id = 'user_id_example' # str |
+    user_email_create_request = azentsadminclient.UserEmailCreateRequest() # UserEmailCreateRequest |
 
     try:
         # Create Email
@@ -57,8 +67,8 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **user_id** | **str**|  | 
- **user_email_create_request** | [**UserEmailCreateRequest**](UserEmailCreateRequest.md)|  | 
+ **user_id** | **str**|  |
+ **user_email_create_request** | [**UserEmailCreateRequest**](UserEmailCreateRequest.md)|  |
 
 ### Return type
 
@@ -66,7 +76,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -91,6 +101,7 @@ Delete a UserEmail.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -103,12 +114,21 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserEmailV1Api(api_client)
-    email_id = 'email_id_example' # str | 
+    email_id = 'email_id_example' # str |
 
     try:
         # Delete Email
@@ -124,7 +144,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **email_id** | **str**|  | 
+ **email_id** | **str**|  |
 
 ### Return type
 
@@ -132,7 +152,7 @@ void (empty response body)
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -157,6 +177,7 @@ List all UserEmail records.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -170,6 +191,15 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
@@ -203,7 +233,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -228,6 +258,7 @@ List UserEmail records by User ID.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -241,12 +272,21 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserEmailV1Api(api_client)
-    user_id = 'user_id_example' # str | 
+    user_id = 'user_id_example' # str |
 
     try:
         # List Emails By User
@@ -264,7 +304,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **user_id** | **str**|  | 
+ **user_id** | **str**|  |
 
 ### Return type
 
@@ -272,7 +312,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -287,4 +327,3 @@ No authorization required
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-

@@ -21,6 +21,7 @@ Create a WorkspaceUser.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -35,12 +36,21 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    workspace_user_create_request = azentsadminclient.WorkspaceUserCreateRequest() # WorkspaceUserCreateRequest | 
+    workspace_user_create_request = azentsadminclient.WorkspaceUserCreateRequest() # WorkspaceUserCreateRequest |
 
     try:
         # Create Workspace User
@@ -58,7 +68,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_create_request** | [**WorkspaceUserCreateRequest**](WorkspaceUserCreateRequest.md)|  | 
+ **workspace_user_create_request** | [**WorkspaceUserCreateRequest**](WorkspaceUserCreateRequest.md)|  |
 
 ### Return type
 
@@ -66,7 +76,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -93,6 +103,7 @@ Owners cannot be deleted. Transfer ownership first, then delete.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -105,12 +116,21 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    workspace_user_id = 'workspace_user_id_example' # str | 
+    workspace_user_id = 'workspace_user_id_example' # str |
 
     try:
         # Delete Workspace User
@@ -126,7 +146,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_id** | **str**|  | 
+ **workspace_user_id** | **str**|  |
 
 ### Return type
 
@@ -134,7 +154,7 @@ void (empty response body)
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -159,6 +179,7 @@ Get a WorkspaceUser by ID.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -172,12 +193,21 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    workspace_user_id = 'workspace_user_id_example' # str | 
+    workspace_user_id = 'workspace_user_id_example' # str |
 
     try:
         # Get Workspace User
@@ -195,7 +225,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_id** | **str**|  | 
+ **workspace_user_id** | **str**|  |
 
 ### Return type
 
@@ -203,7 +233,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -228,6 +258,7 @@ List WorkspaceUsers in a Workspace.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -241,12 +272,21 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    handle = 'handle_example' # str | 
+    handle = 'handle_example' # str |
 
     try:
         # List Workspace Users
@@ -264,7 +304,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
+ **handle** | **str**|  |
 
 ### Return type
 
@@ -272,7 +312,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -299,6 +339,7 @@ Set the new Owner and demote the previous Owner to Manager.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -313,13 +354,22 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    handle = 'handle_example' # str | 
-    transfer_ownership_request = azentsadminclient.TransferOwnershipRequest() # TransferOwnershipRequest | 
+    handle = 'handle_example' # str |
+    transfer_ownership_request = azentsadminclient.TransferOwnershipRequest() # TransferOwnershipRequest |
 
     try:
         # Transfer Workspace Ownership
@@ -337,8 +387,8 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
- **transfer_ownership_request** | [**TransferOwnershipRequest**](TransferOwnershipRequest.md)|  | 
+ **handle** | **str**|  |
+ **transfer_ownership_request** | [**TransferOwnershipRequest**](TransferOwnershipRequest.md)|  |
 
 ### Return type
 
@@ -346,7 +396,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -371,6 +421,7 @@ Update a WorkspaceUser.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -385,13 +436,22 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.WorkspaceUserV1Api(api_client)
-    workspace_user_id = 'workspace_user_id_example' # str | 
-    workspace_user_update_request = azentsadminclient.WorkspaceUserUpdateRequest() # WorkspaceUserUpdateRequest | 
+    workspace_user_id = 'workspace_user_id_example' # str |
+    workspace_user_update_request = azentsadminclient.WorkspaceUserUpdateRequest() # WorkspaceUserUpdateRequest |
 
     try:
         # Update Workspace User
@@ -409,8 +469,8 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **workspace_user_id** | **str**|  | 
- **workspace_user_update_request** | [**WorkspaceUserUpdateRequest**](WorkspaceUserUpdateRequest.md)|  | 
+ **workspace_user_id** | **str**|  |
+ **workspace_user_update_request** | [**WorkspaceUserUpdateRequest**](WorkspaceUserUpdateRequest.md)|  |
 
 ### Return type
 
@@ -418,7 +478,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -433,4 +493,3 @@ No authorization required
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
