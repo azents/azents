@@ -8,15 +8,15 @@
  * Scroll policy:
  * - initial load: useLayoutEffect with scroll to bottom before paint (prevent flicker/misfire)
  *   → enable pagination after scroll stabilizes (isReadyForPaginationRef)
- * - follow active: bottom or iOS bottom bounce area inonly new message/streaming auto-scroll
- * - follow stop: bottom/bounce area as soon as leaving stop and new timeline item when arrives "new message" show chip
+ * - follow active: within the 48px bottom/iOS bounce boundary, new output stays pinned
+ * - follow stop: explicit user scroll beyond that same boundary shows the new-message control
  * - when user sends message: always bottom with scroll
  * - scrolling up loads older messages (pagination), preserve scroll position.
  */
 
 import {
-  Badge,
   Box,
+  Button,
   Center,
   Group,
   Loader,
@@ -79,8 +79,6 @@ const LOAD_MORE_THRESHOLD = 100;
 const BOTTOM_FOLLOW_THRESHOLD = 48;
 const PROGRAMMATIC_SCROLL_GUARD_MS = 350;
 const LOAD_MORE_COOLDOWN_MS = 800;
-/** distance that intentionally exits latest-follow mode (roughly a paragraph or two). */
-const FOLLOW_EXIT_THRESHOLD = 160;
 const CHAT_SCROLL_STATE_STORAGE_PREFIX = "azents.chat.scrollState.";
 const NEW_MESSAGE_CHIP_OFFSET = "calc(100% + var(--mantine-spacing-xl))";
 const KEYBOARD_RESIZE_SETTLE_MS = 250;
@@ -384,8 +382,8 @@ interface ChatViewProps {
   isLoadingMore: boolean;
   /** newer messages loading */
   isLoadingNewer: boolean;
-  /** older messages  withtext */
-  onLoadMore: () => void;
+  /** load older events; automatic viewport filling keeps latest-follow state */
+  onLoadMore: (options?: { detachFromLatest?: boolean }) => void;
   /** newer messages  withtext */
   onLoadNewer: () => void;
   /** latest reset */
@@ -498,7 +496,8 @@ export function ChatView({
     useState<EditingMessageState | null>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const programmaticScrollUntilRef = useRef(0);
-  const lastUserScrollIntentAtRef = useRef(0);
+  const detachedScrollRestoreUntilRef = useRef(0);
+  const userScrollIntentGenerationRef = useRef(0);
   const lastLoadMoreTriggerAtRef = useRef(0);
   const previousSessionIdRef = useRef<string | null>(null);
   const pendingInitialScrollRestoreRef = useRef<StoredChatScrollState | null>(
@@ -607,6 +606,7 @@ export function ChatView({
 
   // older messages prepend when preserve scroll position
   const isLoadingMoreRef = useRef(false);
+  const lastAutoLoadAttemptKeyRef = useRef<string | null>(null);
   const savedScrollRef = useRef<{
     scrollHeight: number;
     scrollTop: number;
@@ -615,6 +615,14 @@ export function ChatView({
   const markProgrammaticScroll = useCallback((): void => {
     programmaticScrollUntilRef.current =
       performance.now() + PROGRAMMATIC_SCROLL_GUARD_MS;
+  }, []);
+
+  const markUserScrollIntent = useCallback((): void => {
+    programmaticScrollUntilRef.current = 0;
+    detachedScrollRestoreUntilRef.current = 0;
+    userScrollIntentGenerationRef.current += 1;
+    pendingInitialScrollRestoreRef.current = null;
+    savedScrollRef.current = null;
   }, []);
 
   const persistScrollState = useCallback(
@@ -647,7 +655,15 @@ export function ChatView({
   }, [markProgrammaticScroll]);
 
   const schedulePinToBottom = useCallback((): void => {
-    requestAnimationFrame(pinToBottom);
+    const userScrollIntentGeneration = userScrollIntentGenerationRef.current;
+    requestAnimationFrame(() => {
+      if (
+        isFollowingLatestRef.current &&
+        userScrollIntentGeneration === userScrollIntentGenerationRef.current
+      ) {
+        pinToBottom();
+      }
+    });
   }, [pinToBottom]);
 
   useEffect(() => {
@@ -721,6 +737,8 @@ export function ChatView({
     setShowNewMessageChip(false);
     prevMessageIdsRef.current = new Set();
     pendingInitialScrollRestoreRef.current = null;
+    lastAutoLoadAttemptKeyRef.current = null;
+    detachedScrollRestoreUntilRef.current = 0;
 
     if (sessionId === null || typeof window === "undefined") {
       return;
@@ -741,9 +759,33 @@ export function ChatView({
     const saved = savedScrollRef.current;
     const viewport = viewportRef.current;
     if (saved && viewport && !isLoadingMore) {
-      const diff = viewport.scrollHeight - saved.scrollHeight;
+      const pendingDetachedScrollState = pendingInitialScrollRestoreRef.current;
       markProgrammaticScroll();
-      viewport.scrollTop = saved.scrollTop + diff;
+      if (
+        pendingDetachedScrollState !== null &&
+        !pendingDetachedScrollState.following
+      ) {
+        const maxDistanceFromBottom = Math.max(
+          0,
+          viewport.scrollHeight - viewport.clientHeight,
+        );
+        detachedScrollRestoreUntilRef.current =
+          performance.now() + PROGRAMMATIC_SCROLL_GUARD_MS;
+        viewport.scrollTop = Math.max(
+          0,
+          maxDistanceFromBottom - pendingDetachedScrollState.distanceFromBottom,
+        );
+        isFollowingLatestRef.current = false;
+        if (
+          !hasMore ||
+          maxDistanceFromBottom >= pendingDetachedScrollState.distanceFromBottom
+        ) {
+          pendingInitialScrollRestoreRef.current = null;
+        }
+      } else {
+        const diff = viewport.scrollHeight - saved.scrollHeight;
+        viewport.scrollTop = saved.scrollTop + diff;
+      }
       savedScrollRef.current = null;
       prevMessageIdsRef.current = new Set(
         getTimelineItemIds(
@@ -759,9 +801,49 @@ export function ChatView({
     pendingInputBuffers,
     liveRun,
     actionExecutions,
+    hasMore,
     isLoadingMore,
     markProgrammaticScroll,
   ]);
+
+  const loadOlderUntilViewportScrollable = useCallback((): void => {
+    const viewport = viewportRef.current;
+    if (
+      viewport === null ||
+      !isReadyForPaginationRef.current ||
+      !hasMore ||
+      isLoadingMore
+    ) {
+      return;
+    }
+    const pendingDetachedScrollState = pendingInitialScrollRestoreRef.current;
+    const maxDistanceFromBottom = Math.max(
+      0,
+      viewport.scrollHeight - viewport.clientHeight,
+    );
+    const needsDetachedRestoreHistory =
+      pendingDetachedScrollState !== null &&
+      !pendingDetachedScrollState.following &&
+      maxDistanceFromBottom < pendingDetachedScrollState.distanceFromBottom;
+    if (
+      viewport.scrollHeight > viewport.clientHeight &&
+      !needsDetachedRestoreHistory
+    ) {
+      return;
+    }
+    const autoLoadAttemptKey = `${viewport.scrollHeight}:${viewport.clientHeight}:${contentRef.current?.scrollHeight ?? 0}`;
+    if (lastAutoLoadAttemptKeyRef.current === autoLoadAttemptKey) {
+      return;
+    }
+    lastAutoLoadAttemptKeyRef.current = autoLoadAttemptKey;
+    savedScrollRef.current = {
+      scrollHeight: viewport.scrollHeight,
+      scrollTop: viewport.scrollTop,
+    };
+    onLoadMore({
+      detachFromLatest: !isFollowingLatestRef.current,
+    });
+  }, [hasMore, isLoadingMore, onLoadMore]);
 
   // initial load when paint before to bottom with scroll.
   // useEffect(paint after) itext useLayoutEffect(paint before) in handledtext
@@ -769,7 +851,7 @@ export function ChatView({
   useLayoutEffect(() => {
     if (
       !isInitialScrollRef.current ||
-      !hasTimelineItems ||
+      chatViewState.type !== "READY" ||
       savedScrollRef.current
     ) {
       return;
@@ -780,21 +862,27 @@ export function ChatView({
     }
 
     const storedScrollState = pendingInitialScrollRestoreRef.current;
-    pendingInitialScrollRestoreRef.current = null;
-    if (
-      storedScrollState !== null &&
-      !storedScrollState.following &&
-      storedScrollState.distanceFromBottom >= FOLLOW_EXIT_THRESHOLD
-    ) {
+    if (storedScrollState !== null && !storedScrollState.following) {
+      const maxDistanceFromBottom = Math.max(
+        0,
+        viewport.scrollHeight - viewport.clientHeight,
+      );
       markProgrammaticScroll();
+      detachedScrollRestoreUntilRef.current =
+        performance.now() + PROGRAMMATIC_SCROLL_GUARD_MS;
       viewport.scrollTop = Math.max(
         0,
-        viewport.scrollHeight -
-          viewport.clientHeight -
-          storedScrollState.distanceFromBottom,
+        maxDistanceFromBottom - storedScrollState.distanceFromBottom,
       );
       isFollowingLatestRef.current = false;
+      if (
+        !hasMore ||
+        maxDistanceFromBottom >= storedScrollState.distanceFromBottom
+      ) {
+        pendingInitialScrollRestoreRef.current = null;
+      }
     } else {
+      pendingInitialScrollRestoreRef.current = null;
       pinToBottom();
       isFollowingLatestRef.current = true;
     }
@@ -811,15 +899,28 @@ export function ChatView({
     // text after next frame pagination enable (sectext scroll insidetext waiting)
     requestAnimationFrame(() => {
       isReadyForPaginationRef.current = true;
+      loadOlderUntilViewportScrollable();
     });
   }, [
     messages,
     pendingInputBuffers,
     liveRun,
     actionExecutions,
-    hasTimelineItems,
+    chatViewState.type,
+    hasMore,
+    loadOlderUntilViewportScrollable,
     markProgrammaticScroll,
     pinToBottom,
+  ]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(loadOlderUntilViewportScrollable);
+    return () => cancelAnimationFrame(frame);
+  }, [
+    actionExecutions,
+    loadOlderUntilViewportScrollable,
+    messages,
+    pendingInputBuffers,
   ]);
 
   useEffect(() => {
@@ -912,13 +1013,10 @@ export function ChatView({
   // integration scroll handler: bottom detection + new message chip release + older messages  withtext + mobile header hide/display
   useEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport) {
+    const scrollArea = scrollAreaRef.current;
+    if (!viewport || !scrollArea) {
       return;
     }
-
-    const markUserScrollIntent = (): void => {
-      lastUserScrollIntentAtRef.current = performance.now();
-    };
 
     const handleScroll = (): void => {
       const scrollTop = viewport.scrollTop;
@@ -928,19 +1026,25 @@ export function ChatView({
       const atFollowBoundary = distanceFromBottom <= BOTTOM_FOLLOW_THRESHOLD;
       const now = performance.now();
       const inProgrammaticScroll = now < programmaticScrollUntilRef.current;
-      if (atFollowBoundary) {
+      const pendingDetachedScrollState = pendingInitialScrollRestoreRef.current;
+      const isRestoringDetachedScroll =
+        (pendingDetachedScrollState !== null &&
+          !pendingDetachedScrollState.following) ||
+        now < detachedScrollRestoreUntilRef.current;
+      if (isRestoringDetachedScroll) {
+        isFollowingLatestRef.current = false;
+      } else if (atFollowBoundary) {
         isFollowingLatestRef.current = true;
-      } else if (
-        !inProgrammaticScroll &&
-        distanceFromBottom >= FOLLOW_EXIT_THRESHOLD
-      ) {
+      } else if (!inProgrammaticScroll) {
         isFollowingLatestRef.current = false;
       }
-      persistScrollState(viewport, isFollowingLatestRef.current);
+      if (!isRestoringDetachedScroll) {
+        persistScrollState(viewport, isFollowingLatestRef.current);
+      }
 
       // bottom or bottom bounce area to alsotextwhen new message chip hide.
       // text bottom in text textonly with detached/buffering switchdoes not..
-      if (atFollowBoundary) {
+      if (atFollowBoundary && !isRestoringDetachedScroll) {
         setShowNewMessageChip(false);
         if (
           chatTimelineState.type === "DETACHED_HISTORY_BROWSING" &&
@@ -982,7 +1086,7 @@ export function ChatView({
     viewport.addEventListener("touchmove", markUserScrollIntent, {
       passive: true,
     });
-    viewport.addEventListener("pointerdown", markUserScrollIntent, {
+    scrollArea.addEventListener("pointerdown", markUserScrollIntent, {
       passive: true,
     });
     viewport.addEventListener("scroll", handleScroll, { passive: true });
@@ -990,7 +1094,7 @@ export function ChatView({
       viewport.removeEventListener("wheel", markUserScrollIntent);
       viewport.removeEventListener("touchstart", markUserScrollIntent);
       viewport.removeEventListener("touchmove", markUserScrollIntent);
-      viewport.removeEventListener("pointerdown", markUserScrollIntent);
+      scrollArea.removeEventListener("pointerdown", markUserScrollIntent);
       viewport.removeEventListener("scroll", handleScroll);
     };
   }, [
@@ -1000,6 +1104,7 @@ export function ChatView({
     hasMore,
     isLoadingMore,
     isLoadingNewer,
+    markUserScrollIntent,
     onLoadMore,
     onLoadNewer,
     onResetToLatest,
@@ -1008,6 +1113,15 @@ export function ChatView({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       if (
         event.key === "ArrowUp" ||
         event.key === "ArrowDown" ||
@@ -1017,12 +1131,12 @@ export function ChatView({
         event.key === "End" ||
         event.key === " "
       ) {
-        lastUserScrollIntentAtRef.current = performance.now();
+        markUserScrollIntent();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [markUserScrollIntent]);
 
   /** bottom with scroll + chip hide */
   const scrollToBottom = useCallback(() => {
@@ -1271,19 +1385,17 @@ export function ChatView({
                 pointerEvents: "auto",
               }}
             >
-              <Badge
-                size="lg"
+              <Button
+                size="xs"
                 variant="filled"
                 color="blue"
                 rightSection={<IconArrowDown size={14} />}
                 onClick={scrollToBottom}
-                style={{
-                  cursor: "pointer",
-                  boxShadow: "var(--mantine-shadow-md)",
-                }}
+                aria-label={t("newMessage")}
+                style={{ boxShadow: "var(--mantine-shadow-md)" }}
               >
                 {t("newMessage")}
-              </Badge>
+              </Button>
             </Box>
           )}
           {/* input area */}
