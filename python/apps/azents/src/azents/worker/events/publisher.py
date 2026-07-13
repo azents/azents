@@ -41,6 +41,8 @@ class WorkerEventPublisher:
         :param session_id: Session ID
         :param event: Engine event
         """
+        if isinstance(event, Event):
+            await self.live_event_projector.flush_session(session_id)
         await self._broadcast_event(session_id, event)
         await self.live_event_projector.update(session_id, event)
 
@@ -51,13 +53,13 @@ class WorkerEventPublisher:
     ) -> None:
         """Deliver Runtime event to WebSocket broadcast best-effort."""
         try:
-            serialized = serialize_event(event)
-            await self.broadcast.publish(session_id, serialized)
             if isinstance(event, Event):
                 await self.broadcast.publish(
                     session_id,
                     chat_history_event_appended_dump(event),
                 )
+            else:
+                await self.broadcast.publish(session_id, serialize_event(event))
         except asyncio.CancelledError:
             raise
         except Exception:

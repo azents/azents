@@ -198,6 +198,7 @@ class _LiveEventProjector:
     def __init__(self) -> None:
         self.flushed_session_ids: list[str] = []
         self.removed_events: list[tuple[str, str]] = []
+        self.removed_active_call_ids: list[set[str]] = []
 
     async def flush_session(self, session_id: str) -> None:
         """Record flush request."""
@@ -206,6 +207,18 @@ class _LiveEventProjector:
     async def remove_event(self, session_id: str, event_id: str) -> None:
         """Record remove request."""
         self.removed_events.append((session_id, event_id))
+
+    async def replace_active_tool_calls(
+        self,
+        session_id: str,
+        active_tool_calls: list[ActiveToolCall],
+        *,
+        removed_call_ids: set[str],
+    ) -> None:
+        """Record deterministic active-call removals."""
+        del session_id
+        assert active_tool_calls == []
+        self.removed_active_call_ids.append(removed_call_ids)
 
 
 class _Broker:
@@ -376,6 +389,7 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
         (session_id, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         (session_id, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
     ]
+    assert projector.removed_active_call_ids == [{"call-1"}]
     assert run_repository.terminal_runs == [
         ("11111111111111111111111111111111", AgentRunStatus.STOPPED)
     ]

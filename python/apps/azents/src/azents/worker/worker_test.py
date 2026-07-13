@@ -662,6 +662,8 @@ def _make_worker_event_publisher(
     projector = LiveEventProjector(
         live_event_store=cast(Any, live_event_store),
         broadcast=cast(WebSocketBroadcast, broadcast),
+        session_manager=cast(Any, _SessionManager()),
+        agent_run_repository=cast(Any, object()),
     )
     return WorkerEventPublisher(
         broker=cast(SessionBroker, broker),
@@ -1080,6 +1082,8 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
     projector = LiveEventProjector(
         live_event_store=cast(Any, live_store),
         broadcast=cast(WebSocketBroadcast, broadcast),
+        session_manager=cast(Any, _SessionManager()),
+        agent_run_repository=cast(Any, object()),
     )
     active_tool_call = ActiveToolCall(
         call_id="call-1",
@@ -1092,6 +1096,7 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
     await projector.replace_active_tool_calls(
         "session-1",
         [active_tool_call],
+        removed_call_ids=set(),
     )
 
     assert live_store.removed_events == []
@@ -1149,13 +1154,12 @@ async def test_dispatch_event_publishes_history_before_live_removal() -> None:
         event.get("kind") or event.get("type") for _, event in broadcast.events
     ]
     assert event_types == [
-        "client_tool_result",
         "history_event_appended",
         "live_event_removed",
     ]
-    appended = cast(dict[str, object], broadcast.events[1][1]["event"])
+    appended = cast(dict[str, object], broadcast.events[0][1]["event"])
     assert appended["id"] == "1123456789abcdef0123456789abcdeb"
-    assert broadcast.events[2][1]["event_id"] == "0123456789abcdef0123456789abcdea"
+    assert broadcast.events[1][1]["event_id"] == "0123456789abcdef0123456789abcdea"
     assert broker.renewed_session_ids == ["session-1"]
 
 
@@ -1304,9 +1308,8 @@ async def test_dispatch_flushes_live_partial_batch_during_event_update() -> None
     assert event_types == [
         "content_delta",
         "content_delta",
-        "client_tool_result",
-        "history_event_appended",
         "live_event_upserted",
+        "history_event_appended",
     ]
 
 
@@ -1358,9 +1361,8 @@ async def test_dispatch_flushes_reasoning_batch_during_event_update() -> None:
     assert event_types == [
         "reasoning_delta",
         "reasoning_delta",
-        "reasoning",
-        "history_event_appended",
         "live_event_upserted",
+        "history_event_appended",
     ]
 
 

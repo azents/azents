@@ -491,8 +491,11 @@ class _LiveEventProjector:
         self,
         session_id: str,
         active_tool_calls: object,
+        *,
+        removed_call_ids: set[str],
     ) -> None:
         """Record active tool call projection replacements."""
+        del removed_call_ids
         self.active_tool_calls.append((session_id, active_tool_calls))
 
     async def flush_session(self, session_id: str) -> None:

@@ -1055,6 +1055,7 @@ class RunExecutor:
         await self.live_event_projector.replace_active_tool_calls(
             message.session_id,
             active_tool_calls,
+            removed_call_ids=set(),
         )
         await publish_session_tree_changed()
         now = loop.time()
@@ -1121,11 +1122,15 @@ class RunExecutor:
                 owner_generation=owner_generation,
             )
             if updated_tool_calls != active_tool_calls:
+                removed_call_ids = {call.call_id for call in active_tool_calls} - {
+                    call.call_id for call in updated_tool_calls
+                }
                 active_tool_calls[:] = updated_tool_calls
                 await refresh_session_activity()
                 await self.live_event_projector.replace_active_tool_calls(
                     message.session_id,
                     active_tool_calls,
+                    removed_call_ids=removed_call_ids,
                 )
             await handle_engine_event(
                 item,

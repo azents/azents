@@ -2,9 +2,12 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from typing import Annotated
 
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent
@@ -16,9 +19,12 @@ from azents.engine.events.engine_events import (
     RunStopped,
 )
 from azents.engine.events.types import ActiveToolCall, Event
+from azents.rdb.deps import get_session_manager
+from azents.repos.agent_execution import AgentRunRepository
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import (
     RedisLiveEventStore,
+    active_tool_call_live_event_id,
     active_tool_call_to_live_event,
 )
 from azents.transport.chat import (
@@ -32,6 +38,8 @@ from azents.worker.live.partial_batcher import LivePartialBatcher, LivePartialFl
 
 logger = logging.getLogger(__name__)
 
+SessionManagerFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+
 
 class LiveEventProjector:
     """Reflect Runtime event into Web chat live projection."""
@@ -41,9 +49,15 @@ class LiveEventProjector:
         *,
         live_event_store: Annotated[RedisLiveEventStore, Depends(get_live_event_store)],
         broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)],
+        session_manager: Annotated[SessionManagerFactory, Depends(get_session_manager)],
+        agent_run_repository: Annotated[
+            AgentRunRepository, Depends(AgentRunRepository)
+        ],
     ) -> None:
         self._live_event_store = live_event_store
         self._broadcast = broadcast
+        self._session_manager = session_manager
+        self._agent_run_repository = agent_run_repository
         self._partial_batcher = LivePartialBatcher(self._flush_partial_batch)
         self._active_run_ids: dict[str, str] = {}
         self._active_tool_events: dict[str, dict[str, Event]] = {}
@@ -59,6 +73,22 @@ class LiveEventProjector:
                 "Failed to flush session live partial batches",
                 extra={"session_id": session_id},
             )
+
+    async def _terminal_matches_current_run(
+        self,
+        session_id: str,
+        run_id: str,
+    ) -> bool:
+        """Validate terminal cleanup against durable current Run authority."""
+        active_run_id = self._active_run_ids.get(session_id)
+        if active_run_id is not None and active_run_id != run_id:
+            return False
+        async with self._session_manager() as session:
+            current = await self._agent_run_repository.get_running_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        return current is None or current.id == run_id
 
     async def update(
         self,
@@ -98,8 +128,7 @@ class LiveEventProjector:
                         after=after,
                     )
                 case RunComplete(run_id=run_id) | RunStopped(run_id=run_id):
-                    active_run_id = self._active_run_ids.get(session_id)
-                    if active_run_id is None or active_run_id == run_id:
+                    if await self._terminal_matches_current_run(session_id, run_id):
                         await self.clear_session(session_id)
                         self._active_run_ids.pop(session_id, None)
                 case _:
@@ -116,6 +145,8 @@ class LiveEventProjector:
         self,
         session_id: str,
         active_tool_calls: list[ActiveToolCall],
+        *,
+        removed_call_ids: set[str],
     ) -> None:
         """Broadcast the PostgreSQL-backed active-call projection best-effort."""
         try:
@@ -127,7 +158,12 @@ class LiveEventProjector:
                     for active in active_tool_calls
                 )
             }
-            for event_id in before.keys() - after.keys():
+            removed_event_ids = before.keys() - after.keys()
+            removed_event_ids |= {
+                active_tool_call_live_event_id(session_id, call_id)
+                for call_id in removed_call_ids
+            }
+            for event_id in removed_event_ids:
                 await self._publish_event_removed(session_id, event_id)
             for event_id, event in after.items():
                 if before.get(event_id) != event:
@@ -179,11 +215,10 @@ class LiveEventProjector:
         run_id: str,
     ) -> None:
         """Broadcast live run state removal best-effort."""
-        active_run_id = self._active_run_ids.get(session_id)
-        if active_run_id is not None and active_run_id != run_id:
-            return
-        self._active_run_ids.pop(session_id, None)
         try:
+            if not await self._terminal_matches_current_run(session_id, run_id):
+                return
+            self._active_run_ids.pop(session_id, None)
             await self._broadcast.publish(
                 session_id,
                 chat_live_run_cleared_dump(session_id, run_id),

@@ -5,6 +5,7 @@ Operates independently from the existing broker ``publish_event()`` and
 ``subscribe_events()``.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -16,6 +17,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 logger = logging.getLogger(__name__)
 
 _CHANNEL_PREFIX = "azents:ws:"
+_SUBSCRIPTION_CONFIRMATION_TIMEOUT_SECONDS = 5.0
 
 
 class WebSocketBroadcastPublishError(Exception):
@@ -53,6 +55,7 @@ class WebSocketBroadcast:
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(channel)
         try:
+            await self._wait_for_subscription_confirmation(pubsub, channel)
             yield self._iter_events(pubsub)
         finally:
             try:
@@ -65,6 +68,26 @@ class WebSocketBroadcast:
                 )
                 with suppress(RedisConnectionError, OSError):
                     await pubsub.aclose()
+
+    @staticmethod
+    async def _wait_for_subscription_confirmation(
+        pubsub: object,
+        channel: str,
+    ) -> None:
+        """Wait until Redis confirms registration for the requested channel."""
+        async with asyncio.timeout(_SUBSCRIPTION_CONFIRMATION_TIMEOUT_SECONDS):
+            while True:
+                message = await pubsub.get_message(  # pyright: ignore[reportAttributeAccessIssue]  # redis.asyncio PubSub typing is incomplete
+                    ignore_subscribe_messages=False,
+                    timeout=1.0,
+                )
+                if not isinstance(message, dict) or message.get("type") != "subscribe":
+                    continue
+                confirmed_channel = message.get("channel")
+                if isinstance(confirmed_channel, bytes):
+                    confirmed_channel = confirmed_channel.decode("utf-8")
+                if confirmed_channel == channel:
+                    return
 
     @staticmethod
     async def _iter_events(
