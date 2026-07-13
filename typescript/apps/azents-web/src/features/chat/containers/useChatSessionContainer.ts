@@ -12,7 +12,10 @@
 import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
-import { applyProviderToolCallItem } from "../hooks/providerToolCallProjection";
+import {
+  applyProviderToolCallItem,
+  applyProviderToolCallOutput,
+} from "../hooks/providerToolCallProjection";
 import {
   applyFunctionCallItem,
   applyFunctionCallOutput,
@@ -785,28 +788,38 @@ function nativeArtifactItem(
   return isRecord(item) ? item : null;
 }
 
+function eventProjectionRoot(event: ChatEventResponse): string {
+  return event.external_id?.split(":", 1)[0] ?? event.id;
+}
+
 function eventRenderKey(event: ChatEventResponse): string {
+  const projectionRoot = eventProjectionRoot(event);
   switch (event.kind) {
     case "assistant_message": {
       const item = nativeArtifactItem(event);
       if (item !== null) {
-        const contentIndex = item.content_index;
-        if (typeof contentIndex === "number") {
-          return `assistant:content:${contentIndex}`;
-        }
-        const outputIndex = item.output_index;
-        if (typeof outputIndex === "number") {
-          return `assistant:output:${outputIndex}`;
-        }
         const nativeId = stringField(item, "id");
         if (nativeId !== null) {
           return `assistant:native:${nativeId}`;
         }
+        const contentIndex = item.content_index;
+        if (typeof contentIndex === "number") {
+          return `assistant:${projectionRoot}:content:${contentIndex}`;
+        }
+        const outputIndex = item.output_index;
+        if (typeof outputIndex === "number") {
+          return `assistant:${projectionRoot}:output:${outputIndex}`;
+        }
       }
-      return `assistant:event:${event.external_id ?? event.id}`;
+      return `assistant:event:${projectionRoot}`;
     }
-    case "reasoning":
-      return "reasoning";
+    case "reasoning": {
+      const item = nativeArtifactItem(event);
+      const nativeId = item === null ? null : stringField(item, "id");
+      return nativeId === null
+        ? `reasoning:event:${projectionRoot}`
+        : `reasoning:native:${nativeId}`;
+    }
     case "client_tool_call": {
       const callId = stringField(event.payload, "call_id");
       return callId === null
@@ -819,12 +832,17 @@ function eventRenderKey(event: ChatEventResponse): string {
         ? `provider-tool:event:${event.external_id ?? event.id}`
         : `provider-tool:${callId}`;
     }
-    case "client_tool_result":
-    case "provider_tool_result": {
+    case "client_tool_result": {
       const callId = stringField(event.payload, "call_id");
       return callId === null
         ? `tool-result:event:${event.external_id ?? event.id}`
         : `tool-result:${callId}`;
+    }
+    case "provider_tool_result": {
+      const callId = stringField(event.payload, "call_id");
+      return callId === null
+        ? `provider-tool-result:event:${event.external_id ?? event.id}`
+        : `provider-tool-result:${callId}`;
     }
     default:
       return `event:${event.external_id ?? event.id}`;
@@ -907,7 +925,7 @@ function mapEvents(
             role: "user",
             content: stringField(payload, "content") ?? "",
             createdAt: event.created_at,
-            status: "complete",
+            status: messageStatus,
             metadata: {
               ...eventMetadata(event),
               source: "agent_mailbox",
@@ -993,7 +1011,10 @@ function mapEvents(
             callId,
             name,
             arguments: stringField(payload, "arguments") ?? "",
-            status: providerToolCallStatusFromPayload(payload),
+            status:
+              messageStatus === "partial"
+                ? "running"
+                : providerToolCallStatusFromPayload(payload),
           },
           event.id,
           event.created_at,
@@ -1016,7 +1037,26 @@ function mapEvents(
         });
       }
       case "provider_tool_result": {
-        return messages;
+        const callId = stringField(payload, "call_id");
+        if (callId === null) {
+          return messages;
+        }
+        return applyProviderToolCallOutput(messages, {
+          callId,
+          name: stringField(payload, "name") ?? "Provider tool",
+          output: contentText(payload.output),
+          status:
+            payload.status === "completed" || payload.status === "success"
+              ? "completed"
+              : "failed",
+          attachments: [
+            ...eventAttachments(payload),
+            ...contentAttachments(payload.output),
+          ],
+          fallbackMessageId: event.id,
+          createdAt: event.created_at,
+          messageStatus,
+        });
       }
       case "turn_marker": {
         const usage = isRecord(payload.usage)
@@ -1473,6 +1513,9 @@ function isPartialHistoryEvent(event: ChatEventResponse): boolean {
     case "assistant_message":
     case "reasoning":
     case "client_tool_call":
+    case "provider_tool_call":
+    case "provider_tool_result":
+    case "agent_message":
     case "goal_continuation":
     case "interrupted":
       return true;
@@ -1580,9 +1623,10 @@ function replaceLiveStateFromSnapshot(
   live: LiveTaxonomySnapshot,
   previous: ManagedLiveState | null,
 ): MappedLiveStateSnapshot {
-  const partialHistory = live.partial_history.items
-    .filter((event) => event.kind !== "provider_tool_call")
-    .reduce(upsertPartialHistoryEvent, emptyPartialHistoryState());
+  const partialHistory = live.partial_history.items.reduce(
+    upsertPartialHistoryEvent,
+    emptyPartialHistoryState(),
+  );
   const goalContinuationInputEvents = live.input_buffers.filter(
     (event) => event.kind === "goal_continuation",
   );
@@ -1646,16 +1690,6 @@ function getMessageMergeKeys(message: ChatMessage): string[] {
   ];
 }
 
-function hasMergeKey(seen: Set<string>, message: ChatMessage): boolean {
-  return getMessageMergeKeys(message).some((key) => seen.has(key));
-}
-
-function rememberMergeKeys(seen: Set<string>, message: ChatMessage): void {
-  for (const key of getMessageMergeKeys(message)) {
-    seen.add(key);
-  }
-}
-
 function upsertMessageByMergeKey(
   existing: ChatMessage[],
   message: ChatMessage,
@@ -1672,43 +1706,6 @@ function upsertMessageByMergeKey(
   );
 }
 
-function mergeMessagePages(
-  existing: ChatMessage[],
-  incoming: ChatMessage[],
-  placement: "append" | "prepend",
-): ChatMessage[] {
-  const ordered =
-    placement === "append" ? [existing, incoming] : [incoming, existing];
-  const seen = new Set<string>();
-  const merged: ChatMessage[] = [];
-  for (const page of ordered) {
-    for (const message of page) {
-      if (hasMergeKey(seen, message)) {
-        continue;
-      }
-      rememberMergeKeys(seen, message);
-      merged.push(message);
-    }
-  }
-  return merged;
-}
-
-function mergeHistoryAndPartialHistory(
-  historyMessages: ChatMessage[],
-  partialHistoryMessages: ChatMessage[],
-): ChatMessage[] {
-  const historyKeys = new Set<string>();
-  for (const message of historyMessages) {
-    rememberMergeKeys(historyKeys, message);
-  }
-  return [
-    ...historyMessages,
-    ...partialHistoryMessages.filter(
-      (message) => !hasMergeKey(historyKeys, message),
-    ),
-  ];
-}
-
 function mapSessionEvents(
   data: {
     history: {
@@ -1720,7 +1717,7 @@ function mapSessionEvents(
   },
   previousLiveState: ManagedLiveState | null,
 ): {
-  historyMessages: ChatMessage[];
+  historyEvents: ChatEventResponse[];
   liveState: ManagedLiveState;
   invalidLiveRun: InvalidLiveRunSnapshot | null;
   hasMore: boolean;
@@ -1730,9 +1727,7 @@ function mapSessionEvents(
 } {
   const mappedLive = replaceLiveStateFromSnapshot(data.live, previousLiveState);
   return {
-    historyMessages: mapEvents(data.history.items, {
-      renderIncompleteToolCalls: false,
-    }),
+    historyEvents: data.history.items,
     liveState: {
       ...mappedLive.state,
       actionExecutions: mergeActionExecutionProjections(
@@ -1815,22 +1810,40 @@ function upsertMessage(
   );
 }
 
-function mergeWithOlderPages(
-  existing: ChatMessage[],
-  serverLatest: ChatMessage[],
-): ChatMessage[] {
-  if (serverLatest.length === 0) {
-    return existing;
+function upsertHistoryEvent(
+  events: ChatEventResponse[],
+  event: ChatEventResponse,
+): ChatEventResponse[] {
+  const index = events.findIndex((item) => item.id === event.id);
+  if (index < 0) {
+    return [...events, event];
   }
+  return events.map((item, itemIndex) => (itemIndex === index ? event : item));
+}
+
+function mergeHistoryEventPages(
+  existing: ChatEventResponse[],
+  incoming: ChatEventResponse[],
+  direction: "prepend" | "append",
+): ChatEventResponse[] {
+  const incomingIds = new Set(incoming.map((event) => event.id));
+  const retained = existing.filter((event) => !incomingIds.has(event.id));
+  return direction === "prepend"
+    ? [...incoming, ...retained]
+    : [...retained, ...incoming];
+}
+
+function mergeLatestHistoryEvents(
+  existing: ChatEventResponse[],
+  serverLatest: ChatEventResponse[],
+): ChatEventResponse[] {
   const cutoff = serverLatest[0];
-  if (!cutoff) {
+  if (typeof cutoff === "undefined") {
     return existing;
   }
-  const serverIds = new Set(serverLatest.flatMap(getMessageMergeKeys));
+  const serverIds = new Set(serverLatest.map((event) => event.id));
   const olderPages = existing.filter(
-    (m) =>
-      m.id < cutoff.id &&
-      getMessageMergeKeys(m).every((key) => !serverIds.has(key)),
+    (event) => event.id < cutoff.id && !serverIds.has(event.id),
   );
   return [...olderPages, ...serverLatest];
 }
@@ -1878,7 +1891,8 @@ export function useChatSessionContainer(
   >([]);
   const [isWritePending, setIsWritePending] = useState(false);
   const [wasRestCommandBlocked, setWasRestCommandBlocked] = useState(false);
-  const [historyMessages, setHistoryMessages] = useState<ChatMessage[]>([]);
+  const [historyEvents, setHistoryEvents] = useState<ChatEventResponse[]>([]);
+  const [transientMessages, setTransientMessages] = useState<ChatMessage[]>([]);
   const [latestHumanInferenceProfile, setLatestHumanInferenceProfile] =
     useState<RequestedInferenceProfile | null>(null);
   const [managedLiveState, setManagedLiveState] = useState<ManagedLiveState>(
@@ -1928,24 +1942,41 @@ export function useChatSessionContainer(
     },
     [sessionId],
   );
-  const partialHistoryMessages = useMemo(
+  const durableHistoryMessages = useMemo(
     () =>
-      chatTimelineState.type === "LATEST_FOLLOWING"
-        ? mapEvents(
-            orderedPartialHistoryEvents(managedLiveState.partialHistory),
-            {
-              renderIncompleteToolCalls: true,
-              messageStatus: "partial",
-            },
-          )
-        : [],
-    [chatTimelineState.type, managedLiveState.partialHistory],
+      mapEvents(historyEvents, {
+        renderIncompleteToolCalls: false,
+      }),
+    [historyEvents],
   );
-  const messages = useMemo(
-    () =>
-      mergeHistoryAndPartialHistory(historyMessages, partialHistoryMessages),
-    [historyMessages, partialHistoryMessages],
-  );
+  const messages = useMemo(() => {
+    const durableAndTransient = [
+      ...durableHistoryMessages,
+      ...transientMessages,
+    ];
+    if (chatTimelineState.type === "DETACHED_HISTORY_BROWSING") {
+      return durableAndTransient;
+    }
+    const visiblePartialEvents = orderedPartialHistoryEvents(
+      managedLiveState.partialHistory,
+    ).filter(
+      (partialEvent) =>
+        !historyEvents.some((durableEvent) =>
+          partialHistoryEventMatchesDurableEvent(partialEvent, durableEvent),
+        ),
+    );
+    return mapEvents(visiblePartialEvents, {
+      initialMessages: durableAndTransient,
+      renderIncompleteToolCalls: true,
+      messageStatus: "partial",
+    });
+  }, [
+    chatTimelineState.type,
+    durableHistoryMessages,
+    historyEvents,
+    managedLiveState.partialHistory,
+    transientMessages,
+  ]);
   const defaultInferenceProfile =
     latestHumanInferenceProfile ??
     sessionCurrentInferenceProfile ??
@@ -2164,16 +2195,6 @@ export function useChatSessionContainer(
           }
           return;
         }
-        if (responseEvent.kind === "provider_tool_call") {
-          markModelOutputVisible();
-          setHistoryMessages((prev) =>
-            mapEvents([responseEvent], {
-              initialMessages: prev,
-              renderIncompleteToolCalls: true,
-            }),
-          );
-          return;
-        }
         if (isPartialHistoryEvent(responseEvent)) {
           markModelOutputVisible();
           setManagedLiveState((prev) => ({
@@ -2203,19 +2224,7 @@ export function useChatSessionContainer(
           setLatestHumanInferenceProfile(appendedInferenceIntent.profile);
         }
         const actionExecution = actionExecutionResultFromEvent(responseEvent);
-        setHistoryMessages((prev) => {
-          if (
-            prev.some(
-              (message) => message.metadata?.event_id === responseEvent.id,
-            )
-          ) {
-            return prev;
-          }
-          return mapEvents([responseEvent], {
-            initialMessages: prev,
-            renderIncompleteToolCalls: true,
-          });
-        });
+        setHistoryEvents((prev) => upsertHistoryEvent(prev, responseEvent));
         setManagedLiveState((prev) => ({
           ...prev,
           partialHistory: removePartialHistoryCounterpart(
@@ -2264,7 +2273,7 @@ export function useChatSessionContainer(
           break;
         case "run_complete":
           if ("item" in event) {
-            setHistoryMessages((prev) =>
+            setTransientMessages((prev) =>
               upsertMessage(prev, {
                 id: event.id,
                 role: "run_complete",
@@ -2283,7 +2292,7 @@ export function useChatSessionContainer(
           void utils.chat.getSubagentTree.invalidate();
           break;
         case "runtime_error":
-          setHistoryMessages((prev) => [
+          setTransientMessages((prev) => [
             ...prev,
             {
               id: `runtime-error-${Date.now()}`,
@@ -2431,10 +2440,10 @@ export function useChatSessionContainer(
           });
         } else {
           historyNewestCursorRef.current = mapped.newestCursor;
-          setHistoryMessages((prev) =>
+          setHistoryEvents((prev) =>
             options.reason === "initial"
-              ? mapped.historyMessages
-              : mergeWithOlderPages(prev, mapped.historyMessages),
+              ? mapped.historyEvents
+              : mergeLatestHistoryEvents(prev, mapped.historyEvents),
           );
           latestHumanModelOrderRef.current =
             mapped.latestDurableInferenceIntent?.modelOrder ?? null;
@@ -2508,8 +2517,8 @@ export function useChatSessionContainer(
       return;
     }
 
-    const oldestMessage = historyMessages[0];
-    if (!oldestMessage) {
+    const oldestEvent = historyEvents[0];
+    if (!oldestEvent) {
       return;
     }
 
@@ -2517,14 +2526,11 @@ export function useChatSessionContainer(
     void utils.chat.listSessionEvents
       .fetch({
         sessionId,
-        before: oldestMessage.id,
+        before: oldestEvent.id,
       })
       .then((result) => {
-        const olderMessages = mapEvents(result.history.items, {
-          renderIncompleteToolCalls: false,
-        });
-        setHistoryMessages((prev) =>
-          mergeMessagePages(prev, olderMessages, "prepend"),
+        setHistoryEvents((prev) =>
+          mergeHistoryEventPages(prev, result.history.items, "prepend"),
         );
         const olderActionExecutions = actionExecutionResultsFromEvents(
           result.history.items,
@@ -2543,7 +2549,7 @@ export function useChatSessionContainer(
             hasNewer: false,
             newestCursor:
               historyNewestCursorRef.current ??
-              historyMessages.at(-1)?.id ??
+              historyEvents.at(-1)?.id ??
               null,
           });
         }
@@ -2556,7 +2562,7 @@ export function useChatSessionContainer(
     sessionId,
     isLoadingMore,
     hasMore,
-    historyMessages,
+    historyEvents,
     utils.chat.listSessionEvents,
   ]);
 
@@ -2577,11 +2583,8 @@ export function useChatSessionContainer(
         after: chatTimelineState.newestCursor,
       })
       .then((result) => {
-        const newerMessages = mapEvents(result.history.items, {
-          renderIncompleteToolCalls: false,
-        });
-        setHistoryMessages((prev) =>
-          mergeMessagePages(prev, newerMessages, "append"),
+        setHistoryEvents((prev) =>
+          mergeHistoryEventPages(prev, result.history.items, "append"),
         );
         const newerActionExecutions = actionExecutionResultsFromEvents(
           result.history.items,
