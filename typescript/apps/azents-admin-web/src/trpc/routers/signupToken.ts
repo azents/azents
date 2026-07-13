@@ -6,7 +6,7 @@ import {
 import { z } from "zod/v4";
 import { getServerConfig } from "@/config/server";
 import { mapExpectedError } from "../api-error";
-import { publicProcedure, router } from "../init";
+import { protectedProcedure, router } from "../init";
 
 function buildSignupUrl(publicWebUrl: string, plaintextToken: string): string {
   const baseUrl = publicWebUrl.replace(/\/$/, "");
@@ -14,7 +14,7 @@ function buildSignupUrl(publicWebUrl: string, plaintextToken: string): string {
 }
 
 export const signupTokenRouter = router({
-  list: publicProcedure.query(async ({ ctx }) => {
+  list: protectedProcedure.query(async ({ ctx }) => {
     try {
       const { data } = await authV1ListSignupTokens({
         client: ctx.adminApiClient,
@@ -26,7 +26,7 @@ export const signupTokenRouter = router({
     }
   }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         email: z.string().email(),
@@ -59,7 +59,7 @@ export const signupTokenRouter = router({
       }
     }),
 
-  revoke: publicProcedure
+  revoke: protectedProcedure
     .input(z.object({ tokenId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       try {

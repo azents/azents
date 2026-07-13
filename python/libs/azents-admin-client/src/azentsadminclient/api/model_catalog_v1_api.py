@@ -264,6 +264,7 @@ class ModelCatalogV1Api:
 
         # authentication setting
         _auth_settings: List[str] = [
+            'HTTPBearer'
         ]
 
         return self.api_client.param_serialize(
@@ -527,6 +528,7 @@ class ModelCatalogV1Api:
 
         # authentication setting
         _auth_settings: List[str] = [
+            'HTTPBearer'
         ]
 
         return self.api_client.param_serialize(
@@ -772,6 +774,7 @@ class ModelCatalogV1Api:
 
         # authentication setting
         _auth_settings: List[str] = [
+            'HTTPBearer'
         ]
 
         return self.api_client.param_serialize(
@@ -788,5 +791,3 @@ class ModelCatalogV1Api:
             _host=_host,
             _request_auth=_request_auth
         )
-
-

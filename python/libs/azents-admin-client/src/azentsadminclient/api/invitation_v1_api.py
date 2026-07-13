@@ -280,6 +280,7 @@ class InvitationV1Api:
 
         # authentication setting
         _auth_settings: List[str] = [
+            'HTTPBearer'
         ]
 
         return self.api_client.param_serialize(
@@ -543,6 +544,7 @@ class InvitationV1Api:
 
         # authentication setting
         _auth_settings: List[str] = [
+            'HTTPBearer'
         ]
 
         return self.api_client.param_serialize(
@@ -559,5 +561,3 @@ class InvitationV1Api:
             _host=_host,
             _request_auth=_request_auth
         )
-
-

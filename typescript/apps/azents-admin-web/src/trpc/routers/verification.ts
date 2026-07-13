@@ -9,14 +9,14 @@ import {
   authV1ListEmailVerifications,
 } from "@azents/admin-client";
 import { z } from "zod/v4";
-import { publicProcedure, router } from "../init";
+import { protectedProcedure, router } from "../init";
 
 // --- Router ---
 export const verificationRouter = router({
   /**
    * 이메일 인증 목록 조회
    */
-  list: publicProcedure.query(async ({ ctx }) => {
+  list: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await authV1ListEmailVerifications({
       client: ctx.adminApiClient,
       throwOnError: true,
@@ -30,7 +30,7 @@ export const verificationRouter = router({
   /**
    * 이메일 인증 상세 조회
    */
-  get: publicProcedure
+  get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await authV1GetEmailVerification({

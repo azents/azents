@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { publicProcedure, router } from "../init";
+import { protectedProcedure, router } from "../init";
 import type { Client } from "@azents/admin-client";
 
 const systemCatalogProviderSchema = z.enum([
@@ -92,11 +92,11 @@ async function refreshSystemModelCatalogs(
 }
 
 export const modelCatalogRouter = router({
-  listSystemCatalogs: publicProcedure.query(async ({ ctx }) => {
+  listSystemCatalogs: protectedProcedure.query(async ({ ctx }) => {
     return await listSystemModelCatalogs(ctx.adminApiClient);
   }),
 
-  refreshSystemCatalog: publicProcedure
+  refreshSystemCatalog: protectedProcedure
     .input(z.object({ provider: systemCatalogProviderSchema }))
     .mutation(async ({ ctx, input }) => {
       return await refreshSystemModelCatalog(
@@ -105,7 +105,7 @@ export const modelCatalogRouter = router({
       );
     }),
 
-  refreshSystemCatalogs: publicProcedure.mutation(async ({ ctx }) => {
+  refreshSystemCatalogs: protectedProcedure.mutation(async ({ ctx }) => {
     return await refreshSystemModelCatalogs(ctx.adminApiClient);
   }),
 });

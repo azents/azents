@@ -19,6 +19,7 @@ FastAPI returns 500 and sends an event with stacktrace to Sentry.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -32,6 +33,15 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
@@ -63,7 +73,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -92,6 +102,7 @@ Used to verify Sentry delivery.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -106,6 +117,15 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
@@ -130,7 +150,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **level** | [**ErrorLevel**](.md)| Log level (warning, error, critical) | [optional] 
+ **level** | [**ErrorLevel**](.md)| Log level (warning, error, critical) | [optional]
  **message** | **str**| Log message | [optional] [default to &#39;Debug test log from admin API&#39;]
 
 ### Return type
@@ -139,7 +159,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -154,4 +174,3 @@ No authorization required
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-

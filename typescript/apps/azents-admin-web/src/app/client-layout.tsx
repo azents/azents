@@ -40,7 +40,6 @@ import NextLink from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 
-import { useConfig } from "@/config/client";
 import { authProvider } from "@/providers/auth-provider";
 import { ColorModeProvider, useColorMode } from "@/providers/color-mode";
 import { dataProvider } from "@/providers/data-provider";
@@ -113,7 +112,6 @@ function Sidebar({
 }): React.ReactElement {
   const pathname = usePathname();
   const { mutate: logout } = useLogout();
-  const config = useConfig();
 
   return (
     <>
@@ -134,16 +132,14 @@ function Sidebar({
           );
         })}
       </AppShell.Section>
-      {config.authEnabled && (
-        <AppShell.Section p="md">
-          <NavLink
-            label="로그아웃"
-            leftSection={<IconLogout size={20} />}
-            onClick={() => logout()}
-            variant="subtle"
-          />
-        </AppShell.Section>
-      )}
+      <AppShell.Section p="md">
+        <NavLink
+          label="Sign out"
+          leftSection={<IconLogout size={20} />}
+          onClick={() => logout()}
+          variant="subtle"
+        />
+      </AppShell.Section>
     </>
   );
 }
@@ -203,7 +199,7 @@ function Header({
               }
               onClick={() => handleSelect("light")}
             >
-              라이트
+              Light
             </Menu.Item>
             <Menu.Item
               leftSection={<IconMoon size={16} />}
@@ -212,7 +208,7 @@ function Header({
               }
               onClick={() => handleSelect("dark")}
             >
-              다크
+              Dark
             </Menu.Item>
             <Menu.Item
               leftSection={<IconBrightnessAuto size={16} />}
@@ -221,7 +217,7 @@ function Header({
               }
               onClick={() => handleSelect("system")}
             >
-              시스템
+              System
             </Menu.Item>
           </Menu.Dropdown>
         </Menu>
@@ -272,7 +268,6 @@ function AppContent({
 }: {
   children: React.ReactNode;
 }): React.ReactElement {
-  const config = useConfig();
   const pathname = usePathname();
   const isLoginPage = pathname === "/login";
 
@@ -286,7 +281,7 @@ function AppContent({
     <Refine
       routerProvider={routerProvider}
       dataProvider={dataProvider}
-      {...(config.authEnabled && { authProvider })}
+      authProvider={authProvider}
       resources={RESOURCES.map((r) => ({
         name: r.name,
         list: r.list,
@@ -298,7 +293,7 @@ function AppContent({
         disableTelemetry: true,
       }}
     >
-      {config.authEnabled && !isLoginPage ? (
+      {!isLoginPage ? (
         <Authenticated key="main" redirectOnFail="/login">
           {content}
         </Authenticated>
@@ -323,7 +318,7 @@ export function ClientLayout({
   initialResolvedMode,
 }: ClientLayoutProps): React.ReactElement {
   return (
-    <Suspense fallback={<div>로딩 중...</div>}>
+    <Suspense fallback={<div>Loading...</div>}>
       <TRPCProvider>
         <ColorModeProvider
           initialPreference={initialPreference}

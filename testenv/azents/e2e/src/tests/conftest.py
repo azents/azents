@@ -10,6 +10,7 @@ import tempfile
 import time
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -46,6 +47,12 @@ def random_secret(length: int = 32) -> str:
 def random_fernet_key() -> str:
     """testt t Fernet key create (URL-safe base64 t 32t)."""
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+
+
+@pytest.fixture(scope="session")
+def auth_jwt_secret_key() -> str:
+    """Return one JWT signing key shared by all server processes."""
+    return random_secret(32)
 
 
 # =============================================================================
@@ -325,6 +332,7 @@ def _configure_azents_server_container(
     rustfs_access_key: str,
     rustfs_secret_key: str,
     s3_bucket_name: str,
+    auth_jwt_secret_key: str,
     credential_encryption_key: str,
     mock_openai_container: DockerContainer,
 ) -> DockerContainer:
@@ -341,7 +349,7 @@ def _configure_azents_server_container(
         .with_env("AZ_S3_BUCKET_NAME", s3_bucket_name)
         .with_env("AWS_ACCESS_KEY_ID", rustfs_access_key)
         .with_env("AWS_SECRET_ACCESS_KEY", rustfs_secret_key)
-        .with_env("AZ_AUTH_JWT_SECRET_KEY", random_secret(32))
+        .with_env("AZ_AUTH_JWT_SECRET_KEY", auth_jwt_secret_key)
         .with_env("AZ_CREDENTIAL_ENCRYPTION_KEY", credential_encryption_key)
         .with_env("AZ_REDIS_URL", "redis://valkey:6379")
         .with_env("AZ_WORKSPACE_S3_BUCKET", s3_bucket_name)
@@ -477,6 +485,7 @@ def azents_public_server_container(
     rustfs_secret_key: str,
     s3_bucket_name: str,
     azents_server_image: str,
+    auth_jwt_secret_key: str,
     credential_encryption_key: str,
     mock_openai_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
@@ -498,6 +507,7 @@ def azents_public_server_container(
         rustfs_access_key,
         rustfs_secret_key,
         s3_bucket_name,
+        auth_jwt_secret_key,
         credential_encryption_key,
         mock_openai_container,
     )
@@ -519,6 +529,7 @@ def azents_admin_server_container(
     s3_bucket_name: str,
     azents_server_image: str,
     azents_public_server_container: DockerContainer,  # public server t t
+    auth_jwt_secret_key: str,
     credential_encryption_key: str,
     mock_openai_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
@@ -541,6 +552,7 @@ def azents_admin_server_container(
         rustfs_access_key,
         rustfs_secret_key,
         s3_bucket_name,
+        auth_jwt_secret_key,
         credential_encryption_key,
         mock_openai_container,
     )
@@ -562,6 +574,7 @@ def azents_engine_worker_container(
     s3_bucket_name: str,
     azents_server_image: str,
     azents_admin_server_container: DockerContainer,
+    auth_jwt_secret_key: str,
     credential_encryption_key: str,
     mock_openai_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
@@ -586,6 +599,7 @@ def azents_engine_worker_container(
         rustfs_access_key,
         rustfs_secret_key,
         s3_bucket_name,
+        auth_jwt_secret_key,
         credential_encryption_key,
         mock_openai_container,
     )
@@ -635,6 +649,7 @@ def azents_runtime_control_container(
     s3_bucket_name: str,
     azents_server_image: str,
     azents_admin_server_container: DockerContainer,
+    auth_jwt_secret_key: str,
     credential_encryption_key: str,
     mock_openai_container: DockerContainer,
     azents_runtime_runner_image: str,
@@ -659,6 +674,7 @@ def azents_runtime_control_container(
         rustfs_access_key,
         rustfs_secret_key,
         s3_bucket_name,
+        auth_jwt_secret_key,
         credential_encryption_key,
         mock_openai_container,
     )
@@ -769,6 +785,58 @@ def azents_admin_server_url(
     return f"http://{host}:{port}"
 
 
+@pytest.fixture(scope="session")
+def admin_access_token(
+    azents_public_server_url: str,
+    azents_admin_server_container: DockerContainer,
+) -> str:
+    """Create and promote the initial User for authenticated Admin API tests."""
+    email = f"e2e-system-admin-{random_secret(4)}@example.com"
+    password = "SystemAdmin123!"
+    bootstrap_response = requests.post(
+        f"{azents_public_server_url}/workspace/v1/bootstrap/first-owner",
+        json={
+            "email": email,
+            "password": password,
+            "owner_name": "E2E system administrator",
+            "workspace_name": "E2E bootstrap",
+            "workspace_handle": f"e2e-bootstrap-{random_secret(4)}",
+            "locale": "en-US",
+        },
+        timeout=10,
+    )
+    if bootstrap_response.status_code != 201:
+        pytest.fail(
+            f"first-owner bootstrap failed with HTTP {bootstrap_response.status_code}"
+        )
+
+    cli_result = azents_admin_server_container.get_wrapped_container().exec_run(
+        [
+            "python",
+            "src/cli/system_admin.py",
+            "grant",
+            "--email",
+            email,
+        ]
+    )
+    if cast(Any, cli_result).exit_code != 0:
+        pytest.fail("system-admin CLI grant failed")
+
+    login_response = requests.post(
+        f"{azents_public_server_url}/auth/v1/login/password",
+        json={"email": email, "password": password},
+        timeout=10,
+    )
+    if login_response.status_code != 200:
+        pytest.fail(
+            f"initial Admin login failed with HTTP {login_response.status_code}"
+        )
+    access_token = login_response.json().get("access_token")
+    if not isinstance(access_token, str):
+        pytest.fail("initial Admin login returned no access token")
+    return access_token
+
+
 # =============================================================================
 # API Clients
 # =============================================================================
@@ -777,10 +845,14 @@ def azents_admin_server_url(
 @pytest.fixture(scope="function")
 def admin_api_client(
     azents_admin_server_url: str,
+    admin_access_token: str,
 ) -> azentsadminclient.ApiClient:
-    """Azents Admin API client."""
+    """Azents Admin API client authenticated as a system administrator."""
     return azentsadminclient.ApiClient(
-        configuration=azentsadminclient.Configuration(host=azents_admin_server_url)
+        configuration=azentsadminclient.Configuration(
+            host=azents_admin_server_url,
+            access_token=admin_access_token,
+        )
     )
 
 

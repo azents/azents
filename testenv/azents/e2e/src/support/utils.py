@@ -97,9 +97,14 @@ def authenticate_user(
 
     public_base_url = str(cast(Any, public_api_client).configuration.host)
     admin_base_url = str(cast(Any, admin_api_client).configuration.host)
+    admin_access_token = cast(Any, admin_api_client).configuration.access_token
+    if not isinstance(admin_access_token, str):
+        raise AssertionError("Admin API client is not authenticated")
+    admin_headers = {"Authorization": f"Bearer {admin_access_token}"}
 
     token_response = http_requests.post(
         f"{admin_base_url}/auth/v1/signup-tokens",
+        headers=admin_headers,
         json={"email": email, "delivery_method": "manual"},
         timeout=5,
     )
@@ -129,6 +134,7 @@ def authenticate_user(
         csrf_token = cast(str, send_response.json()["csrf_token"])
         verification_response = http_requests.get(
             f"{admin_base_url}/auth/v1/email-verifications/by-email",
+            headers=admin_headers,
             params={"email": email, "csrf_token": csrf_token},
             timeout=5,
         )

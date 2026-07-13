@@ -12,7 +12,7 @@ import {
   workspaceuserV1UpdateWorkspaceUser,
 } from "@azents/admin-client";
 import { z } from "zod/v4";
-import { publicProcedure, router } from "../init";
+import { protectedProcedure, router } from "../init";
 
 // --- Input Schemas ---
 const WorkspaceMemberCreateInput = z.object({
@@ -34,7 +34,7 @@ export const workspaceMemberRouter = router({
   /**
    * Workspace별 멤버 목록 조회
    */
-  listByWorkspace: publicProcedure
+  listByWorkspace: protectedProcedure
     .input(z.object({ workspace_handle: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await workspaceuserV1ListWorkspaceUsers({
@@ -52,7 +52,7 @@ export const workspaceMemberRouter = router({
   /**
    * WorkspaceUser 상세 조회
    */
-  get: publicProcedure
+  get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await workspaceuserV1GetWorkspaceUser({
@@ -66,7 +66,7 @@ export const workspaceMemberRouter = router({
   /**
    * WorkspaceUser 생성
    */
-  create: publicProcedure
+  create: protectedProcedure
     .input(WorkspaceMemberCreateInput)
     .mutation(async ({ ctx, input }) => {
       const { data } = await workspaceuserV1CreateWorkspaceUser({
@@ -80,7 +80,7 @@ export const workspaceMemberRouter = router({
   /**
    * WorkspaceUser 수정
    */
-  update: publicProcedure
+  update: protectedProcedure
     .input(WorkspaceMemberUpdateInput)
     .mutation(async ({ ctx, input }) => {
       const { workspace_user_id, ...body } = input;
@@ -96,7 +96,7 @@ export const workspaceMemberRouter = router({
   /**
    * WorkspaceUser 삭제
    */
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await workspaceuserV1DeleteWorkspaceUser({

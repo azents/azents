@@ -18,6 +18,7 @@ Delete a User.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -30,12 +31,21 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserV1Api(api_client)
-    user_id = 'user_id_example' # str | 
+    user_id = 'user_id_example' # str |
 
     try:
         # Delete User
@@ -51,7 +61,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **user_id** | **str**|  | 
+ **user_id** | **str**|  |
 
 ### Return type
 
@@ -59,7 +69,7 @@ void (empty response body)
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -84,6 +94,7 @@ Get a User by ID.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -97,12 +108,21 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserV1Api(api_client)
-    user_id = 'user_id_example' # str | 
+    user_id = 'user_id_example' # str |
 
     try:
         # Get User
@@ -120,7 +140,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **user_id** | **str**|  | 
+ **user_id** | **str**|  |
 
 ### Return type
 
@@ -128,7 +148,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -153,6 +173,7 @@ List all Users.
 
 ### Example
 
+* Bearer Authentication (HTTPBearer):
 
 ```python
 import azentsadminclient
@@ -166,6 +187,15 @@ configuration = azentsadminclient.Configuration(
     host = "http://localhost"
 )
 
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
 
 # Enter a context with an instance of the API client
 with azentsadminclient.ApiClient(configuration) as api_client:
@@ -199,7 +229,7 @@ Name | Type | Description  | Notes
 
 ### Authorization
 
-No authorization required
+[HTTPBearer](../README.md#HTTPBearer)
 
 ### HTTP request headers
 
@@ -214,4 +244,3 @@ No authorization required
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
