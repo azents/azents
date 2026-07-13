@@ -4,6 +4,16 @@ export function getAuthCookiePath(baseUrl: string): string {
   return normalized || "/";
 }
 
+export function getPublicRoutePath(baseUrl: string, routePath: string): string {
+  const basePath = getAuthCookiePath(baseUrl);
+  const normalizedRoute = routePath.replace(/^\/+/, "");
+  return `${basePath === "/" ? "" : basePath}/${normalizedRoute}`;
+}
+
+export function getPublicRouteUrl(baseUrl: string, routePath: string): string {
+  return new URL(getPublicRoutePath(baseUrl, routePath), baseUrl).toString();
+}
+
 export function isExpectedOrigin(
   origin: string | null,
   baseUrl: string,

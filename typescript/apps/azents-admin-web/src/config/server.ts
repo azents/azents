@@ -15,9 +15,10 @@ export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 function loadServerConfig(): ServerConfig {
   return ServerConfigSchema.parse({
     nodeEnv: process.env.NODE_ENV,
-    adminApiUrl: process.env.ADMIN_API_URL ?? "http://localhost:8011",
-    publicApiUrl: process.env.PUBLIC_API_URL ?? "http://localhost:8000",
-    publicWebUrl: process.env.AZ_WEB_URL ?? "http://localhost:3000",
+    adminApiUrl: process.env.INTERNAL_ADMIN_API_URL ?? "http://localhost:8011",
+    publicApiUrl:
+      process.env.INTERNAL_PUBLIC_API_URL ?? "http://localhost:8010",
+    publicWebUrl: process.env.PUBLIC_WEB_URL ?? "http://localhost:3003",
   });
 }
 

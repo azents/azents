@@ -11,6 +11,8 @@ const ServerConfigSchema = z.object({
   publicApiUrl: z.string(),
   /** URL for server → API server communication (k8s internal URL; uses publicApiUrl if unset) */
   internalApiUrl: z.string(),
+  /** Optional external Admin Web URL shown only to system administrators. */
+  adminWebUrl: z.string().url().nullable(),
 });
 
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
@@ -22,6 +24,7 @@ function loadServerConfig(): ServerConfig {
     nodeEnv: process.env.NODE_ENV,
     publicApiUrl,
     internalApiUrl: process.env.INTERNAL_API_URL || publicApiUrl,
+    adminWebUrl: process.env.ADMIN_WEB_URL || null,
   });
 }
 

@@ -38,12 +38,14 @@ import {
 } from "@tabler/icons-react";
 import NextLink from "next/link";
 import { usePathname } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 
-import { authProvider } from "@/providers/auth-provider";
+import { useConfig } from "@/config/client";
+import { createAuthProvider } from "@/providers/auth-provider";
 import { ColorModeProvider, useColorMode } from "@/providers/color-mode";
 import { dataProvider } from "@/providers/data-provider";
 import { TRPCProvider } from "@/providers/trpc";
+import { getPublicRoutePath } from "@/shared/lib/auth-policy";
 
 type ColorModePreference = "light" | "dark" | "system";
 
@@ -111,18 +113,21 @@ function Sidebar({
   onNavigate?: () => void;
 }): React.ReactElement {
   const pathname = usePathname();
+  const { publicBaseUrl } = useConfig();
   const { mutate: logout } = useLogout();
 
   return (
     <>
       <AppShell.Section grow component={ScrollArea} pt="md">
         {RESOURCES.map((resource) => {
-          const isActive = pathname.startsWith(`/${resource.name}`);
+          const listPath = getPublicRoutePath(publicBaseUrl, resource.list);
+          const isActive =
+            pathname.startsWith(listPath) || pathname.startsWith(resource.list);
           return (
             <NavLink
               key={resource.name}
               component={NextLink}
-              href={resource.list}
+              href={listPath}
               label={resource.label}
               leftSection={resource.icon}
               active={isActive}
@@ -151,6 +156,7 @@ function Header({
   opened: boolean;
   toggle: () => void;
 }): React.ReactElement {
+  const { publicBaseUrl } = useConfig();
   const { mode, preference, setColorMode } = useColorMode();
   const { setColorScheme } = useMantineColorScheme();
   const { data: user } = useGetIdentity<UserIdentity>();
@@ -175,7 +181,12 @@ function Header({
     <Group h="100%" px="md" justify="space-between">
       <Group>
         <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-        <Anchor component={NextLink} href="/" underline="never" c="inherit">
+        <Anchor
+          component={NextLink}
+          href={getPublicRoutePath(publicBaseUrl, "/")}
+          underline="never"
+          c="inherit"
+        >
           <Group gap="sm">
             <Text fw={700} size="lg">
               AZ
@@ -269,7 +280,13 @@ function AppContent({
   children: React.ReactNode;
 }): React.ReactElement {
   const pathname = usePathname();
-  const isLoginPage = pathname === "/login";
+  const { publicBaseUrl } = useConfig();
+  const loginPath = getPublicRoutePath(publicBaseUrl, "/login");
+  const isLoginPage = pathname === loginPath || pathname === "/login";
+  const authProvider = useMemo(
+    () => createAuthProvider(publicBaseUrl),
+    [publicBaseUrl],
+  );
 
   const content = isLoginPage ? (
     children
@@ -282,10 +299,10 @@ function AppContent({
       routerProvider={routerProvider}
       dataProvider={dataProvider}
       authProvider={authProvider}
-      resources={RESOURCES.map((r) => ({
-        name: r.name,
-        list: r.list,
-        meta: { icon: r.icon, label: r.label },
+      resources={RESOURCES.map((resource) => ({
+        name: resource.name,
+        list: getPublicRoutePath(publicBaseUrl, resource.list),
+        meta: { icon: resource.icon, label: resource.label },
       }))}
       options={{
         syncWithLocation: true,
@@ -294,7 +311,7 @@ function AppContent({
       }}
     >
       {!isLoginPage ? (
-        <Authenticated key="main" redirectOnFail="/login">
+        <Authenticated key="main" redirectOnFail={loginPath}>
           {content}
         </Authenticated>
       ) : (

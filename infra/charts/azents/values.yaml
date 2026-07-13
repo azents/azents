@@ -16,7 +16,6 @@ secrets:
     database: azents-database
     redis: ""
     objectStorage: azents-object-storage
-    adminAuth: ""
 
 ingress:
   enabled: false
@@ -38,6 +37,9 @@ server:
     pullPolicy: IfNotPresent
   env:
     AZ_RUNTIME_ENV: deployed
+  systemBootstrap:
+    existingSecret: ""
+    tokenKey: setup-token
   apiserver:
     enabled: true
     resources: {}
@@ -117,6 +119,7 @@ web:
   api:
     publicUrl: ""
     internalUrl: ""
+  adminWebUrl: ""
   ingress:
     enabled: false
     className: ""
@@ -139,14 +142,12 @@ adminWeb:
   resources: {}
   env:
     HOSTNAME: 0.0.0.0
-    ADMIN_API_AUTH_METHOD: none
-    AUTH_ENABLED: "false"
-    AZ_WEB_URL: ""
-    BASE_URL: ""
-    AUTH_URL: ""
-    GITHUB_REPO: azents/azents
-  api:
-    adminUrl: ""
+  publicUrl: ""
+  publicWebUrl: ""
+  publicApi:
+    internalUrl: ""
+  adminApi:
+    internalUrl: ""
   ingress:
     enabled: false
     className: ""

@@ -907,6 +907,9 @@
         "env": {
           "type": "object"
         },
+        "systemBootstrap": {
+          "$ref": "#/definitions/systemBootstrap"
+        },
         "apiserver": {
           "type": "object",
           "properties": {
@@ -1005,6 +1008,31 @@
         "env": {
           "type": "object"
         },
+        "adminWebUrl": {
+          "type": "string"
+        },
+        "publicUrl": {
+          "type": "string"
+        },
+        "publicWebUrl": {
+          "type": "string"
+        },
+        "publicApi": {
+          "type": "object",
+          "properties": {
+            "internalUrl": {
+              "type": "string"
+            }
+          }
+        },
+        "adminApi": {
+          "type": "object",
+          "properties": {
+            "internalUrl": {
+              "type": "string"
+            }
+          }
+        },
         "api": {
           "type": "object",
           "properties": {
@@ -1012,9 +1040,6 @@
               "type": "string"
             },
             "internalUrl": {
-              "type": "string"
-            },
-            "adminUrl": {
               "type": "string"
             }
           }
@@ -1091,6 +1116,22 @@
         },
         "tls": {
           "type": "array"
+        }
+      }
+    },
+    "systemBootstrap": {
+      "type": "object",
+      "required": [
+        "existingSecret",
+        "tokenKey"
+      ],
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        },
+        "tokenKey": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

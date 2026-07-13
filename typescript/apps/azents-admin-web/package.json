@@ -6,7 +6,7 @@
     "dev": "next dev --port 3002",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --test src/shared/lib/auth-policy.test.mts",
+    "test": "node --experimental-strip-types --test src/shared/lib/auth-policy.test.mts src/features/users/system-admin-state.test.mts",
     "lint": "eslint src --max-warnings 0 --cache --cache-strategy content",
     "lint:fix": "eslint src --max-warnings 0 --fix --cache --cache-strategy content",
     "typecheck": "tsc --noEmit",

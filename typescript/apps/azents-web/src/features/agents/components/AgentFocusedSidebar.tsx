@@ -34,12 +34,14 @@ import {
   IconCheck,
   IconChevronLeft,
   IconDots,
+  IconExternalLink,
   IconLayoutGrid,
   IconLogout,
   IconMoon,
   IconPencil,
   IconPlus,
   IconSettings,
+  IconShieldLock,
   IconSun,
   IconTrash,
   IconUser,
@@ -145,6 +147,12 @@ export function AgentFocusedSidebar({
   const [editingTitle, setEditingTitle] = useState("");
   const [archiveTarget, setArchiveTarget] =
     useState<AgentSessionResponse | null>(null);
+  const { data: adminAccess } = trpc.user.adminAccess.useQuery(
+    {},
+    {
+      retry: false,
+    },
+  );
 
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {
@@ -515,6 +523,18 @@ export function AgentFocusedSidebar({
             leftSection={<IconUser size={rem(18)} />}
             onClick={onNavigate}
           />
+          {adminAccess?.url && (
+            <NavLink
+              component="a"
+              href={adminAccess.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              label={tAppBar("admin")}
+              leftSection={<IconShieldLock size={rem(18)} />}
+              rightSection={<IconExternalLink size={rem(16)} />}
+              onClick={onNavigate}
+            />
+          )}
           <Menu shadow="md" width={rem(180)} position="top-start">
             <Menu.Target>
               <Button
