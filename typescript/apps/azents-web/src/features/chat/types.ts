@@ -122,6 +122,48 @@ export type ChatAction =
       starting_ref: string;
     };
 
+export interface WorktreeOperationExecution {
+  id: string;
+  input_buffer_id: string;
+  action_type: string;
+  action: ChatAction;
+  status: "pending" | "running" | "completed" | "failed";
+  failure_summary: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  failed_at: string | null;
+  updated_at: string;
+}
+
+export interface WorktreeOperationEvent {
+  id: string;
+  action_execution_id: string;
+  sequence: number;
+  kind:
+    | "step_started"
+    | "command_started"
+    | "stdout"
+    | "stderr"
+    | "command_completed"
+    | "warning"
+    | "completed"
+    | "failed";
+  step_key: string | null;
+  command_argv: string[] | null;
+  content: string | null;
+  exit_code: number | null;
+  created_at: string;
+}
+
+export interface WorktreeOperation {
+  execution: WorktreeOperationExecution;
+  events: WorktreeOperationEvent[];
+}
+
+export interface WorktreeOperationPayload {
+  action_execution: WorktreeOperation;
+}
+
 export interface ActionMessagePayload {
   action: ChatAction;
   message: string;
@@ -305,6 +347,7 @@ export type ChatEventPayload =
   | GoalBriefingPayload
   | ActionMessagePayload
   | AgentMessagePayload
+  | WorktreeOperationPayload
   | SkillLoadedPayload
   | SystemReminderPayload
   | SystemErrorPayload
@@ -341,6 +384,8 @@ export type ChatHistoryEvent =
   | EventBase<"goal_briefing", GoalBriefingPayload>
   | EventBase<"action_message", ActionMessagePayload>
   | EventBase<"agent_message", AgentMessagePayload>
+  | EventBase<"action_execution_progress", WorktreeOperationPayload>
+  | EventBase<"action_execution_result", WorktreeOperationPayload>
   | EventBase<"skill_loaded", SkillLoadedPayload>
   | EventBase<"system_reminder", SystemReminderPayload>
   | EventBase<"system_error", SystemErrorPayload>
@@ -722,7 +767,8 @@ export interface ChatMessage {
     | "goal_continuation"
     | "goal_updated"
     | "goal_briefing"
-    | "skill_loaded";
+    | "skill_loaded"
+    | "worktree_operation";
   content: string | null;
   toolCalls?: ActiveToolCall[];
   providerToolCalls?: ProviderToolCall[];
@@ -743,6 +789,8 @@ export interface ChatMessage {
   inferenceProfile?: RequestedInferenceProfile | AppliedInferenceProfile | null;
   /** failed-run recovery metadata for terminal failed-run errors */
   failedRunFailure?: FailedRunFailureMetadata | null;
+  /** Durable Git worktree operation assembled from transcript events. */
+  worktreeOperation?: WorktreeOperation;
 }
 
 /** Agent list status */

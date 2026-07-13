@@ -16,7 +16,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-13
-spec_version: 27
+spec_version: 28
 ---
 
 # Chat Session Resync
@@ -79,7 +79,6 @@ sequenceDiagram
 | `compaction_started` | server → client | `continuing` | transient compaction UI state begins. |
 | `compaction_complete` | server → client | `continuing` | transient compaction UI state ends. |
 | `todo_state_changed` | server → client | `todo` | session todo Toolkit State snapshot changed. |
-| `action_execution_updated` | server → client | `session_id`, `action_execution` | Current operation TurnAction execution projection changed, including status and durable progress events. |
 | `subagent_tree_changed` | server → client | `root_session_agent_id`, `changed_session_agent_id` | Subagent Tree projection invalidation signal; client refetches the dedicated tree API. |
 
 The server sends `subscribed` only after the Redis session subscription is confirmed for the current
@@ -139,9 +138,8 @@ Response fields:
 | `run` | currently running run projection. `null` if absent. Includes running profile provenance plus `run.retry` with failed-run retry status, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history when retry is active. |
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |
-| `action_executions` | current nonterminal operation TurnAction execution projections, each with execution state and durable progress events. Terminal completed/failed action results are recovered from durable history events. |
 
-`snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.action_executions` is the current nonterminal operation TurnAction projection list.
+`snapshot` in REST write response follows the same taxonomy. `snapshot.partial_history_events` is the partial history projection list synthesized into the chat timeline, `snapshot.input_buffer_events` is the pending user input buffer projection list, and `snapshot.todo` is the same session todo snapshot.
 
 History events and live/pending event projections preserve immutable requested profile intent. They do not embed associated AgentRun summaries or change when run provenance changes. The dedicated live Run projection carries the current run's allowlisted inference summary. Unknown physical resolution is never derived from Composer or Agent defaults.
 
@@ -149,22 +147,24 @@ A valid non-null running `/live.run` projection overrides a contradictory Sessio
 frontend replacement, `run: null` is an explicit authoritative absence, while a malformed non-null
 Run is an invalid observation that preserves the last valid Run and emits a diagnostic. WebSocket
 observations advance a local generation, and each REST request records its start generation and
-request epoch. A REST response replaces Run, partial history, input buffers, Todo, and action
-executions only when no newer WebSocket observation or newer REST request has superseded it. Exact
-`run_id` matching is also required for `RunComplete`, `RunStopped`, and `live_run_cleared`; a delayed
-Run A event cannot clear active Run B.
+request epoch. A REST response replaces Run, partial history, input buffers, and Todo only when no
+newer WebSocket observation or newer REST request has superseded it. Exact `run_id` matching is also
+required for `RunComplete`, `RunStopped`, and `live_run_cleared`; a delayed Run A event cannot clear
+active Run B.
 
-Action execution progress is reconciled through `action_execution_updated` and the
-`/live.action_executions` baseline. Clients upsert projections by execution id. Failed operation
-actions are terminal and have no retry/discard mutation response; terminal completed or failed
-projections move to durable `action_execution_result` history.
+Worktree operation display state comes only from ordered durable history. Each
+`action_execution_progress` event carries the current execution state and one newly persisted
+progress record; `action_execution_result` carries the full terminal projection. Clients merge both
+kinds by execution id into one timeline candidate at the position of the first loaded operation event.
+A later operation event updates that candidate without moving it to the tail. When an older history
+page reveals an earlier progress event, rebuilding the ordered projection moves the candidate to that
+earlier natural position. Failed operation actions remain terminal and have no retry/discard mutation.
 
 Raw live partials remain separate from raw durable history until render selection. Assistant,
 reasoning, provider-tool, client-tool, and internal-agent rows use semantic projection identity so a
 durable history append replaces its live counterpart without duplicate frames or temporary
 disappearance. Provider results preserve completion/failure status, output text, and attachments.
 Live `agent_message` uses the same collapsed, source-labeled internal-agent row as the durable event.
-Durable action execution results take precedence over any competing live projection.
 
 ## 5.2 REST Subagent Tree Contract
 
@@ -212,8 +212,8 @@ Draft persistence and last-selected-profile persistence are separate agent/sessi
 
 - Renders REST history tail and REST live state together.
 - WS events are replayed on baseline, then applied in realtime.
-- Can display pending input buffer, model response pending indicator, compaction indicator, todo preview, and compact action execution progress blocks. Worktree action execution is keyed by a consumed input buffer rather than a transcript event, so nonterminal projections render as unanchored operation progress after pending buffers. Terminal completed or failed blocks are reconstructed from durable `action_execution_result` history events.
-- Operation TurnAction execution is live progress, not model response pending state. It does not by itself replace the composer with a stop control or block new input.
+- Can display pending input buffer, model response pending indicator, compaction indicator, todo preview, and worktree operation history candidates. Incremental and terminal action events merge by execution id at the first event's chronological position, so later durable history appears below the operation instead of leaving it sticky at the tail.
+- Operation TurnAction execution is durable history, not model response pending state. It does not by itself replace the composer with a stop control or block new input.
 - When `run.retry` is present, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history; the normal model dots indicator remains below the card when the run phase is `waiting_for_model` or `streaming_model`.
 - Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
 - Human and actionable input rows show their immutable requested target/effort intent. Historical rows do not resolve or embed the associated run's physical model.
@@ -231,7 +231,7 @@ Draft persistence and last-selected-profile persistence are separate agent/sessi
 ### DETACHED_HISTORY_BROWSING
 
 - Does not render live state. Todo preview is also treated as live state and hidden.
-- Hides pending input buffer and live-only indicators, including action execution progress blocks.
+- Hides pending input buffers and live-only indicators. Worktree operation candidates remain visible when their durable events are inside the detached history window.
 - WS durable or live observations do not mutate the visible detached history or detached live state. A durable append records only confirmed newer availability; live upserts/removals and live Run/action updates are ignored for detached rendering.
 - A successful periodic/resume baseline may also confirm a newer durable gap by comparing the fresh latest cursor with the cursor saved on detach.
 - The “new message” button is displayed only when a durable append or fresh latest cursor confirms an actual latest-direction gap, not by detached state or live-only activity itself.
@@ -359,7 +359,7 @@ finite transaction periodically.
 **TC-10: Only durable confirmation marks newer while detached**
 
 - Given: timeline state is `DETACHED_HISTORY_BROWSING`.
-- When: live-only Run, partial, or action observations arrive.
+- When: live-only Run or partial observations arrive.
 - Then: visible detached state and newer availability remain unchanged.
 - When: a durable history append arrives or a fresh baseline exposes a different latest cursor.
 - Then: client records the latest-direction gap and displays the “new message” button.
@@ -382,12 +382,12 @@ finite transaction periodically.
 - Public WebSocket delivery uses canonical action envelopes plus the listed control frames; the server does not emit raw top-level durable Events or internal runtime telemetry.
 - Every resync is a finite epoch/generation-guarded transaction with a fresh REST query and eventual release of its owned observation buffer.
 - REST baseline is applied as latest source only after session subscription ack and a successful health check for that transaction.
-- REST `/live` does not return aggregate event list and returns live state taxonomy snapshot split into `partial_history`, `input_buffers`, `run`, `session_run_state`, `todo`, and `action_executions`.
+- REST `/live` does not return an aggregate event list and returns live state split into `partial_history`, `input_buffers`, `run`, `session_run_state`, and `todo`.
 - `live_run_updated` and REST `/live.run` are the authoritative current run snapshot sources; clients replace the stored run snapshot rather than merging individual retry or profile fields.
 - Requested inference intent is restored from durable/pending data, and unresolved physical provenance is never inferred from current Agent or Composer state.
 - Usage provenance requires an exact run-id match.
-- `action_execution_updated` and REST `/live.action_executions` are the authoritative nonterminal operation progress sources; clients upsert by execution id and render buffer-keyed executions without requiring a transcript or pending-buffer anchor.
-- REST write `snapshot` does not return aggregate `live_events` and returns live state taxonomy snapshot split into `partial_history_events`, `input_buffer_events`, `run`, `session_run_state`, `todo`, and `action_executions`.
+- Ordered `action_execution_progress` and `action_execution_result` transcript events are the only worktree operation display source; clients merge them by execution id at the first loaded event's chronological position.
+- REST write `snapshot` does not return aggregate `live_events` and returns live state split into `partial_history_events`, `input_buffer_events`, `run`, `session_run_state`, and `todo`.
 - Detached state does not synthesize or mutate live state below the history window; live-only observations do not confirm a newer durable gap.
 - Entering detached state itself does not mean “new message” exists.
 - Follow stop does not mean entering detached state or live event buffering.
@@ -397,8 +397,8 @@ finite transaction periodically.
 - Browser idle return candidate signals are handled by WebSocket health check and fresh REST baseline convergence.
 - Raw history pagination always returns events oldest to newest, keeps page-owned cursors even for render-hidden pages, and merges semantic output identity across page boundaries.
 - Legacy aggregate `/messages` fallback is not used.
-- Terminal worktree action execution results are chat history events of kind `action_execution_result`; clients reconcile in-progress action logs through `/live.action_executions` and `action_execution_updated`.
-- Durable semantic projections override matching live assistant, reasoning, provider-tool, client-tool, internal-agent, and action-execution projections without duplicate rows.
+- Every persisted worktree progress record has one matching `action_execution_progress` history event, and terminal state has one `action_execution_result`; both are UI-only and do not lower into model input.
+- Durable semantic projections override matching live assistant, reasoning, provider-tool, client-tool, and internal-agent projections without duplicate rows.
 - Provider result rendering preserves status, text output, and attachments.
 - The “new message” control is a semantic keyboard-accessible button.
 - Subagent Tree state is restored from the dedicated tree endpoint; `subagent_tree_changed` only invalidates/refetches cached tree queries.
@@ -406,6 +406,7 @@ finite transaction periodically.
 
 ## 11. Changelog
 
+- **2026-07-13** — v28. Replaced live/sticky worktree operation projections with chronologically anchored incremental and terminal durable history candidates.
 - **2026-07-13** — v27. Promoted confirmed-generation WebSocket barriers, finite fresh-baseline resync, detached observation isolation, raw-page projection identity, durable output promotion, and exact follow/accessibility behavior.
 - **2026-07-12** — v26. Added resilient live snapshot ordering, exact terminal correlation, opaque effort handling, Composer last-selected persistence, and durable token provenance.
 - **2026-07-12** — v25. Promoted buffer-keyed unanchored action progress, terminal success/failure history recovery, and removal of action retry/discard mutations.

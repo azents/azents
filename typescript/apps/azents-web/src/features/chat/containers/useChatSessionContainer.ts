@@ -21,6 +21,7 @@ import {
   applyFunctionCallOutput,
 } from "../hooks/toolCallMerge";
 import { useChatWebSocket } from "../hooks/useChatWebSocket";
+import { applyWorktreeOperationHistoryEvent } from "../worktree-operation-history";
 import type { UploadedFile } from "../hooks/useFileUpload";
 import type {
   AgentRunPhase,
@@ -44,6 +45,9 @@ import type {
   TodoStateSnapshot,
   TokenUsageSummary,
   ToolResultStatus,
+  WorktreeOperation,
+  WorktreeOperationEvent,
+  WorktreeOperationExecution,
 } from "../types";
 import type {
   AgentResponse,
@@ -296,6 +300,149 @@ function chatActionFromValue(value: unknown): ChatAction | null {
     };
   }
   return null;
+}
+
+function nullableStringField(
+  record: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = record[key];
+  return typeof value === "string" ? value : null;
+}
+
+function worktreeOperationStatus(
+  value: unknown,
+): WorktreeOperationExecution["status"] | null {
+  switch (value) {
+    case "pending":
+    case "running":
+    case "completed":
+    case "failed":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function worktreeOperationExecutionFromValue(
+  value: unknown,
+): WorktreeOperationExecution | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const id = stringField(value, "id");
+  const inputBufferId = stringField(value, "input_buffer_id");
+  const actionType = stringField(value, "action_type");
+  const action = chatActionFromValue(value.action);
+  const status = worktreeOperationStatus(value.status);
+  const updatedAt = stringField(value, "updated_at");
+  if (
+    id === null ||
+    inputBufferId === null ||
+    actionType === null ||
+    action === null ||
+    status === null ||
+    updatedAt === null
+  ) {
+    return null;
+  }
+  return {
+    id,
+    input_buffer_id: inputBufferId,
+    action_type: actionType,
+    action,
+    status,
+    failure_summary: nullableStringField(value, "failure_summary"),
+    started_at: nullableStringField(value, "started_at"),
+    completed_at: nullableStringField(value, "completed_at"),
+    failed_at: nullableStringField(value, "failed_at"),
+    updated_at: updatedAt,
+  };
+}
+
+function worktreeOperationEventKind(
+  value: unknown,
+): WorktreeOperationEvent["kind"] | null {
+  switch (value) {
+    case "step_started":
+    case "command_started":
+    case "stdout":
+    case "stderr":
+    case "command_completed":
+    case "warning":
+    case "completed":
+    case "failed":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+  );
+}
+
+function worktreeOperationEventFromValue(
+  value: unknown,
+): WorktreeOperationEvent | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const id = stringField(value, "id");
+  const actionExecutionId = stringField(value, "action_execution_id");
+  const sequence = numberField(value, "sequence");
+  const kind = worktreeOperationEventKind(value.kind);
+  const createdAt = stringField(value, "created_at");
+  const commandArgv = value.command_argv;
+  if (
+    id === null ||
+    actionExecutionId === null ||
+    sequence === null ||
+    kind === null ||
+    createdAt === null ||
+    (commandArgv !== null &&
+      typeof commandArgv !== "undefined" &&
+      !isStringArray(commandArgv))
+  ) {
+    return null;
+  }
+  return {
+    id,
+    action_execution_id: actionExecutionId,
+    sequence,
+    kind,
+    step_key: nullableStringField(value, "step_key"),
+    command_argv: isStringArray(commandArgv) ? commandArgv : null,
+    content: nullableStringField(value, "content"),
+    exit_code: numberField(value, "exit_code"),
+    created_at: createdAt,
+  };
+}
+
+function worktreeOperationFromEvent(
+  event: ChatEventResponse,
+): WorktreeOperation | null {
+  if (
+    event.kind !== "action_execution_progress" &&
+    event.kind !== "action_execution_result"
+  ) {
+    return null;
+  }
+  const value = event.payload.action_execution;
+  if (!isRecord(value) || !Array.isArray(value.events)) {
+    return null;
+  }
+  const execution = worktreeOperationExecutionFromValue(value.execution);
+  const events = value.events.map(worktreeOperationEventFromValue);
+  if (execution === null || events.some((item) => item === null)) {
+    return null;
+  }
+  return {
+    execution,
+    events: events.filter((item) => item !== null),
+  };
 }
 
 interface DurableInferenceIntent {
@@ -1223,7 +1370,16 @@ function mapEvents(
           },
         ];
       }
-      case "action_execution_result":
+      case "action_execution_progress":
+      case "action_execution_result": {
+        const operation = worktreeOperationFromEvent(event);
+        return operation === null
+          ? messages
+          : applyWorktreeOperationHistoryEvent(messages, {
+              createdAt: event.created_at,
+              operation,
+            });
+      }
       case "system_reminder":
       case "unknown_adapter_output": {
         return messages;
@@ -2145,6 +2301,23 @@ export function useChatSessionContainer(
             markRunInactive(markerRunId);
           }
         }
+        const worktreeOperation = worktreeOperationFromEvent(responseEvent);
+        if (
+          worktreeOperation?.execution.action_type === "create_git_worktree" &&
+          worktreeOperation.execution.status === "completed"
+        ) {
+          void Promise.all([
+            utils.chat.listAgentProjects.invalidate({
+              agentId: agent.id,
+              sessionId,
+            }),
+            utils.chat.getSessionProjectBrowserManifest.invalidate({
+              agentId: agent.id,
+              sessionId,
+            }),
+            utils.chat.listInputActions.invalidate({ sessionId }),
+          ]);
+        }
         return;
       }
 
@@ -2225,10 +2398,13 @@ export function useChatSessionContainer(
       }
     },
     [
+      agent.id,
       connectionInfoQuery,
       reportInvalidLiveRun,
       sessionId,
+      utils.chat.getSessionProjectBrowserManifest,
       utils.chat.getSubagentTree,
+      utils.chat.listAgentProjects,
       utils.chat.listInputActions,
     ],
   );

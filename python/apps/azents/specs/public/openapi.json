@@ -11554,6 +11554,7 @@
           "goal_updated",
           "action_message",
           "agent_message",
+          "action_execution_progress",
           "action_execution_result",
           "skill_loaded",
           "goal_briefing",

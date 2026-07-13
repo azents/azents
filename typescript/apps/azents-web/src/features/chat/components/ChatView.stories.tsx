@@ -257,6 +257,68 @@ export const WithWorkspaceBrowser = {
   args: baseArgs,
 } satisfies Story;
 
+export const WorktreeOperationInChronologicalHistory = {
+  args: {
+    ...baseArgs,
+    messages: [
+      createChatMessage({
+        id: "worktree-request",
+        role: "user",
+        content: "Create a worktree from main.",
+        createdAt: "2026-07-13T12:00:00Z",
+      }),
+      createChatMessage({
+        id: "worktree-operation:execution-1",
+        role: "worktree_operation",
+        content: null,
+        createdAt: "2026-07-13T12:00:01Z",
+        worktreeOperation: {
+          execution: {
+            id: "execution-1",
+            input_buffer_id: "input-buffer-1",
+            action_type: "create_git_worktree",
+            action: {
+              type: "create_git_worktree",
+              source_project_path: "/workspace/agent/azents",
+              starting_ref: "main",
+            },
+            status: "completed",
+            failure_summary: null,
+            started_at: "2026-07-13T12:00:01Z",
+            completed_at: "2026-07-13T12:00:03Z",
+            failed_at: null,
+            updated_at: "2026-07-13T12:00:03Z",
+          },
+          events: [],
+        },
+      }),
+      createChatMessage({
+        id: "later-user-message",
+        role: "user",
+        content: "Now inspect the new Project.",
+        createdAt: "2026-07-13T12:00:04Z",
+      }),
+      createChatMessage({
+        id: "later-assistant-message",
+        role: "assistant",
+        content: "The new Project is ready.",
+        createdAt: "2026-07-13T12:00:05Z",
+      }),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const operation = await canvas.findByText("Worktree action");
+    const laterMessage = await canvas.findByText(
+      "Now inspect the new Project.",
+    );
+    await expect(
+      operation.compareDocumentPosition(laterMessage) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  },
+} satisfies Story;
+
 export const LongMobileConversation = {
   args: {
     ...baseArgs,

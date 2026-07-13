@@ -92,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-13
-spec_version: 99
+spec_version: 100
 ---
 
 # Conversation & Events
@@ -306,14 +306,14 @@ action that succeeds invalidates the prepared context; the same active `AgentRun
 turn-local request from the updated Session inference snapshot before the next model call. Failed
 actions are terminal and do not block later FIFO input.
 
-`action_executions` stores durable execution state for operation TurnActions keyed by the source
+`action_executions` stores durable processor state for operation TurnActions keyed by the source
 `input_buffer_id` and includes the durable typed action payload needed for recovery after the input
 buffer is deleted. `action_execution_events` stores ordered progress records such as step start,
-command start/completion, stdout/stderr text, warning, failure, and completion. `GET
-/chat/v1/sessions/{session_id}/live` and REST write snapshots expose only nonterminal executions as
-execution state plus event log. Terminal completed or failed projections are appended as durable
-`action_execution_result` history events. Failed actions are not retried or discarded through a
-separate mutation API.
+command start/completion, stdout/stderr text, warning, failure, and completion. Each newly persisted
+progress record is committed atomically with one incremental `action_execution_progress` transcript
+event, and terminal completed or failed state is appended as `action_execution_result`. Chat live and
+write snapshots do not expose a parallel action-execution projection. Failed actions are not retried
+or discarded through a separate mutation API.
 
 `session_git_worktrees` is the cleanup authority for Azents-owned worktrees. It stores the source
 Project path, starting ref, generated worktree path, generated branch name, base commit, status,
@@ -387,6 +387,7 @@ Event kinds:
 - `goal_continuation`
 - `goal_updated`
 - `agent_message`
+- `action_execution_progress`
 - `action_execution_result`
 - `skill_loaded`
 - `goal_briefing`
@@ -398,9 +399,11 @@ Event kinds:
 `action_message` is an InputBuffer kind for user-selected TurnActions, not a newly appended transcript
 event. `skill` actions load Skill context by appending `skill_loaded` and an optional normal
 `user_message`. `create_git_worktree` actions create buffer-keyed durable execution state before the
-source buffer is consumed. `action_execution_result` is a durable transcript event containing the
-terminal action execution projection after a worktree action completes or fails; it lets history
-reloads render operation logs without treating them as model input or ordinary chat bubbles.
+source buffer is consumed. Each `action_execution_progress` event contains the current execution
+state plus exactly one newly persisted progress record. `action_execution_result` contains the full
+terminal projection after completion or failure. Clients merge both kinds by execution id into one
+history candidate at the first event's chronological position. These events are UI-only and are not
+lowered into model input.
 
 `skill_loaded` records a Skill turn action side effect. Its payload stores the Skill display name,
 exact `skill_path`, full Skill body, original user action message, content hash, source label, and
@@ -490,7 +493,7 @@ source. Goal continuation starts as a pending `goal_continuation` input buffer a
 bubbles or delete controls; it may render non-interactive timeline indicators such as goal controls or
 an interrupted divider.
 
-Session todo is persisted in `toolkit_states`, not in the transcript. `/live` and REST write snapshots expose it as `todo: { items }`; each item has `content` and status `pending`, `in_progress`, or `completed`. The same live and write snapshots expose `action_executions` as the current operation TurnAction projections. Terminal action projections are also appended as durable `action_execution_result` events so completed worktree progress remains visible after live state is cleared. The worker broadcasts `todo_state_changed` after `update_todo` so the chat UI can update without a separate todo read API.
+Session todo is persisted in `toolkit_states`, not in the transcript. `/live` and REST write snapshots expose it as `todo: { items }`; each item has `content` and status `pending`, `in_progress`, or `completed`. Worktree operation display state is recovered only from ordered `action_execution_progress` and `action_execution_result` transcript events. The worker broadcasts those appends through `history_event_appended`, and broadcasts `todo_state_changed` after `update_todo` so the chat UI can update without separate operation or todo read APIs.
 
 WebSocket chat clients receive subscription and event actions:
 
@@ -506,7 +509,6 @@ WebSocket chat clients receive subscription and event actions:
 - `todo_state_changed` when the session-scoped TodoToolkit State changes;
 - `live_run_updated` when the authoritative running run projection changes, including failed-run retry state;
 - `live_run_cleared` with the exact terminal `run_id` when cleanup removes that current run projection;
-- `action_execution_updated` when an operation TurnAction execution projection changes;
 - `subagent_tree_changed` when subagent tool side effects or wait observation cursors change the
   durable Subagent Tree projection. This event is an invalidation signal only; clients refetch the
   dedicated tree API instead of treating the live event as tree state.
@@ -702,6 +704,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-13** — v100. Replaced the live/sticky worktree operation projection with incremental and terminal durable history events merged into one chronologically anchored timeline candidate.
 - **2026-07-13** — v99. Promoted raw-page cursor ownership, cross-page semantic projection identity, provider/internal-agent rendering, durable-over-live promotion, and explicit public WebSocket delivery boundaries.
 - **2026-07-12** — v98. Made PostgreSQL active tool ownership authoritative for execution and live reconstruction, and removed the Background flag from active calls.
 - **2026-07-12** — v97. Added exact terminal Run correlation, durable per-turn inference provenance, and historical-marker compatibility.

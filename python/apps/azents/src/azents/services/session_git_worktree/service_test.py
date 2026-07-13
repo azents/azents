@@ -25,7 +25,11 @@ from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
 )
-from azents.engine.events.types import ActionExecutionResultPayload
+from azents.engine.events.types import (
+    ActionExecutionProgressPayload,
+    ActionExecutionResultPayload,
+    Event,
+)
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -672,11 +676,17 @@ class TestSessionGitWorktreeService:
             )
         runner = _RunnerOperations()
         service = _service(rdb_session_manager, runner)
+        published_events: list[Event] = []
+
+        async def publish_history_event(event: Event) -> None:
+            published_events.append(event)
+
         result = await service.run_git_worktree_action(
             agent_id=agent_id,
             session_id=agent_session.id,
             execution=execution,
             action=action,
+            on_history_event_appended=publish_history_event,
         )
 
         assert result.completed is True
@@ -702,6 +712,30 @@ class TestSessionGitWorktreeService:
         assert [project.path for project in projects] == [allocations[0].worktree_path]
         assert projection is not None
         assert projection.execution.status is ActionExecutionStatus.COMPLETED
+        terminal_events = [
+            event
+            for event in published_events
+            if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert published_events[-1] == terminal_events[0]
+        assert len(terminal_events) == 1
+        progress_events = [
+            event
+            for event in published_events
+            if event.kind is EventKind.ACTION_EXECUTION_PROGRESS
+        ]
+        assert len(progress_events) == len(projection.events)
+        for progress_event, action_event in zip(
+            progress_events,
+            projection.events,
+            strict=True,
+        ):
+            progress_payload = progress_event.payload
+            assert isinstance(progress_payload, ActionExecutionProgressPayload)
+            progress_projection_events = progress_payload.action_execution["events"]
+            assert isinstance(progress_projection_events, list)
+            assert len(progress_projection_events) == 1
+            assert progress_projection_events[0]["id"] == action_event.id
         assert runner.calls == [
             {
                 "operation": "create_git_worktree",
@@ -958,9 +992,16 @@ class TestSessionGitWorktreeService:
         assert projection is not None
         assert projection.execution.status is ActionExecutionStatus.FAILED
         assert [buffer.content for buffer in buffers] == ["start invalid"]
+        progress_events = [
+            event
+            for event in events
+            if event.kind is EventKind.ACTION_EXECUTION_PROGRESS
+        ]
         terminal_events = [
             event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
         ]
+        assert progress_events
+        assert events.index(progress_events[0]) < events.index(terminal_events[0])
         assert len(terminal_events) == 1
         terminal_payload = terminal_events[0].payload
         assert isinstance(terminal_payload, ActionExecutionResultPayload)

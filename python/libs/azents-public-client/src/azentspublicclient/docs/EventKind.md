@@ -14,6 +14,8 @@ Event transcript event kind.
 
 * `AGENT_MESSAGE` (value: `'agent_message'`)
 
+* `ACTION_EXECUTION_PROGRESS` (value: `'action_execution_progress'`)
+
 * `ACTION_EXECUTION_RESULT` (value: `'action_execution_result'`)
 
 * `SKILL_LOADED` (value: `'skill_loaded'`)

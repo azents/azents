@@ -43,6 +43,7 @@ import { MessageMetadataSurface } from "./MessageMetadataFooter";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { RunRetryCard } from "./RunRetryCard";
 import { ToolCallCard } from "./ToolCallCard";
+import { WorktreeOperationCard } from "./WorktreeOperationCard";
 import type { ChatMessage } from "../types";
 
 interface FailedRunRetryAction {
@@ -892,6 +893,14 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <Box opacity={dimmed ? 0.45 : 1}>
         <GoalBriefingCard message={message} />
+      </Box>
+    );
+  }
+
+  if (message.role === "worktree_operation" && message.worktreeOperation) {
+    return (
+      <Box opacity={dimmed ? 0.45 : 1}>
+        <WorktreeOperationCard operation={message.worktreeOperation} />
       </Box>
     );
   }

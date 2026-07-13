@@ -321,6 +321,43 @@ def _terminal_action_execution_projection(
     return None
 
 
+def _assert_durable_action_execution_history(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    action_execution_id: str,
+) -> None:
+    """Verify progress and terminal state are recovered from ordered history."""
+    history = _get_json(
+        server_url=server_url,
+        token=token,
+        path=f"/chat/v1/sessions/{session_id}/history",
+        params={"limit": "100"},
+    )
+    events = _object_list(history.get("items"), label="history events")
+    action_events = [
+        event
+        for event in events
+        if event.get("kind") in {"action_execution_progress", "action_execution_result"}
+    ]
+    assert action_events
+    assert action_events[-1].get("kind") == "action_execution_result"
+    assert any(
+        event.get("kind") == "action_execution_progress" for event in action_events
+    )
+    for event in action_events:
+        payload = _OBJECT_ADAPTER.validate_python(event.get("payload"))
+        projection = _OBJECT_ADAPTER.validate_python(payload.get("action_execution"))
+        assert _action_execution_id(projection) == action_execution_id
+        if event.get("kind") == "action_execution_progress":
+            progress_items = _object_list(
+                projection.get("events"),
+                label="incremental action execution events",
+            )
+            assert len(progress_items) == 1
+
+
 def _wait_for_action_execution_status(
     *,
     server_url: str,
@@ -491,6 +528,12 @@ class TestSessionGitWorktreeLifecycle:
             status="completed",
         )
         action_execution_id = _action_execution_id(projection)
+        _assert_durable_action_execution_history(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            action_execution_id=action_execution_id,
+        )
         _assert_action_retry_controls_removed(
             server_url=azents_public_server_url,
             token=token,
@@ -520,6 +563,12 @@ class TestSessionGitWorktreeLifecycle:
             status="failed",
         )
         failed_execution_id = _action_execution_id(failed_projection)
+        _assert_durable_action_execution_history(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=failed_session_id,
+            action_execution_id=failed_execution_id,
+        )
         failed_execution = _OBJECT_ADAPTER.validate_python(
             failed_projection.get("execution")
         )

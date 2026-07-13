@@ -41,7 +41,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-13
-spec_version: 78
+spec_version: 79
 ---
 
 # Agent Execution Loop
@@ -457,16 +457,18 @@ existing pending commands, or pending input buffers reject command/edit writes w
 Operation TurnActions are processed after input-buffer preparation and before model dispatch at both
 wake-up entry and model-call turn boundaries inside an already-running run. `create_git_worktree`
 action execution is keyed by the source `input_buffer_id`; the transaction stores the typed action
-payload and pending execution before deleting the source buffer. Execution publishes projection
-updates while status or log entries change, creates the worktree through typed Runner Git operations,
-registers the created path as a session Project, refreshes catalog/Skill projection, and then
-invalidates the prepared context boundary. This same path covers new-session setup actions and
+payload and pending execution before deleting the source buffer. Each ordered progress record is
+committed atomically with one `action_execution_progress` transcript event containing the current
+execution state and exactly that new record. Execution creates the worktree through typed Runner Git
+operations, registers the created path as a session Project, refreshes catalog/Skill projection, and
+then invalidates the prepared context boundary. This same path covers new-session setup actions and
 existing-session Register Project worktree actions. After successful Project mutation, the same
 active `AgentRun` rebuilds model/tool context and the next physical model request from the current
 Session inference snapshot. If an action fails, it is terminal and FIFO processing may continue to
 later pending input without a retry/discard mutation. Terminal completed and failed worktree actions
-append an `action_execution_result` durable event containing the final projection; live state excludes
-terminal executions so logs survive history reload without a live-only fallback.
+append one `action_execution_result` event containing the full final projection. Progress and result
+appends use the normal durable history broadcast path; chat live state has no parallel operation
+projection.
 
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
@@ -479,7 +481,7 @@ Public web chat projection is split by lifecycle:
 - durable transcript reads use `GET /chat/v1/sessions/{session_id}/history`;
 - current streaming/tool/pending-input state uses `GET /chat/v1/sessions/{session_id}/live`;
 - WebSocket transport publishes canonical action envelopes such as `history_event_appended`,
-  `live_event_upserted`, `live_event_removed`, and `action_execution_updated`.
+  `live_event_upserted`, and `live_event_removed`.
 
 A durable `Event` is nested inside `history_event_appended`; it is never sent as a raw top-level public
 WebSocket frame. REST writes commit their authoritative database state before projection. When the
@@ -617,6 +619,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-13** (spec_version 79) — Replaced live worktree operation projections with atomically appended incremental and terminal durable history events.
 - **2026-07-13** (spec_version 78) — Reverted incremental native-stream normalization from version 77 and removed time- and character-based live partial batching so every existing content and reasoning delta updates Redis and WebSocket projection immediately.
 - **2026-07-13** (spec_version 77) — Made native model stream normalization incremental so text and reasoning projections are emitted before provider completion without retaining the full native event sequence.
 - **2026-07-13** (spec_version 76) — Clarified that the LLM running indicator remains visible through the complete model streaming phase, including after partial output appears.

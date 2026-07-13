@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-12
-spec_version: 18
+last_verified_at: 2026-07-13
+spec_version: 19
 ---
 
 # Run Resume
@@ -181,9 +181,11 @@ finalized as an interrupted terminal failure rather than creating a second suffi
 completed action is not duplicated. A failed action is terminal, is not retried or discarded, and
 FIFO processing may continue to later pending input. Running workers process TurnActions at model-call
 turn boundaries instead of waiting for run completion. If a Project-mutating action completes, the
-same active run rebuilds model/tool context before its next model call. Completed and failed worktree
-projections are appended to durable history as `action_execution_result` events, and terminal live
-action state is not kept as a persistent fallback.
+same active run rebuilds model/tool context before its next model call. Each persisted worktree
+progress record is atomically paired with one `action_execution_progress` transcript event containing
+that record and the current execution state. Completed and failed projections append one full
+`action_execution_result`. Recovery and reconnect rebuild the operation card from these ordered
+durable events; no live action projection is required.
 
 ## Failed-run Retry Recovery
 
@@ -243,6 +245,7 @@ that next run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-13** (spec_version 19) — Made incremental and terminal worktree operation display recover exclusively from durable transcript history.
 - **2026-07-12** (spec_version 18) — Made ownership generation and durable call/result state authoritative for no-reexecution tool recovery.
 - **2026-07-12** (spec_version 17) — Promoted Session-owned per-turn inference recovery, handled preparation failure, buffer-only action transport, buffer-keyed action recovery, and same-run context rebuild.
 - **2026-07-11** (spec_version 16) — Added recovery semantics for pre-resolved `spawn_override` child runs and later session-last-used re-resolution.
