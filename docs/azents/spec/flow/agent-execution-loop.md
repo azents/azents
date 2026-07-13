@@ -38,8 +38,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-12
-spec_version: 74
+last_verified_at: 2026-07-13
+spec_version: 75
 ---
 
 # Agent Execution Loop
@@ -96,11 +96,13 @@ tool activity uses `executing_tools` and `active_tool_calls`.
 A newly selected run begins as `pending`. For normal buffered input, the worker resolves the
 Agent-owned target label and optional effort before transactionally preparing the FIFO head. Successful
 preparation stores the complete Session inference snapshot and uses it to activate or continue the
-run. A canonical user message stores the applied target label, resolved model display name, and
-reasoning effort from that prepared snapshot so sent-message metadata remains stable after reload.
-Resolution failure is a handled preparation failure: it consumes that head, appends a
-user-safe `system_error`, preserves the previous Session snapshot, completes the active run, and is
-not retried.
+run. A canonical human `user_message` stores the immutable requested target label and raw nullable
+requested effort accepted with that input. It does not copy the resolved physical selection or the
+applied model display name from the prepared Session snapshot. Exact applied public provenance belongs
+to the `turn_marker` for each provider call, so requested intent remains stable after reload while
+applied provenance can differ at later turn boundaries. Resolution failure is a handled preparation
+failure: it consumes that head, appends a user-safe `system_error`, preserves the previous Session
+snapshot, completes the active run, and is not retried.
 
 Requested profile selection precedence for implicit execution is the Session current requested
 profile then Agent `main_model_label`; explicit human input wins over both. The complete Session
@@ -475,18 +477,31 @@ Public web chat projection is split by lifecycle:
 
 - durable transcript reads use `GET /chat/v1/sessions/{session_id}/history`;
 - current streaming/tool/pending-input state uses `GET /chat/v1/sessions/{session_id}/live`;
-- WebSocket transport publishes `history_event_appended`, `live_event_upserted`,
-  `live_event_removed`, and `action_execution_updated` actions.
+- WebSocket transport publishes canonical action envelopes such as `history_event_appended`,
+  `live_event_upserted`, `live_event_removed`, and `action_execution_updated`.
+
+A durable `Event` is nested inside `history_event_appended`; it is never sent as a raw top-level public
+WebSocket frame. REST writes commit their authoritative database state before projection. When the
+committed state requires worker execution, the route sends the essential broker wake-up before any
+best-effort WebSocket notification. A broker wake-up failure remains an execution-path failure, while
+a WebSocket publication failure is logged and does not change the success of the committed REST
+write or delete.
 
 `WorkerEventPublisher.dispatch_event()` preserves the durable/live handoff order. For `Event`, the
-publisher broadcasts the durable history action first, then removes and broadcasts matching live
-projections. Non-event runtime events keep the live projection update → broadcast ordering.
+publisher first flushes pending partials, broadcasts the durable history action, and then removes and
+broadcasts matching live projections. Explicitly public controls (`runtime_error`, authorization and
+account-link controls, compaction controls, `todo_state_changed`, and `subagent_tree_changed`) retain
+their direct wire frames. Internal provider deltas and Run/runtime lifecycle telemetry update the live
+projector without being broadcast directly; the projector emits canonical live actions where
+applicable. Live-store mutation, partial flush, active-tool projection, live Run publication, and
+WebSocket broadcast are non-authoritative UI projection boundaries: they preserve
+`asyncio.CancelledError`, log other projection failures, and do not fail provider execution, durable
+event append, Run phase/terminal persistence, or subsequent cleanup.
 
 `ContentDelta` and `ReasoningDelta` are live projection events only. The worker batches them in a
 session-local `LivePartialBatcher` before Redis live store upsert and `live_event_upserted` broadcast.
-Pending batches flush before event durable event handling and before terminal `RunComplete` /
-`RunStopped` handling, so finalized durable assistant/reasoning events do not overtake buffered live
-text.
+Pending batches flush before durable event handling and before terminal `RunComplete` / `RunStopped`
+handling, so finalized durable assistant/reasoning events do not overtake buffered live text.
 
 The old `GET /chat/v1/sessions/{session_id}/messages` aggregate endpoint is removed. The POST
 `/chat/v1/sessions/{session_id}/messages` write endpoint is a separate REST commit boundary and does
@@ -600,6 +615,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-13** (spec_version 75) — Promoted immutable requested input intent, non-fatal live projection boundaries, essential wake-up ordering, and explicit public WebSocket delivery boundaries.
 - **2026-07-12** (spec_version 74) — Added atomic tool-call admission/completion, deterministic cancellation and result identity, ownership-generation recovery, and PostgreSQL-backed active-call state.
 - **2026-07-12** (spec_version 72) — Restored durable sent-message model label, resolved display name, and reasoning effort metadata from the prepared Session snapshot.
 - **2026-07-10** (spec_version 67) — Added explicit child identity to forked-history boundaries and rejected self-targeted `wait_agent` calls.
