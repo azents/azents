@@ -10,7 +10,6 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    ActionExecutionStatus,
     AgentProjectDefaultItemType,
     AgentRunStatus,
     AgentSessionKind,
@@ -1029,21 +1028,6 @@ class ChatSessionService:
             todo = TodoStateSnapshot.from_state(
                 await todo_store.load(agent_session.agent_id, session_id)
             )
-            terminal_action_statuses = {
-                ActionExecutionStatus.COMPLETED,
-                ActionExecutionStatus.FAILED,
-            }
-            projections = (
-                await self.action_execution_repository.list_projections_by_session_id(
-                    session,
-                    session_id=session_id,
-                )
-            )
-            action_executions = [
-                projection
-                for projection in projections
-                if projection.execution.status not in terminal_action_statuses
-            ]
             session_run_state = agent_session.run_state
             if run is not None:
                 if session_run_state != AgentSessionRunState.RUNNING:
@@ -1099,7 +1083,6 @@ class ChatSessionService:
                     session_run_state=session_run_state,
                     todo=todo,
                     goal=goal,
-                    action_executions=action_executions,
                 )
             )
 

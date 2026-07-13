@@ -29,7 +29,7 @@ ACTION_ONE_OF_SCHEMAS = ["CommandAction", "CreateGitWorktreeAction", "GoalAction
 
 class Action(BaseModel):
     """
-    Durable action payload
+    Action payload
     """
     # data type: CommandAction
     oneof_schema_1_validator: Optional[CommandAction] = None

@@ -235,7 +235,6 @@ const baseArgs = {
   inputActions: [],
   authorizationRequests: [],
   onAuthorizationComplete: noop,
-  actionExecutions: [],
   workspacePanel,
   goal: { objective: null, status: null },
   todo: { items: [] },
@@ -342,61 +341,6 @@ export const StreamingModelWithPartialOutput = {
     await expect(
       canvas.getByRole("status", { name: "Agent is working" }),
     ).toBeVisible();
-  },
-} satisfies Story;
-
-export const WithActionExecutionFailure = {
-  args: {
-    ...baseArgs,
-    chatTimelineState: {
-      type: "DETACHED_HISTORY_BROWSING",
-      hasNewer: true,
-      newestCursor: "action-result-cursor",
-    },
-    messages: [],
-    actionExecutions: [
-      {
-        provenance: "durable",
-        execution: {
-          id: "action-execution-1",
-          input_buffer_id: "buffer-action-1",
-          action_type: "create_git_worktree",
-          action: {
-            type: "create_git_worktree",
-            source_project_path: "/workspace/agent/project",
-            starting_ref: "main",
-          },
-          status: "failed",
-          failure_summary:
-            "Git worktree creation failed because the branch already exists.",
-          started_at: "2026-05-19T00:00:00Z",
-          completed_at: "2026-05-19T00:00:05Z",
-          updated_at: "2026-05-19T00:00:05Z",
-        },
-        events: [
-          {
-            id: "action-event-1",
-            action_execution_id: "action-execution-1",
-            sequence: 1,
-            kind: "command_started",
-            step_key: "create_worktree",
-            command_argv: ["git", "worktree", "add", "../project-feature"],
-            content: null,
-            created_at: "2026-05-19T00:00:00Z",
-          },
-          {
-            id: "action-event-2",
-            action_execution_id: "action-execution-1",
-            sequence: 2,
-            kind: "command_failed",
-            step_key: "create_worktree",
-            command_argv: null,
-            content: "fatal: 'project-feature' is already checked out",
-            created_at: "2026-05-19T00:00:05Z",
-          },
-        ],
-      },
-    ],
   },
 } satisfies Story;
 

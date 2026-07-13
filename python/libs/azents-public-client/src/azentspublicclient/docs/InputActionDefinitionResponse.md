@@ -6,17 +6,17 @@ Composer action definition response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** | Action definition ID | 
-**keyword** | **str** | Slash search keyword | 
-**label** | **str** | Action label | 
-**description** | **str** | Action description | 
-**action** | [**Action1**](Action1.md) |  | 
-**category** | **str** | Action category | 
-**message** | [**InputActionMessagePolicyResponse**](InputActionMessagePolicyResponse.md) | Message policy | 
-**attachments** | [**InputActionAttachmentPolicyResponse**](InputActionAttachmentPolicyResponse.md) | Attachment policy | 
-**availability_hint** | [**InputActionAvailabilityHintResponse**](InputActionAvailabilityHintResponse.md) |  | [optional] 
-**source_label** | **str** |  | [optional] 
-**relative_hint** | **str** |  | [optional] 
+**id** | **str** | Action definition ID |
+**keyword** | **str** | Slash search keyword |
+**label** | **str** | Action label |
+**description** | **str** | Action description |
+**action** | [**Action**](Action.md) |  |
+**category** | **str** | Action category |
+**message** | [**InputActionMessagePolicyResponse**](InputActionMessagePolicyResponse.md) | Message policy |
+**attachments** | [**InputActionAttachmentPolicyResponse**](InputActionAttachmentPolicyResponse.md) | Attachment policy |
+**availability_hint** | [**InputActionAvailabilityHintResponse**](InputActionAvailabilityHintResponse.md) |  | [optional]
+**source_label** | **str** |  | [optional]
+**relative_hint** | **str** |  | [optional]
 
 ## Example
 

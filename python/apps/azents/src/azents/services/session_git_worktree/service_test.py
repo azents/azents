@@ -32,10 +32,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent_context import RDBSessionAgentContextGitWorktree
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import (
-    ActionExecutionCreate,
-    ActionExecutionProjection,
-)
+from azents.repos.action_execution.data import ActionExecutionCreate
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -675,23 +672,14 @@ class TestSessionGitWorktreeService:
             )
         runner = _RunnerOperations()
         service = _service(rdb_session_manager, runner)
-        published_statuses: list[ActionExecutionStatus] = []
-
-        async def publish_projection(
-            projection: ActionExecutionProjection,
-        ) -> None:
-            published_statuses.append(projection.execution.status)
-
         result = await service.run_git_worktree_action(
             agent_id=agent_id,
             session_id=agent_session.id,
             execution=execution,
             action=action,
-            on_projection_updated=publish_projection,
         )
 
         assert result.completed is True
-        assert published_statuses[-1] is ActionExecutionStatus.COMPLETED
         assert result.context_invalidated is True
         async with rdb_session_manager() as session:
             allocations = await SessionGitWorktreeRepository().list_by_session_id(

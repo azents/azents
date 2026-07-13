@@ -23,7 +23,6 @@ import {
 import { useChatWebSocket } from "../hooks/useChatWebSocket";
 import type { UploadedFile } from "../hooks/useFileUpload";
 import type {
-  ActionExecutionProjection,
   AgentRunPhase,
   AgentRunStatus,
   AuthorizationRequest,
@@ -47,7 +46,6 @@ import type {
   ToolResultStatus,
 } from "../types";
 import type {
-  ActionExecutionProjectionResponse,
   AgentResponse,
   AppliedInferenceProfile,
   ChatEventResponse,
@@ -165,8 +163,6 @@ export interface ChatSessionContainerOutput {
   authorizationRequests: AuthorizationRequest[];
   /** auth complete when remove corresponding request */
   onAuthorizationComplete: (toolkitId: string) => void;
-  /** current operation TurnAction execution projections */
-  actionExecutions: ActionExecutionProjection[];
   /** latest turn usage */
   tokenUsage: TokenUsageSummary | null;
   /** current session goal snapshot */
@@ -1296,79 +1292,6 @@ function removePendingBuffersForEvent(
   return buffers.filter((buffer) => !pendingBufferMatchesEvent(buffer, event));
 }
 
-function upsertActionExecutionProjection(
-  actionExecutions: ActionExecutionProjection[],
-  actionExecution: ActionExecutionProjection,
-): ActionExecutionProjection[] {
-  const index = actionExecutions.findIndex(
-    (item) => item.execution.id === actionExecution.execution.id,
-  );
-  if (index === -1) {
-    return [...actionExecutions, actionExecution];
-  }
-  if (
-    actionExecutions[index]?.provenance === "durable" &&
-    actionExecution.provenance !== "durable"
-  ) {
-    return actionExecutions;
-  }
-  return actionExecutions.map((item, itemIndex) =>
-    itemIndex === index ? actionExecution : item,
-  );
-}
-
-function isActionExecutionProjectionValue(
-  value: unknown,
-): value is ActionExecutionProjectionResponse {
-  if (!isRecord(value) || !isRecord(value.execution)) {
-    return false;
-  }
-  return (
-    typeof value.execution.id === "string" &&
-    typeof value.execution.input_buffer_id === "string" &&
-    typeof value.execution.status === "string" &&
-    Array.isArray(value.events)
-  );
-}
-
-function actionExecutionResultFromEvent(
-  event: ChatEventResponse,
-): ActionExecutionProjection | null {
-  if (event.kind !== "action_execution_result" || !isRecord(event.payload)) {
-    return null;
-  }
-  return isActionExecutionProjectionValue(event.payload.action_execution)
-    ? { ...event.payload.action_execution, provenance: "durable" }
-    : null;
-}
-
-function isCompletedGitWorktreeActionExecution(
-  actionExecution: ActionExecutionProjection,
-): boolean {
-  return (
-    actionExecution.execution.action_type === "create_git_worktree" &&
-    actionExecution.execution.status === "completed"
-  );
-}
-
-function actionExecutionResultsFromEvents(
-  events: ChatEventResponse[],
-): ActionExecutionProjection[] {
-  return events.reduce<ActionExecutionProjection[]>((items, event) => {
-    const actionExecution = actionExecutionResultFromEvent(event);
-    return actionExecution === null
-      ? items
-      : upsertActionExecutionProjection(items, actionExecution);
-  }, []);
-}
-
-function mergeActionExecutionProjections(
-  durable: ActionExecutionProjection[],
-  live: ActionExecutionProjection[],
-): ActionExecutionProjection[] {
-  return live.reduce(upsertActionExecutionProjection, durable);
-}
-
 function mapInputBufferLiveEvent(
   event: ChatEventResponse,
 ): PendingInputBuffer | null {
@@ -1433,7 +1356,6 @@ interface ManagedLiveState {
   isStopPending: boolean;
   todo: TodoStateSnapshot;
   goal: GoalStateSnapshot;
-  actionExecutions: ActionExecutionProjection[];
 }
 
 interface RestSnapshotRequest {
@@ -1455,7 +1377,6 @@ interface LiveTaxonomySnapshot {
   session_run_state: LiveEventListResponse["session_run_state"];
   todo?: TodoStateSnapshot | null;
   goal?: Partial<GoalStateSnapshot> | null;
-  action_executions?: ActionExecutionProjectionResponse[] | null;
 }
 
 function emptyPartialHistoryState(): PartialHistoryState {
@@ -1493,7 +1414,6 @@ function emptyManagedLiveState(): ManagedLiveState {
     isStopPending: false,
     todo: emptyTodoState(),
     goal: emptyGoalState(),
-    actionExecutions: [],
   };
 }
 
@@ -1664,10 +1584,6 @@ function replaceLiveStateFromSnapshot(
           : false,
       todo: live.todo ?? emptyTodoState(),
       goal: normalizeGoalState(live.goal),
-      actionExecutions: (live.action_executions ?? []).map((projection) => ({
-        ...projection,
-        provenance: "live",
-      })),
     },
     invalidLiveRun:
       runSnapshot.type === "INVALID" ? { value: runSnapshot.value } : null,
@@ -1755,7 +1671,6 @@ function mapChatWriteSnapshot(
       session_run_state: response.snapshot.session_run_state,
       todo: response.snapshot.todo,
       goal: normalizeGoalState(response.snapshot.goal),
-      action_executions: response.snapshot.action_executions,
     },
     previousLiveState,
   );
@@ -1843,9 +1758,6 @@ function pageAdvancesVisibleTimeline(
   incoming: ChatEventResponse[],
   direction: "prepend" | "append",
 ): boolean {
-  if (actionExecutionResultsFromEvents(incoming).length > 0) {
-    return true;
-  }
   const merged = mergeHistoryEventPages(existing, incoming, direction);
   return (
     renderableTimelineMessageCount(merged) >
@@ -2001,14 +1913,6 @@ export function useChatSessionContainer(
     managedLiveState.partialHistory,
     transientMessages,
   ]);
-  const actionExecutions = useMemo(
-    () =>
-      mergeActionExecutionProjections(
-        actionExecutionResultsFromEvents(historyEvents),
-        managedLiveState.actionExecutions,
-      ),
-    [historyEvents, managedLiveState.actionExecutions],
-  );
   const defaultInferenceProfile =
     latestHumanInferenceProfile ??
     sessionCurrentInferenceProfile ??
@@ -2057,7 +1961,6 @@ export function useChatSessionContainer(
           event.type === "live_event_removed" ||
           event.type === "live_run_updated" ||
           event.type === "live_run_cleared" ||
-          event.type === "action_execution_updated" ||
           event.type === "run_started" ||
           event.type === "run_phase_changed" ||
           event.type === "run_complete" ||
@@ -2116,34 +2019,6 @@ export function useChatSessionContainer(
 
       if ("type" in event && event.type === "subagent_tree_changed") {
         void utils.chat.getSubagentTree.invalidate();
-        return;
-      }
-
-      if ("type" in event && event.type === "action_execution_updated") {
-        const actionExecution: ActionExecutionProjection = {
-          ...event.action_execution,
-          provenance: "live",
-        };
-        setManagedLiveState((prev) => ({
-          ...prev,
-          actionExecutions: upsertActionExecutionProjection(
-            prev.actionExecutions,
-            actionExecution,
-          ),
-        }));
-        if (isCompletedGitWorktreeActionExecution(actionExecution)) {
-          void Promise.all([
-            utils.chat.listAgentProjects.invalidate({
-              agentId: agent.id,
-              sessionId,
-            }),
-            utils.chat.getSessionProjectBrowserManifest.invalidate({
-              agentId: agent.id,
-              sessionId,
-            }),
-            utils.chat.listInputActions.invalidate({ sessionId }),
-          ]);
-        }
         return;
       }
 
@@ -2350,13 +2225,10 @@ export function useChatSessionContainer(
       }
     },
     [
-      agent.id,
       connectionInfoQuery,
       reportInvalidLiveRun,
       sessionId,
-      utils.chat.getSessionProjectBrowserManifest,
       utils.chat.getSubagentTree,
-      utils.chat.listAgentProjects,
       utils.chat.listInputActions,
     ],
   );
@@ -3085,12 +2957,6 @@ export function useChatSessionContainer(
     }),
     authorizationRequests,
     onAuthorizationComplete,
-    actionExecutions:
-      chatTimelineState.type === "DETACHED_HISTORY_BROWSING"
-        ? actionExecutions.filter(
-            (projection) => projection.provenance === "durable",
-          )
-        : actionExecutions,
     tokenUsage,
     goal: managedLiveState.goal,
     todo: managedLiveState.todo,
