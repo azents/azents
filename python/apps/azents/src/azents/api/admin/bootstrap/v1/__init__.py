@@ -30,7 +30,7 @@ async def get_system_bootstrap_status(
 ) -> SystemBootstrapStatusResponse:
     """Return whether initial system bootstrap is available."""
     output = await service.get_status()
-    return SystemBootstrapStatusResponse.model_validate(output)
+    return SystemBootstrapStatusResponse.convert_from(output)
 
 
 @router.post(
@@ -55,7 +55,7 @@ async def bootstrap_first_system_admin(
     )
     match result:
         case Success(value):
-            return SystemBootstrapFirstAdminResponse.model_validate(value)
+            return SystemBootstrapFirstAdminResponse.convert_from(value)
         case Failure(error):
             match error:
                 case BootstrapUnavailable() | InvalidSetupToken():
