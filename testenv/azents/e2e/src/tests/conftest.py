@@ -40,13 +40,6 @@ _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
 _LOCAL_DOCKER_CACHE_WRITE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_WRITE_ROOT"
 
 
-class _RedactedSecret(str):
-    """String secret whose pytest/debug representation never reveals its value."""
-
-    def __repr__(self) -> str:
-        return "<redacted>"
-
-
 def random_secret(length: int = 32) -> str:
     """testt t t create."""
     return secrets.token_hex(length)
@@ -66,7 +59,7 @@ def auth_jwt_secret_key() -> str:
 @pytest.fixture(scope="session")
 def system_bootstrap_setup_token() -> str:
     """Return a configured bootstrap token that is never written to test output."""
-    return _RedactedSecret(secrets.token_urlsafe(32))
+    return secrets.token_urlsafe(32)
 
 
 # =============================================================================
@@ -852,9 +845,10 @@ def system_bootstrap_evidence(
     statuses = sorted(response.status_code for response in responses)
     if statuses != [201, 403]:
         pytest.fail(f"concurrent bootstrap returned unexpected statuses: {statuses}")
-    success_payload = next(
+    success_response = next(
         response for response in responses if response.status_code == 201
-    ).json()
+    )
+    success_payload = success_response.json()
     access_token = success_payload.get("access_token")
     refresh_token = success_payload.get("refresh_token")
     if not isinstance(access_token, str) or not isinstance(refresh_token, str):

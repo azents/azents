@@ -61,9 +61,9 @@ class TestUserCrud:
         # listt t t ID t
         users = user_api.user_v1_list_users()
         user_id = None
-        for u in users.items:
-            if hasattr(u, "id"):
-                user_id = u.id
+        for user in users.items:
+            if user.primary_email == email:
+                user_id = user.id
                 break
         assert user_id is not None
 
