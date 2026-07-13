@@ -5,6 +5,7 @@ from collections.abc import Sequence
 
 from azcommon.uuid import uuid7
 
+from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.types import (
     Attachment as EventAttachment,
 )
@@ -26,6 +27,7 @@ def make_run_user_message(
     file_parts: Sequence[FileOutputPart] = (),
     external_id: str,
     attachment_source: str,
+    requested_inference_profile: RequestedInferenceProfile | None,
 ) -> RunUserMessage:
     """Convert a runtime input snapshot into an event run user message."""
     event_content: str | list[UserContentPart]
@@ -47,6 +49,7 @@ def make_run_user_message(
                 for attachment in attachments
             ],
             metadata=metadata,
+            requested_inference_profile=requested_inference_profile,
         ),
         external_id=external_id,
     )

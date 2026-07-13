@@ -126,6 +126,7 @@ export type ChatAction =
 export interface ActionMessagePayload {
   action: ChatAction;
   message: string;
+  requested_inference_profile?: RequestedInferenceProfile | null;
 }
 
 export interface AgentMessagePayload {
@@ -141,6 +142,8 @@ export interface UserMessagePayload {
   content: string | UserContentPart[];
   attachments: EventAttachment[];
   metadata: Record<string, string>;
+  requested_inference_profile?: RequestedInferenceProfile | null;
+  applied_inference_profile?: AppliedInferenceProfile | null;
 }
 
 export interface AssistantMessagePayload {
@@ -554,7 +557,9 @@ export interface InputActionsUpdatedEvent {
   session_id: string;
 }
 
-export type ActionExecutionProjection = ActionExecutionProjectionResponse;
+export type ActionExecutionProjection = ActionExecutionProjectionResponse & {
+  provenance: "durable" | "live";
+};
 
 export interface ActionExecutionUpdatedEvent {
   type: "action_execution_updated";

@@ -252,6 +252,7 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
             content=content,
             attachments=[],
             metadata=metadata,
+            requested_inference_profile=requested_profile,
             applied_inference_profile=(
                 AppliedInferenceProfile(
                     model_target_label=requested_profile.model_target_label,

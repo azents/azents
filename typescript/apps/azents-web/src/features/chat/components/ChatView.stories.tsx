@@ -307,9 +307,15 @@ export const WithLiveRunRetry = {
 export const WithActionExecutionFailure = {
   args: {
     ...baseArgs,
+    chatTimelineState: {
+      type: "DETACHED_HISTORY_BROWSING",
+      hasNewer: true,
+      newestCursor: "action-result-cursor",
+    },
     messages: [],
     actionExecutions: [
       {
+        provenance: "durable",
         execution: {
           id: "action-execution-1",
           input_buffer_id: "buffer-action-1",

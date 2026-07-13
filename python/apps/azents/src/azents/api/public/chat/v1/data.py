@@ -22,11 +22,12 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
+    ActionMessagePayload,
     ChatAction,
     CommandAction,
     CreateGitWorktreeAction,
 )
-from azents.engine.events.types import Event
+from azents.engine.events.types import Event, UserMessagePayload
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
 from azents.repos.action_execution.data import (
@@ -1702,11 +1703,19 @@ class ChatEventResponse(BaseModel):
         event: Event,
     ) -> Self:
         """Convert from Event domain model."""
+        payload = event.payload.model_dump(mode="json", exclude_none=True)
+        if (
+            isinstance(event.payload, (ActionMessagePayload, UserMessagePayload))
+            and event.payload.requested_inference_profile is not None
+        ):
+            payload["requested_inference_profile"] = (
+                event.payload.requested_inference_profile.model_dump(mode="json")
+            )
         return cls(
             id=event.id,
             session_id=event.session_id,
             kind=event.kind,
-            payload=event.payload.model_dump(mode="json", exclude_none=True),
+            payload=payload,
             model_order=event.model_order,
             external_id=event.external_id,
             adapter=event.adapter,

@@ -15,6 +15,7 @@ from azents.engine.events.types import (
     AssistantMessagePayload,
     ClientToolCallPayload,
     ReasoningPayload,
+    UserMessagePayload,
 )
 from azents.repos.input_buffer.data import InputBuffer
 
@@ -25,6 +26,32 @@ from .live_events import (
     active_tool_call_to_live_event,
     input_buffer_to_live_event,
 )
+
+
+def test_user_input_buffer_live_event_preserves_nullable_requested_profile() -> None:
+    """Pending User input exposes explicit nullable reasoning intent."""
+    event = input_buffer_to_live_event(
+        InputBuffer(
+            id="0023456789abcdef0123456789abcdef",
+            session_id="1123456789abcdef0123456789abcdef",
+            kind=InputBufferKind.USER_MESSAGE,
+            requested_model_target_label="quality",
+            requested_reasoning_effort=None,
+            actor_user_id="user-1",
+            content="Use the quality model",
+            idempotency_key=None,
+            metadata={"source": "chat"},
+            action=None,
+            attachments=[],
+            file_parts=[],
+            created_at=datetime.datetime(2026, 6, 4, tzinfo=datetime.UTC),
+        )
+    )
+
+    assert isinstance(event.payload, UserMessagePayload)
+    assert event.payload.requested_inference_profile is not None
+    assert event.payload.requested_inference_profile.model_target_label == "quality"
+    assert event.payload.requested_inference_profile.reasoning_effort is None
 
 
 def test_action_input_buffer_live_event_preserves_requested_profile() -> None:

@@ -1247,13 +1247,12 @@ export function ChatView({
                         ))}
                     </Fragment>
                   ))}
-                {chatTimelineState.type === "LATEST_FOLLOWING" &&
-                  fallbackActionExecutions.map((actionExecution) => (
-                    <ActionExecutionTimelineCard
-                      key={actionExecution.execution.id}
-                      actionExecution={actionExecution}
-                    />
-                  ))}
+                {fallbackActionExecutions.map((actionExecution) => (
+                  <ActionExecutionTimelineCard
+                    key={actionExecution.execution.id}
+                    actionExecution={actionExecution}
+                  />
+                ))}
               </Stack>
             )}
           </Box>

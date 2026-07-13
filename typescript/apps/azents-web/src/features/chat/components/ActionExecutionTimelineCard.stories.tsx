@@ -12,6 +12,7 @@ type Story = StoryObj<typeof meta>;
 export const FailedWorktreeAction = {
   args: {
     actionExecution: {
+      provenance: "durable",
       execution: {
         id: "action-execution-1",
         input_buffer_id: "buffer-action-1",
@@ -57,6 +58,7 @@ export const FailedWorktreeAction = {
 export const CompletedWorktreeAction = {
   args: {
     actionExecution: {
+      provenance: "durable",
       execution: {
         id: "action-execution-2",
         input_buffer_id: "buffer-action-2",
@@ -91,6 +93,7 @@ export const CompletedWorktreeAction = {
 export const RunningWorktreeAction = {
   args: {
     actionExecution: {
+      provenance: "durable",
       execution: {
         id: "action-execution-3",
         input_buffer_id: "buffer-action-3",
